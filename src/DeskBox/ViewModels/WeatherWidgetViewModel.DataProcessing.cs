@@ -13,6 +13,39 @@ namespace DeskBox.ViewModels;
 
 public sealed partial class WeatherWidgetViewModel
 {
+    private bool _wasActiveBeforeHide;
+
+    public bool IsLoading => _isRefreshing && !_hasData;
+
+    internal void OnAdapterWindowVisibilityChanged(bool isVisible)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (!isVisible)
+        {
+            _wasActiveBeforeHide |= _isWindowRevealCompleted || (_refreshTimer?.IsRunning == true);
+            OnWindowVisibilityChanged(false);
+            return;
+        }
+
+        OnWindowVisibilityChanged(true);
+        if (_wasActiveBeforeHide)
+        {
+            _wasActiveBeforeHide = false;
+            _isWindowRevealCompleted = true;
+            _refreshTimer?.Start();
+            if (!_hasData ||
+                _weatherData?.IsStale == true ||
+                DateTimeOffset.UtcNow >= _automaticRefreshNotBeforeUtc)
+            {
+                _ = RefreshAsync();
+            }
+        }
+    }
+
     private async Task LoadCachedWeatherAsync()
     {
         WeatherCacheState state = await _weatherService.LoadCacheStateAsync();
@@ -135,7 +168,7 @@ public sealed partial class WeatherWidgetViewModel
             }
             return;
         }
-    
+
         var settings = _settingsService.Settings;
         if (settings.WeatherAutoLocation)
         {
@@ -176,7 +209,7 @@ public sealed partial class WeatherWidgetViewModel
                 App.Log("[Weather] Auto-location failed, retaining cached location");
                 return;
             }
-    
+
             // Auto-location failed: if user has a saved city, use it.
             // Otherwise fall back to a well-known default so the widget still shows data.
             App.Log("[Weather] Auto-location failed, using saved city or default");
@@ -196,7 +229,7 @@ public sealed partial class WeatherWidgetViewModel
                     return;
                 }
             }
-    
+
             // Last resort: use a neutral default so the widget renders something.
             _latitude = 39.9042;
             _longitude = 116.4074;
@@ -260,7 +293,7 @@ public sealed partial class WeatherWidgetViewModel
         return TimeSpan.FromMinutes(minutes);
     }
 
-    private void ApplyWeatherData(WeatherData data)
+    internal void ApplyWeatherData(WeatherData data)
     {
         if (data.Current is null)
         {
@@ -268,7 +301,7 @@ public sealed partial class WeatherWidgetViewModel
         }
 
         var current = data.Current;
-        
+
         IsDay = current.IsDay == 1;
         CurrentWeatherCode = current.WeatherCode;
         CurrentCondition = WeatherCodeMapper.GetCondition(current.WeatherCode);
@@ -276,34 +309,34 @@ public sealed partial class WeatherWidgetViewModel
         CurrentIcon = CreateIcon(current.WeatherCode, IsDay);
         CurrentDescription = WeatherCodeMapper.GetDescription(current.WeatherCode, _localizationService);
         CurrentTemperatureText = FormatTemperature(current.Temperature);
-        
+
         ApparentTemperatureText = _localizationService.Format("Weather.FeelsLike", FormatTemperature(current.ApparentTemperature));
-        
+
         HumidityValueText = $"{(int)current.Humidity}%";
         HumidityText = _localizationService.Format("Weather.HumidityLabel", HumidityValueText);
-        
+
         WindValueText = FormatWindSpeed(current.WindSpeed);
         WindText = $"{WindValueText} {GetWindDirectionText(current.WindDirection)}";
-        
+
         PressureValueText = $"{(int)current.Pressure} hPa";
         PressureText = _localizationService.Format("Weather.PressureLabel", PressureValueText);
-        
+
         LocationDisplay = string.IsNullOrWhiteSpace(data.LocationName)
             ? _locationName
             : data.LocationName;
-        
+
         // Daily forecast
         if (data.Daily is not null)
         {
             PopulateDailyForecast(data.Daily);
-        
+
             if (data.Daily.UvIndexMax.Count > 0)
             {
                 double uv = data.Daily.UvIndexMax[0];
                 UvIndexValueText = $"{uv:0}";
                 UvIndexText = _localizationService.Format("Weather.UVLabel", UvIndexValueText);
             }
-        
+
             if (data.Daily.PrecipitationProbabilityMax.Count > 0)
             {
                 double precip = data.Daily.PrecipitationProbabilityMax[0];
@@ -324,6 +357,7 @@ public sealed partial class WeatherWidgetViewModel
         else
         {
             DailyForecast.Clear();
+            _cachedDailyForecastItemsSource = [];
             OnPropertyChanged(nameof(DailyForecastItemsSource));
             UvIndexValueText = string.Empty;
             UvIndexText = string.Empty;
@@ -336,11 +370,12 @@ public sealed partial class WeatherWidgetViewModel
         // Hourly forecast
         if (data.Hourly is not null)
         {
-            PopulateHourlyForecast(data.Hourly);
+            PopulateHourlyForecast(data.Hourly, data.UtcOffsetSeconds, data.Timezone);
         }
         else
         {
             HourlyForecast.Clear();
+            _cachedHourlyForecastItemsSource = [];
             OnPropertyChanged(nameof(HourlyForecastItemsSource));
         }
 
@@ -411,9 +446,11 @@ public sealed partial class WeatherWidgetViewModel
 
     private void PopulateDailyForecast(WeatherDaily daily)
     {
-        DailyForecast.Clear();
         int count = Math.Min(daily.Time.Count, 7);
-    
+        bool requiresItemsSourceRefresh =
+            DailyForecast.Count != count ||
+            _cachedDailyForecastItemsSource.Length != count;
+
         // First pass: find the overall weekly min/max for the temperature range bar
         double weekMin = double.MaxValue, weekMax = double.MinValue;
         for (int i = 0; i < count; i++)
@@ -425,7 +462,7 @@ public sealed partial class WeatherWidgetViewModel
         }
         double weekRange = weekMax - weekMin;
         if (weekRange < 1) weekRange = 1; // avoid division by zero
-    
+
         string lang = _localizationService.CurrentCultureName;
         for (int i = 0; i < count; i++)
         {
@@ -434,7 +471,7 @@ public sealed partial class WeatherWidgetViewModel
             double tempMax = i < daily.TemperatureMax.Count ? daily.TemperatureMax[i] : 0;
             double tempMin = i < daily.TemperatureMin.Count ? daily.TemperatureMin[i] : 0;
             double precipProb = i < daily.PrecipitationProbabilityMax.Count ? daily.PrecipitationProbabilityMax[i] : 0;
-    
+
             string dayLabel;
             if (i == 0)
             {
@@ -448,35 +485,128 @@ public sealed partial class WeatherWidgetViewModel
             {
                 dayLabel = ParseDateToDayLabel(dateStr, lang);
             }
-    
-            double barOffset = (tempMin - weekMin) / weekRange;
-            double barWidth = (tempMax - tempMin) / weekRange;
-            barOffset = Math.Clamp(barOffset, 0, 1);
-            barWidth = Math.Clamp(barWidth, 0.04, 1); // minimum visible width
-    
-            DailyForecast.Add(new WeatherDayViewModel
+
+            double barOffset = Math.Clamp((tempMin - weekMin) / weekRange, 0, 1);
+            double barWidth = Math.Clamp((tempMax - tempMin) / weekRange, 0.04, 1); // minimum visible width
+            string iconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDay: true);
+            ImageSource? icon = CreateIcon(wmoCode, isDay: true);
+            string description = WeatherCodeMapper.GetDescription(wmoCode, _localizationService);
+            string tempMaxText = FormatTemperature(tempMax);
+            string tempMinText = FormatTemperature(tempMin);
+            string precipitationText = $"{(int)precipProb}%";
+
+            if (i < DailyForecast.Count)
             {
-                DayLabel = dayLabel,
-                IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDay: true),
-                Icon = CreateIcon(wmoCode, isDay: true),
-                Description = WeatherCodeMapper.GetDescription(wmoCode, _localizationService),
-                TempMaxText = FormatTemperature(tempMax),
-                TempMinText = FormatTemperature(tempMin),
-                PrecipitationText = $"{(int)precipProb}%",
-                TempBarOffset = barOffset,
-                TempBarWidth = barWidth
-            });
+                WeatherDayViewModel existing = DailyForecast[i];
+                bool barGeometryChanged =
+                    Math.Abs(existing.TempBarOffset - barOffset) > 0.001 ||
+                    Math.Abs(existing.TempBarWidth - barWidth) > 0.001;
+                if (barGeometryChanged)
+                {
+                    // TempBarMarginConverter binds to the item DataContext itself, so
+                    // replace the slot only when the relative bar geometry actually shifts.
+                    DailyForecast[i] = new WeatherDayViewModel
+                    {
+                        DayLabel = dayLabel,
+                        IconGlyph = iconGlyph,
+                        Icon = icon,
+                        Description = description,
+                        TempMaxText = tempMaxText,
+                        TempMinText = tempMinText,
+                        PrecipitationText = precipitationText,
+                        TempBarOffset = barOffset,
+                        TempBarWidth = barWidth
+                    };
+                    requiresItemsSourceRefresh = true;
+                }
+                else
+                {
+                    existing.DayLabel = dayLabel;
+                    existing.IconGlyph = iconGlyph;
+                    existing.Icon = icon;
+                    existing.Description = description;
+                    existing.TempMaxText = tempMaxText;
+                    existing.TempMinText = tempMinText;
+                    existing.PrecipitationText = precipitationText;
+                    existing.TempBarOffset = barOffset;
+                    existing.TempBarWidth = barWidth;
+                }
+            }
+            else
+            {
+                DailyForecast.Add(new WeatherDayViewModel
+                {
+                    DayLabel = dayLabel,
+                    IconGlyph = iconGlyph,
+                    Icon = icon,
+                    Description = description,
+                    TempMaxText = tempMaxText,
+                    TempMinText = tempMinText,
+                    PrecipitationText = precipitationText,
+                    TempBarOffset = barOffset,
+                    TempBarWidth = barWidth
+                });
+                requiresItemsSourceRefresh = true;
+            }
         }
 
-        OnPropertyChanged(nameof(DailyForecastItemsSource));
+        while (DailyForecast.Count > count)
+        {
+            DailyForecast.RemoveAt(DailyForecast.Count - 1);
+            requiresItemsSourceRefresh = true;
+        }
+
+        if (requiresItemsSourceRefresh)
+        {
+            _cachedDailyForecastItemsSource = [.. DailyForecast];
+            OnPropertyChanged(nameof(DailyForecastItemsSource));
+        }
+    }
+
+    private static readonly object s_svgIconCacheGate = new();
+    private static readonly Dictionary<string, SvgImageSource> s_svgIconCache = new(StringComparer.Ordinal);
+
+    internal static void ClearIconCache()
+    {
+        lock (s_svgIconCacheGate)
+        {
+            s_svgIconCache.Clear();
+        }
     }
 
     private ImageSource? CreateIcon(int wmoCode, bool isDay)
     {
+        Uri uri = WeatherCodeMapper.GetIconUri(wmoCode, isDay, _iconStyle);
+        string key = uri.AbsoluteUri;
+        bool canShareOnUiThread = _dispatcherQueue?.HasThreadAccess == true;
+        if (canShareOnUiThread)
+        {
+            lock (s_svgIconCacheGate)
+            {
+                if (s_svgIconCache.TryGetValue(key, out SvgImageSource? cached))
+                {
+                    return cached;
+                }
+            }
+        }
+
         try
         {
-            return new SvgImageSource(WeatherCodeMapper.GetIconUri(
-                wmoCode, isDay, _iconStyle));
+            var created = new SvgImageSource(uri);
+            if (canShareOnUiThread)
+            {
+                lock (s_svgIconCacheGate)
+                {
+                    if (s_svgIconCache.Count >= 128)
+                    {
+                        s_svgIconCache.Clear();
+                    }
+
+                    s_svgIconCache[key] = created;
+                }
+            }
+
+            return created;
         }
         catch (System.Runtime.InteropServices.COMException)
         {
@@ -487,16 +617,24 @@ public sealed partial class WeatherWidgetViewModel
         }
     }
 
-    private void PopulateHourlyForecast(WeatherHourly hourly)
+    private void PopulateHourlyForecast(
+        WeatherHourly hourly,
+        int? utcOffsetSeconds = null,
+        string? timezone = null)
     {
-        HourlyForecast.Clear();
-        int startIndex = FindCurrentHourIndex(hourly.Time);
-        int count = Math.Min(24, hourly.Time.Count - startIndex);
-        for (int i = 0; i < count; i++)
+        int startIndex = FindCurrentHourIndex(hourly.Time, utcOffsetSeconds, timezone);
+        int targetCount = Math.Max(0, Math.Min(24, hourly.Time.Count - startIndex));
+        bool requiresItemsSourceRefresh =
+            HourlyForecast.Count != targetCount ||
+            _cachedHourlyForecastItemsSource.Length != targetCount;
+        double textSize = this.ForecastHourTextSize;
+
+        for (int i = 0; i < targetCount; i++)
         {
             int idx = startIndex + i;
             if (idx >= hourly.Time.Count)
             {
+                targetCount = i;
                 break;
             }
 
@@ -507,107 +645,186 @@ public sealed partial class WeatherWidgetViewModel
 
             string hourLabel = FormatHourLabel(timeStr);
             bool isDaytime = IsDaytimeHour(timeStr);
+            string temperatureText = FormatTemperature(temp);
+            string precipitationText = precip > 0 ? $"{(int)precip}%" : "";
+            string iconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDaytime);
+            ImageSource? icon = CreateIcon(wmoCode, isDaytime);
+            bool isCurrentHour = i == 0;
 
-            HourlyForecast.Add(new WeatherHourViewModel
+            if (i < HourlyForecast.Count)
             {
-                HourLabel = hourLabel,
-                TemperatureText = FormatTemperature(temp),
-                PrecipitationText = precip > 0 ? $"{(int)precip}%" : "",
-                IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDaytime),
-                Icon = CreateIcon(wmoCode, isDaytime),
-                IsCurrentHour = i == 0,
-                ForecastHourTextSize = this.ForecastHourTextSize
-            });
+                WeatherHourViewModel existing = HourlyForecast[i];
+                existing.HourLabel = hourLabel;
+                existing.TemperatureText = temperatureText;
+                existing.PrecipitationText = precipitationText;
+                existing.IconGlyph = iconGlyph;
+                existing.Icon = icon;
+                existing.IsCurrentHour = isCurrentHour;
+                existing.ForecastHourTextSize = textSize;
+            }
+            else
+            {
+                HourlyForecast.Add(new WeatherHourViewModel
+                {
+                    HourLabel = hourLabel,
+                    TemperatureText = temperatureText,
+                    PrecipitationText = precipitationText,
+                    IconGlyph = iconGlyph,
+                    Icon = icon,
+                    IsCurrentHour = isCurrentHour,
+                    ForecastHourTextSize = textSize
+                });
+                requiresItemsSourceRefresh = true;
+            }
         }
 
-        OnPropertyChanged(nameof(HourlyForecastItemsSource));
+        while (HourlyForecast.Count > targetCount)
+        {
+            HourlyForecast.RemoveAt(HourlyForecast.Count - 1);
+            requiresItemsSourceRefresh = true;
+        }
+
+        if (requiresItemsSourceRefresh)
+        {
+            _cachedHourlyForecastItemsSource = [.. HourlyForecast];
+            OnPropertyChanged(nameof(HourlyForecastItemsSource));
+        }
     }
 
-    private static int FindCurrentHourIndex(List<string> times)
+    internal static int FindCurrentHourIndex(
+        IReadOnlyList<string> times,
+        int? utcOffsetSeconds = null,
+        string? timezone = null,
+        DateTimeOffset? utcNowOverride = null)
     {
         if (times.Count == 0)
         {
             return 0;
         }
 
-        string now = DateTimeOffset.Now.ToString("yyyy-MM-ddTHH");
+        DateTimeOffset targetNow = ResolveTargetCityNow(utcOffsetSeconds, timezone, utcNowOverride);
+        string nowPrefix = targetNow.ToString("yyyy-MM-ddTHH", System.Globalization.CultureInfo.InvariantCulture);
         for (int i = 0; i < times.Count; i++)
         {
-            if (times[i].StartsWith(now, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(times[i]) &&
+                times[i].StartsWith(nowPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }
         }
 
-        return 0;
+        DateTime targetWallClock = targetNow.DateTime;
+        int lastAtOrBefore = -1;
+        DateTime lastAtOrBeforeTime = default;
+        int firstAfter = -1;
+
+        for (int i = 0; i < times.Count; i++)
+        {
+            if (!DateTimeOffset.TryParse(
+                    times[i],
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTimeOffset parsed))
+            {
+                continue;
+            }
+
+            DateTime slotWallClock = parsed.DateTime;
+            if (slotWallClock <= targetWallClock)
+            {
+                lastAtOrBefore = i;
+                lastAtOrBeforeTime = slotWallClock;
+            }
+            else if (firstAfter < 0)
+            {
+                firstAfter = i;
+            }
+        }
+
+        if (lastAtOrBefore >= 0 &&
+            (firstAfter >= 0 || targetWallClock - lastAtOrBeforeTime <= TimeSpan.FromHours(3)))
+        {
+            return lastAtOrBefore;
+        }
+
+        return firstAfter >= 0 ? firstAfter : 0;
+    }
+
+    private static DateTimeOffset ResolveTargetCityNow(
+        int? utcOffsetSeconds,
+        string? timezone,
+        DateTimeOffset? utcNowOverride)
+    {
+        DateTimeOffset utcNow = (utcNowOverride ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        if (utcOffsetSeconds is int offsetSec and >= -18 * 3600 and <= 18 * 3600)
+        {
+            return utcNow.ToOffset(TimeSpan.FromSeconds(offsetSec));
+        }
+
+        if (!string.IsNullOrWhiteSpace(timezone) &&
+            TimeZoneInfo.TryFindSystemTimeZoneById(timezone, out TimeZoneInfo? tz))
+        {
+            return TimeZoneInfo.ConvertTime(utcNow, tz);
+        }
+
+        return utcNowOverride?.ToLocalTime() ?? DateTimeOffset.Now;
     }
 
     private static bool IsDaytimeHour(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
             return dt.Hour >= 6 && dt.Hour < 19;
         }
-        catch
-        {
-            return true;
-        }
+
+        return true;
     }
 
     private static string FormatHourLabel(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
-            return dt.Hour == 0 ? "0:00" : $"{dt.Hour}:00";
+            return dt.Hour == 0 ? "0:00" : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{dt.Hour}:00");
         }
-        catch
-        {
-            return string.Empty;
-        }
+
+        return string.Empty;
     }
 
     private static string FormatTime(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
-            return dt.ToString("HH:mm");
+            return dt.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
-        catch
-        {
-            return string.Empty;
-        }
+
+        return string.Empty;
     }
 
     private static string ParseDateToDayLabel(string dateStr, string language)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                dateStr,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(dateStr);
-            var culture = language switch
-            {
-                "zh-CN" => new System.Globalization.CultureInfo("zh-CN"),
-                "zh-TW" => new System.Globalization.CultureInfo("zh-TW"),
-                "ja-JP" => new System.Globalization.CultureInfo("ja-JP"),
-                "de-DE" => new System.Globalization.CultureInfo("de-DE"),
-                "pt-BR" => new System.Globalization.CultureInfo("pt-BR"),
-                "hi-IN" => new System.Globalization.CultureInfo("hi-IN"),
-                "es-ES" => new System.Globalization.CultureInfo("es-ES"),
-                "fr-FR" => new System.Globalization.CultureInfo("fr-FR"),
-                "ar-SA" => new System.Globalization.CultureInfo("ar-SA"),
-                "bn-BD" => new System.Globalization.CultureInfo("bn-BD"),
-                "ru-RU" => new System.Globalization.CultureInfo("ru-RU"),
-                "ko-KR" => new System.Globalization.CultureInfo("ko-KR"),
-                _ => new System.Globalization.CultureInfo("en-US")
-            };
+            var culture = LocalizationService.GetGregorianCulture(language);
             return dt.ToString("ddd", culture);
         }
-        catch
-        {
-            return dateStr;
-        }
+
+        return dateStr;
     }
 
     private string FormatTemperature(double celsius)

@@ -89,10 +89,12 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     public AppearanceAnimationSettings ReadAnimation()
     {
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        string effect = WidgetAnimationKinds.NormalizeEffect(shell.WidgetAnimationEffect);
         return new(
-            WidgetAnimationKinds.NormalizeEffect(shell.WidgetAnimationEffect),
+            effect,
             WidgetAnimationKinds.NormalizeSpeed(shell.WidgetAnimationSpeed),
-            WidgetAnimationKinds.NormalizeSlideDirection(
+            WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+                shell.WidgetAnimationEffect,
                 shell.WidgetAnimationSlideDirection),
             WidgetAnimationKinds.NormalizeEasingIntensity(
                 shell.WidgetAnimationEasingIntensity),
@@ -297,12 +299,14 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         string normalized = preference is
             SettingsService.WidgetCornerPreferenceSquare or
             SettingsService.WidgetCornerPreferenceSmall or
-            SettingsService.WidgetCornerPreferenceRound
+            SettingsService.WidgetCornerPreferenceRound or
+            SettingsService.WidgetCornerPreferenceLarge
                 ? preference
                 : SettingsService.WidgetCornerPreferenceRound;
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         if (shell.WidgetCornerPreference == normalized) return;
         shell.WidgetCornerPreference = normalized;
+        _settings.RequestAppearancePreview();
         _settings.SaveDebounced();
     }
 
@@ -318,6 +322,7 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         if (shell.WidgetBorderColorMode == normalized) return;
         shell.WidgetBorderColorMode = normalized;
+        _settings.RequestAppearancePreview();
         _settings.SaveDebounced();
     }
 
@@ -333,6 +338,7 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         if (shell.WidgetBorderStyle == normalized) return;
         shell.WidgetBorderStyle = normalized;
+        _settings.RequestAppearancePreview();
         _settings.SaveDebounced();
     }
 
@@ -486,7 +492,7 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         return cleared;
     }
 
-    private int CountPerWidgetBackgroundOverrides() =>
+    public int CountPerWidgetBackgroundOverrides() =>
         _settings.Settings.WidgetLayout.Widgets.Count(widget =>
             WidgetBackgroundCustomization.GetImageFileNameOverride(widget) is not null ||
             WidgetBackgroundCustomization.GetColorOverride(widget) is not null);
@@ -600,13 +606,22 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         ThrowIfStopped();
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         string normalized = SettingsService.NormalizeWidgetAnimationEffect(effect);
-        if (shell.WidgetAnimationEffect == normalized)
+        string normalizedDirection = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+            effect,
+            shell.WidgetAnimationSlideDirection);
+        if (shell.WidgetAnimationEffect == normalized &&
+            shell.WidgetAnimationSlideDirection == normalizedDirection)
         {
             return;
         }
 
         shell.WidgetAnimationEffect = normalized;
-        if (scheduleSave) _settings.SaveDebounced();
+        shell.WidgetAnimationSlideDirection = normalizedDirection;
+        if (scheduleSave)
+        {
+            _settings.NotifyWidgetAnimationSettingsChangedNow();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
     }
 
     public void SetAnimationSpeed(string? speed, bool scheduleSave = true)
@@ -620,7 +635,11 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         }
 
         shell.WidgetAnimationSpeed = normalized;
-        if (scheduleSave) _settings.SaveDebounced();
+        if (scheduleSave)
+        {
+            _settings.NotifyWidgetAnimationSettingsChangedNow();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
     }
 
     public void SetAnimationSlideDirection(string? direction, bool scheduleSave = true)
@@ -634,7 +653,11 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         }
 
         shell.WidgetAnimationSlideDirection = normalized;
-        if (scheduleSave) _settings.SaveDebounced();
+        if (scheduleSave)
+        {
+            _settings.NotifyWidgetAnimationSettingsChangedNow();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
     }
 
     public void SetAnimationEasingIntensity(string? intensity, bool scheduleSave = true)
@@ -648,7 +671,11 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         }
 
         shell.WidgetAnimationEasingIntensity = normalized;
-        if (scheduleSave) _settings.SaveDebounced();
+        if (scheduleSave)
+        {
+            _settings.NotifyWidgetAnimationSettingsChangedNow();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
     }
 
     public void SetAnimationStaggerEnabled(bool enabled, bool scheduleSave = true)
@@ -661,7 +688,11 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         }
 
         shell.WidgetAnimationStaggerEnabled = enabled;
-        if (scheduleSave) _settings.SaveDebounced();
+        if (scheduleSave)
+        {
+            _settings.NotifyWidgetAnimationSettingsChangedNow();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
     }
 
     public void SetWidgetForegroundMode(string? mode)

@@ -18,10 +18,11 @@ public sealed class FileItemSurfaceLayoutContractTests
         Assert.Equal("Transparent", (string?)border.Attribute("Background"));
         Assert.Null(border.Attribute("DataContext"));
         Assert.Null(border.Attribute(Xaml + "Load"));
-        Assert.Equal("{Binding SurfaceMargin, ElementName=SurfaceRoot}", (string?)border.Attribute("Margin"));
-        Assert.Equal("{Binding SurfacePadding, ElementName=SurfaceRoot}", (string?)border.Attribute("Padding"));
-        Assert.Equal("{Binding SurfaceHorizontalAlignment, ElementName=SurfaceRoot}",
-            (string?)border.Attribute("HorizontalAlignment"));
+        Assert.Null(border.Attribute("Margin"));
+        Assert.Null(border.Attribute("Padding"));
+        Assert.Equal("Stretch", (string?)border.Attribute("HorizontalAlignment"));
+        string codeBehind = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/FileItemSurface.xaml.cs"));
+        Assert.Contains("ApplyLayoutMetrics()", codeBehind, StringComparison.Ordinal);
 
         foreach (string eventName in new[]
         {

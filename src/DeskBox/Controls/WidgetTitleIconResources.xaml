@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary
+    x:Class="DeskBox.Controls.WidgetTitleIconResources"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Style x:Key="MonoIconPathStyle" TargetType="Path">
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="StrokeLineJoin" Value="Round" />
+        <Setter Property="StrokeStartLineCap" Value="Round" />
+        <Setter Property="StrokeEndLineCap" Value="Round" />
+        <Setter Property="Stretch" Value="Uniform" />
+        <Setter Property="Visibility" Value="Collapsed" />
+    </Style>
+    <DataTemplate x:Key="LineDefaultPathTemplate">
+        <Path x:Name="LineDefaultPath" Style="{StaticResource MonoIconPathStyle}" Data="M5.75,5 L10.5,5 L12,7 L18.25,7 C18.94,7 19.5,7.56 19.5,8.25 L19.5,17.25 C19.5,17.94 18.94,18.5 18.25,18.5 L5.75,18.5 C5.06,18.5 4.5,17.94 4.5,17.25 L4.5,6.25 C4.5,5.56 5.06,5 5.75,5 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineManagedStoragePathTemplate">
+        <Path x:Name="LineManagedStoragePath" Style="{StaticResource MonoIconPathStyle}" Data="M4.5 3 A2.5 2.5 0 0 0 2 5.5 L2 14.5 A2.5 2.5 0 0 0 4.5 17 L15.5 17 A2.5 2.5 0 0 0 18 14.5 L18 7.5 A2.5 2.5 0 0 0 15.5 5 L9.7 5 L8.23 3.51 A1.75 1.75 0 0 0 6.98 3 L4.5 3 Z M3 5.5 C3 4.67 3.67 4 4.5 4 L6.98 4 C7.18 4 7.38 4.08 7.51 4.22 L8.8 5.5 L7.44 6.85 A0.5 0.5 0 0 1 7.09 7 L3 7 L3 5.5 Z M3 8 L7.09 8 C7.49 8 7.87 7.84 8.15 7.56 L9.7 6 L15.49 6 C16.32 6 16.99 6.67 16.99 7.5 L16.99 14.5 C16.99 15.33 16.32 16 15.49 16 L4.49 16 A1.5 1.5 0 0 1 3 14.5 L3 8 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineMappedFolderPathTemplate">
+        <Path x:Name="LineMappedFolderPath" Style="{StaticResource MonoIconPathStyle}" Data="M4.5 3 A2.5 2.5 0 0 0 2 5.5 L2 14.5 A2.5 2.5 0 0 0 4.5 17 L9.34 17 A3.48 3.48 0 0 1 9.04 16 L4.5 16 A1.5 1.5 0 0 1 3 14.5 L3 8 L7.09 8 C7.49 8 7.87 7.84 8.15 7.56 L9.7 6 L15.49 6 C16.32 6 16.99 6.67 16.99 7.5 L16.99 12.04 C17.34 12.09 17.68 12.19 17.99 12.34 L17.99 7.5 A2.5 2.5 0 0 0 15.5 5 L9.7 5 L8.23 3.51 A1.75 1.75 0 0 0 6.98 3 L4.5 3 Z M3 5.5 C3 4.67 3.67 4 4.5 4 L6.98 4 C7.18 4 7.38 4.08 7.51 4.22 L8.8 5.5 L7.44 6.85 A0.5 0.5 0 0 1 7.09 7 L3 7 L3 5.5 Z M12.5 13 A2.5 2.5 0 0 0 12.5 18 L13 18 A0.5 0.5 0 0 0 13 17 L12.5 17 A1.5 1.5 0 0 1 12.5 14 L13 14 A0.5 0.5 0 0 0 13 13 L12.5 13 Z M16 13 A0.5 0.5 0 0 0 16 14 L16.5 14 A1.5 1.5 0 0 1 16.5 17 L16 17 A0.5 0.5 0 0 0 16 18 L16.5 18 A2.5 2.5 0 0 0 16.5 13 L16 13 Z M12 15.5 C12 15.22 12.22 15 12.5 15 L16.5 15 A0.5 0.5 0 0 1 16.5 16 L12.5 16 A0.5 0.5 0 0 1 12 15.5 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineQuickCapturePathTemplate">
+        <Path x:Name="LineQuickCapturePath" Style="{StaticResource MonoIconPathStyle}" Data="M14 3 A3 3 0 0 1 17 5.82 L17 10.38 A2 2 0 0 1 16.53 11.66 L16.41 11.79 L11.79 16.41 A2 2 0 0 1 10.55 16.99 L10.38 17 L6 17 A3 3 0 0 1 3 14.18 L3 6 A3 3 0 0 1 5.82 3 L14 3 Z M14 4 L6 4 A2 2 0 0 0 4 5.85 L4 14 A2 2 0 0 0 5.85 16 L10 16 L10 13 A3 3 0 0 1 12.82 10 L16 10 L16 6 A2 2 0 0 0 14.15 4 L14 4 Z M15.78 11 L13 11 A2 2 0 0 0 11 12.85 L11 15.78 L11.09 15.71 L15.71 11.09 A1 1 0 0 0 15.78 11 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineTodoPathTemplate">
+        <Path x:Name="LineTodoPath" Style="{StaticResource MonoIconPathStyle}" Data="M6 3 A3 3 0 0 0 3 6 L3 14 A3 3 0 0 0 6 17 L14 17 A3 3 0 0 0 17 14 L17 6 A3 3 0 0 0 14 3 L6 3 Z M4 6 C4 4.9 4.9 4 6 4 L14 4 A2 2 0 0 1 16 6 L16 14 A2 2 0 0 1 14 16 L6 16 A2 2 0 0 1 4 14 L4 6 Z M13.85 7.85 A0.5 0.5 0 0 0 13.15 7.15 L8.5 11.79 L6.85 10.15 A0.5 0.5 0 0 0 6.15 10.85 L8.15 12.85 C8.35 13.05 8.65 13.05 8.85 12.85 L13.85 7.85 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineMusicPathTemplate">
+        <Path x:Name="LineMusicPath" Style="{StaticResource MonoIconPathStyle}" Data="M3 10 A7 7 0 0 1 17 10 L17 11 L13.5 11 A0.5 0.5 0 0 0 13 11.5 L13 17.5 C13 17.78 13.22 18 13.5 18 L16 18 A2 2 0 0 0 18 16 L18 10 A8 8 0 1 0 2 10 L2 16 C2 17.1 2.9 18 4 18 L6.5 18 A0.5 0.5 0 0 0 7 17.5 L7 11.5 A0.5 0.5 0 0 0 6.5 11 L3 11 L3 10 Z M3 12 L6 12 L6 17 L4 17 A1 1 0 0 1 3 16 L3 12 Z M17 12 L17 16 A1 1 0 0 1 16 17 L14 17 L14 12 L17 12 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineWeatherPathTemplate">
+        <Path x:Name="LineWeatherPath" Style="{StaticResource MonoIconPathStyle}" Data="M8.2,17.5 L16.7,17.5 C18.52,17.5 20,16.09 20,14.35 C20,12.72 18.7,11.38 17.05,11.22 C16.48,8.51 14.05,6.5 11.15,6.5 C8.18,6.5 5.72,8.62 5.24,11.44 C3.88,11.87 3,13.04 3,14.35 C3,16.09 4.48,17.5 6.3,17.5 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineTagsPathTemplate">
+        <Path x:Name="LineTagsPath" Style="{StaticResource MonoIconPathStyle}" Data="M5,6.4 C5,5.63 5.63,5 6.4,5 L12.2,5 C12.57,5 12.93,5.15 13.19,5.41 L19,11.22 C19.55,11.77 19.55,12.66 19,13.21 L13.21,19 C12.66,19.55 11.77,19.55 11.22,19 L5.41,13.19 C5.15,12.93 5,12.57 5,12.2 Z M8.25,8.25 L8.26,8.25" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineSearchPathTemplate">
+        <Path x:Name="LineSearchPath" Style="{StaticResource MonoIconPathStyle}" Data="M9.864 3.081A1.56 1.56 0 0 0 9 4.471c.001.275.079.553.215.799A6.002 6.002 0 0 0 5 11a6 6 0 0 0 11.875 1.218c.045.053.082.113.106.183.234.743.489 1.61 1.416 1.647a7.98 7.98 0 0 1-1.125 1.919l4.426 4.317a1 1 0 0 1-1.396 1.432l-4.46-4.348A7.963 7.963 0 0 1 11 19a8 8 0 0 1-1.136-15.919ZM18.484 8a.3.3 0 0 1 .285.201l.25.766c.077.232.208.444.381.617.174.173.385.304.618.381l.765.248.015.004a.3.3 0 0 1 0 .57l-.765.248a1.57 1.57 0 0 0-.999.998l-.249.766a.3.3 0 0 1-.57 0l-.249-.766a1.58 1.58 0 0 0-.999-1.002l-.765-.248a.3.3 0 0 1 0-.57l.765-.248c.23-.08.439-.211.61-.384.17-.173.299-.383.375-.614l.248-.766A.3.3 0 0 1 18.484 8ZM14.473 0a.54.54 0 0 1 .513.363l.448 1.376c.139.419.374.8.686 1.112.312.311.693.546 1.111.685l1.378.447.028.007a.54.54 0 0 1 0 1.027l-1.378.447c-.419.139-.8.374-1.112.686a3.17 3.17 0 0 0-.686 1.111l-.447 1.376a.54.54 0 0 1-1.027 0l-.448-1.376a3.17 3.17 0 0 0-.686-1.115 3.16 3.16 0 0 0-1.112-.693l-1.378-.447a.54.54 0 0 1 0-1.027l1.378-.447c.414-.143.789-.379 1.096-.69.299-.303.525-.67.663-1.072l.011-.034.448-1.377A.54.54 0 0 1 14.473 0Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineSystemMonitorPathTemplate">
+        <Path x:Name="LineSystemMonitorPath" Style="{StaticResource MonoIconPathStyle}" Data="M4.5,16 L8.1,16 L10.25,8.25 L13,19 L15.25,12 L19.5,12 M5.75,5 L18.25,5 C18.94,5 19.5,5.56 19.5,6.25 L19.5,17.75 C19.5,18.44 18.94,19 18.25,19 L5.75,19 C5.06,19 4.5,18.44 4.5,17.75 L4.5,6.25 C4.5,5.56 5.06,5 5.75,5 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LinePomodoroPathTemplate">
+        <Path x:Name="LinePomodoroPath" Style="{StaticResource MonoIconPathStyle}" Data="M8 2 A0.5 0.5 0 0 0 8 3 L9.5 3 L9.5 4.02 A7 7 0 1 0 10.5 4.02 L10.5 3 L12 3 A0.5 0.5 0 0 0 12 2 L8 2 Z M10 5 A6 6 0 1 1 10 17 A6 6 0 0 1 10 5 Z M10 7.5 A0.5 0.5 0 0 0 9.5 8 L9.5 11.25 C9.5 11.43 9.6 11.59 9.75 11.68 L12 13 A0.5 0.5 0 1 0 12.5 12.13 L10.5 10.96 L10.5 8 A0.5 0.5 0 0 0 10 7.5 Z M14.85 4.15 A0.5 0.5 0 0 0 14.15 4.85 L15.15 5.85 A0.5 0.5 0 0 0 15.85 5.15 L14.85 4.15 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineCountdownPathTemplate">
+        <Path x:Name="LineCountdownPath" Style="{StaticResource MonoIconPathStyle}" Data="M5.5 3 A2.5 2.5 0 0 0 3 5.5 L3 14.5 A2.5 2.5 0 0 0 5.5 17 L14.5 17 A2.5 2.5 0 0 0 17 14.5 L17 5.5 A2.5 2.5 0 0 0 14.5 3 L5.5 3 Z M4 5.5 A1.5 1.5 0 0 1 5.5 4 L14.5 4 A1.5 1.5 0 0 1 16 5.5 L16 6.5 L4 6.5 L4 5.5 Z M4 7.5 L16 7.5 L16 14.5 A1.5 1.5 0 0 1 14.5 16 L5.5 16 A1.5 1.5 0 0 1 4 14.5 L4 7.5 Z M10 8.6 C10.18 8.6 10.35 8.71 10.42 8.88 L10.92 10.22 L12.35 10.33 C12.74 10.36 12.9 10.85 12.6 11.1 L11.5 12.03 L11.85 13.43 C11.94 13.81 11.53 14.11 11.2 13.9 L10 13.15 L8.8 13.9 C8.47 14.11 8.06 13.81 8.15 13.43 L8.5 12.03 L7.4 11.1 C7.1 10.85 7.26 10.36 7.65 10.33 L9.08 10.22 L9.58 8.88 C9.65 8.71 9.82 8.6 10 8.6 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineAiMonitorPathTemplate">
+        <Path x:Name="LineAiMonitorPath" Style="{StaticResource MonoIconPathStyle}" Data="M6 3 A3 3 0 0 0 3 6 L3 14 A3 3 0 0 0 6 17 L14 17 A3 3 0 0 0 17 14 L17 6 A3 3 0 0 0 14 3 L6 3 Z M4 6 A2 2 0 0 1 6 4 L14 4 A2 2 0 0 1 16 6 L16 14 A2 2 0 0 1 14 16 L6 16 A2 2 0 0 1 4 14 L4 6 Z M8.15 8.2 A0.5 0.5 0 0 1 8.63 8.53 L10.18 13.02 L11.1 11.18 A0.5 0.5 0 0 1 11.55 10.9 L13.25 10.9 A0.5 0.5 0 0 1 13.25 11.9 L11.86 11.9 L10.55 14.52 A0.5 0.5 0 0 1 9.63 14.47 L8.12 10.08 L7.22 12.42 A0.5 0.5 0 0 1 6.75 12.75 L5.25 12.75 A0.5 0.5 0 0 1 5.25 11.75 L6.4 11.75 L7.68 8.52 A0.5 0.5 0 0 1 8.15 8.2 Z M13.85 5.15 C13.97 5.15 14.08 5.23 14.12 5.35 L14.42 6.28 L15.35 6.58 A0.28 0.28 0 0 1 15.35 7.12 L14.42 7.42 L14.12 8.35 A0.28 0.28 0 0 1 13.58 8.35 L13.28 7.42 L12.35 7.12 A0.28 0.28 0 0 1 12.35 6.58 L13.28 6.28 L13.58 5.35 C13.62 5.23 13.73 5.15 13.85 5.15 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="LineClipboardPathTemplate">
+        <Path x:Name="LineClipboardPath" Style="{StaticResource MonoIconPathStyle}" Data="M7.5 2 A1.5 1.5 0 0 0 6.08 3 L5.5 3 A2.5 2.5 0 0 0 3 5.5 L3 15.5 A2.5 2.5 0 0 0 5.5 18 L14.5 18 A2.5 2.5 0 0 0 17 15.5 L17 5.5 A2.5 2.5 0 0 0 14.5 3 L13.92 3 A1.5 1.5 0 0 0 12.5 2 L7.5 2 Z M7.5 3 L12.5 3 A0.5 0.5 0 0 1 12.5 4 L7.5 4 A0.5 0.5 0 0 1 7.5 3 Z M6.08 4 A1.5 1.5 0 0 0 7.5 5 L12.5 5 A1.5 1.5 0 0 0 13.92 4 L14.5 4 A1.5 1.5 0 0 1 16 5.5 L16 15.5 A1.5 1.5 0 0 1 14.5 17 L5.5 17 A1.5 1.5 0 0 1 4 15.5 L4 5.5 A1.5 1.5 0 0 1 5.5 4 L6.08 4 Z M6.5 8 A0.5 0.5 0 0 0 6.5 9 L13.5 9 A0.5 0.5 0 0 0 13.5 8 L6.5 8 Z M6.5 11 A0.5 0.5 0 0 0 6.5 12 L13.5 12 A0.5 0.5 0 0 0 13.5 11 L6.5 11 Z M6.5 14 A0.5 0.5 0 0 0 6.5 15 L11 15 A0.5 0.5 0 0 0 11 14 L6.5 14 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledDefaultPathTemplate">
+        <Path x:Name="FilledDefaultPath" Style="{StaticResource MonoIconPathStyle}" Data="M5.75,4 C4.78,4 4,4.78 4,5.75 L4,18.25 C4,19.22 4.78,20 5.75,20 L18.25,20 C19.22,20 20,19.22 20,18.25 L20,7.75 C20,6.78 19.22,6 18.25,6 L12.9,6 C12.53,6 12.18,5.85 11.92,5.59 L10.91,4.59 C10.53,4.21 10.02,4 9.48,4 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledManagedStoragePathTemplate">
+        <Path x:Name="FilledManagedStoragePath" Style="{StaticResource MonoIconPathStyle}" Data="M2 5.5 A2.5 2.5 0 0 1 4.5 3 L6.98 3 C7.45 3 7.89 3.18 8.22 3.51 L9.5 4.8 L7.44 6.85 A0.5 0.5 0 0 1 7.09 7 L2 7 L2 5.5 Z M2 8 L2 14.5 A2.5 2.5 0 0 0 4.5 17 L15.5 17 A2.5 2.5 0 0 0 18 14.5 L18 7.5 A2.5 2.5 0 0 0 15.5 5 L10.7 5 L8.16 7.56 A1.5 1.5 0 0 1 7.09 8 L2 8 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledMappedFolderPathTemplate">
+        <Path x:Name="FilledMappedFolderPath" Style="{StaticResource MonoIconPathStyle}" Data="M2 5.5 A2.5 2.5 0 0 1 4.5 3 L6.98 3 C7.45 3 7.89 3.18 8.22 3.51 L9.5 4.8 L7.44 6.85 A0.5 0.5 0 0 1 7.09 7 L2 7 L2 5.5 Z M2 8 L2 14.5 A2.5 2.5 0 0 0 4.5 17 L9.34 17 A3.5 3.5 0 0 1 12.5 12 L16.5 12 C17.04 12 17.55 12.12 18 12.34 L18 7.5 A2.5 2.5 0 0 0 15.5 5 L10.7 5 L8.16 7.56 A1.5 1.5 0 0 1 7.09 8 L2 8 Z M12.5 13 A2.5 2.5 0 0 0 12.5 18 L13 18 A0.5 0.5 0 0 0 13 17 L12.5 17 A1.5 1.5 0 0 1 12.5 14 L13 14 A0.5 0.5 0 0 0 13 13 L12.5 13 Z M16 13 A0.5 0.5 0 0 0 16 14 L16.5 14 A1.5 1.5 0 0 1 16.5 17 L16 17 A0.5 0.5 0 0 0 16 18 L16.5 18 A2.5 2.5 0 0 0 16.5 13 L16 13 Z M12 15.5 C12 15.22 12.22 15 12.5 15 L16.5 15 A0.5 0.5 0 0 1 16.5 16 L12.5 16 A0.5 0.5 0 0 1 12 15.5 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledQuickCapturePathTemplate">
+        <Path x:Name="FilledQuickCapturePath" Style="{StaticResource MonoIconPathStyle}" Data="M14 3 A3 3 0 0 1 17 5.82 L17 10 L12.82 10 A3 3 0 0 0 10.01 12.82 L10 13 L10 17 L6 17 A3 3 0 0 1 3 14.18 L3 6 A3 3 0 0 1 5.82 3 L14 3 Z M16.9 11 A2 2 0 0 1 16.54 11.65 L16.41 11.79 L11.79 16.41 A2 2 0 0 1 11 16.91 L11 12.84 A2 2 0 0 1 12.84 11 L13 11 L16.9 11 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledTodoPathTemplate">
+        <Path x:Name="FilledTodoPath" Style="{StaticResource MonoIconPathStyle}" Data="M6 3 A3 3 0 0 0 3 6 L3 14 A3 3 0 0 0 6 17 L14 17 A3 3 0 0 0 17 14 L17 6 A3 3 0 0 0 14 3 L6 3 Z M13.85 7.85 L8.85 12.85 A0.5 0.5 0 0 1 8.15 12.85 L6.15 10.85 A0.5 0.5 0 0 1 6.85 10.15 L8.5 11.79 L13.15 7.15 A0.5 0.5 0 0 1 13.85 7.85 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledMusicPathTemplate">
+        <Path x:Name="FilledMusicPath" Style="{StaticResource MonoIconPathStyle}" Data="M3 10 A7 7 0 0 1 17 10 L17 11 L13.5 11 A0.5 0.5 0 0 0 13 11.5 L13 17.5 C13 17.78 13.22 18 13.5 18 L16 18 A2 2 0 0 0 18 16 L18 10 A8 8 0 1 0 2 10 L2 16 C2 17.1 2.9 18 4 18 L6.5 18 A0.5 0.5 0 0 0 7 17.5 L7 11.5 A0.5 0.5 0 0 0 6.5 11 L3 11 L3 10 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledWeatherPathTemplate">
+        <Path x:Name="FilledWeatherPath" Style="{StaticResource MonoIconPathStyle}" Data="M8.2,18.25 L16.7,18.25 C18.94,18.25 20.75,16.51 20.75,14.35 C20.75,12.44 19.34,10.85 17.47,10.51 C16.69,7.65 14.08,5.75 11.15,5.75 C7.97,5.75 5.26,7.98 4.64,11.02 C3.17,11.68 2.25,12.96 2.25,14.35 C2.25,16.51 4.06,18.25 6.3,18.25 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledTagsPathTemplate">
+        <Path x:Name="FilledTagsPath" Style="{StaticResource MonoIconPathStyle}" Data="M5.75,4 C4.78,4 4,4.78 4,5.75 L4,11.72 C4,12.18 4.18,12.63 4.51,12.96 L11.04,19.49 C11.72,20.17 12.83,20.17 13.51,19.49 L19.49,13.51 C20.17,12.83 20.17,11.72 19.49,11.04 L12.96,4.51 C12.63,4.18 12.18,4 11.72,4 Z M8.25,8.8 C7.64,8.8 7.15,8.31 7.15,7.7 C7.15,7.09 7.64,6.6 8.25,6.6 C8.86,6.6 9.35,7.09 9.35,7.7 C9.35,8.31 8.86,8.8 8.25,8.8 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledSearchPathTemplate">
+        <Path x:Name="FilledSearchPath" Style="{StaticResource MonoIconPathStyle}" Data="M17 14.5V7H3v2.468A4.48 4.48 0 0 1 5 9a4.5 4.5 0 0 1 4.061 6.44L10.621 17H14.5a2.5 2.5 0 0 0 2.5-2.5ZM17 5.5A2.5 2.5 0 0 0 14.5 3h-9A2.5 2.5 0 0 0 3 5.5V6h14v-.5ZM7.096 16.303A3.5 3.5 0 1 1 8.5 13.5a3.485 3.485 0 0 1-.697 2.096l2.55 2.55a.5.5 0 0 1-.707.708l-2.55-2.551ZM7.5 13.5A2.5 2.5 0 1 0 5 16a2.5 2.5 0 0 0 2.5-2.5Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledSystemMonitorPathTemplate">
+        <Path x:Name="FilledSystemMonitorPath" Style="{StaticResource MonoIconPathStyle}" Data="M5.75,4 C4.78,4 4,4.78 4,5.75 L4,18.25 C4,19.22 4.78,20 5.75,20 L18.25,20 C19.22,20 20,19.22 20,18.25 L20,5.75 C20,4.78 19.22,4 18.25,4 Z M10.14,7.28 C10.37,7.26 10.6,7.35 10.76,7.51 C10.92,7.67 11.02,7.89 11.04,8.12 L12.37,15.01 L14.1,10.5 C14.24,10.13 14.61,9.89 15,9.92 C15.4,9.94 15.73,10.23 15.83,10.61 L16.17,12 L18.25,12 C18.66,12 19,12.34 19,12.75 C19,13.16 18.66,13.5 18.25,13.5 L15.6,13.5 C15.25,13.5 14.94,13.26 14.85,12.92 L14.78,12.64 L12.9,17.54 C12.77,17.88 12.43,18.12 12.06,18.1 C11.68,18.08 11.37,17.82 11.29,17.45 L9.91,10.3 L8.86,14.92 C8.78,15.26 8.48,15.5 8.13,15.5 L5.75,15.5 C5.34,15.5 5,15.16 5,14.75 C5,14.34 5.34,14 5.75,14 L7.53,14 L9.28,8.05 C9.39,7.62 9.73,7.32 10.14,7.28 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledPomodoroPathTemplate">
+        <Path x:Name="FilledPomodoroPath" Style="{StaticResource MonoIconPathStyle}" Data="M8 2 A0.6 0.6 0 0 0 8 3.2 L9.4 3.2 L9.4 4.18 A6.85 6.85 0 1 0 10.6 4.18 L10.6 3.2 L12 3.2 A0.6 0.6 0 0 0 12 2 L8 2 Z M10 7.4 C10.33 7.4 10.6 7.67 10.6 8 L10.6 10.85 L12.45 11.95 A0.6 0.6 0 1 1 11.85 12.98 L9.7 11.7 A0.6 0.6 0 0 1 9.4 11.18 L9.4 8 C9.4 7.67 9.67 7.4 10 7.4 Z M14.85 4.15 A0.55 0.55 0 0 0 14.07 4.93 L15.07 5.93 A0.55 0.55 0 0 0 15.85 5.15 L14.85 4.15 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledCountdownPathTemplate">
+        <Path x:Name="FilledCountdownPath" Style="{StaticResource MonoIconPathStyle}" Data="M17 5.5 A2.5 2.5 0 0 0 14.5 3 L5.5 3 A2.5 2.5 0 0 0 3 5.5 L3 6.5 L17 6.5 L17 5.5 Z M17 7.5 L3 7.5 L3 14.5 A2.5 2.5 0 0 0 5.5 17 L14.5 17 A2.5 2.5 0 0 0 17 14.5 L17 7.5 Z M10 8.6 C10.22 8.6 10.42 8.74 10.5 8.95 L11.05 10.45 L12.62 10.56 C13.06 10.59 13.24 11.14 12.9 11.42 L11.7 12.44 L12.08 13.97 C12.18 14.39 11.73 14.73 11.36 14.5 L10 13.66 L8.64 14.5 C8.27 14.73 7.82 14.39 7.92 13.97 L8.3 12.44 L7.1 11.42 C6.76 11.14 6.94 10.59 7.38 10.56 L8.95 10.45 L9.5 8.95 C9.58 8.74 9.78 8.6 10 8.6 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledAiMonitorPathTemplate">
+        <Path x:Name="FilledAiMonitorPath" Style="{StaticResource MonoIconPathStyle}" Data="M6 3 A3 3 0 0 0 3 6 L3 14 A3 3 0 0 0 6 17 L14 17 A3 3 0 0 0 17 14 L17 6 A3 3 0 0 0 14 3 L6 3 Z M13.85 4.8 C14.01 4.8 14.15 4.9 14.2 5.05 L14.55 6.12 L15.62 6.47 A0.36 0.36 0 0 1 15.62 7.15 L14.55 7.5 L14.2 8.57 A0.36 0.36 0 0 1 13.5 8.57 L13.15 7.5 L12.08 7.15 A0.36 0.36 0 0 1 12.08 6.47 L13.15 6.12 L13.5 5.05 C13.55 4.9 13.69 4.8 13.85 4.8 Z M8.15 8.15 C8.4 8.15 8.62 8.31 8.7 8.55 L10.16 12.78 L11.05 11.02 A0.58 0.58 0 0 1 11.57 10.7 L13.3 10.7 A0.58 0.58 0 1 1 13.3 11.86 L11.93 11.86 L10.62 14.48 A0.58 0.58 0 0 1 9.56 14.42 L8.12 10.25 L7.26 12.48 A0.58 0.58 0 0 1 6.72 12.85 L5.2 12.85 A0.58 0.58 0 1 1 5.2 11.69 L6.32 11.69 L7.61 8.52 C7.7 8.3 7.91 8.15 8.15 8.15 Z" />
+    </DataTemplate>
+    <DataTemplate x:Key="FilledClipboardPathTemplate">
+        <Path x:Name="FilledClipboardPath" Style="{StaticResource MonoIconPathStyle}" Data="M7.5 2 A1.5 1.5 0 0 0 6 3.5 L6 4 A1.5 1.5 0 0 0 7.5 5.5 L12.5 5.5 A1.5 1.5 0 0 0 14 4 L14 3.5 A1.5 1.5 0 0 0 12.5 2 L7.5 2 Z M5.2 3.5 A2.2 2.2 0 0 0 3 5.7 L3 15.8 A2.2 2.2 0 0 0 5.2 18 L14.8 18 A2.2 2.2 0 0 0 17 15.8 L17 5.7 A2.2 2.2 0 0 0 14.8 3.5 L14.8 4 A2.3 2.3 0 0 1 12.5 6.3 L7.5 6.3 A2.3 2.3 0 0 1 5.2 4 L5.2 3.5 Z M6.5 8.5 L13.5 8.5 A0.55 0.55 0 0 1 13.5 9.6 L6.5 9.6 A0.55 0.55 0 0 1 6.5 8.5 Z M6.5 11.3 L13.5 11.3 A0.55 0.55 0 0 1 13.5 12.4 L6.5 12.4 A0.55 0.55 0 0 1 6.5 11.3 Z M6.5 14.1 L11 14.1 A0.55 0.55 0 0 1 11 15.2 L6.5 15.2 A0.55 0.55 0 0 1 6.5 14.1 Z" />
+    </DataTemplate>
+</ResourceDictionary>

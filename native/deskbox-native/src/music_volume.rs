@@ -5,8 +5,8 @@ use windows::{
         Foundation::{CloseHandle, HANDLE, RPC_E_CHANGED_MODE},
         Media::Audio::{
             Endpoints::IAudioEndpointVolume, IAudioSessionControl2, IAudioSessionManager2,
-            IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, eMultimedia,
-            eRender,
+            IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator, eConsole,
+            eMultimedia, eRender,
         },
         System::{
             Com::{
@@ -117,8 +117,8 @@ pub(crate) unsafe fn execute(
         };
 
     result.attempted_phases |= DESKBOX_MUSIC_VOLUME_PHASE_GET_DEVICE;
-    // SAFETY: The fixed flow and role match the legacy DeskBox service.
-    let device = match unsafe { device_enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) } {
+    // SAFETY: The fixed flow and role fallback match DeskBox's render endpoint contract.
+    let device = match unsafe { default_render_endpoint(&device_enumerator) } {
         Ok(value) => {
             result.device_hresult = DESKBOX_NATIVE_S_OK;
             value
@@ -137,18 +137,11 @@ pub(crate) unsafe fn execute(
     match request.operation {
         DESKBOX_MUSIC_VOLUME_OPERATION_GET_SNAPSHOT => {
             read_system_volume(&device, result);
-            // The legacy snapshot resolves the default endpoint again before session enumeration.
-            // SAFETY: The fixed flow and role match the legacy DeskBox service.
-            match unsafe { device_enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) } {
-                Ok(session_device) => {
-                    // SAFETY: The exported ABI validated both UTF-16 inputs.
-                    let source_app = unsafe { decode_input(&request.source_app_user_model_id) };
-                    // SAFETY: The exported ABI validated both UTF-16 inputs.
-                    let source_display_name = unsafe { decode_input(&request.source_display_name) };
-                    read_session_volume(&session_device, &source_app, &source_display_name, result);
-                }
-                Err(error) => result.session_hresult = error.code().0,
-            }
+            // SAFETY: The exported ABI validated both UTF-16 inputs.
+            let source_app = unsafe { decode_input(&request.source_app_user_model_id) };
+            // SAFETY: The exported ABI validated both UTF-16 inputs.
+            let source_display_name = unsafe { decode_input(&request.source_display_name) };
+            read_session_volume(&device, &source_app, &source_display_name, result);
             finish(result, DESKBOX_NATIVE_STATUS_OK, DESKBOX_NATIVE_S_OK, true)
         }
         DESKBOX_MUSIC_VOLUME_OPERATION_GET_SYSTEM => {
@@ -178,6 +171,14 @@ pub(crate) unsafe fn execute(
             false,
         ),
     }
+}
+
+unsafe fn default_render_endpoint(
+    device_enumerator: &IMMDeviceEnumerator,
+) -> windows::core::Result<IMMDevice> {
+    // SAFETY: Fixed Core Audio flow and role values on a valid enumerator.
+    unsafe { device_enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) }
+        .or_else(|_| unsafe { device_enumerator.GetDefaultAudioEndpoint(eRender, eConsole) })
 }
 
 fn read_system_volume(device: &IMMDevice, result: &mut DeskBoxMusicVolumeResultV1) {

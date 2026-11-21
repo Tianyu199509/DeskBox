@@ -19,16 +19,27 @@ public sealed partial class OnboardingWindow : Window
 {
     internal const int CurrentOnboardingVersion = 3;
     private const int DesiredWindowWidth = 1040;
-    private const int DesiredWindowHeight = 680;
+    private const int DesiredWindowHeight = 700;
     private const int MinWindowWidth = 700;
     private const int MinWindowHeight = 560;
     private const int WindowWorkAreaMargin = 80;
     private const int CompactLayoutThreshold = 860;
     private const int StepCount = 5;
+
+    /// <summary>The move/path safety step; skipping is offered only after it.</summary>
+    private const int FirstSkippableStep = 2;
+
+    /// <summary>Per-child delay of the copy column's staggered reveal.</summary>
+    private const int TextRevealStaggerMs = 45;
+    private const double TextRevealTravel = 18;
     private static readonly UIntPtr OnboardingWindowSubclassId = new(0xD05C0B01);
 
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
+    private readonly ThemeService? _themeService;
+    private readonly WidgetManager? _widgetManager;
+    private readonly ManagedStorageDesktopShortcutService? _desktopShortcutService;
+    private readonly Action? _showDesktopOrganization;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
 
@@ -41,16 +52,27 @@ public sealed partial class OnboardingWindow : Window
     private bool _hasToggledDuringSummonStep;
     private bool _hasCompletedSummonPractice;
     private bool _isCompactLayout;
+    private Task _storagePathUpdateTask = Task.CompletedTask;
     private Task _featureWidgetSelectionUpdateTask = Task.CompletedTask;
     private readonly Win32Helper.SubclassProc _windowSubclassProc;
+    private Storyboard? _textRevealStoryboard;
+    private Panel? _textRevealPanel;
 
     public OnboardingWindow(
         SettingsService settingsService,
         LocalizationService localizationService,
-        int initialStep = 0)
+        int initialStep = 0,
+        ThemeService? themeService = null,
+        WidgetManager? widgetManager = null,
+        ManagedStorageDesktopShortcutService? desktopShortcutService = null,
+        Action? showDesktopOrganization = null)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
+        _themeService = themeService;
+        _widgetManager = widgetManager;
+        _desktopShortcutService = desktopShortcutService;
+        _showDesktopOrganization = showDesktopOrganization;
         _stepIndex = Math.Clamp(initialStep, 0, StepCount - 1);
         _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         InitializeComponent();
@@ -59,6 +81,7 @@ public sealed partial class OnboardingWindow : Window
         App.Current.OnboardingWidgetsVisibilityChanged += OnOnboardingWidgetsVisibilityChanged;
 
         WindowsCompatibilityService.ApplySafeBackdrop(this);
+        _themeService?.TrackWindow(this);
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarHost);
@@ -67,6 +90,7 @@ public sealed partial class OnboardingWindow : Window
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
+        ApplyTitleBarButtonColors();
         AppBranding.ApplyWindowIcon(_appWindow);
         ResizeAndCenterForDisplay(windowId);
         InstallMinimumSizeHook();
@@ -78,34 +102,77 @@ public sealed partial class OnboardingWindow : Window
             presenter.IsMinimizable = false;
         }
 
-        SizeChanged += (_, _) => ApplyResponsiveLayout();
-        RootGrid.Loaded += (_, _) =>
-        {
-            _hasLoaded = true;
-            ApplyResponsiveLayout();
-            StepPips.SelectedPageIndex = _stepIndex;
-            SetupStep(animate: false);
-            ApplySceneState(_stepIndex, animate: false);
-            StartSceneLoops(_stepIndex);
-            PlaySceneEntrance();
-        };
+        SizeChanged += OnWindowSizeChanged;
+        RootGrid.Loaded += OnRootGridLoaded;
+        RootGrid.ActualThemeChanged += OnRootGridActualThemeChanged;
+        Closed += OnWindowClosed;
+    }
 
-        RootGrid.ActualThemeChanged += (_, _) =>
-        {
-            SetupStep(animate: false);
-            ApplySceneState(_stepIndex, animate: false);
-        };
+    private void ApplyTitleBarButtonColors()
+    {
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
+    }
 
-        Closed += (_, _) =>
+    private void OnWindowSizeChanged(object sender, WindowSizeChangedEventArgs args) =>
+        ApplyResponsiveLayout();
+
+    private void OnRootGridLoaded(object sender, RoutedEventArgs e)
+    {
+        _hasLoaded = true;
+        ApplyTitleBarButtonColors();
+        ApplyResponsiveLayout();
+        StepPips.SelectedPageIndex = _stepIndex;
+        SetupStep(animate: false);
+        UpdateFooterState();
+        ApplySceneState(_stepIndex, animate: false);
+        StartSceneLoops(_stepIndex);
+        PlaySceneEntrance();
+        PlayTextReveal(GetStepPanel(_stepIndex), direction: 1, initialDelayMs: 220);
+    }
+
+    private void OnRootGridActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_isClosed)
         {
-            _isClosed = true;
-            WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
-            StopSceneLoops();
-            RemoveMinimumSizeHook();
-            _localizationService.LanguageChanged -= OnLanguageChanged;
-            _settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged;
-            App.Current.OnboardingWidgetsVisibilityChanged -= OnOnboardingWidgetsVisibilityChanged;
-        };
+            return;
+        }
+
+        ApplyTitleBarButtonColors();
+        if (!_hasLoaded)
+        {
+            return;
+        }
+
+        SetupStep(animate: false);
+        ApplySceneState(_stepIndex, animate: false);
+        StartSceneLoops(_stepIndex);
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        _isClosed = true;
+        Closed -= OnWindowClosed;
+        SizeChanged -= OnWindowSizeChanged;
+        RootGrid.Loaded -= OnRootGridLoaded;
+        RootGrid.ActualThemeChanged -= OnRootGridActualThemeChanged;
+        WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
+        StopAllSceneAnimations();
+        FinishTextReveal();
+        _sceneCompositor = null;
+        RemoveMinimumSizeHook();
+        _localizationService.LanguageChanged -= OnLanguageChanged;
+        _settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged;
+        App.Current.OnboardingWidgetsVisibilityChanged -= OnOnboardingWidgetsVisibilityChanged;
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     public void RestartIntro(int stepIndex = 0)
@@ -117,9 +184,11 @@ public sealed partial class OnboardingWindow : Window
 
         _stepIndex = Math.Clamp(stepIndex, 0, StepCount - 1);
         SetupStep(animate: false);
+        UpdateFooterState();
         ApplySceneState(_stepIndex, animate: false);
         StartSceneLoops(_stepIndex);
         PlaySceneEntrance();
+        PlayTextReveal(GetStepPanel(_stepIndex), direction: 1, initialDelayMs: 120);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -203,11 +272,24 @@ public sealed partial class OnboardingWindow : Window
         await CompleteOnboardingAsync();
     }
 
+    private async void SkipButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_stepIndex < FirstSkippableStep)
+        {
+            return;
+        }
+
+        await CompleteOnboardingAsync();
+    }
+
     private async Task CompleteOnboardingAsync()
     {
         NextButton.IsEnabled = false;
         BackButton.IsEnabled = false;
+        SkipButton.IsEnabled = false;
+        SetStoragePathControlsEnabled(false);
         SetFeatureTogglesEnabled(false);
+        await _storagePathUpdateTask;
         await _featureWidgetSelectionUpdateTask;
         _settingsService.Settings.HasCompletedOnboarding = true;
         _settingsService.Settings.CompletedOnboardingVersion = CurrentOnboardingVersion;
@@ -224,90 +306,168 @@ public sealed partial class OnboardingWindow : Window
         }
 
         _isAnimating = true;
+        int direction = newStep > _stepIndex ? 1 : -1;
         var currentPanel = GetStepPanel(_stepIndex);
         var newPanel = GetStepPanel(newStep);
-
-        newPanel.Visibility = Visibility.Visible;
-
-        // The scene stage stays mounted and morphs; only the text column swaps.
-        ApplySceneState(newStep, animate: true);
-        StartSceneLoops(newStep);
-        PlayTextColumnSwap(currentPanel, newPanel);
 
         _stepIndex = newStep;
         _settingsService.Settings.OnboardingStepIndex = newStep;
         _settingsService.SaveDebounced(notifySubscribers: false);
 
-        UpdateFooterState();
+        // Step data first (drop mode, hotkey text, values), then the stage
+        // hand-off so each scene starts from the right story.
         SetupStep(animate: true);
+        ApplySceneState(newStep, animate: true, direction);
+        StartSceneLoops(newStep);
+        if (newStep == 4)
+        {
+            PlayFeatureStepEntrance();
+        }
+
+        PlayTextColumnSwap(currentPanel, newPanel, direction);
+        UpdateFooterState();
     }
 
     /// <summary>
     /// Swaps the copy column in a single layout pass: the outgoing panel
-    /// collapses immediately so the incoming one renders straight at its
-    /// final vertically-centered position. The previous cross-dissolve kept
-    /// both panels laid out for ~460ms — the Grid cell stayed at the taller
-    /// outgoing height, so the incoming copy first appeared at the outgoing
-    /// title's offset and then visibly jumped when the cell re-centered on
-    /// collapse. A short opacity-only fade (at the final position, no offset)
-    /// keeps the swap from reading as a hard cut. Storyboards are used
-    /// instead of raw visual animations because the incoming panel was just
-    /// uncollapsed and its visual can still be rebuilt under StartAnimation,
-    /// silently dropping the animation and leaving the panel blank until the
-    /// completion timeout snaps it on.
+    /// collapses immediately so the incoming one lays out straight at its
+    /// final vertically-centered position (a cross-dissolve kept both panels
+    /// laid out and made the incoming copy jump when the cell re-centered).
+    /// The incoming children then reveal in a short stagger — title, body,
+    /// controls — each sliding a few pixels in from the navigation direction
+    /// on the Fluent decelerate curve. Storyboards (not composition) because
+    /// the panel was just uncollapsed and its visuals can still be rebuilt
+    /// under StartAnimation, which would silently drop the animation.
     /// </summary>
     private void PlayTextColumnSwap(
         FrameworkElement outgoing,
-        FrameworkElement incoming)
+        FrameworkElement incoming,
+        int direction)
     {
+        outgoing.Visibility = Visibility.Collapsed;
+        incoming.Visibility = Visibility.Visible;
+        incoming.Opacity = 1;
+
         if (!WindowsCompatibilityService.AreAnimationsEnabled)
         {
-            outgoing.Visibility = Visibility.Collapsed;
-            incoming.Opacity = 1;
+            FinishTextReveal();
             _isAnimating = false;
             return;
         }
 
-        outgoing.Visibility = Visibility.Collapsed;
-        incoming.Opacity = 0;
-
-        var storyboard = new Storyboard();
-
-        var fadeIn = new DoubleAnimation
-        {
-            To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(fadeIn, incoming);
-        Storyboard.SetTargetProperty(fadeIn, nameof(UIElement.Opacity));
-
-        storyboard.Children.Add(fadeIn);
-        storyboard.Begin();
-
+        PlayTextReveal(incoming, direction, initialDelayMs: 60);
         int generation = ++_transitionGeneration;
-        _ = CompleteSwapAsync(storyboard, outgoing, incoming, generation);
+        _ = ReleaseNavigationGateAsync(generation);
     }
 
     private int _transitionGeneration;
 
-    private async Task CompleteSwapAsync(
-        Storyboard storyboard,
-        FrameworkElement outgoing,
-        FrameworkElement incoming,
-        int generation)
+    /// <summary>
+    /// Navigation re-opens shortly after a swap starts (it only debounces
+    /// double clicks); a newer swap simply supersedes the running reveal.
+    /// </summary>
+    private async Task ReleaseNavigationGateAsync(int generation)
     {
-        await Task.Delay(220);
+        await Task.Delay(200);
         if (_isClosed || generation != _transitionGeneration)
         {
             return;
         }
 
-        // Land base values first, then release the storyboard's hold so the
-        // panel settles without a post-animation snap.
-        incoming.Opacity = 1;
-        storyboard.Stop();
         _isAnimating = false;
+    }
+
+    private void PlayTextReveal(FrameworkElement panel, int direction, int initialDelayMs)
+    {
+        FinishTextReveal();
+        panel.Opacity = 1;
+        if (!WindowsCompatibilityService.AreAnimationsEnabled || panel is not Panel host)
+        {
+            return;
+        }
+
+        var storyboard = new Storyboard();
+        int index = 0;
+        foreach (UIElement child in host.Children)
+        {
+            if (child.Visibility != Visibility.Visible)
+            {
+                continue;
+            }
+
+            double travel = direction * TextRevealTravel;
+            var transform = new TranslateTransform { X = travel };
+            child.RenderTransform = transform;
+            child.Opacity = 0;
+            TimeSpan begin = TimeSpan.FromMilliseconds(initialDelayMs + (index * TextRevealStaggerMs));
+            storyboard.Children.Add(CreateDecelerateAnimation(child, nameof(UIElement.Opacity), 0, 1, 260, begin));
+            storyboard.Children.Add(CreateDecelerateAnimation(transform, nameof(TranslateTransform.X), travel, 0, 500, begin));
+            index++;
+        }
+
+        _textRevealStoryboard = storyboard;
+        _textRevealPanel = host;
+        storyboard.Completed += (_, _) =>
+        {
+            if (ReferenceEquals(_textRevealStoryboard, storyboard))
+            {
+                FinishTextReveal();
+            }
+        };
+        storyboard.Begin();
+    }
+
+    /// <summary>
+    /// Lands base values first, then releases the storyboard's hold so the
+    /// copy settles without a post-animation snap.
+    /// </summary>
+    private void FinishTextReveal()
+    {
+        if (_textRevealPanel is { } host)
+        {
+            foreach (UIElement child in host.Children)
+            {
+                child.Opacity = 1;
+                if (child.RenderTransform is TranslateTransform transform)
+                {
+                    transform.X = 0;
+                }
+            }
+        }
+
+        _textRevealStoryboard?.Stop();
+        _textRevealStoryboard = null;
+        _textRevealPanel = null;
+    }
+
+    private static DoubleAnimationUsingKeyFrames CreateDecelerateAnimation(
+        DependencyObject target,
+        string property,
+        double from,
+        double to,
+        int durationMs,
+        TimeSpan begin)
+    {
+        var animation = new DoubleAnimationUsingKeyFrames { BeginTime = begin };
+        animation.KeyFrames.Add(new DiscreteDoubleKeyFrame
+        {
+            KeyTime = KeyTime.FromTimeSpan(TimeSpan.Zero),
+            Value = from
+        });
+        animation.KeyFrames.Add(new SplineDoubleKeyFrame
+        {
+            KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(durationMs)),
+            Value = to,
+            // Fluent "decelerate max": fast departure, long soft landing.
+            KeySpline = new KeySpline
+            {
+                ControlPoint1 = new Windows.Foundation.Point(0.1, 0.9),
+                ControlPoint2 = new Windows.Foundation.Point(0.2, 1.0)
+            }
+        });
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, property);
+        return animation;
     }
 
     // ════════════════════════════════════════════════════════════
@@ -318,6 +478,7 @@ public sealed partial class OnboardingWindow : Window
     {
         if (!animate)
         {
+            FinishTextReveal();
             for (int index = 0; index < StepCount; index++)
             {
                 var panel = GetStepPanel(index);
@@ -337,6 +498,9 @@ public sealed partial class OnboardingWindow : Window
                 break;
             case 2:
                 SetupSummonStep();
+                break;
+            case 3:
+                SetupTrayStep();
                 break;
             case 4:
                 SetupFeatureStep();
@@ -360,6 +524,9 @@ public sealed partial class OnboardingWindow : Window
             ? _localizationService.T("Onboarding.Start")
             : _localizationService.T("Onboarding.Next");
         NextButton.IsEnabled = true;
+        SkipButton.Visibility = _stepIndex >= FirstSkippableStep && _stepIndex < StepCount - 1
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         UpdateProgressDots();
     }
 
@@ -378,6 +545,11 @@ public sealed partial class OnboardingWindow : Window
         int target = sender.SelectedPageIndex;
         if (target == _stepIndex || _isAnimating)
         {
+            if (target != _stepIndex)
+            {
+                sender.SelectedPageIndex = _stepIndex;
+            }
+
             return;
         }
 
@@ -427,23 +599,6 @@ public sealed partial class OnboardingWindow : Window
         Win32Helper.RemoveWindowSubclass(_hWnd, _windowSubclassProc, OnboardingWindowSubclassId);
     }
 
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [System.Runtime.InteropServices.StructLayout(
-        System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
-    }
-
     private IntPtr WindowSubclassProc(
         IntPtr hWnd,
         uint message,
@@ -455,14 +610,16 @@ public sealed partial class OnboardingWindow : Window
         const uint WmGetMinMaxInfo = 0x0024;
         const uint WmNcDestroy = 0x0082;
 
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = System.Runtime.InteropServices.Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = GetCurrentDpiScale();
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
-            System.Runtime.InteropServices.Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                GetCurrentDpiScale(),
+                MinWindowWidth,
+                MinWindowHeight);
         }
 
         if (message == WmNcDestroy)

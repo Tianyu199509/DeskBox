@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
@@ -19,6 +19,8 @@ $publishDir = Join-Path $runRoot "publish"
 $symbolsDir = Join-Path $runRoot "symbols"
 $rustIntermediateDir = Join-Path $runRoot "rust-staging"
 $rustCargoTargetDir = Join-Path $runRoot "rust-target"
+$qjsIntermediateDir = Join-Path $runRoot "qjs-staging"
+$qjsObjDir = Join-Path $runRoot "qjs-obj"
 $logPath = Join-Path $runRoot "publish.log"
 $summaryPath = Join-Path $runRoot "summary.json"
 $project = Join-Path $repoRoot "src\DeskBox\DeskBox.csproj"
@@ -99,7 +101,7 @@ function Copy-WindowsAppRuntimeInsightsResource {
         throw "The restored $($runtimeLibrary.Name) framework MSIX is missing for '$NativePlatform'."
     }
 
-    # WindowsAppSDK 2.5.1 resolves Foundation 2.3.12, whose self-contained
+    # WindowsAppSDK 2.7.0 resolves Foundation 2.7.0, whose self-contained
     # component payload omits this signed resource DLL even though the matching
     # Runtime framework MSIX contains it. Extract the file from that exact,
     # restore-locked MSIX so app-local RuntimeInfo/AppNotification startup does
@@ -265,6 +267,7 @@ $commonProperties = @(
     "-p:PublishAot=true",
     "-p:DeskBoxRustNative=true",
     "-p:DeskBoxRustCrtLinkage=Static",
+    "-p:DeskBoxQjsNative=true",
     "-p:JsonSerializerIsReflectionEnabledByDefault=false",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
@@ -300,6 +303,8 @@ try {
         "--no-restore",
         "-p:DeskBoxRustNativeIntermediateDir=$rustIntermediateDir",
         "-p:DeskBoxRustNativeCargoTargetDir=$rustCargoTargetDir",
+        "-p:DeskBoxQjsIntermediateDir=$qjsIntermediateDir",
+        "-p:DeskBoxQjsObjDir=$qjsObjDir",
         "-p:PublishSingleFile=false",
         "-v:minimal"
     ) + $commonProperties
@@ -340,6 +345,27 @@ if ($nativeStagingSha256 -cne $nativePublishSha256) {
     throw "AOT retail Rust module does not match this run's isolated staging output."
 }
 
+$qjsValidation = & (Join-Path $PSScriptRoot "build-qjs-native.ps1") `
+    -Platform $Platform `
+    -Configuration Release `
+    -CrtLinkage Static `
+    -OutputDirectory $publishDir `
+    -ValidateOnly
+$qjsStagingPath = Join-Path $qjsIntermediateDir "deskbox_qjs.dll"
+$qjsPublishPath = Join-Path $publishDir "deskbox_qjs.dll"
+foreach ($requiredPath in @(
+        $qjsStagingPath,
+        $qjsPublishPath)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+        throw "AOT retail QuickJS payload is missing '$requiredPath'."
+    }
+}
+$qjsStagingSha256 = (Get-FileHash -LiteralPath $qjsStagingPath -Algorithm SHA256).Hash
+$qjsPublishSha256 = (Get-FileHash -LiteralPath $qjsPublishPath -Algorithm SHA256).Hash
+if ($qjsStagingSha256 -cne $qjsPublishSha256) {
+    throw "AOT retail QuickJS module does not match this run's isolated staging output."
+}
+
 $pdbFiles = @(Get-ChildItem -LiteralPath $publishDir -Filter "*.pdb" -File -Recurse)
 foreach ($pdb in $pdbFiles) {
     Assert-PathInsideRoot -Root $publishDir -Candidate $pdb.FullName
@@ -347,6 +373,59 @@ foreach ($pdb in $pdbFiles) {
     $destination = Join-Path $symbolsDir $relativePath
     New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
     Move-Item -LiteralPath $pdb.FullName -Destination $destination -Force
+}
+
+# Strip compile-time WinMD metadata, unused WindowsAppSDK AI/Search/Widgets/Workloads
+# payloads, and unsupported satellite .mui locale directories before generating the install manifest.
+# Note: Microsoft.UI.Xaml.Phone.dll MUST be retained because Microsoft.ui.xaml.dll dynamically
+# LoadLibrary's it at runtime when instantiating ComboBox/Picker/NavigationView templates in SettingsWindow.
+$pruneFilePatterns = @(
+    "*.winmd",
+    "Microsoft.Windows.Search.dll",
+    "Microsoft.Asg.SemanticIndex.AiFabric.Compatibility.dll",
+    "Microsoft.Windows.Widgets.dll",
+    "PerceptiveStreaming.dll",
+    "Microsoft.Windows.AI.*.dll",
+    "Microsoft.Windows.Workloads*.dll",
+    "Microsoft.Windows.Workloads.pri",
+    "WorkloadsSessionHost*",
+    "workloads*.json",
+    "NPUDetect.dll"
+)
+foreach ($pattern in $pruneFilePatterns) {
+    foreach ($candidate in @(Get-ChildItem -LiteralPath $publishDir -Filter $pattern -File -Recurse -ErrorAction SilentlyContinue)) {
+        Assert-PathInsideRoot -Root $publishDir -Candidate $candidate.FullName
+        Remove-Item -LiteralPath $candidate.FullName -Force
+    }
+}
+
+$retainedTopLevelDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($dirName in @(
+        "Assets",
+        "Strings",
+        "Microsoft.UI.Xaml",
+        "ar-SA",
+        "bn-BD",
+        "bn-IN",
+        "de-DE",
+        "en-US",
+        "en-GB",
+        "es-ES",
+        "fr-FR",
+        "hi-IN",
+        "ja-JP",
+        "ko-KR",
+        "pt-BR",
+        "ru-RU",
+        "zh-CN",
+        "zh-TW")) {
+    [void]$retainedTopLevelDirectories.Add($dirName)
+}
+foreach ($topDir in @(Get-ChildItem -LiteralPath $publishDir -Directory -ErrorAction SilentlyContinue)) {
+    if (-not $retainedTopLevelDirectories.Contains($topDir.Name)) {
+        Assert-PathInsideRoot -Root $publishDir -Candidate $topDir.FullName
+        Remove-Item -LiteralPath $topDir.FullName -Recurse -Force
+    }
 }
 
 $installManifestName = "DeskBox.InstallManifest.txt"
@@ -376,13 +455,40 @@ $requiredFiles = @(
     "DeskBox.ThumbnailProxy.exe",
     "DeskBox.pri",
     "deskbox_native.dll",
-    "EverythingSdk.dll",
+    "deskbox_qjs.dll",
     "Microsoft.UI.Input.dll",
+    "Microsoft.UI.Xaml.Phone.dll",
     "Microsoft.ui.xaml.dll",
     "Microsoft.WindowsAppRuntime.dll",
     "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
-    $installManifestName,
-    "ThirdParty/Everything/LICENSE.txt"
+    "Strings\ar-SA.json",
+    "Strings\bn-BD.json",
+    "Strings\de-DE.json",
+    "Strings\en-US.json",
+    "Strings\es-ES.json",
+    "Strings\fr-FR.json",
+    "Strings\hi-IN.json",
+    "Strings\ja-JP.json",
+    "Strings\ko-KR.json",
+    "Strings\pt-BR.json",
+    "Strings\ru-RU.json",
+    "Strings\zh-CN.json",
+    "Strings\zh-TW.json",
+    "Assets\CustomWidgets\Templates\agent-hud\manifest.json",
+    "Assets\CustomWidgets\Templates\ai-inbox\manifest.json",
+    "Assets\CustomWidgets\Templates\ai-pulse\manifest.json",
+    "Assets\CustomWidgets\Templates\countdown\manifest.json",
+    "Assets\CustomWidgets\Templates\dev-toolbox\manifest.json",
+    "Assets\CustomWidgets\Templates\focus-dial\manifest.json",
+    "Assets\CustomWidgets\Templates\hydration\manifest.json",
+    "Assets\CustomWidgets\Templates\news-rss\manifest.json",
+    "Assets\CustomWidgets\Templates\pomodoro\manifest.json",
+    "Assets\CustomWidgets\Templates\snippet-grid\manifest.json",
+    "Assets\CustomWidgets\Templates\sys-pulse\manifest.json",
+    "Assets\CustomWidgets\Templates\todo-agenda\manifest.json",
+    "Assets\CustomWidgets\Templates\weather-desk\manifest.json",
+    "Assets\CustomWidgets\Templates\world-clock\manifest.json",
+    $installManifestName
 )
 foreach ($requiredFile in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDir $requiredFile) -PathType Leaf)) {
@@ -395,7 +501,8 @@ foreach ($requiredSymbolFile in @(
         "DeskBox.pdb",
         "DeskBox.Updater.pdb",
         "DeskBox.ThumbnailProxy.pdb",
-        "deskbox_native.pdb")) {
+        "deskbox_native.pdb",
+        "deskbox_qjs.pdb")) {
     if (-not ($symbolFiles | Where-Object Name -eq $requiredSymbolFile)) {
         throw "AOT retail symbols are missing '$requiredSymbolFile'."
     }
@@ -411,11 +518,38 @@ $forbiddenNames = @(
     "DeskBox.dll",
     "DeskBox.deps.json",
     "DeskBox.runtimeconfig.json",
+    # The settings host is DeskBox.exe --settings; a separate settings image
+    # would statically duplicate the whole Native AOT app.
+    "DeskBox.Settings.exe",
+    "DeskBox.Settings.pri",
+    "DeskBox.Settings.dll",
+    "DeskBox.Settings.deps.json",
+    "DeskBox.Settings.runtimeconfig.json",
     "DeskBox.Updater.dll",
     "DeskBox.Updater.deps.json",
     "DeskBox.Updater.runtimeconfig.json"
 )
-$forbiddenFiles = @($publishedFiles | Where-Object { $_.Name -in $forbiddenNames -or $_.Extension -eq ".pdb" })
+$forbiddenNamePatterns = @(
+    '^EverythingSdk\.dll$',
+    '^H\.NotifyIcon(?:\.WinUI)?\.dll$',
+    '^deskbox_search_core(?:\.|$)',
+    # WinAppSDK AI / App Content Search / Widgets components and compile-time WinMD metadata
+    # are excluded from the retail Native AOT payload.
+    '\.winmd$',
+    '^Microsoft\.Windows\.(?:AI\.|Search\.|Widgets\.|Workloads\.)',
+    '^Microsoft\.Asg\.',
+    '^PerceptiveStreaming\.dll$',
+    '^NPUDetect\.dll$',
+    '^workloads(?:\.[a-z0-9]+)?\.json$'
+)
+$forbiddenNameRegex = $forbiddenNamePatterns -join '|'
+$forbiddenFiles = @(
+    $publishedFiles | Where-Object {
+        $_.Name -in $forbiddenNames -or
+        $_.Extension -eq ".pdb" -or
+        $_.Name -match $forbiddenNameRegex
+    }
+)
 if ($forbiddenFiles.Count -gt 0) {
     throw "AOT retail output contains forbidden managed/JIT/symbol files: $($forbiddenFiles.Name -join ', ')."
 }
@@ -426,7 +560,7 @@ $peResults = @(
             "DeskBox.Updater.exe",
             "DeskBox.ThumbnailProxy.exe",
             "deskbox_native.dll",
-            "EverythingSdk.dll",
+            "deskbox_qjs.dll",
             "Microsoft.WindowsAppRuntime.Insights.Resource.dll")) {
         $path = Join-Path $publishDir $fileName
         $machine = Get-PeMachine -Path $path
@@ -539,6 +673,13 @@ $summary = [ordered]@{
         capabilities = $nativeValidation.Capabilities
         publishMatchesStaging = $true
         sha256 = $nativePublishSha256
+    }
+    qjsNative = [ordered]@{
+        abiVersion = $qjsValidation.AbiVersion
+        crtLinkage = $qjsValidation.CrtLinkage
+        requiredExports = @($qjsValidation.RequiredExports)
+        publishMatchesStaging = $true
+        sha256 = $qjsPublishSha256
     }
 }
 [System.IO.File]::WriteAllText(

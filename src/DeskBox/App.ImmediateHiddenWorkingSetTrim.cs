@@ -27,8 +27,7 @@ public partial class App
     private readonly HiddenWorkingSetTrimTracker _immediateHiddenWorkingSetTrimTracker = new();
 
     private bool IsImmediateHiddenWorkingSetTrimEnabled =>
-        SettingsService.Settings.IdleWorkingSetTrimEnabled &&
-        SettingsService.Settings.ImmediateHiddenWorkingSetTrimEnabled;
+        SettingsService.Settings.Performance.IdleWorkingSetTrimEnabled;
 
     internal void ObserveWidgetVisibilityForImmediateWorkingSetTrim(
         WidgetMemoryVisibilitySnapshot visibility,
@@ -88,10 +87,9 @@ public partial class App
             return;
         }
 
-        using var process = Process.GetCurrentProcess();
-        process.Refresh();
-        long workingSetBefore = process.WorkingSet64;
-        long privateBytesBefore = process.PrivateMemorySize64;
+        _ = Win32Helper.TryGetCurrentProcessMemoryBytes(
+            out long workingSetBefore,
+            out long privateBytesBefore);
         if (workingSetBefore < ImmediateHiddenWorkingSetFloorBytes)
         {
             _immediateHiddenWorkingSetTrimTracker.Complete(generation, trimmed: false);
@@ -106,14 +104,16 @@ public partial class App
         _immediateHiddenWorkingSetTrimTracker.Complete(generation, trimmed);
         CompleteWorkingSetTrim(trimmed, $"immediate-hidden:{reason}");
 
-        process.Refresh();
+        _ = Win32Helper.TryGetCurrentProcessMemoryBytes(
+            out long workingSetAfter,
+            out long privateBytesAfter);
         Log(
             $"[Memory] Immediate hidden working-set trim completed workingSetTrimmed={trimmed} " +
             $"durationMs={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F1} " +
             $"workingSetBeforeMB={workingSetBefore / (1024.0 * 1024):F1} " +
-            $"workingSetAfterMB={process.WorkingSet64 / (1024.0 * 1024):F1} " +
+            $"workingSetAfterMB={workingSetAfter / (1024.0 * 1024):F1} " +
             $"privateBeforeMB={privateBytesBefore / (1024.0 * 1024):F1} " +
-            $"privateAfterMB={process.PrivateMemorySize64 / (1024.0 * 1024):F1} " +
+            $"privateAfterMB={privateBytesAfter / (1024.0 * 1024):F1} " +
             $"loadedWidgets={visibility.LoadedWindowCount} logicalVisibleWidgets=0 nativeVisibleWidgets=0 " +
             $"forcedCollection=false fullViewRebuilds=0 trigger={reason}");
     }

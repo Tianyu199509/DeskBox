@@ -38,9 +38,9 @@ public static class QuickCaptureOptionKinds
     public const double MinTextSize = 10;
     public const double MaxTextSize = 16;
 
-    public static string NormalizeDefaultView(string? view) => view is
-        DefaultViewPinned or DefaultViewRecent
-            ? view
+    public static string NormalizeDefaultView(string? view) =>
+        view == DefaultViewPinned
+            ? DefaultViewPinned
             : DefaultViewRecords;
 
     public static string NormalizeFormat(string? format) =>

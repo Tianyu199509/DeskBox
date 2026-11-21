@@ -126,10 +126,10 @@ public partial class App
 
         if (s_startupLaunchQuietExit)
         {
-            // Task-triggered launch: nobody is watching, and the logon task's
-            // RestartOnFailure policy retries in a minute. A modal dialog here
-            // would sit on the unattended desktop holding the mutex — the
-            // exact zombie shape this path exists to prevent.
+            // Background autostart launch: nobody is actively waiting on a modal
+            // dialog, and showing one on an unattended logon desktop would hold
+            // the single-instance mutex hostage. Exit cleanly so a later manual
+            // launch can start fresh.
             DrainLogQueue();
             Environment.Exit(1);
         }
@@ -321,4 +321,181 @@ public partial class App
 
     private static StartupPipeline EnsureStartupPipeline() =>
         s_startupPipeline ??= new StartupPipeline(Log, MarkStartupProgress);
+
+    internal const string ApplicationRestartCommandLine = "--startup --startup-source=restart";
+    private int _applicationRestartRegistered;
+
+    /// <summary>
+    /// Runs once after primary launch: applies the one-time autostart default
+    /// for genuinely new installs, and keeps Windows Application Restart (ARSO)
+    /// synchronized with the live OS autostart registration. Development data
+    /// roots (portable runs, smoke harnesses) never touch machine-level startup
+    /// registration or ARSO.
+    /// </summary>
+    private async Task InitializeAutoStartOnLaunchAsync()
+    {
+        try
+        {
+            if (DeskBoxDataPathService.Current.IsDevelopmentRoot)
+            {
+                return;
+            }
+
+            if (AutoStartDefaultPolicy.ShouldApply(SettingsService.Settings))
+            {
+                StartupOperationResult initialStatus =
+                    await StartupService.GetStatusAsync().ConfigureAwait(false);
+                StartupOperationResult resolved =
+                    await AutoStartDefaultPolicy.ResolveAsync(StartupService.Current).ConfigureAwait(false);
+                bool enabled = AutoStartDefaultPolicy.IsEnabledState(resolved.State);
+
+                void Commit()
+                {
+                    SettingsService.Settings.Core.AutoStart = enabled;
+                    if (AutoStartDefaultPolicy.ShouldMarkApplied(resolved.State))
+                    {
+                        SettingsService.Settings.Core.AutoStartDefaultApplied = true;
+                    }
+
+                    SettingsService.SaveDebounced();
+                }
+
+                DeskBox.Platform.UiDispatch.RunOrDefer(Commit);
+                SyncApplicationRestartRegistration(enabled);
+                StartupService.NotifyStateChanged();
+
+                Log(
+                    $"[AutoStart] One-time default applied: initial={initialStatus.State} " +
+                    $"effective={resolved.State} mode={resolved.EffectiveMode} fallback={resolved.UsedFallback} mirror={enabled}");
+                return;
+            }
+
+            // Do not overwrite Settings.Core.AutoStart on subsequent launches:
+            // preserving the saved preference is how Settings detects an
+            // external deletion (Core.AutoStart=true while OS state=NotRegistered).
+            StartupOperationResult liveStatus =
+                await StartupService.GetStatusAsync().ConfigureAwait(false);
+            SyncApplicationRestartRegistration(AutoStartDefaultPolicy.IsEnabledState(liveStatus.State));
+        }
+        catch (Exception ex)
+        {
+            Log($"[AutoStart] Launch initialization failed: {ex.Message}");
+        }
+    }
+
+    internal async Task<StartupOperationResult> GetAutoStartStatusAsync()
+    {
+        StartupOperationResult status = await StartupService.GetStatusAsync().ConfigureAwait(false);
+        bool enabled = AutoStartDefaultPolicy.IsEnabledState(status.State);
+        SyncApplicationRestartRegistration(enabled);
+        // If the user re-enabled DeskBox externally (e.g. in Windows Startup Apps),
+        // mirror Core.AutoStart=true. When NotRegistered, intentionally leave a
+        // previously true Core.AutoStart intact so Settings can surface the
+        // ExternallyRemoved warning.
+        if (enabled)
+        {
+            DeskBox.Platform.UiDispatch.RunOrDefer(() =>
+            {
+                if (!SettingsService.Settings.Core.AutoStart)
+                {
+                    SettingsService.Settings.Core.AutoStart = true;
+                    SettingsService.SaveDebounced();
+                }
+            });
+        }
+
+        return status;
+    }
+
+    internal async Task<StartupOperationResult> SetAutoStartEnabledAsync(bool enabled)
+    {
+        StartupOperationResult result = await StartupService.SetEnabledAsync(enabled).ConfigureAwait(false);
+        bool effectiveEnabled = AutoStartDefaultPolicy.IsEnabledState(result.State);
+        if (result.State != StartupRegistrationState.Pending)
+        {
+            SyncApplicationRestartRegistration(effectiveEnabled);
+            DeskBox.Platform.UiDispatch.RunOrDefer(() =>
+            {
+                if (SettingsService.Settings.Core.AutoStart != effectiveEnabled)
+                {
+                    SettingsService.Settings.Core.AutoStart = effectiveEnabled;
+                    SettingsService.SaveDebounced();
+                }
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Registers or unregisters Windows Application Restart (ARSO) as a dual-channel
+    /// reboot accelerator alongside the primary Task Scheduler / Store StartupTask
+    /// registration. Uses RESTART_NO_CRASH | RESTART_NO_HANG so ARSO only restarts
+    /// DeskBox across OS reboots/updates and never interferes with crash handling.
+    /// </summary>
+    internal void SyncApplicationRestartRegistration(bool enabled)
+    {
+        if (DeskBoxDataPathService.Current.IsDevelopmentRoot || IsShuttingDown)
+        {
+            return;
+        }
+
+        try
+        {
+            if (enabled)
+            {
+                int hr = Kernel32NativeMethods.RegisterApplicationRestart(
+                    ApplicationRestartCommandLine,
+                    Kernel32NativeMethods.RestartNoCrash | Kernel32NativeMethods.RestartNoHang);
+                if (hr >= 0)
+                {
+                    if (Interlocked.Exchange(ref _applicationRestartRegistered, 1) == 0)
+                    {
+                        Log("[AutoStart] Registered Windows Application Restart (ARSO) accelerator.");
+                    }
+                }
+                else
+                {
+                    Log($"[AutoStart] RegisterApplicationRestart failed hr=0x{hr:X8}");
+                }
+            }
+            else if (Interlocked.Exchange(ref _applicationRestartRegistered, 0) != 0)
+            {
+                int hr = Kernel32NativeMethods.UnregisterApplicationRestart();
+                if (hr >= 0)
+                {
+                    Log("[AutoStart] Unregistered Windows Application Restart (ARSO).");
+                }
+                else
+                {
+                    Log($"[AutoStart] UnregisterApplicationRestart failed hr=0x{hr:X8}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[AutoStart] Application restart sync failed: {ex.Message}");
+        }
+    }
+
+    private void UnregisterApplicationRestartForCleanExit()
+    {
+        if (Interlocked.Exchange(ref _applicationRestartRegistered, 0) == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            int hr = Kernel32NativeMethods.UnregisterApplicationRestart();
+            if (hr < 0)
+            {
+                Log($"[Shutdown] UnregisterApplicationRestart failed hr=0x{hr:X8}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Shutdown] UnregisterApplicationRestart threw: {ex.Message}");
+        }
+    }
 }

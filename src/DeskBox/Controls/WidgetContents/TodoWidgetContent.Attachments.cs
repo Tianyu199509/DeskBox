@@ -50,17 +50,9 @@ public sealed partial class TodoWidgetContent
 
         try
         {
-            if (File.Exists(attachment.FilePath))
+            if (File.Exists(attachment.FilePath) || Directory.Exists(attachment.FilePath))
             {
-                StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
-                await Launcher.LaunchFileAsync(file);
-                return;
-            }
-
-            if (Directory.Exists(attachment.FilePath))
-            {
-                StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(attachment.FilePath);
-                await Launcher.LaunchFolderAsync(folder);
+                _ = await ShellLaunchService.OpenPathAsync(attachment.FilePath);
                 return;
             }
 

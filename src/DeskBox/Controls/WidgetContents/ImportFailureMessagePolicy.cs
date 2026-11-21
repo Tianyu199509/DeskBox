@@ -1,4 +1,5 @@
 using DeskBox.Services;
+using DeskBox.Services.DragDrop;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -19,6 +20,11 @@ internal static class ImportFailureMessagePolicy
         int requestedCount,
         string? singleItemPath)
     {
+        if (exception is StoreVirtualizedDestinationException)
+        {
+            return ("Widget.DropBlocked.StoreVirtualizedAppData", []);
+        }
+
         if (exception is OrganizerService.MappedFolderUnavailableException)
         {
             return ("Widget.Import.MappedFolderUnavailable", []);

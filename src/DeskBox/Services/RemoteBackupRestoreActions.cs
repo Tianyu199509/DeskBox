@@ -19,10 +19,10 @@ public sealed class RemoteBackupRestoreActions : IBackupRestoreActions
 
     public bool IsCurrentEndpoint(BackupEndpoint endpoint)
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.CloudIsCurrentEndpoint,
-                SettingsIpcPayload.Encode(endpoint, SettingsIpcJsonContext.Default.BackupEndpoint))
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.CloudIsCurrentEndpoint,
+            SettingsIpcPayload.Encode(endpoint, SettingsIpcJsonContext.Default.BackupEndpoint));
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
@@ -104,8 +104,7 @@ public sealed class RemoteBackupRestoreActions : IBackupRestoreActions
 
     public AppRelaunchScheduleResult ScheduleRelaunch()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.CloudScheduleRelaunch)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.CloudScheduleRelaunch);
         return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppRelaunchScheduleResult)
             is { } schedule
                 ? schedule

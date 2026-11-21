@@ -186,6 +186,7 @@ function Get-DeskBoxNativePeContract {
                 -FileLength $bytes.Length
             $terminated = $false
             $imports = @(
+                @(
                 for ($descriptorIndex = 0; $descriptorIndex -lt 4096; $descriptorIndex++) {
                     $descriptorOffset = $importOffset + ($descriptorIndex * 20)
                     [uint32]$originalFirstThunk =
@@ -217,7 +218,8 @@ function Get-DeskBoxNativePeContract {
                         -FileLength $bytes.Length
                     Get-DeskBoxPeAsciiString -Bytes $bytes -Offset $nameOffset
                 }
-            ) | Sort-Object -Unique
+                ) | Sort-Object -Unique
+            )
             if (-not $terminated) {
                 throw "'$fullPath' import descriptor table is not terminated."
             }
@@ -241,6 +243,7 @@ function Get-DeskBoxNativePeContract {
         -SizeOfHeaders $sizeOfHeaders `
         -FileLength $bytes.Length
     $exports = @(
+        @(
         for ([uint32]$index = 0; $index -lt $nameCount; $index++) {
             [uint32]$nameRva =
                 Get-DeskBoxPeUInt32 -Bytes $bytes -Offset ($namesOffset + ([int]$index * 4))
@@ -251,7 +254,8 @@ function Get-DeskBoxNativePeContract {
                 -FileLength $bytes.Length
             Get-DeskBoxPeAsciiString -Bytes $bytes -Offset $nameOffset
         }
-    ) | Sort-Object -Unique
+        ) | Sort-Object -Unique
+    )
 
     $missingExports = @($RequiredExports | Where-Object { -not ($exports -ccontains $_) })
     if ($missingExports.Count -gt 0) {

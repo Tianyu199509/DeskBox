@@ -276,14 +276,13 @@ public sealed partial class ElevationNoticeWindow : Window
 
     private void OpenSecpolButton_Click(object sender, RoutedEventArgs e)
     {
-        // Task.Run matches the settings-page launcher: ShellExecute off the
-        // UI thread.
-        _ = Task.Run(() => Win32Helper.OpenFile("secpol.msc"));
+        Services.ShellLaunchService.FireAndForgetOpenPath("secpol.msc", _hWnd);
     }
 
     private void OpenUacSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        _ = Task.Run(() => Win32Helper.OpenFile("UserAccountControlSettings.exe"));
+        IntPtr ownerHwnd = _hWnd;
+        _ = Task.Run(() => DragDropPermissionService.OpenUserAccountControlSettings(ownerHwnd));
     }
 
     private void CopyRegCommandButton_Click(object sender, RoutedEventArgs e)

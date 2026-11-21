@@ -1,4 +1,6 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
+using DeskBox.Controls.Search;
+using DeskBox.Features.Search;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -36,7 +38,7 @@ namespace DeskBox.Views;
 /// Layout: search box, dynamic tab bar, result list, and a persistent footer.
 /// The surface material and border follow the widget appearance settings.
 /// </summary>
-public sealed partial class SearchPopupWindow : Window
+public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGridHost, ISearchRecommendationOverlayHost
 {
     private readonly SearchPopupViewModel _viewModel;
     private readonly SettingsService _settingsService;
@@ -44,21 +46,42 @@ public sealed partial class SearchPopupWindow : Window
     private readonly SpacePreviewBroker _spacePreviewService = new();
     private readonly ThemeService? _themeService;
     private DispatcherTimer? _searchDebounceTimer;
-    private CancellationTokenSource? _skeletonDelayCancellation;
+    private IDisposable? _morphAnimationRegistration;
+    private long _heightSpringLastTimestamp;
+    private double _heightSpringCurrentLogical;
+    private double _heightSpringVelocity;
+    private bool _heightSpringExpanding;
+    private double _heightMorphTargetLogical;
+    private double _widthSpringCurrentLogical;
+    private double _widthSpringVelocity;
+    private bool _widthSpringExpanding;
+    private double _widthMorphTargetLogical;
+    private RectInt32 _heightMorphPendingBounds;
+    private RectInt32 _morphWorkAreaPhysical;
+    private double _morphDpiScale = 1.0;
+    private int? _morphCustomX;
+    private int? _morphCustomY;
+    private int _lastMorphWindowX = int.MinValue;
     private bool _suppressPanelEntranceAnimation;
+    private bool _hasPlayedOpenRecommendationsEntrance;
+
+    private bool IsMorphSpringRunning => _morphAnimationRegistration is not null;
 
     // When non-null, the recommended-apps entrance animation is "pending": each
     // card is animated the moment ItemsRepeater realizes it (via ElementPrepared),
     // because TryGetElement returns null until a layout pass has realized the
     // virtualized elements. The flag carries the configured style index.
-    private int? _pendingEntranceStyle;
-    private DispatcherTimer? _entranceGuardTimer;
+    private DispatcherQueueTimer? _coldHiddenCleanupTimer;
+    private DispatcherQueueTimer? _unfocusedAutoHideTimer;
+    private bool _isPopupInputActive;
     private AppWindow? _appWindow;
     private IntPtr _hwnd;
 
     // Native backdrop controllers (same approach as desktop widgets).
     private MicaController? _micaController;
     private DesktopAcrylicController? _acrylicController;
+    private SolidTintSystemBackdrop? _transparentWindowBackdrop;
+    private ElementBackdropTargetBridge? _materialBackdropBridge;
     private SystemBackdropConfiguration? _backdropConfiguration;
     private ICompositionSupportsSystemBackdrop? _backdropTarget;
     private bool _micaControllerAttached;
@@ -75,9 +98,12 @@ public sealed partial class SearchPopupWindow : Window
     // WM_CLOSE" (WinUI/DWM teardown).
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
+    private const uint WmDpiChanged = 0x02E0;
     private static readonly UIntPtr PopupCloseWatcherSubclassId = new(0x5E4C);
+    private static App? CurrentApp => App.Current as App;
     private readonly Win32Helper.SubclassProc _popupCloseWatcherProc;
     private bool _isPopupCloseWatcherInstalled;
+    private bool _isWindowClosed;
 
     // The popup uses the same pointer-capture interaction model as widget windows,
     // avoiding the visible native WS_THICKFRAME border.
@@ -90,53 +116,10 @@ public sealed partial class SearchPopupWindow : Window
 
     // Keyboard-selected result row. Hover feedback is owned by the row control itself.
     private SearchResultRowControl? _selectedRow;
+    private bool _isNavigatingResults;
     private double? _measuredResultRowHeight;
     private int _selectedRowHighlightGeneration;
     private int _tabFocusRestoreGeneration;
-
-    // Recommended-apps selection: tracks the currently highlighted app card.
-    private int _selectedAppIndex = -1;
-    private Grid? _selectedAppCard;
-
-    // True after the user presses Up/Down in the search box to navigate results.
-    // While navigating, plain Space triggers QuickLook preview instead of typing.
-    // Cleared whenever the user types a character (TextChanged).
-    private bool _isNavigatingResults;
-
-    // Drag state for result rows: distinguishes a click (execute) from a drag
-    // (export the file/folder path to another app or widget).
-    // Drag is initiated only from the icon column, not the entire row.
-    private SearchResultItem? _dragCandidate;
-    private SearchResultRowControl? _dragSourceRow;
-    private SearchResultItem? _pressedItem;
-    private Windows.Foundation.Point _dragStartPoint;
-    private bool _dragOccurred;
-    private bool _restoreResultFocusAfterFlyout;
-
-    private static bool? s_isProcessElevatedForDrag;
-
-    // Cached per process — elevation cannot change mid-run, and the probe
-    // sits on the pointer-pressed hot path. Elevated runs never arm a drag
-    // candidate: WinUI's StartDragAsync throws inside the platform drag
-    // pipeline for an elevated process (see FileSurfaceContent's elevated
-    // CanDrag removal), and this window's await has no catch.
-    private static bool IsCurrentProcessElevatedForDrag()
-    {
-        s_isProcessElevatedForDrag ??= DragDropPermissionService.IsCurrentProcessElevated();
-        return s_isProcessElevatedForDrag.Value;
-    }
-
-    // Multi-selection state: tracks all items selected via rubber-band or Ctrl+click.
-    // When non-empty, batch operations (copy/cut/delete) act on these items.
-    private readonly HashSet<SearchResultItem> _multiSelectedItems = new();
-    private readonly HashSet<SearchResultItem> _rubberBandBaseSelection = new();
-    private bool _isRubberBanding;
-    private Point _rubberBandStart;
-    private Point _rubberBandCurrent;
-    private Point _rubberBandPointerInViewport;
-    private DispatcherTimer? _rubberBandAutoScrollTimer;
-    private bool _suppressMultiSelectSync;
-    private int _selectionAnchorIndex = -1;
 
     // One stable search surface. Layout differences should follow available width,
     // not a user-facing mode that only changes the window dimensions.
@@ -160,6 +143,9 @@ public sealed partial class SearchPopupWindow : Window
         var windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
 
+        RecommendedAppsGrid.Initialize(_viewModel, _settingsService, _localizationService, this);
+        RecommendationOverlays.Initialize(_viewModel, _localizationService, this);
+
         ConfigureWindow();
         ApplyTheme();
         SetupBindings();
@@ -167,9 +153,12 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.ActionRequested += OnViewModelActionRequested;
         _viewModel.ContentRequested += OnViewModelContentRequested;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.CurrentResults.CollectionChanged += OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
-        RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
+        ResultsRepeater.ElementClearing += OnResultsElementClearing;
         _viewModel.RecommendationIconsResolved += OnRecommendationIconsResolved;
+        ApplyWin10SafeSearchGlyphs();
+        _viewModel.RecommendationLayoutUpdated += OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -205,13 +194,61 @@ public sealed partial class SearchPopupWindow : Window
         else if (message == WmDestroy)
         {
             App.Log($"[Search] Popup WM_DESTROY hwnd=0x{hWnd.ToInt64():X}");
+            IntPtr destroyResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            RemovePopupCloseWatcherSubclass();
+            return destroyResult;
+        }
+        else if (message == WmDpiChanged)
+        {
+            IntPtr dpiResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            if (IsPopupVisible && !_isWindowDragging && !_isWindowResizing)
+            {
+                _ = DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (IsPopupVisible && !_isWindowClosed && !_isWindowDragging && !_isWindowResizing)
+                    {
+                        UpdatePopupDynamicBounds(forceWhenOpening: true);
+                    }
+                });
+            }
+
+            return dpiResult;
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
+    private void RemovePopupCloseWatcherSubclass()
+    {
+        if (!_isPopupCloseWatcherInstalled || _hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _isPopupCloseWatcherInstalled = false;
+        try
+        {
+            Win32Helper.RemoveWindowSubclass(
+                _hwnd,
+                _popupCloseWatcherProc,
+                PopupCloseWatcherSubclassId);
+        }
+        catch
+        {
+        }
+    }
+
     public IntPtr WindowHandle => _hwnd;
     public bool IsPopupVisible { get; private set; }
+
+    /// <summary>
+    /// True only while the popup is actively focused, hovered, or mid-gesture.
+    /// When the user clicks another window and leaves the popup covered underneath,
+    /// it stops blocking background/idle memory compression immediately.
+    /// </summary>
+    internal bool IsBlockingMemoryCleanup =>
+        IsPopupVisible &&
+        (_isPopupInputActive || HasActivePopupInteraction() || IsPointerOverPopupWindow());
 
     /// <summary>
     /// Raised when an action needs to be handled by the app (e.g., open settings).
@@ -224,12 +261,15 @@ public sealed partial class SearchPopupWindow : Window
 
     public event EventHandler? PopupHidden;
 
+    public event EventHandler? PopupDeactivated;
+
     /// <summary>
     /// Shows the popup at the correct position and focuses the search box.
     /// </summary>
     public async void ShowPopup()
     {
-        await ShowPopupCoreAsync(null);
+        try { await ShowPopupCoreAsync(null); }
+        catch (Exception ex) { App.Log($"[SearchPopup] ShowPopup failed: {ex}"); }
     }
 
     /// <summary>
@@ -237,18 +277,36 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public async void ShowPopupWithQuery(string query)
     {
-        await ShowPopupCoreAsync(query);
+        try { await ShowPopupCoreAsync(query); }
+        catch (Exception ex) { App.Log($"[SearchPopup] ShowPopupWithQuery failed: {ex}"); }
     }
 
     private async Task ShowPopupCoreAsync(string? initialQuery)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
         if (IsPopupVisible)
         {
             ActivateSearchInput();
             if (!string.IsNullOrWhiteSpace(initialQuery))
             {
-                SearchTextBox.Text = initialQuery;
-                _viewModel.Query = initialQuery;
+                _latchedInlineScope = SearchInlineScope.None;
+                _suppressScopeLatchTextChange = true;
+                try
+                {
+                    SearchTextBox.Text = initialQuery;
+                }
+                finally
+                {
+                    _suppressScopeLatchTextChange = false;
+                }
+                TryLatchInlineScopeFromInput(SearchTextBox.Text);
+                _viewModel.Query = GetEffectivePopupQuery();
                 UpdatePanelVisibility();
             }
 
@@ -261,22 +319,39 @@ public sealed partial class SearchPopupWindow : Window
         // Alt+D re-toggle interrupts the dismissal instead of racing with it.
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
+        _hasPlayedOpenRecommendationsEntrance = false;
 
         // Appearance settings may have changed while the popup was hidden.
         ApplyMaterialFromSettings();
 
-        // Restore the user's custom position/size if one was persisted (drag/resize
-        // is remembered across shows); otherwise fall back to the mode-based default
-        // dimensions and centered placement.
-        if (!TryApplyCustomBounds())
+        // Sync initial query and dynamic capsule/anchored downward bounds before showing
+        // so the first rendered frame already matches the exact capsule or recommendation height.
+        _latchedInlineScope = SearchInlineScope.None;
+        _suppressScopeLatchTextChange = true;
+        try
         {
-            _appWindow?.Resize(new SizeInt32(PopupWidth, PopupHeight));
-            PositionOnScreen();
+            SearchTextBox.Text = initialQuery ?? string.Empty;
         }
+        finally
+        {
+            _suppressScopeLatchTextChange = false;
+        }
+        TryLatchInlineScopeFromInput(SearchTextBox.Text);
+        UpdateScopePrefixBadge(SearchTextBox.Text);
+        string effectiveInitialQuery = GetEffectivePopupQuery();
+        if (!string.IsNullOrWhiteSpace(effectiveInitialQuery))
+        {
+            _viewModel.Query = effectiveInitialQuery;
+        }
+        UpdatePanelVisibility(forceBoundsWhenOpening: true);
+
         RootGrid.Opacity = AreSystemAnimationsEnabled() ? 0 : 1;
-        PopupTranslateTransform.Y = AreSystemAnimationsEnabled() ? 4 : 0;
+        PopupTranslateTransform.Y = 0;
+        PopupScaleTransform.ScaleX = AreSystemAnimationsEnabled() ? 0.985 : 1;
+        PopupScaleTransform.ScaleY = AreSystemAnimationsEnabled() ? 0.985 : 1;
         _appWindow?.Show();
         IsPopupVisible = true;
+        _isPopupInputActive = true;
         PopupShown?.Invoke(this, EventArgs.Empty);
 
         // Bring the popup above all windows (including desktop-level widgets) at the
@@ -291,8 +366,7 @@ public sealed partial class SearchPopupWindow : Window
 
         // This is an interactive search window, so it must be activatable again after
         // the user works in another app.
-        Activate();
-        Win32Helper.SetForegroundWindow(_hwnd);
+        DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
 
         // Fluent entrance: quick scale + fade + rise, matching the Windows 11
         // menu/popup transition language.
@@ -303,7 +377,7 @@ public sealed partial class SearchPopupWindow : Window
 
         // Focus immediately; recommendations can continue loading without making the
         // freshly shown window feel inert.
-        SearchTextBox.Text = initialQuery ?? string.Empty;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(SearchTextBox);
         SearchTextBox.Focus(FocusState.Programmatic);
 
         // Yield before recommendations, icons, or an idle-unloaded index do any work.
@@ -323,6 +397,9 @@ public sealed partial class SearchPopupWindow : Window
         {
             // When opened with a pre-filled query, skip the empty-state recommendations
             // and directly trigger the search.
+            _viewModel.UpdateEverythingPromptState();
+            _ = _viewModel.EnsureEverythingConnectionProbedAsync();
+            UpdateEverythingPromptBanner();
             _viewModel.Query = initialQuery;
             UpdatePanelVisibility();
         }
@@ -335,11 +412,8 @@ public sealed partial class SearchPopupWindow : Window
                 && !hadRecommendationCache;
             if (showSkeleton)
             {
-                _skeletonDelayCancellation?.Cancel();
-                _skeletonDelayCancellation?.Dispose();
-                _skeletonDelayCancellation = new CancellationTokenSource();
-                _ = ShowAppsSkeletonAfterDelayAsync(
-                    _skeletonDelayCancellation.Token);
+                StopHeightMorphTimer();
+                RecommendedAppsGrid.StartSkeletonDelay();
             }
 
             // Recommendation identities may be published before their shell icons
@@ -357,16 +431,13 @@ public sealed partial class SearchPopupWindow : Window
 
             if (!IsPopupVisible)
             {
-                HideAppsSkeleton();
+                RecommendedAppsGrid.CancelSkeletonDelayAndHide();
                 return;
             }
 
             if (showSkeleton)
             {
-                _skeletonDelayCancellation?.Cancel();
-                _skeletonDelayCancellation?.Dispose();
-                _skeletonDelayCancellation = null;
-                HideAppsSkeleton();
+                RecommendedAppsGrid.CancelSkeletonDelayAndHide();
             }
 
             UpdatePanelVisibility();
@@ -374,9 +445,10 @@ public sealed partial class SearchPopupWindow : Window
             // Replaying the configured card entrance on every popup invocation is
             // intentional. A cached reopen should be immediate, but not visually
             // static; the window and its application cards are one entrance gesture.
-            if (RecommendedAppsPanel.Visibility == Visibility.Visible)
+            if (RecommendedAppsGrid.IsAppsPanelVisible)
             {
-                AnimateAppIconsEntrance();
+                _hasPlayedOpenRecommendationsEntrance = true;
+                RecommendedAppsGrid.AnimateEntrance();
             }
         }
     }
@@ -387,14 +459,20 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public void ActivateSearchInput()
     {
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
+        _isPopupInputActive = true;
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
+        PopupShowStoryboard.Stop();
+        RootGrid.Opacity = 1.0;
+        PopupScaleTransform.ScaleX = 1.0;
+        PopupScaleTransform.ScaleY = 1.0;
         _appWindow?.Show();
         App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
             _hwnd,
             "search-popup-reactivated");
-        Activate();
-        Win32Helper.SetForegroundWindow(_hwnd);
+        DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
         SearchTextBox.Focus(FocusState.Programmatic);
     }
 
@@ -409,29 +487,58 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         App.Log("[Search] Popup hidden");
+        CancelUnfocusedAutoHideTimer();
+        DisarmDragOutCandidate();
+        StopExternalDragFadeTimer(restoreOpacity: false);
+        StopHeightMorphTimer();
+        CompleteDetailsPaneClose();
+        _isPopupInputActive = false;
         IsPopupVisible = false;
+        _hasPlayedOpenRecommendationsEntrance = false;
+        RecommendedAppsGrid.CancelDrag();
+        RecommendedAppsGrid.DisableEditMode();
+        RecommendationOverlays.CloseOverlays(immediate: true);
+        if (_isCmdBarFlyoutOpen)
+        {
+            CmdBarActionsFlyout.Hide();
+        }
+        _activeRightDropMenu?.Hide();
+        _activeRightDropMenu = null;
+        _detailsUpdateCoalesceTimer?.Stop();
+        ResetSearchSessionVisualFlags();
+        _displayedDetailsItem = null;
+        ResetLatchedScopeState();
+        ClearSelectedResultRow();
+        RecommendedAppsGrid.ClearSelection();
+        RecommendedAppsGrid.ClearHoveredCard();
+        RecommendationOverlays.ClearHoveredCard();
+        RecommendedAppsGrid.ResetDoubleClickTracking();
+        ClearAllResultRowTransientStates();
+        ClearMultiSelection();
         _viewModel.OnPopupHidden();
         _searchDebounceTimer?.Stop();
-        _skeletonDelayCancellation?.Cancel();
-        _skeletonDelayCancellation?.Dispose();
-        _skeletonDelayCancellation = null;
-        HideAppsSkeleton();
+        RecommendedAppsGrid.CancelSkeletonDelayAndHide();
+        SearchProgressBar.IsIndeterminate = false;
+        LoadingRing.IsActive = false;
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
+        RecommendedAppsGrid.StopEntranceGuard();
         PopupHidden?.Invoke(this, EventArgs.Empty);
 
         // Fluent exit: fast shrink + fade, then remove the window from view once the
-        // animation completes. The window stays interactive-looking for ~150ms, which
-        // is imperceptible but gives the dismissal a physical feel.
+        // animation completes. Skip the From="1" storyboard when the popup was already
+        // faded (e.g., auto-hiding at 0.20 opacity after an external drag-out drop) so
+        // dismissal never flashes back to 100% opacity.
+        double currentOpacity = RootGrid.Opacity;
         PopupShowStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
-        if (AreSystemAnimationsEnabled())
+        if (AreSystemAnimationsEnabled() && currentOpacity >= 0.5)
         {
             PopupHideStoryboard.Completed += OnPopupHideCompleted;
             PopupHideStoryboard.Begin();
         }
         else
         {
+            RootGrid.Opacity = 0;
             OnPopupHideCompleted(null, EventArgs.Empty);
         }
     }
@@ -444,6 +551,9 @@ public sealed partial class SearchPopupWindow : Window
         // already stopped and this completion is stale; never hide a visible popup.
         if (!IsPopupVisible)
         {
+            SearchProgressBar.IsIndeterminate = false;
+            LoadingRing.IsActive = false;
+            App.Current.WidgetManager?.RestoreForegroundToRaisedWidgetBeforeAuxiliaryHide(_hwnd);
             _appWindow?.Hide();
             // Leave the quick-reveal raised band at the actual hide moment, not at
             // the hide request: releasing earlier would sink the fading window
@@ -451,10 +561,222 @@ public sealed partial class SearchPopupWindow : Window
             App.Current.WidgetManager?.ReleaseRaisedBandGuest(
                 _hwnd,
                 "search-popup-hidden");
-            // Keep the initialized XAML shell and its material controllers warm.
-            // Recreating these resources on the next hotkey press shifts memory
-            // savings into a visible input delay and a transient material flash.
+            // Dispose DWM backdrop controllers immediately while hidden, then close
+            // the cold-hidden popup window after the retention delay to reclaim its
+            // DXGI SwapChain.
+            DisposeMicaController();
+            DisposeAcrylicController();
+            ClearTransparentWindowBackdrop();
+            ArmColdHiddenCleanupTimer();
         }
+    }
+
+    private void ArmColdHiddenCleanupTimer()
+    {
+        int delaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        if (delaySeconds <= 0)
+        {
+            CancelColdHiddenCleanupTimer();
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(delaySeconds);
+        if (_coldHiddenCleanupTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += ColdHiddenCleanupTimer_Tick;
+            _coldHiddenCleanupTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _coldHiddenCleanupTimer.Stop();
+            _coldHiddenCleanupTimer.Interval = interval;
+        }
+
+        _coldHiddenCleanupTimer.Start();
+    }
+
+    private void CancelColdHiddenCleanupTimer()
+    {
+        _coldHiddenCleanupTimer?.Stop();
+    }
+
+    private void DisposeColdHiddenCleanupTimer()
+    {
+        if (_coldHiddenCleanupTimer is not { } timer)
+        {
+            return;
+        }
+
+        _coldHiddenCleanupTimer = null;
+        timer.Tick -= ColdHiddenCleanupTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private bool HasActivePopupInteraction() =>
+        _isWindowDragging ||
+        _isWindowResizing ||
+        RecommendedAppsGrid.HasActiveInteraction ||
+        RecommendationOverlays.HasActiveInteraction ||
+        _isRubberBanding ||
+                        _isExternalFileDragActive ||
+        _isCmdBarFlyoutOpen ||
+        _dragOutCandidate is not null ||
+        _dragOutInProgress ||
+        (RootGrid.XamlRoot is { } xamlRoot &&
+         VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0);
+
+    private bool IsPointerOverPopupWindow()
+    {
+        if (_hwnd == IntPtr.Zero ||
+            !Win32Helper.GetCursorPos(out var cursor) ||
+            !Win32Helper.GetWindowRect(_hwnd, out var rect))
+        {
+            return false;
+        }
+
+        if (cursor.X < rect.Left || cursor.X >= rect.Right ||
+            cursor.Y < rect.Top || cursor.Y >= rect.Bottom)
+        {
+            return false;
+        }
+
+        IntPtr hit = Win32Helper.WindowFromPoint(cursor);
+        if (hit == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(hit, Win32Helper.GA_ROOT);
+        return (root != IntPtr.Zero ? root : hit) == _hwnd;
+    }
+
+    private void ArmUnfocusedAutoHideTimer()
+    {
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            CancelUnfocusedAutoHideTimer();
+            return;
+        }
+
+        int releaseDelaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        int autoHideSeconds = releaseDelaySeconds <= 0
+            ? 60
+            : Math.Clamp(releaseDelaySeconds, 60, 180);
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(autoHideSeconds);
+        if (_unfocusedAutoHideTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += UnfocusedAutoHideTimer_Tick;
+            _unfocusedAutoHideTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _unfocusedAutoHideTimer.Stop();
+            _unfocusedAutoHideTimer.Interval = interval;
+        }
+
+        _unfocusedAutoHideTimer.Start();
+    }
+
+    private void CancelUnfocusedAutoHideTimer()
+    {
+        _unfocusedAutoHideTimer?.Stop();
+    }
+
+    private void DisposeUnfocusedAutoHideTimer()
+    {
+        if (_unfocusedAutoHideTimer is not { } timer)
+        {
+            return;
+        }
+
+        _unfocusedAutoHideTimer = null;
+        timer.Tick -= UnfocusedAutoHideTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void UnfocusedAutoHideTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        if (_isPopupInputActive ||
+            Win32Helper.GetForegroundWindow() == _hwnd ||
+            HasActivePopupInteraction() ||
+            IsPointerOverPopupWindow())
+        {
+            ArmUnfocusedAutoHideTimer();
+            return;
+        }
+
+        App.Log("[Search] Unfocused popup auto-hiding after idle timeout");
+        HidePopup();
+    }
+
+    private void ColdHiddenCleanupTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        RecommendedAppsGrid.DisableEditMode();
+        ClearSelectedResultRow();
+        RecommendedAppsGrid.ClearSelection();
+        RecommendedAppsGrid.ClearHoveredCard();
+        RecommendationOverlays.ClearHoveredCard();
+        RecommendedAppsGrid.ResetDoubleClickTracking();
+        ClearAllResultRowTransientStates();
+        ClearMultiSelection();
+        ClearRealizedRepeaterVisuals();
+        int releasedIcons = _viewModel.ReleaseColdHiddenCaches();
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
+        App.Log(
+            $"[Search] Cold-hidden popup closing to reclaim swapchain icons={releasedIcons}");
+        App.Current.EnsureXamlLoopLifelineIfNoOtherWindows();
+        Close();
     }
 
     /// <summary>
@@ -470,6 +792,39 @@ public sealed partial class SearchPopupWindow : Window
         {
             ShowPopup();
         }
+    }
+
+    private void ClearSelectedResultRow()
+    {
+        if (_selectedRow is not null)
+        {
+            _selectedRow.IsSelected = false;
+            _selectedRow.IsTabStop = false;
+            _selectedRow = null;
+        }
+    }
+
+    private void ClearRealizedRepeaterVisuals()
+    {
+        int resultChildCount = VisualTreeHelper.GetChildrenCount(ResultsRepeater);
+        for (int i = 0; i < resultChildCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
+            {
+                row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
+                row.OpenLocationRequested -= OnRowOpenLocationRequested;
+                row.MoreActionsRequested -= OnRowMoreActionsRequested;
+                row.IsSelected = false;
+                row.IsMultiSelected = false;
+                row.IsTabStop = false;
+                row.PrepareItem(null);
+                row.RefreshIconVisuals();
+                row.DataContext = null;
+            }
+        }
+
+        RecommendedAppsGrid.ClearRealizedVisuals();
+        RecommendationOverlays.ClearRealizedVisuals();
     }
 
     private void ConfigureWindow()
@@ -501,12 +856,11 @@ public sealed partial class SearchPopupWindow : Window
             Win32Helper.SWP_NOMOVE | Win32Helper.SWP_NOSIZE |
             Win32Helper.SWP_NOACTIVATE | Win32Helper.SWP_FRAMECHANGED);
 
-        // Kill the DWM-drawn border (the thick light edge that otherwise rings the
-        // backdrop) and extend the frame edge-to-edge so the material reaches the corners.
-        Win32Helper.SetWindowBorderColor(_hwnd, unchecked((int)0xFFFFFFFE));
-        Win32Helper.ApplyFullWindowFrame(_hwnd);
+        // Disable DWM border, rounding, and shadow so XAML/SystemBackdropElement owns
+        // exact corner curvature with per-pixel alpha transparency.
+        Win32Helper.DisableWindowFrameShadow(_hwnd);
 
-        // Apply corner preference from settings (Default/Square/Small/Round).
+        // Apply corner preference from settings (Square/Small/Round/Large).
         ApplyWindowCornerPreference();
 
     }
@@ -519,6 +873,8 @@ public sealed partial class SearchPopupWindow : Window
             if (IsPopupVisible)
             {
                 ApplyMaterialFromSettings();
+                UpdatePanelVisibility();
+                RefreshPreparedResultRows();
             }
             UpdateHotkeyHint();
         }
@@ -555,6 +911,13 @@ public sealed partial class SearchPopupWindow : Window
             theme = Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light;
 
         RootGrid.RequestedTheme = theme;
+        SyncEditRecommendationsButtonVisuals();
+        if (RecommendedAppsGrid.IsEditMode)
+        {
+            RecommendedAppsGrid.RefreshEditVisuals();
+        }
+
+        ApplySearchInputWellVisuals();
 
         // A pre-warmed hidden shell intentionally owns no backdrop controller.
         // The current material is applied immediately before the next native show.
@@ -566,15 +929,29 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
+        bool isActive = args.WindowActivationState != WindowActivationState.Deactivated;
+        _isPopupInputActive = isActive;
         if (_backdropConfiguration is not null)
         {
-            _backdropConfiguration.IsInputActive =
-                args.WindowActivationState != WindowActivationState.Deactivated;
+            _backdropConfiguration.IsInputActive = isActive;
         }
 
-        if (args.WindowActivationState != WindowActivationState.Deactivated)
+        if (isActive)
         {
+            CancelUnfocusedAutoHideTimer();
             UpdateSelectionActions();
+        }
+        else if (IsPopupVisible && !_isWindowClosed)
+        {
+            if (!IsPointerOverPopupWindow())
+            {
+                RecommendedAppsGrid.ClearHoveredCard();
+                RecommendationOverlays.ClearHoveredCard();
+                ClearAllResultRowTransientStates();
+            }
+
+            ArmUnfocusedAutoHideTimer();
+            PopupDeactivated?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -587,10 +964,10 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        _settingsService.Settings.SearchPopupCustomX = rect.Left;
-        _settingsService.Settings.SearchPopupCustomY = rect.Top;
-        _settingsService.Settings.SearchPopupCustomWidth = rect.Right - rect.Left;
-        _settingsService.Settings.SearchPopupCustomHeight = rect.Bottom - rect.Top;
+        _settingsService.Settings.Search.SearchPopupCustomX = rect.Left;
+        _settingsService.Settings.Search.SearchPopupCustomY = rect.Top;
+        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
+        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
         // Persist without raising SettingsChanged. Raising it here re-triggers
         // OnAppearanceSettingsChanged -> ApplyMaterialFromSettings, which re-applies the
         // DWM backdrop and causes the window to flash on every drag release.
@@ -599,14 +976,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private void ResetToDefaultBounds()
     {
-        _settingsService.Settings.SearchPopupCustomX = null;
-        _settingsService.Settings.SearchPopupCustomY = null;
-        _settingsService.Settings.SearchPopupCustomWidth = null;
-        _settingsService.Settings.SearchPopupCustomHeight = null;
-        _settingsService.SaveDebounced();
+        _settingsService.Settings.Search.SearchPopupCustomX = null;
+        _settingsService.Settings.Search.SearchPopupCustomY = null;
+        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
+        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
+        _settingsService.SaveDebounced(notifySubscribers: false);
 
-        _appWindow?.Resize(new SizeInt32(PopupWidth, PopupHeight));
-        PositionOnScreen();
+        UpdatePopupDynamicBounds(forceWhenOpening: true);
     }
 
     private static int ToPhysicalPixels(int logicalPixels, double scale)
@@ -617,16 +993,11 @@ public sealed partial class SearchPopupWindow : Window
 
     private void TopDragHotZone_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        TopDragHandle.Opacity = 1;
         SetPointerCursor(TopDragHotZone, InputSystemCursorShape.SizeAll);
     }
 
     private void TopDragHotZone_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isWindowDragging)
-        {
-            TopDragHandle.Opacity = 0;
-        }
     }
 
     private void TopDragHotZone_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -637,13 +1008,13 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        SnapHeightMorphToTarget();
         if (!TryBeginWindowInteraction(element, e))
         {
             return;
         }
 
         _isWindowDragging = true;
-        TopDragHandle.Opacity = 1;
         e.Handled = true;
     }
 
@@ -662,6 +1033,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         string direction = element.Tag as string ?? string.Empty;
+        SnapHeightMorphToTarget();
         if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e))
         {
             return;
@@ -713,9 +1085,11 @@ public sealed partial class SearchPopupWindow : Window
         int deltaY = cursor.Y - _interactionStartCursor.Y;
         if (_isWindowDragging)
         {
-            _appWindow.Move(new PointInt32(
+            WindowShellState.MoveWindowInteractive(
+                _appWindow,
+                _hwnd,
                 _interactionStartBounds.X + deltaX,
-                _interactionStartBounds.Y + deltaY));
+                _interactionStartBounds.Y + deltaY);
         }
         else
         {
@@ -762,7 +1136,7 @@ public sealed partial class SearchPopupWindow : Window
             y = bottom - height;
         }
 
-        _appWindow.MoveAndResize(new RectInt32(x, y, width, height));
+        WindowShellState.ResizeWindowInteractive(_appWindow, _hwnd, x, y, width, height);
     }
 
     private void WindowInteraction_PointerReleased(object sender, PointerRoutedEventArgs e)
@@ -783,16 +1157,20 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        bool wasDragging = _isWindowDragging;
         var captureElement = _windowInteractionElement;
         _windowInteractionElement = null;
         _isWindowDragging = false;
         _isWindowResizing = false;
         _resizeDirection = string.Empty;
         captureElement?.ReleasePointerCapture(pointer);
-        TopDragHandle.Opacity = 0;
         if (persist)
         {
             PersistCustomBounds();
+            if (wasDragging && IsPopupVisible && !_isWindowClosed)
+            {
+                UpdatePopupDynamicBounds(forceWhenOpening: true);
+            }
         }
     }
 
@@ -820,30 +1198,113 @@ public sealed partial class SearchPopupWindow : Window
     }
 
     /// <summary>
-    /// Applies the native DWM corner style from the widget appearance settings.
+    /// Applies the XAML/SystemBackdropElement corner style from the widget appearance
+    /// settings while keeping the outer HWND unrounded and shadowless.
     /// </summary>
     private void ApplyWindowCornerPreference()
     {
         string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-            _settingsService.Settings.WidgetCornerPreference);
-        int cornerPreference = effectivePreference switch
-        {
-            SettingsService.WidgetCornerPreferenceSquare => Win32Helper.DWMWCP_DONOTROUND,
-            SettingsService.WidgetCornerPreferenceSmall => Win32Helper.DWMWCP_ROUNDSMALL,
-            _ => Win32Helper.DWMWCP_ROUND
-        };
+            SettingsService.WidgetCornerPreferenceLarge);
+        int cornerPreference = Win32Helper.DWMWCP_DONOTROUND;
 
+        Win32Helper.DisableWindowFrameShadow(_hwnd);
         Win32Helper.TrySetDwmWindowAttribute(
             _hwnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
             ref cornerPreference);
 
-        // Keep the XAML border overlay corner radius in sync with the native corner.
-        PopupBorderOverlay.CornerRadius = cornerPreference switch
+        double radius = Math.Max(
+            SearchPopupSurfacePolicy.OuterCornerRadius,
+            WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(effectivePreference));
+        var outerCornerRadius = new CornerRadius(radius);
+        var bottomCornerRadius = new CornerRadius(0, 0, radius, radius);
+        if (RootGrid.CornerRadius != default)
         {
-            Win32Helper.DWMWCP_DONOTROUND => new CornerRadius(0),
-            Win32Helper.DWMWCP_ROUNDSMALL => new CornerRadius(4),
-            _ => new CornerRadius(8)
-        };
+            RootGrid.CornerRadius = default;
+        }
+
+        if (PopupMaterialSurface.CornerRadius != default)
+        {
+            PopupMaterialSurface.CornerRadius = default;
+        }
+
+        PopupSurfacePlate.CornerRadius = outerCornerRadius;
+        PopupBorderOverlay.CornerRadius = outerCornerRadius;
+        RecommendationOverlays.ApplyBottomCornerRadius(bottomCornerRadius);
+        FooterAcrylicSurface.CornerRadius = bottomCornerRadius;
+        _materialBackdropBridge?.SetCornerRadius(radius);
+    }
+
+    private void EnsureTransparentWindowBackdrop()
+    {
+        Win32Helper.EnableTransparentWindowHost(_hwnd);
+        if (_transparentWindowBackdrop is null)
+        {
+            _transparentWindowBackdrop = new SolidTintSystemBackdrop(Colors.Transparent);
+        }
+
+        if (!ReferenceEquals(SystemBackdrop, _transparentWindowBackdrop))
+        {
+            SystemBackdrop = _transparentWindowBackdrop;
+        }
+    }
+
+    private void ClearTransparentWindowBackdrop()
+    {
+        if (_transparentWindowBackdrop is not null)
+        {
+            if (ReferenceEquals(SystemBackdrop, _transparentWindowBackdrop))
+            {
+                SystemBackdrop = null;
+            }
+
+            _transparentWindowBackdrop.Dispose();
+            _transparentWindowBackdrop = null;
+        }
+
+        Win32Helper.DisableTransparentWindowHost(_hwnd);
+    }
+
+    private ElementBackdropTargetBridge EnsurePopupMaterialBackdropBridge()
+    {
+        if (_materialBackdropBridge is null)
+        {
+            _materialBackdropBridge = new ElementBackdropTargetBridge(
+                onTargetChanged: OnPopupMaterialBackdropTargetChanged,
+                onTargetDisconnecting: OnPopupMaterialBackdropTargetDisconnecting);
+        }
+
+        _materialBackdropBridge.SetCornerRadius(PopupSurfacePlate.CornerRadius.TopLeft);
+        if (!ReferenceEquals(PopupMaterialSurface.SystemBackdrop, _materialBackdropBridge))
+        {
+            PopupMaterialSurface.SystemBackdrop = _materialBackdropBridge;
+        }
+
+        _backdropTarget = _materialBackdropBridge.Target;
+        return _materialBackdropBridge;
+    }
+
+    private void OnPopupMaterialBackdropTargetChanged()
+    {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        _backdropTarget = _materialBackdropBridge?.Target;
+        if (_backdropTarget is not null && IsPopupVisible)
+        {
+            ApplyMaterialFromSettings();
+        }
+    }
+
+    private void OnPopupMaterialBackdropTargetDisconnecting(ICompositionSupportsSystemBackdrop target)
+    {
+        if (ReferenceEquals(_backdropTarget, target))
+        {
+            DetachAcrylicControllerTarget();
+            DetachMicaControllerTarget();
+            _backdropTarget = null;
+        }
     }
 
     private void ApplyMaterialFromSettings()
@@ -857,78 +1318,124 @@ public sealed partial class SearchPopupWindow : Window
         var accentColor = (App.Current as App)?.ThemeService?.GetEffectiveAccentColor()
                           ?? AccentColorHelper.DefaultAccentColor;
 
+        var shell = _settingsService.Settings.WidgetShell;
         string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-            _settingsService.Settings.WidgetMaterialType);
-        double surfaceOpacity = Math.Clamp(_settingsService.Settings.WidgetOpacity, 0.0, 1.0);
-        double materialIntensity = Math.Clamp(_settingsService.Settings.WidgetMaterialIntensity, 0.0, 1.0);
+            shell.WidgetMaterialType);
+        double surfaceOpacity = Math.Clamp(shell.WidgetOpacity, 0.0, 1.0);
+        double materialIntensity = Math.Clamp(shell.WidgetMaterialIntensity, 0.0, 1.0);
+        SearchPopupMaterialResolution materialResolution = SearchPopupSurfacePolicy.ResolveMaterial(
+            materialType,
+            surfaceOpacity,
+            materialIntensity,
+            isDark,
+            accentColor);
+        double effectiveCornerRadius = materialResolution.OuterCornerRadius;
 
         try
         {
             Win32Helper.SetWindowTheme(_hwnd, isDark);
-            Win32Helper.ApplyFullWindowFrame(_hwnd);
+            Win32Helper.DisableWindowFrameShadow(_hwnd);
+            ApplyWindowCornerPreference();
+            RootGrid.Background = SearchRecommendationLayoutEngine.TransparentCardBrush;
 
             int backdropType;
             bool controllerApplied = false;
+            bool awaitingElementTarget = false;
 
-            if (SettingsService.IsMicaMaterial(materialType))
+            if (materialType is SettingsService.WidgetMaterialTypeSolid || WindowsCompatibilityService.IsHighContrast)
             {
-                controllerApplied = ApplyMicaController(
-                    isDark,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    materialType == SettingsService.WidgetMaterialTypeMicaAlt);
-            }
-
-            if (!controllerApplied && SettingsService.IsAcrylicMaterial(materialType))
-            {
-                controllerApplied = ApplyAcrylicController(
-                    isDark,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    surfaceOpacity,
-                    materialType == SettingsService.WidgetMaterialTypeAcrylicBase);
-            }
-
-            if (controllerApplied)
-            {
-                backdropType = Win32Helper.DWMSBT_NONE;
-                Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
-                Win32Helper.DisableAccentPolicy(_hwnd);
-                // Keep the XAML surface transparent so the native backdrop shows through.
-                RootGrid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
-            }
-            else if (materialType is SettingsService.WidgetMaterialTypeSolid)
-            {
+                EnsureTransparentWindowBackdrop();
+                PopupMaterialSurface.Visibility = Visibility.Collapsed;
                 DetachAcrylicControllerTarget();
                 DetachMicaControllerTarget();
                 backdropType = Win32Helper.DWMSBT_NONE;
                 Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
                 Win32Helper.DisableAccentPolicy(_hwnd);
-                // The popup floats above other windows, so its solid material is
-                // fully opaque regardless of the widget surface opacity: a
-                // translucent surface here only reveals the black window
-                // surface underneath.
-                RootGrid.Background = new SolidColorBrush(
-                    BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
+                bool hc = WindowsCompatibilityService.IsHighContrast;
+                var opaqueBase = hc
+                    ? WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark)
+                    : BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity);
+                PopupSurfacePlate.Background = new SolidColorBrush(
+                    Windows.UI.Color.FromArgb(
+                        hc ? (byte)0xFF : materialResolution.SurfacePlateColor.A,
+                        opaqueBase.R,
+                        opaqueBase.G,
+                        opaqueBase.B));
             }
             else
             {
-                // Fallback: use legacy accent blur.
-                backdropType = Win32Helper.DWMSBT_TRANSIENTWINDOW;
-                Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
-                DetachAcrylicControllerTarget();
-                DetachMicaControllerTarget();
-                double accentOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
-                    SettingsService.IsAcrylicMaterial(materialType)
-                        ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
-                            materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
-                            surfaceOpacity,
-                            materialIntensity)
-                        : Math.Min(surfaceOpacity, 0.52);
-                Win32Helper.ApplyAccentBlur(
-                    _hwnd,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    accentOpacity,
-                    true);
-                RootGrid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
+                EnsureTransparentWindowBackdrop();
+                PopupMaterialSurface.Visibility = Visibility.Visible;
+                ElementBackdropTargetBridge bridge = EnsurePopupMaterialBackdropBridge();
+                if (bridge.Target is null)
+                {
+                    awaitingElementTarget = true;
+                }
+                else
+                {
+                    if (SettingsService.IsMicaMaterial(materialType))
+                    {
+                        controllerApplied = ApplyMicaController(
+                            isDark,
+                            BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                            materialType == SettingsService.WidgetMaterialTypeMicaAlt);
+                    }
+
+                    if (!controllerApplied && SettingsService.IsAcrylicMaterial(materialType))
+                    {
+                        controllerApplied = ApplyAcrylicController(
+                            isDark,
+                            BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                            materialResolution.EffectiveAcrylicSurfaceOpacity,
+                            materialType == SettingsService.WidgetMaterialTypeAcrylicBase);
+                    }
+                }
+
+                if (awaitingElementTarget)
+                {
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(materialResolution.SurfacePlateColor);
+                }
+                else if (controllerApplied)
+                {
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(materialResolution.SurfacePlateColor);
+                }
+                else if (effectiveCornerRadius <= 0)
+                {
+                    PopupMaterialSurface.Visibility = Visibility.Collapsed;
+                    ClearTransparentWindowBackdrop();
+                    backdropType = Win32Helper.DWMSBT_TRANSIENTWINDOW;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    DetachAcrylicControllerTarget();
+                    DetachMicaControllerTarget();
+                    double accentOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
+                        SettingsService.IsAcrylicMaterial(materialType)
+                            ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
+                                materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
+                                surfaceOpacity,
+                                materialIntensity)
+                            : Math.Min(surfaceOpacity, 0.52);
+                    Win32Helper.ApplyAccentBlur(
+                        _hwnd,
+                        BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                        accentOpacity,
+                        true);
+                    PopupSurfacePlate.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
+                }
+                else
+                {
+                    PopupMaterialSurface.Visibility = Visibility.Collapsed;
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(
+                        BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
+                }
             }
         }
         catch (Exception ex)
@@ -936,25 +1443,41 @@ public sealed partial class SearchPopupWindow : Window
             App.Log($"[SearchPopup] ApplyMaterialFromSettings fallback: {ex.Message}");
             DisposeAcrylicController();
             DisposeMicaController();
-            double fallbackOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic
-                ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
-                    materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
-                    surfaceOpacity,
-                    materialIntensity)
-                : Math.Min(surfaceOpacity, 0.52);
-            Win32Helper.ApplyAccentBlur(
-                _hwnd,
-                BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                fallbackOpacity,
-                true);
+            EnsureTransparentWindowBackdrop();
+            PopupMaterialSurface.Visibility = Visibility.Collapsed;
+            Win32Helper.DisableAccentPolicy(_hwnd);
+            PopupSurfacePlate.Background = new SolidColorBrush(
+                BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
         }
 
-        var (thickness, borderColor) = GetPopupBorderVisuals(isDark, accentColor);
+        var (thickness, borderColor) = WindowsCompatibilityService.IsHighContrast
+            ? (1.0, WindowsCompatibilityService.ResolveHighContrastForegroundColor(isDark))
+            : GetPopupBorderVisuals(isDark, accentColor);
+        PopupBorderOverlay.BorderBrush = new SolidColorBrush(
+            borderColor.A == 0 ? Colors.Transparent : borderColor);
         PopupBorderOverlay.BorderThickness = new Thickness(thickness);
-        PopupBorderOverlay.BorderBrush = borderColor.A == 0
-            ? null
-            : new SolidColorBrush(borderColor);
+        ApplySearchInputWellVisuals();
+    }
 
+    private void ApplySearchInputWellVisuals()
+    {
+        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
+        bool isExpanded = BodyContentRow.Visibility == Visibility.Visible ||
+                          TabsAndFilterRow.Visibility == Visibility.Visible ||
+                          EverythingPromptBanner.Visibility == Visibility.Visible ||
+                          FooterBar.Visibility == Visibility.Visible;
+        SearchPopupInputWellVisuals visuals = SearchPopupSurfacePolicy.ResolveInputWellVisuals(
+            isExpanded,
+            isDark);
+        SearchBoxBorder.Background = visuals.BackgroundColor.A == 0
+            ? SearchRecommendationLayoutEngine.TransparentCardBrush
+            : new SolidColorBrush(visuals.BackgroundColor);
+        SearchBoxBorder.BorderBrush = visuals.BorderColor.A == 0
+            ? SearchRecommendationLayoutEngine.TransparentCardBrush
+            : new SolidColorBrush(visuals.BorderColor);
+        HeaderBottomDivider.Visibility = visuals.ShowHeaderBottomDivider
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -982,22 +1505,24 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        _backdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
+        _backdropTarget = EnsurePopupMaterialBackdropBridge().Target;
+        if (_backdropTarget is null)
+        {
+            return false;
+        }
         _backdropConfiguration ??= new SystemBackdropConfiguration();
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
 
-        if (_micaController is not null)
+        DetachAcrylicControllerTarget();
+        if (_micaController is null)
         {
-            DisposeMicaController();
+            _micaController = new MicaController();
+            _micaControllerAttached = false;
         }
 
-        _micaController = new MicaController
-        {
-            Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base
-        };
+        _micaController.Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base;
 
-        DetachAcrylicControllerTarget();
         if (!_micaControllerAttached)
         {
             if (!_micaController.AddSystemBackdropTarget(_backdropTarget))
@@ -1007,8 +1532,9 @@ public sealed partial class SearchPopupWindow : Window
             }
 
             _micaControllerAttached = true;
-            _micaController.SetSystemBackdropConfiguration(_backdropConfiguration);
         }
+
+        _micaController.SetSystemBackdropConfiguration(_backdropConfiguration);
 
         _micaController.TintColor = tintColor;
         _micaController.FallbackColor = useAlt
@@ -1040,25 +1566,26 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        _backdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
+        _backdropTarget = EnsurePopupMaterialBackdropBridge().Target;
+        if (_backdropTarget is null)
+        {
+            return false;
+        }
         _backdropConfiguration ??= new SystemBackdropConfiguration();
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
-        _backdropConfiguration.HighContrastBackgroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20)
-            : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
-
-        if (_acrylicController is not null && !_acrylicController.IsClosed)
-        {
-            DisposeAcrylicController();
-        }
-
-        _acrylicController = new DesktopAcrylicController
-        {
-            Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin
-        };
+        _backdropConfiguration.HighContrastBackgroundColor = WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark);
 
         DetachMicaControllerTarget();
+        if (_acrylicController is null || _acrylicController.IsClosed)
+        {
+            DisposeAcrylicController();
+            _acrylicController = new DesktopAcrylicController();
+            _acrylicControllerAttached = false;
+        }
+
+        _acrylicController.Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin;
+
         if (!_acrylicControllerAttached)
         {
             if (!_acrylicController.AddSystemBackdropTarget(_backdropTarget))
@@ -1068,8 +1595,9 @@ public sealed partial class SearchPopupWindow : Window
             }
 
             _acrylicControllerAttached = true;
-            _acrylicController.SetSystemBackdropConfiguration(_backdropConfiguration);
         }
+
+        _acrylicController.SetSystemBackdropConfiguration(_backdropConfiguration);
 
         _acrylicController.TintColor = tintColor;
         _acrylicController.FallbackColor = tintColor;
@@ -1192,9 +1720,11 @@ public sealed partial class SearchPopupWindow : Window
             _ => (0.8d, (byte)0x18)
         };
 
-        if (colorMode == SettingsService.WidgetBorderColorModeNone)
+        if (thickness <= 0 || colorMode == SettingsService.WidgetBorderColorModeNone)
         {
-            return (0d, Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            byte fallbackChannel = isDark ? (byte)0xFF : (byte)0x00;
+            byte fallbackAlpha = isDark ? (byte)0x20 : (byte)0x16;
+            return (0.8d, Windows.UI.Color.FromArgb(fallbackAlpha, fallbackChannel, fallbackChannel, fallbackChannel));
         }
 
         bool useAccent = colorMode == SettingsService.WidgetBorderColorModeAccent;
@@ -1248,7 +1778,7 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        var settings = _settingsService.Settings;
+        var settings = _settingsService.Settings.Search;
         if (settings.SearchPopupCustomX is not int x ||
             settings.SearchPopupCustomY is not int y ||
             settings.SearchPopupCustomWidth is not int width ||
@@ -1310,26 +1840,34 @@ public sealed partial class SearchPopupWindow : Window
 
         OpenSettingsLabel.Text = _localizationService.T("Search.Action.OpenSettings");
 
+        ToolTipService.SetToolTip(ClearQueryButton, _localizationService.T("Common.Close"));
         SortNameLabel.Text = _localizationService.T("Search.Sort.Name");
         SortTypeLabel.Text = _localizationService.T("Search.Sort.Type");
         SortSizeLabel.Text = _localizationService.T("Search.Sort.Size");
         SortDateLabel.Text = _localizationService.T("Search.Sort.Date");
-        ResultFilterLabel.Text = _localizationService.T("Search.Filter.Label");
-        FilterAllItem.Content = _localizationService.T("Search.Filter.All");
-        FilterFilesItem.Content = _localizationService.T("Search.Filter.Files");
-        FilterAppsItem.Content = _localizationService.T("Search.Filter.Apps");
-        FilterImagesItem.Content = _localizationService.T("Search.Filter.Images");
-        FilterDocumentsItem.Content = _localizationService.T("Search.Filter.Documents");
-        FilterDeskBoxItem.Content = _localizationService.T("Search.Filter.DeskBox");
         OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
         OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
+        ToolTipService.SetToolTip(
+            HiddenAppsEntryButton,
+            _localizationService.T("Search.Recommend.HiddenTitle"));
+        ToolTipService.SetToolTip(
+            EverythingDismissButton,
+            _localizationService.T("Search.EverythingBanner.DontRemind"));
+        RecommendedAppsGrid.ApplyLocalizedStrings();
+        RecommendationOverlays.ApplyLocalizedStrings();
+        SyncEditRecommendationsButtonVisuals();
+        ApplyLocalizedCommandPaletteStrings();
+
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
-        RecommendedAppsRepeater.ItemsSource = _viewModel.CurrentResults;
+        RecommendedAppsGrid.BindItemsSource();
+        RecommendationOverlays.BindItemsSources();
 
+        UpdateEverythingPromptBanner();
+        UpdateRecommendationHeaderState();
         UpdatePanelVisibility();
         UpdateSortHeaders();
     }
@@ -1338,15 +1876,30 @@ public sealed partial class SearchPopupWindow : Window
     {
         string hint = _viewModel.HotkeyHint;
         HotkeyHintText.Text = hint;
-        HotkeyHintBadge.Visibility = string.IsNullOrWhiteSpace(hint)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
+        ClearQueryButton.Visibility = hasText
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = !hasText &&
+                                     _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(hint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Handled)
+        if (e.Handled || _isCmdBarFlyoutOpen ||
+            DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
         {
+            return;
+        }
+
+        if (!RecommendationOverlays.IsAnyOverlayOpen &&
+            !RecommendationOverlays.IsEditingFolderTitle &&
+            HandleCommandPaletteShortcutKeys(e))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -1362,14 +1915,45 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        if (!RecommendationOverlays.IsAnyOverlayOpen &&
+            !RecommendationOverlays.IsEditingFolderTitle &&
+            RecommendedAppsGrid.IsAppsPanelVisible &&
+            string.IsNullOrEmpty(SearchTextBox.Text))
+        {
+            bool plainArrowKey =
+                e.Key is Windows.System.VirtualKey.Up
+                    or Windows.System.VirtualKey.Down
+                    or Windows.System.VirtualKey.Left
+                    or Windows.System.VirtualKey.Right &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+            bool routeToRecommend =
+                plainArrowKey ||
+                (RecommendedAppsGrid.IsEditMode &&
+                 ((e.Key == Windows.System.VirtualKey.Delete && RecommendedAppsGrid.MultiSelectedCount > 0) ||
+                  (e.Key == Windows.System.VirtualKey.A &&
+                   Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))));
+            if (routeToRecommend && RecommendedAppsGrid.HandleKey(e))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down))
         {
             return;
         }
 
-        if (RecommendedAppsPanel.Visibility == Visibility.Visible)
+        if (RecommendationOverlays.IsAnyOverlayOpen)
         {
-            if (HandleRecommendedAppsKey(e))
+            return;
+        }
+
+        if (RecommendedAppsGrid.IsAppsPanelVisible)
+        {
+            if (RecommendedAppsGrid.HandleKey(e))
             {
                 e.Handled = true;
             }
@@ -1384,17 +1968,59 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        // ── Recommended apps panel takes priority when visible ──
-        bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
 
-        // Escape: clear recommended app selection first, then hand focus back
-        // from a sort header to the search box (same tier as the results
-        // panel's Escape), then hide popup.
+        // ── Recommended apps panel takes priority when visible ──
+        bool recommendedVisible =
+            RecommendedAppsGrid.IsAppsPanelVisible &&
+            !RecommendationOverlays.IsAnyOverlayOpen;
+
+        // Escape: close active folder/hidden overlays first, then clear recommended
+        // app selection, then hand focus back from a sort header to the search box,
+        // then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (_selectedAppIndex >= 0)
+            if (RecommendationOverlays.IsEditingFolderTitle)
             {
-                ClearRecommendedAppSelection();
+                RecommendationOverlays.CancelTitleEdit();
+                e.Handled = true;
+                return;
+            }
+            if (RecommendationOverlays.IsAnyOverlayOpen)
+            {
+                RecommendationOverlays.CloseOverlays();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (RecommendedAppsGrid.IsEditMode)
+            {
+                if (RecommendedAppsGrid.MultiSelectedCount > 0)
+                {
+                    RecommendedAppsGrid.ClearEditMultiSelection();
+                }
+                else
+                {
+                    RecommendedAppsGrid.DisableEditMode();
+                }
+
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_multiSelectedItems.Count > 0)
+            {
+                ClearMultiSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (RecommendedAppsGrid.SelectedIndex >= 0)
+            {
+                RecommendedAppsGrid.ClearSelection();
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 return;
@@ -1402,6 +2028,12 @@ public sealed partial class SearchPopupWindow : Window
             if (FocusManager.GetFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
             {
                 SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_latchedInlineScope != SearchInlineScope.None)
+            {
+                ExitLatchedScope();
                 e.Handled = true;
                 return;
             }
@@ -1421,7 +2053,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         // Recommended apps keyboard navigation (arrows, Enter, Space).
-        if (recommendedVisible && HandleRecommendedAppsKey(e))
+        if (recommendedVisible && RecommendedAppsGrid.HandleKey(e))
         {
             e.Handled = true;
             return;
@@ -1443,7 +2075,7 @@ public sealed partial class SearchPopupWindow : Window
         {
             // If a recommended app is selected, preview it even when focus
             // is in the search text box.
-            if (_selectedAppIndex >= 0)
+            if (RecommendedAppsGrid.SelectedIndex >= 0)
             {
                 TryPreviewSelectedItem();
                 e.Handled = true;
@@ -1457,19 +2089,25 @@ public sealed partial class SearchPopupWindow : Window
             }
         }
 
-        // Sort headers joined the tab chain: printable keys falling through
-        // from a focused header must keep flowing into the query, mirroring
-        // the results panel's redirect (ResultsPanel_KeyDown default branch).
-        // Modifier chords stay untouched — Ctrl+A/C/V must not insert
-        // literal characters into the query.
+        // Printable keys falling through from non-editable controls (sort
+        // headers, scroll viewers, recommendation chrome) flow into the query
+        // so the user can always start typing immediately. Modifier chords
+        // stay untouched — Ctrl+A/C/V must not insert literal characters.
         if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
-            FocusManager.GetFocusedElement() is Button focusedControl &&
-            IsSortHeaderButton(focusedControl))
+            !RecommendationOverlays.IsEditingFolderTitle &&
+            !RecommendationOverlays.IsAnyOverlayOpen)
         {
-            if (TryRedirectCharToSearchBox(e.Key))
+            object? focused = FocusManager.GetFocusedElement();
+            if (focused is not TextBox and not ComboBox &&
+                (focused is not Button focusedBtn ||
+                 IsSortHeaderButton(focusedBtn) ||
+                 RecommendedAppsGrid.IsAppsPanelVisible))
             {
-                e.Handled = true;
+                if (TryRedirectCharToSearchBox(e.Key))
+                {
+                    e.Handled = true;
+                }
             }
         }
     }
@@ -1499,13 +2137,6 @@ public sealed partial class SearchPopupWindow : Window
         if (focusedTextBox is not null && !searchInputFocused)
         {
             // Do not take arrow keys from rename/dialog text editors.
-            return false;
-        }
-
-        if (focusedObject is not null &&
-            IsVisualDescendantOf(focusedObject, ResultFilterComboBox))
-        {
-            // The filter picker owns its arrow keys while it is focused.
             return false;
         }
 
@@ -1539,38 +2170,12 @@ public sealed partial class SearchPopupWindow : Window
 
     private static bool IsVisualDescendantOf(
         DependencyObject element,
-        DependencyObject ancestor)
-    {
-        DependencyObject? current = element;
-        while (current is not null)
-        {
-            if (ReferenceEquals(current, ancestor))
-            {
-                return true;
-            }
-
-            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
+        DependencyObject ancestor) =>
+        SearchRecommendationLayoutEngine.IsVisualDescendantOf(element, ancestor);
 
     private static T? FindVisualAncestor<T>(DependencyObject? element)
-        where T : DependencyObject
-    {
-        DependencyObject? current = element;
-        while (current is not null)
-        {
-            if (current is T match)
-            {
-                return match;
-            }
-
-            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
-        }
-
-        return null;
-    }
+        where T : DependencyObject =>
+        SearchRecommendationLayoutEngine.FindVisualAncestor<T>(element);
 
     private void ClosePopupButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1583,128 +2188,140 @@ public sealed partial class SearchPopupWindow : Window
     /// lazily by FileMetaService and is not observable, so XAML binding alone
     /// cannot track it.
     /// </summary>
-    private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        // The card template binds through x:Bind, which ItemsRepeater wires
-        // without assigning an inherited DataContext, so every DataContext-
-        // based card handler (select, double-tap open, keyboard selection,
-        // icon patch) silently no-ops unless the item is assigned explicitly
-        // from the repeater index — the same resolution the result rows use.
-        if (args.Element is FrameworkElement card &&
-            RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
-            args.Index >= 0 &&
-            args.Index < items.Count)
-        {
-            card.DataContext = items[args.Index];
-        }
-
-        if (args.Element is FrameworkElement { DataContext: SearchResultItem item } preparedCard &&
-            item.Icon is not null)
-        {
-            // The card template binds Icon one-time, so a container realized
-            // before enrichment finished needs its Image patched explicitly.
-            var image = FindDescendant<Image>(preparedCard);
-            if (image is not null && image.Source != item.Icon)
-            {
-                image.Source = item.Icon;
-            }
-        }
-
-        // If an entrance animation is pending, animate this freshly realized card
-        // immediately. This is the reliable trigger because ItemsRepeater realizes
-        // elements asynchronously; TryGetElement would still be null at call time.
-        if (_pendingEntranceStyle is int style && args.Element is FrameworkElement element)
-        {
-            AnimateSingleAppCard(element, args.Index, style);
-            // Once every element in the source has been prepared, the entrance is
-            // complete; drop the flag so later re-realizations (scroll/recycle) are
-            // not re-animated.
-            if (RecommendedAppsRepeater.ItemsSource is System.Collections.ICollection coll &&
-                args.Index >= coll.Count - 1)
-            {
-                _pendingEntranceStyle = null;
-                _entranceGuardTimer?.Stop();
-                _entranceGuardTimer = null;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Finds the first descendant of the specified type in the visual tree.
-    /// </summary>
-    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is T result)
-            {
-                return result;
-            }
-
-            var descendant = FindDescendant<T>(child);
-            if (descendant is not null)
-            {
-                return descendant;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Refreshes icons on all realized containers in the recommended-apps repeater.
-    /// Called after FileMetaService finishes lazy icon enrichment.
-    /// </summary>
-    private void RefreshRecommendedAppIcons()
-    {
-        int index = 0;
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
-            ?? Array.Empty<object>();
-        foreach (var dataItem in itemsSource)
-        {
-            if (dataItem is SearchResultItem item && item.Icon is not null &&
-                RecommendedAppsRepeater.TryGetElement(index) is FrameworkElement card)
-            {
-                var image = FindDescendant<Image>(card);
-                if (image is not null && image.Source != item.Icon)
-                {
-                    image.Source = item.Icon;
-                }
-            }
-            index++;
-        }
-    }
 
     private void OnRecommendationIconsResolved()
     {
-        if (!IsPopupVisible ||
-            RecommendedAppsPanel.Visibility != Visibility.Visible)
+        if (IsPopupVisible)
+        {
+            RecommendedAppsGrid.RefreshIcons();
+        }
+    }
+
+    private void OnRecommendationLayoutUpdated()
+    {
+        if (!IsPopupVisible)
         {
             return;
         }
 
-        RefreshRecommendedAppIcons();
+        RecommendedAppsGrid.RefreshAfterLayoutUpdate();
+        UpdateRecommendationHeaderState();
+        RecommendationOverlays.SyncWithViewModel();
+        UpdateRecommendationEditStatusHint();
+        RecommendedAppsGrid.RefreshIcons();
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_isWindowClosed || !IsPopupVisible)
+            {
+                return;
+            }
+
+            RecommendedAppsGrid.QueueDeferredEditRefresh();
+        });
     }
 
-    private void UpdatePanelVisibility()
+    private void UpdateEverythingPromptBanner()
     {
         bool hasQuery = !string.IsNullOrWhiteSpace(SearchTextBox.Text);
+        bool allowBanner = hasQuery || _settingsService.Settings.Search.SearchShowRecommendations;
+        EverythingPromptBanner.Visibility = allowBanner && _viewModel.IsEverythingPromptVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        EverythingPromptTextBlock.Text = _viewModel.EverythingPromptText;
+        EverythingConnectButtonText.Text = _viewModel.EverythingPromptActionText;
+        EverythingPromptIcon.Glyph = _viewModel.IsEverythingPromptWarning
+            ? "\uE7BA"
+            : "\uE946";
+    }
+
+    private void EverythingConnectButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.InvokeAction("open-settings");
+    }
+
+    private void EverythingDismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.DismissEverythingPrompt();
+        UpdatePanelVisibility();
+    }
+
+    private void UpdateRecommendationHeaderState()
+    {
+        bool homeVisible = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                           RecommendedAppsGrid.IsAppsPanelVisible;
+        bool hasHidden = _viewModel.HasHiddenRecommendations;
+        bool hasEntries = _viewModel.HasRecommendedEntries;
+
+        HiddenAppsEntryButton.Visibility = homeVisible && hasHidden
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (hasHidden)
+        {
+            HiddenAppsEntryLabel.Text = string.Format(
+                _localizationService.T("Search.Recommend.HiddenEntryFormat"),
+                _viewModel.HiddenRecommendationCount);
+        }
+
+        EditRecommendationsButton.Visibility = homeVisible && hasEntries
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!hasEntries && RecommendedAppsGrid.IsEditMode)
+        {
+            RecommendedAppsGrid.DisableEditMode();
+        }
+
+        RecommendedAppsGrid.SetHomeContentState(hasEntries, hasHidden);
+
+        if (!hasHidden && RecommendationOverlays.IsHiddenOverlayVisible)
+        {
+            RecommendationOverlays.CloseOverlays();
+        }
+    }
+
+    private void UpdateScopePrefixBadge(string? rawQuery)
+    {
+        SyncScopeHeaderVisuals(rawQuery);
+    }
+
+    private void UpdatePanelVisibility() => UpdatePanelVisibility(forceBoundsWhenOpening: false);
+
+    private void UpdatePanelVisibility(bool forceBoundsWhenOpening)
+    {
+        bool wasResultsVisible = ResultsPanel.Visibility == Visibility.Visible;
+        bool hasQuery = HasActiveSearchOrScope;
+        if (!hasQuery)
+        {
+            ResetSearchSessionVisualFlags();
+        }
         bool searching = _viewModel.IsSearching;
         bool hasResults = _viewModel.HasResults;
         bool tabHasItems = _viewModel.HasCurrentResults;
         bool tabSelected = _viewModel.SelectedTab is not null;
+        bool recommendationsEnabled = _settingsService.Settings.Search.SearchShowRecommendations;
+
+        UpdateEverythingPromptBanner();
+        UpdateScopePrefixBadge(SearchTextBox.Text);
+        UpdateHotkeyHint();
 
         // A ready resident index answers normal keystrokes directly. Avoid flashing a
         // progress animation for the short cancellable query window; indexing state
         // remains available in Settings for first-build and rebuild diagnostics.
+        SearchProgressBar.IsIndeterminate = false;
         SearchProgressBar.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
         LoadingStatusText.Text = _localizationService.T("Search.Status.Searching");
         LoadingPanel.Visibility = Visibility.Collapsed;
-        TabsList.Visibility = hasQuery ? Visibility.Visible : Visibility.Collapsed;
 
-        NoResultsPanel.Visibility = hasQuery && !searching && !hasResults
+        bool showResults = hasQuery && hasResults && tabHasItems;
+        bool showNoResults = hasQuery && !searching && !hasResults;
+        bool showResultChrome = hasQuery && hasResults && tabSelected;
+
+        bool showCategoryBar = showResultChrome && _viewModel.ShouldShowCategoryBar;
+        TabsList.Visibility = showCategoryBar ? Visibility.Visible : Visibility.Collapsed;
+        TabsAndFilterRow.Visibility = showCategoryBar ? Visibility.Visible : Visibility.Collapsed;
+
+        NoResultsPanel.Visibility = showNoResults
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -1718,59 +2335,542 @@ public sealed partial class SearchPopupWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
-        bool showResults = hasQuery && hasResults && tabHasItems;
         ResultsPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
-        bool showResultChrome = hasQuery && hasResults && tabSelected;
+        UpdateDetailsSplitLayout(showResults);
+        UpdateCommandBarForSelectedItem();
 
-        bool showRecommendedApps = !hasQuery && tabHasItems;
+        bool holdRecommendationsForInitialSearch =
+            hasQuery &&
+            searching &&
+            !hasResults &&
+            !showNoResults &&
+            !_hasExpandedResultsInQuerySession &&
+            recommendationsEnabled &&
+            RecommendedAppsGrid.IsAppsPanelVisible;
+        bool showRecommendedApps = (!hasQuery || holdRecommendationsForInitialSearch) &&
+            recommendationsEnabled &&
+            (tabHasItems ||
+             _viewModel.HasRecommendedEntries ||
+             _viewModel.HasHiddenRecommendations ||
+             RecommendedAppsGrid.IsSkeletonVisible);
         if (showRecommendedApps)
         {
-            bool wasHidden = RecommendedAppsPanel.Visibility != Visibility.Visible;
-            RecommendedAppsPanel.Visibility = Visibility.Visible;
-            RefreshRecommendedAppIcons();
+            bool wasHidden = !RecommendedAppsGrid.IsAppsPanelVisible;
+            RecommendedAppsGrid.SetAppsPanelVisibility(true);
+            UpdateRecommendationHeaderState();
+            RecommendedAppsGrid.RefreshIcons();
 
-            // When the home tab re-appears after a query, replay the configured
-            // per-icon entrance. Popup opening owns its own single playback and
-            // temporarily suppresses this property-change path.
-            if (wasHidden && !_suppressPanelEntranceAnimation)
+            if (wasHidden &&
+                !_suppressPanelEntranceAnimation &&
+                !_hasPlayedOpenRecommendationsEntrance)
             {
-                AnimateAppIconsEntrance();
+                _hasPlayedOpenRecommendationsEntrance = true;
+                RecommendedAppsGrid.AnimateEntrance();
             }
         }
         else
         {
-            RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-            ClearRecommendedAppSelection();
+            RecommendedAppsGrid.SetAppsPanelVisibility(false);
+            RecommendedAppsGrid.DisableEditMode();
+            UpdateRecommendationHeaderState();
+            RecommendedAppsGrid.CancelDrag();
+            RecommendationOverlays.CloseOverlays(immediate: true);
+            RecommendedAppsGrid.ClearSelection();
+            RecommendedAppsGrid.ClearHoveredCard();
         }
 
-        // Sortable header only for file-style tabs (All / extension tabs / File / Folder).
+        UpdateRecommendationEditStatusHint();
+
+        // Optional sortable header: hidden by default unless enabled in Search Settings.
         bool fileSortTab = _viewModel.SelectedTab?.SupportsFileSort == true;
-        SortHeaderRow.Visibility = showResultChrome && fileSortTab
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        ResultFilterBar.Visibility = showResultChrome && _viewModel.SelectedTab?.Id == "all"
+        bool showSortHeader = showResultChrome &&
+                              fileSortTab &&
+                              _settingsService.Settings.Search.SearchShowSortHeader;
+        SortHeaderRow.Visibility = showSortHeader
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        EmptyTabHintPanel.Visibility = !searching && !showResults && !showRecommendedApps && tabSelected
-                                       && !(hasQuery && !hasResults)
+        bool showEmptySelectedTab = hasQuery && !searching && hasResults && !tabHasItems && tabSelected;
+        EmptyTabHintPanel.Visibility = showEmptySelectedTab
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        BodyContentRow.Visibility =
+            (showResults || showNoResults || showRecommendedApps || showEmptySelectedTab ||
+             RecommendedAppsGrid.IsSkeletonVisible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
         UpdateSelectionActions();
+        ApplySearchInputWellVisuals();
+
+        if (!wasResultsVisible &&
+            !_hasExpandedResultsInQuerySession &&
+            showResults &&
+            !forceBoundsWhenOpening &&
+            !_viewModel.IsApplyingBackgroundResultRefresh)
+        {
+            _hasExpandedResultsInQuerySession = true;
+            AnimateResultsFirstExpand();
+        }
+        else if (showResults)
+        {
+            _hasExpandedResultsInQuerySession = true;
+        }
+        else if (!showResults)
+        {
+            ResultsPanel.Opacity = 1;
+            ResultsTranslateTransform.Y = 0;
+        }
+
+        UpdatePopupDynamicBounds(forceBoundsWhenOpening);
+    }
+
+    private void UpdatePopupDynamicBounds(bool forceWhenOpening = false)
+    {
+        if (_appWindow is null || _isWindowClosed || _isWindowDragging || _isWindowResizing)
+        {
+            return;
+        }
+
+        if (!IsPopupVisible && !forceWhenOpening)
+        {
+            return;
+        }
+
+        var searchSlice = _settingsService.Settings.Search;
+        int? customX = searchSlice.SearchPopupCustomX;
+        int? customY = searchSlice.SearchPopupCustomY;
+
+        double scale = customX is int targetX && customY is int targetY
+            ? Win32Helper.GetDpiScaleForPoint(targetX, targetY)
+            : Win32Helper.GetDpiScaleForWindow(_hwnd, Content?.XamlRoot);
+        if (!double.IsFinite(scale) || scale <= 0)
+        {
+            scale = 1.0;
+        }
+
+        DisplayArea displayArea = customX is int savedX && customY is int savedY
+            ? DisplayArea.GetFromPoint(new PointInt32(savedX, savedY), DisplayAreaFallback.Nearest)
+            : DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
+        RectInt32 workAreaPhysical = displayArea.WorkArea;
+        int workAreaLogicalHeight = Math.Max(320, (int)Math.Round(workAreaPhysical.Height / scale));
+
+        bool hasQuery = HasActiveSearchOrScope;
+        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible && !_isDetailsPaneClosing;
+        bool showNoResultsOrEmptyTab = NoResultsPanel.Visibility == Visibility.Visible ||
+                                       EmptyTabHintPanel.Visibility == Visibility.Visible;
+
+        // When the very first keystroke triggers an async query, hold the current window
+        // geometry steady during the few milliseconds before ApplySearchResponse arrives
+        // instead of collapsing downward toward 56px and immediately bouncing back out.
+        if (!forceWhenOpening &&
+            hasQuery &&
+            _viewModel.IsSearching &&
+            !_viewModel.HasResults &&
+            !showNoResultsOrEmptyTab)
+        {
+            return;
+        }
+
+        bool showRecommendations = RecommendedAppsGrid.IsAppsPanelVisible ||
+                                   RecommendedAppsGrid.IsSkeletonVisible;
+        int recCount = RecommendedAppsGrid.IsSkeletonVisible
+            ? Math.Max(6, _viewModel.RecommendedEntries.Count)
+            : _viewModel.RecommendedEntries.Count;
+
+        var layoutState = new SearchPopupLayoutState(
+            HasQuery: hasQuery,
+            IsSearching: _viewModel.IsSearching,
+            ResultCount: ResultsPanel.Visibility == Visibility.Visible ? _viewModel.CurrentResults.Count : 0,
+            ShowFilterBar: TabsAndFilterRow.Visibility == Visibility.Visible,
+            ShowSortHeader: SortHeaderRow.Visibility == Visibility.Visible,
+            ShowEverythingBanner: EverythingPromptBanner.Visibility == Visibility.Visible,
+            ShowRecommendations: showRecommendations,
+            RecommendationEntryCount: recCount,
+            ShowAllHiddenRecommendationsHint: RecommendedAppsGrid.IsAllHiddenHintVisible,
+            ShowNoResults: showNoResultsOrEmptyTab,
+            ShowFooter: FooterBar.Visibility == Visibility.Visible,
+            ShowDetailsPane: showDetailsPane);
+
+        int maxLogicalHeight = SearchPopupSurfacePolicy.ComputeMaxLogicalHeight(workAreaLogicalHeight);
+        int desiredLogicalHeight = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
+            layoutState,
+            workAreaLogicalHeight);
+
+        // Suppress scrollbar unless content genuinely hits the max-height ceiling or pages more results.
+        ResultsPanel.VerticalScrollBarVisibility =
+            (ResultsPanel.Visibility == Visibility.Visible &&
+             (desiredLogicalHeight >= maxLogicalHeight || _viewModel.HasMoreResults))
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Hidden;
+
+        int? minOverlayHeightPhysical = RecommendationOverlays.IsAnyOverlayOpen
+            ? SearchPopupSurfacePolicy.ToPhysicalPixels(420, scale)
+            : null;
+
+        // Keep split-pane width locked throughout an active query session whenever
+        // SearchShowDetailsPane is enabled so typing never snaps horizontally 780 <-> 660.
+        bool useDetailsSplitWidth = showDetailsPane ||
+                                    (hasQuery && searchSlice.SearchShowDetailsPane);
+        int desiredLogicalWidth = useDetailsSplitWidth
+            ? SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical
+            : SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
+
+        RectInt32 targetBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+            workAreaPhysical,
+            scale,
+            desiredLogicalHeight,
+            customX,
+            customY,
+            minOverlayHeightPhysical,
+            desiredLogicalWidth);
+
+        double targetLogicalWidth = Math.Max(
+            SearchPopupSurfacePolicy.MinPopupWidthLogical,
+            Math.Round(targetBounds.Width / scale, 2));
+        double targetLogicalHeight = Math.Max(
+            SearchPopupSurfacePolicy.CapsuleOnlyHeightLogical,
+            Math.Round(targetBounds.Height / scale, 2));
+
+        bool animateMorph = !forceWhenOpening &&
+                            IsPopupVisible &&
+                            AreSystemAnimationsEnabled() &&
+                            !RecommendationOverlays.IsAnyOverlayOpen &&
+                            double.IsFinite(RootGrid.Height) &&
+                            RootGrid.Height > 0 &&
+                            double.IsFinite(RootGrid.Width) &&
+                            RootGrid.Width > 0;
+
+        if (!animateMorph)
+        {
+            SnapMorphBoundsToTarget(targetLogicalWidth, targetLogicalHeight, targetBounds);
+            return;
+        }
+
+        bool isSpringRunning = IsMorphSpringRunning;
+        if (!isSpringRunning || !double.IsFinite(_heightSpringCurrentLogical) || _heightSpringCurrentLogical <= 0)
+        {
+            _heightSpringCurrentLogical = RootGrid.Height;
+            _heightSpringVelocity = 0;
+        }
+
+        if (!isSpringRunning || !double.IsFinite(_widthSpringCurrentLogical) || _widthSpringCurrentLogical <= 0)
+        {
+            _widthSpringCurrentLogical = RootGrid.Width;
+            _widthSpringVelocity = 0;
+        }
+
+        bool widthAnimating = Math.Abs(targetLogicalWidth - _widthSpringCurrentLogical) >= 0.5 ||
+                              Math.Abs(_widthSpringVelocity) >= 3.0;
+        bool heightAnimating = Math.Abs(targetLogicalHeight - _heightSpringCurrentLogical) >= 0.5 ||
+                               Math.Abs(_heightSpringVelocity) >= 3.0;
+
+        if (!widthAnimating && !heightAnimating)
+        {
+            SnapMorphBoundsToTarget(targetLogicalWidth, targetLogicalHeight, targetBounds);
+            return;
+        }
+
+        PointInt32 livePos = _appWindow.Position;
+        SizeInt32 liveSize = _appWindow.Size;
+        int headroomPhysical = SearchPopupSurfacePolicy.ToPhysicalPixels(
+            SearchPopupSurfacePolicy.SpringHeadroomLogical,
+            scale);
+        int maxDownwardPhysical = Math.Max(
+            targetBounds.Height,
+            (workAreaPhysical.Y + workAreaPhysical.Height - 8) - targetBounds.Y);
+        int immediatePhysicalHeight = Math.Min(
+            maxDownwardPhysical,
+            Math.Max(liveSize.Height, targetBounds.Height + headroomPhysical));
+        int immediatePhysicalWidth = widthAnimating
+            ? Math.Max(liveSize.Width, targetBounds.Width + headroomPhysical)
+            : Math.Max(liveSize.Width, targetBounds.Width);
+        int startX = widthAnimating ? livePos.X : targetBounds.X;
+
+        if (RootGrid.HorizontalAlignment != HorizontalAlignment.Left)
+        {
+            RootGrid.HorizontalAlignment = HorizontalAlignment.Left;
+        }
+
+        if (livePos.X != startX ||
+            livePos.Y != targetBounds.Y ||
+            liveSize.Width < immediatePhysicalWidth ||
+            liveSize.Height < immediatePhysicalHeight)
+        {
+            _appWindow.MoveAndResize(new RectInt32(
+                startX,
+                targetBounds.Y,
+                immediatePhysicalWidth,
+                immediatePhysicalHeight));
+        }
+
+        _morphWorkAreaPhysical = workAreaPhysical;
+        _morphDpiScale = scale;
+        _morphCustomX = customX;
+        _morphCustomY = customY;
+        _lastMorphWindowX = startX;
+
+        if (!isSpringRunning || Math.Abs(targetLogicalWidth - _widthMorphTargetLogical) >= 0.5)
+        {
+            _widthSpringExpanding = targetLogicalWidth >= _widthSpringCurrentLogical;
+        }
+
+        _widthMorphTargetLogical = targetLogicalWidth;
+        if (!isSpringRunning || Math.Abs(targetLogicalHeight - _heightMorphTargetLogical) >= 0.5)
+        {
+            _heightSpringExpanding = targetLogicalHeight >= _heightSpringCurrentLogical;
+        }
+
+        _heightMorphTargetLogical = targetLogicalHeight;
+        _heightMorphPendingBounds = targetBounds;
+
+        StartMorphAnimation();
+    }
+
+    private void StartMorphAnimation()
+    {
+        if (_morphAnimationRegistration is not null || _isWindowClosed)
+        {
+            return;
+        }
+
+        _heightSpringLastTimestamp = Stopwatch.GetTimestamp();
+        _morphAnimationRegistration = WidgetCompactAnimationCoordinator.Register(
+            OnMorphFrameRendered,
+            _hwnd);
+    }
+
+    private void OnMorphFrameRendered()
+    {
+        if (!IsPopupVisible || _isWindowClosed || _appWindow is null)
+        {
+            StopHeightMorphTimer();
+            return;
+        }
+
+        long nowTimestamp = Stopwatch.GetTimestamp();
+        double dtSeconds = _heightSpringLastTimestamp > 0
+            ? Stopwatch.GetElapsedTime(_heightSpringLastTimestamp, nowTimestamp).TotalSeconds
+            : 0.014;
+        _heightSpringLastTimestamp = nowTimestamp;
+
+        SearchPopupWidthSpringStep widthStep = SearchPopupSurfacePolicy.StepWidthSpring(
+            _widthSpringCurrentLogical,
+            _widthSpringVelocity,
+            _widthMorphTargetLogical,
+            dtSeconds,
+            _widthSpringExpanding);
+
+        SearchPopupHeightSpringStep heightStep = SearchPopupSurfacePolicy.StepHeightSpring(
+            _heightSpringCurrentLogical,
+            _heightSpringVelocity,
+            _heightMorphTargetLogical,
+            dtSeconds,
+            _heightSpringExpanding);
+
+        _widthSpringCurrentLogical = widthStep.Width;
+        _widthSpringVelocity = widthStep.Velocity;
+        _heightSpringCurrentLogical = heightStep.Height;
+        _heightSpringVelocity = heightStep.Velocity;
+
+        if (widthStep.IsSettled && heightStep.IsSettled)
+        {
+            SnapMorphBoundsToTarget(
+                _widthMorphTargetLogical,
+                _heightMorphTargetLogical,
+                _heightMorphPendingBounds,
+                syncMinHeight: true);
+            return;
+        }
+
+        if (Math.Abs(RootGrid.Width - widthStep.Width) > 0.001)
+        {
+            RootGrid.Width = widthStep.Width;
+        }
+
+        if (Math.Abs(RootGrid.Height - heightStep.Height) > 0.001)
+        {
+            RootGrid.Height = heightStep.Height;
+        }
+
+        int frameX = widthStep.IsSettled
+            ? _heightMorphPendingBounds.X
+            : SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
+                _morphWorkAreaPhysical,
+                _morphDpiScale,
+                widthStep.Width,
+                _morphCustomX,
+                _morphCustomY);
+        if (frameX != _lastMorphWindowX)
+        {
+            _lastMorphWindowX = frameX;
+            _ = Win32Helper.SetWindowPos(
+                _hwnd,
+                IntPtr.Zero,
+                frameX,
+                _heightMorphPendingBounds.Y,
+                0,
+                0,
+                Win32Helper.SWP_NOSIZE |
+                Win32Helper.SWP_NOZORDER |
+                Win32Helper.SWP_NOACTIVATE |
+                Win32Helper.SWP_NOCOPYBITS);
+        }
+
+        ApplyDetailsSplitWidthForPopupWidth(widthStep.Width, isSettled: widthStep.IsSettled);
+    }
+
+    private void StopHeightMorphTimer()
+    {
+        if (_morphAnimationRegistration is { } registration)
+        {
+            _morphAnimationRegistration = null;
+            try { registration.Dispose(); } catch { }
+        }
+
+        _heightSpringVelocity = 0;
+        _widthSpringVelocity = 0;
+        _heightSpringLastTimestamp = 0;
+    }
+
+    private void SnapHeightMorphToTarget()
+    {
+        if (!IsMorphSpringRunning || _appWindow is null)
+        {
+            return;
+        }
+
+        SnapMorphBoundsToTarget(
+            _widthMorphTargetLogical,
+            _heightMorphTargetLogical,
+            _heightMorphPendingBounds,
+            syncMinHeight: true);
+    }
+
+    private void SnapMorphBoundsToTarget(
+        double targetLogicalWidth,
+        double targetLogicalHeight,
+        RectInt32 targetBounds,
+        bool syncMinHeight = false)
+    {
+        StopHeightMorphTimer();
+        _widthSpringCurrentLogical = targetLogicalWidth;
+        _heightSpringCurrentLogical = targetLogicalHeight;
+        RootGrid.HorizontalAlignment = HorizontalAlignment.Left;
+        RootGrid.Width = targetLogicalWidth;
+        RootGrid.Height = targetLogicalHeight;
+        _lastMorphWindowX = targetBounds.X;
+        ApplyDetailsSplitWidthForPopupWidth(targetLogicalWidth, isSettled: true);
+        if (syncMinHeight)
+        {
+            SyncResultsSurfaceMinHeight();
+        }
+
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        PointInt32 pos = _appWindow.Position;
+        SizeInt32 size = _appWindow.Size;
+        if (pos.X != targetBounds.X ||
+            pos.Y != targetBounds.Y ||
+            size.Width != targetBounds.Width ||
+            size.Height != targetBounds.Height)
+        {
+            _appWindow.MoveAndResize(targetBounds);
+        }
+    }
+
+    private void SearchTextBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (SearchRecommendationLayoutEngine.FindVisualChild<Button>(SearchTextBox, "DeleteButton") is { } nativeDeleteButton)
+        {
+            nativeDeleteButton.MaxWidth = 0;
+            nativeDeleteButton.MaxHeight = 0;
+            nativeDeleteButton.Opacity = 0;
+            nativeDeleteButton.IsHitTestVisible = false;
+        }
+    }
+
+    private void ClearQueryButton_Click(object sender, RoutedEventArgs e)
+    {
+        _searchDebounceTimer?.Stop();
+        _suppressScopeLatchTextChange = true;
+        try
+        {
+            SearchTextBox.Text = string.Empty;
+        }
+        finally
+        {
+            _suppressScopeLatchTextChange = false;
+        }
+
+        ClearQueryButton.Visibility = Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(_viewModel.HotkeyHint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateScopePrefixBadge(string.Empty);
+        if (_latchedInlineScope != SearchInlineScope.None)
+        {
+            _viewModel.Query = GetEffectivePopupQuery();
+        }
+        else
+        {
+            _viewModel.ClearSearch();
+        }
+        UpdatePanelVisibility();
+        SearchTextBox.Focus(FocusState.Programmatic);
     }
 
     private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (_suppressScopeLatchTextChange)
+        {
+            return;
+        }
+
+        TryLatchInlineScopeFromInput(SearchTextBox.Text);
+
         // Typing a new query clears any recommended-app selection so that
         // Space/arrow keys switch back to result-list navigation.
-        ClearRecommendedAppSelection();
+        RecommendedAppsGrid.ClearSelection();
         _isNavigatingResults = false;
         ClearMultiSelection();
         bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
-        HotkeyHintBadge.Visibility = hasText
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        if (HasActiveSearchOrScope)
+        {
+            RecommendedAppsGrid.DisableEditMode();
+            RecommendedAppsGrid.CancelDrag();
+            RecommendationOverlays.CloseOverlays(immediate: true);
+        }
+        ClearQueryButton.Visibility = hasText
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = !hasText &&
+                                     _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(_viewModel.HotkeyHint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateScopePrefixBadge(SearchTextBox.Text);
+
+        // When the input becomes empty outside active CJK IME preedit composition,
+        // cancel any in-flight Everything IPC search immediately and return directly
+        // to recommendations so a 30-80ms query cannot land during a 35ms debounce
+        // and bounce Recommendation -> Search Results -> Recommendation.
+        if (!HasActiveSearchOrScope)
+        {
+            _viewModel.CancelPendingSearch();
+            if (!DeskBox.Helpers.ImeCompositionGuard.IsActivelyComposing(SearchTextBox))
+            {
+                _searchDebounceTimer?.Stop();
+                _viewModel.ClearSearch();
+                UpdatePanelVisibility();
+                return;
+            }
+        }
 
         // Keep only a short coalescing window. Native queries are cancellable and the
         // resident catalog is the sole file provider, so a long visual debounce is
@@ -1784,36 +2884,80 @@ public sealed partial class SearchPopupWindow : Window
 
     private void SearchTextBox_GotFocus(object sender, RoutedEventArgs e)
     {
-        HotkeyHintBadge.Opacity = 0.45;
-        // Focus is an input state, so the ring follows the inline-rename
-        // precedent and stays neutral.
-        SearchBoxBorder.BorderBrush = new SolidColorBrush(
-            NeutralInteractionBrush.Line(SearchBoxBorder));
+        HotkeyHintBadge.Opacity = 0.50;
+        ApplySearchInputWellVisuals();
     }
 
     private void SearchTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
-        HotkeyHintBadge.Opacity = 1;
-        SearchBoxBorder.BorderBrush =
-            ResolveThemeBrush("ControlStrokeColorDefaultBrush");
+        HotkeyHintBadge.Opacity = 0.68;
+        ApplySearchInputWellVisuals();
     }
 
     private void OnSearchDebounceTick(object? sender, object e)
     {
         _searchDebounceTimer?.Stop();
-        _viewModel.Query = SearchTextBox.Text;
+        string effectiveQuery = GetEffectivePopupQuery();
+        if (string.IsNullOrEmpty(effectiveQuery) && _latchedInlineScope == SearchInlineScope.None)
+        {
+            _viewModel.ClearSearch();
+        }
+        else
+        {
+            _viewModel.Query = effectiveQuery;
+        }
         UpdatePanelVisibility();
     }
 
     private void SearchTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
-                if (!string.IsNullOrEmpty(SearchTextBox.Text))
+                if (RecommendationOverlays.IsEditingFolderTitle)
+                {
+                    RecommendationOverlays.CancelTitleEdit();
+                }
+                else if (RecommendationOverlays.IsAnyOverlayOpen)
+                {
+                    RecommendationOverlays.CloseOverlays();
+                }
+                else if (RecommendedAppsGrid.IsEditMode)
+                {
+                    if (RecommendedAppsGrid.MultiSelectedCount > 0)
+                    {
+                        RecommendedAppsGrid.ClearEditMultiSelection();
+                    }
+                    else
+                    {
+                        RecommendedAppsGrid.DisableEditMode();
+                    }
+                }
+                else if (_multiSelectedItems.Count > 0)
+                {
+                    ClearMultiSelection();
+                }
+                else if (!string.IsNullOrEmpty(SearchTextBox.Text))
                 {
                     SearchTextBox.Text = string.Empty;
-                    _viewModel.ClearSearch();
+                    if (_latchedInlineScope != SearchInlineScope.None)
+                    {
+                        _viewModel.Query = GetEffectivePopupQuery();
+                        UpdatePanelVisibility();
+                    }
+                    else
+                    {
+                        _viewModel.ClearSearch();
+                    }
+                }
+                else if (_latchedInlineScope != SearchInlineScope.None)
+                {
+                    ExitLatchedScope();
                 }
                 else
                 {
@@ -1831,9 +2975,23 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Enter:
+                if (RecommendationOverlays.IsAnyOverlayOpen)
+                {
+                    e.Handled = true;
+                    break;
+                }
+
                 bool controlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+                if (!HasActiveSearchOrScope &&
+                    RecommendedAppsGrid.IsAppsPanelVisible &&
+                    RecommendedAppsGrid.HandleEnterKey(controlPressed))
+                {
+                    e.Handled = true;
+                    break;
+                }
+
                 bool executed = controlPressed
-                    ? _viewModel.OpenSelectedLocation()
+                    ? ExecuteSecondaryCommandForSelectedItem()
                     : _viewModel.ExecuteSelectedItem();
                 if (executed)
                 {
@@ -1883,6 +3041,10 @@ public sealed partial class SearchPopupWindow : Window
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
+                if (_multiSelectedItems.Count > 0)
+                {
+                    ClearMultiSelection();
+                }
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 break;
@@ -1897,7 +3059,7 @@ public sealed partial class SearchPopupWindow : Window
 
             case Windows.System.VirtualKey.Enter:
                 bool opened = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
-                    ? _viewModel.OpenSelectedLocation()
+                    ? ExecuteSecondaryCommandForSelectedItem()
                     : _viewModel.ExecuteSelectedItem();
                 if (opened)
                 {
@@ -1993,486 +3155,77 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.InvokeAction("open-settings");
     }
 
-    // ── Recommended apps: single-click select, double-click open, keyboard nav ──
+    // ── Recommended apps: Win11 Start Menu single-click open, drag reorder, folder grouping & batch edit mode ──
 
-    private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private void EditRecommendationsButton_Click(object sender, RoutedEventArgs e)
     {
-        // Marking the press handled here would suppress the DoubleTapped
-        // gesture, so the card could never be opened with the mouse.
-        if (sender is Grid card && card.DataContext is SearchResultItem item)
+        if (RecommendationOverlays.IsAnyOverlayOpen)
         {
-            SelectRecommendedApp(card, item);
+            RecommendationOverlays.CloseOverlays();
+        }
+
+        RecommendedAppsGrid.ToggleEditMode();
+    }
+
+    private void SyncEditRecommendationsButtonVisuals()
+    {
+        bool isEditMode = RecommendedAppsGrid.IsEditMode;
+        EditRecommendationsIcon.Glyph = isEditMode ? "\uE73E" : "\uE70F";
+        string label = _localizationService.T(
+            isEditMode
+                ? "Search.Recommend.EditDone"
+                : "Search.Recommend.Edit");
+        EditRecommendationsLabel.Text = label;
+        ToolTipService.SetToolTip(EditRecommendationsButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(EditRecommendationsButton, label);
+        EditRecommendationsButton.Background = SearchRecommendationLayoutEngine.ResolveThemeBrush(
+            RootGrid,
+            isEditMode
+                ? "ControlFillColorSecondaryBrush"
+                : "ControlFillColorDefaultBrush");
+        EditRecommendationsButton.BorderBrush = SearchRecommendationLayoutEngine.ResolveThemeBrush(
+            RootGrid,
+            isEditMode
+                ? "ControlStrokeColorDefaultBrush"
+                : "CardStrokeColorDefaultBrush");
+    }
+
+    private void UpdateRecommendationEditStatusHint()
+    {
+        int selectedCount = RecommendedAppsGrid.MultiSelectedCount;
+        bool showHint = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                        RecommendedAppsGrid.IsAppsPanelVisible &&
+                        RecommendedAppsGrid.IsEditMode &&
+                        selectedCount > 0;
+        if (showHint)
+        {
+            string batchHideLabel = string.Format(
+                _localizationService.T("Search.Recommend.BatchHideFormat"),
+                selectedCount);
+            BatchHideSelectedLabel.Text = batchHideLabel;
+            ToolTipService.SetToolTip(BatchHideSelectedButton, batchHideLabel);
+            BatchHideSelectedButton.Visibility = Visibility.Visible;
+
+            StatusTextBlock.Text = string.Format(
+                _localizationService.T("Search.Recommend.EditSelectionHint"),
+                selectedCount);
+            StatusBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            BatchHideSelectedButton.Visibility = Visibility.Collapsed;
+            StatusBar.Visibility = Visibility.Collapsed;
         }
     }
 
-    private void RecommendedApp_PointerEntered(object sender, PointerRoutedEventArgs e)
+    private void BatchHideSelectedButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
-        {
-            card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
-        }
+        RecommendedAppsGrid.HideSelected();
     }
 
-    private void RecommendedApp_PointerExited(object sender, PointerRoutedEventArgs e)
+    private void HiddenAppsEntryButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
-        {
-            card.Background = null;
-        }
-    }
-
-    private void RecommendedApp_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        if (sender is Grid { DataContext: SearchResultItem item })
-        {
-            _viewModel.ExecuteItem(item);
-        }
-        e.Handled = true;
-    }
-
-    /// <summary>
-    /// Handles keyboard navigation for the recommended-apps panel.
-    /// Called from RootGrid_KeyDown when the panel is visible.
-    /// Returns true if the key was consumed.
-    /// </summary>
-    private bool HandleRecommendedAppsKey(KeyRoutedEventArgs e)
-    {
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || itemsSource.Count == 0) return false;
-
-        int count = itemsSource.Count;
-
-        switch (e.Key)
-        {
-            case Windows.System.VirtualKey.Left:
-            case Windows.System.VirtualKey.Right:
-            case Windows.System.VirtualKey.Up:
-            case Windows.System.VirtualKey.Down:
-                if (_selectedAppIndex < 0)
-                {
-                    SelectRecommendedAppByIndex(0);
-                }
-                else
-                {
-                    int columns = Math.Max(1,
-                        (int)Math.Floor((double)RecommendedAppsPanel.ActualWidth / 110));
-                    int newIndex = e.Key switch
-                    {
-                        Windows.System.VirtualKey.Left => Math.Max(0, _selectedAppIndex - 1),
-                        Windows.System.VirtualKey.Right => Math.Min(count - 1, _selectedAppIndex + 1),
-                        Windows.System.VirtualKey.Up => Math.Max(0, _selectedAppIndex - columns),
-                        Windows.System.VirtualKey.Down => Math.Min(count - 1, _selectedAppIndex + columns),
-                        _ => _selectedAppIndex
-                    };
-                    if (newIndex != _selectedAppIndex && newIndex >= 0 && newIndex < count)
-                    {
-                        SelectRecommendedAppByIndex(newIndex);
-                    }
-                }
-                return true;
-
-            case Windows.System.VirtualKey.Enter:
-                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is SearchResultItem selected)
-                {
-                    _viewModel.ExecuteItem(selected);
-                    return true;
-                }
-                return false; // No selection → let Enter fall through to execute first result.
-
-            case Windows.System.VirtualKey.Space:
-                if (_selectedAppIndex >= 0)
-                {
-                    TryPreviewSelectedItem();
-                }
-                return true; // Always consume Space when panel is visible.
-        }
-        return false;
-    }
-
-    private void SelectRecommendedApp(Grid card, SearchResultItem item)
-    {
-        ClearRecommendedAppSelection();
-        _selectedAppCard = card;
-        card.Background = ResolveThemeBrush("ControlFillColorSecondaryBrush");
-
-        // Sync ViewModel selection for preview/action bar.
-        _viewModel.SelectedItem = item;
-
-        // Find the index for keyboard navigation.
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is not null)
-        {
-            _selectedAppIndex = itemsSource.IndexOf(item);
-        }
-    }
-
-    private void SelectRecommendedAppByIndex(int index)
-    {
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || index < 0 || index >= itemsSource.Count) return;
-
-        if (RecommendedAppsRepeater.TryGetElement(index) is Grid card &&
-            card.DataContext is SearchResultItem item)
-        {
-            SelectRecommendedApp(card, item);
-            card.StartBringIntoView();
-        }
-    }
-
-    private void ClearRecommendedAppSelection()
-    {
-        if (_selectedAppCard is not null)
-        {
-            _selectedAppCard.Background = null;
-            _selectedAppCard = null;
-        }
-        _selectedAppIndex = -1;
-    }
-
-    // ── Skeleton screen ─────────────────────────────────────────────────────────
-
-    private async Task ShowAppsSkeletonAfterDelayAsync(
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(250, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        if (!cancellationToken.IsCancellationRequested && IsPopupVisible)
-        {
-            DispatcherQueue.TryEnqueue(ShowAppsSkeleton);
-        }
-    }
-
-    private void ShowAppsSkeleton()
-    {
-        // Populate skeleton items to match the grid layout.
-        int count = Math.Max(8, _viewModel.CurrentResults.Count);
-        AppsSkeletonRepeater.ItemsSource = Enumerable.Range(0, count).Select(_ => new object()).ToList();
-        AppsSkeletonPanel.Visibility = Visibility.Visible;
-        RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-
-        var visual = ElementCompositionPreview.GetElementVisual(AppsSkeletonPanel);
-        visual.StopAnimation("Opacity");
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Opacity = 0.62f;
-            return;
-        }
-
-        var animation = visual.Compositor.CreateScalarKeyFrameAnimation();
-        animation.InsertKeyFrame(0, 0.42f);
-        animation.InsertKeyFrame(1, 0.7f);
-        animation.Duration = TimeSpan.FromMilliseconds(900);
-        animation.IterationBehavior =
-            Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-        animation.Direction =
-            Microsoft.UI.Composition.AnimationDirection.Alternate;
-        visual.StartAnimation("Opacity", animation);
-    }
-
-    private void HideAppsSkeleton()
-    {
-        ElementCompositionPreview
-            .GetElementVisual(AppsSkeletonPanel)
-            .StopAnimation("Opacity");
-        AppsSkeletonPanel.Visibility = Visibility.Collapsed;
-        AppsSkeletonPanel.Opacity = 1;
-    }
-
-    // ── Icon entrance animations ────────────────────────────────────────────────
-
-    /// <summary>
-    /// Plays the configured icon entrance animation on all realized app cards.
-    /// Each card's opacity is explicitly reset to 0 first, so re-entering the
-    /// home tab replays the animation cleanly instead of no-oping (Composition
-    /// animations only fire on the start, not on completion).
-    /// </summary>
-    private void AnimateAppIconsEntrance()
-    {
-        int style = _settingsService.Settings.SearchAppIconAnimation;
-        if (!AreSystemAnimationsEnabled())
-        {
-            int staticIndex = 0;
-            foreach (var _ in RecommendedAppsRepeater.ItemsSource as
-                         System.Collections.IEnumerable ?? Array.Empty<object>())
-            {
-                if (RecommendedAppsRepeater.TryGetElement(staticIndex)
-                    is FrameworkElement element)
-                {
-                    ElementCompositionPreview.GetElementVisual(element).Opacity = 1;
-                }
-                staticIndex++;
-            }
-            return;
-        }
-
-        // Signal pending entrance so that any cards realized AFTER this point
-        // (ItemsRepeater is virtualized; TryGetElement is null until the layout
-        // pass realizes them) are animated as soon as ElementPrepared fires.
-        _pendingEntranceStyle = style;
-
-        // Safety net: clear the pending flag shortly after the longest possible
-        // entrance window so a late/aborted realization can never leave a card
-        // stuck at opacity 0. Covers the worst-case stagger + duration.
-        _entranceGuardTimer?.Stop();
-        _entranceGuardTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(1200)
-        };
-        _entranceGuardTimer.Tick += OnEntranceGuardTick;
-        _entranceGuardTimer.Start();
-
-        // Animate any cards that are already realized right now.
-        int index = 0;
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
-            ?? Array.Empty<object>();
-
-        foreach (var _ in itemsSource)
-        {
-            if (RecommendedAppsRepeater.TryGetElement(index)
-                is FrameworkElement card)
-            {
-                AnimateSingleAppCard(card, index, style);
-            }
-            index++;
-        }
-    }
-
-    private void OnEntranceGuardTick(object? sender, object e)
-    {
-        _entranceGuardTimer?.Stop();
-        _entranceGuardTimer = null;
-        _pendingEntranceStyle = null;
-    }
-
-    private void AnimateSingleAppCard(FrameworkElement card, int index, int style)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(card);
-        if (visual is null) return;
-
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        var compositor = visual.Compositor;
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Opacity = 1;
-            visual.Scale = System.Numerics.Vector3.One;
-            visual.StopAnimation("Translation.Y");
-            return;
-        }
-
-        // WinUI deceleration curve.
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-
-        var spring = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.34f, 1.56f),
-            new System.Numerics.Vector2(0.64f, 1.0f));
-
-        int staggerMs = style switch
-        {
-            0 => 30,
-            1 => 30,
-            2 => 0,
-            3 => 30,
-            _ => 30
-        };
-        var delay = TimeSpan.FromMilliseconds(index * staggerMs);
-
-        var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
-        opacityAnim.InsertKeyFrame(0f, 0f);
-        opacityAnim.InsertKeyFrame(1f, 1f, decel);
-        opacityAnim.Duration = TimeSpan.FromMilliseconds(style switch
-        {
-            0 => 280,
-            1 => 320,
-            2 => 360,
-            3 => 260,
-            _ => 280
-        });
-        opacityAnim.DelayTime = delay;
-        visual.Opacity = 0f;
-        visual.StartAnimation("Opacity", opacityAnim);
-
-        // Anchor scale to the card's center so it grows in place. Prefer the
-        // visual's realized Size (post-layout); fall back to ActualWidth/Height
-        // when the element hasn't been measured yet (e.g. realized during load).
-        float cx = visual.Size.X > 0 ? visual.Size.X / 2 : (float)(card.ActualWidth > 0 ? card.ActualWidth : 46) / 2;
-        float cy = visual.Size.Y > 0 ? visual.Size.Y / 2 : (float)(card.ActualHeight > 0 ? card.ActualHeight : 92) / 2;
-        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0);
-
-        switch (style)
-        {
-            case 0:
-            {
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    350,
-                    decel,
-                    0.92f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    350,
-                    decel,
-                    0.92f,
-                    1.0f);
-                break;
-            }
-            case 1:
-            {
-                var translateAnim = compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, 18f);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(400);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    400,
-                    decel,
-                    0.95f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    400,
-                    decel,
-                    0.95f,
-                    1.0f);
-                break;
-            }
-            case 2:
-            {
-                int columns = ComputeRecommendedAppsColumnCount();
-                int column = columns <= 0 ? 0 : index % columns;
-                int row = columns <= 0 ? 0 : index / columns;
-                float startY =
-                    (column * 10f) + (Math.Min(row, 3) * 3f);
-
-                var translateAnim = compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, startY);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(450);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    450,
-                    decel,
-                    0.95f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    450,
-                    decel,
-                    0.95f,
-                    1.0f);
-                break;
-            }
-            case 3:
-            {
-                var scaleAnim =
-                    compositor.CreateScalarKeyFrameAnimation();
-                scaleAnim.InsertKeyFrame(0f, 0.92f);
-                scaleAnim.InsertKeyFrame(0.7f, 1.06f, spring);
-                scaleAnim.InsertKeyFrame(1f, 1.0f, decel);
-                scaleAnim.Duration = TimeSpan.FromMilliseconds(500);
-                scaleAnim.DelayTime = delay;
-                visual.StartAnimation("Scale.X", scaleAnim);
-                visual.StartAnimation("Scale.Y", scaleAnim);
-
-                var translateAnim =
-                    compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, 12f);
-                translateAnim.InsertKeyFrame(0.7f, -4f, spring);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(500);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-                break;
-            }
-        }
-    }
-
-    private static void StartScalarAnim(
-        Microsoft.UI.Composition.Compositor compositor,
-        Microsoft.UI.Composition.Visual visual,
-        string property,
-        TimeSpan delay,
-        int durationMs,
-        Microsoft.UI.Composition.CompositionEasingFunction easing,
-        float from,
-        float to)
-    {
-        var anim = compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(0f, from);
-        anim.InsertKeyFrame(1f, to, easing);
-        anim.Duration = TimeSpan.FromMilliseconds(durationMs);
-        anim.DelayTime = delay;
-        visual.StartAnimation(property, anim);
-    }
-
-    private int ComputeRecommendedAppsColumnCount()
-    {
-        double width = RecommendedAppsPanel.ActualWidth;
-        if (width <= 0)
-        {
-            return 1;
-        }
-        return Math.Max(1, (int)Math.Floor(width / 110));
-    }
-
-    private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
-        NeutralInteractionBrush.ResolveThemedResource(key, RootGrid);
-
-    private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        var item = FindDataContext<SearchResultItem>(e.OriginalSource as DependencyObject);
-        if (item is null)
-        {
-            return;
-        }
-
-        var anchor = (UIElement?)FindItemRow(e.OriginalSource as DependencyObject) ?? RecommendedAppsPanel;
-        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
-        e.Handled = true;
-    }
-
-    private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
-    {
-        // Icon loaded successfully.
-    }
-
-    private void OnAppIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)
-    {
-        // Icon failed to load — the glyph fallback handles this.
+        RecommendationOverlays.OpenHiddenApps();
     }
 
     private void OnLanguageChanged()
@@ -2507,1839 +3260,7 @@ public sealed partial class SearchPopupWindow : Window
         ClearMultiSelection();
     }
 
-    private void SyncResultFilterCombo()
-    {
-        int index = (int)_viewModel.ResultFilter;
-        if (ResultFilterComboBox.SelectedIndex != index)
-        {
-            // Assigning the same value the view model already holds would
-            // re-enter SelectionChanged without changing state.
-            ResultFilterComboBox.SelectedIndex = index;
-        }
-    }
-
-    // ── Sort headers ────────────────────────────────────────────────────────
-
-    private void SortNameHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Name);
-    }
-
-    private void SortTypeHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Type);
-    }
-
-    private void SortSizeHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Size);
-    }
-
-    private void SortDateHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Date);
-    }
-
-    private void ResultFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ResultFilterComboBox.SelectedItem is ComboBoxItem { Tag: string tag } &&
-            Enum.TryParse(tag, ignoreCase: true, out SearchResultFilter filter))
-        {
-            _viewModel.ResultFilter = filter;
-        }
-    }
-
-    private void UpdateSortHeaders()
-    {
-        var column = _viewModel.SortColumn;
-        bool ascending = _viewModel.SortAscending;
-        SetSortIndicator(SortNameDirection, SortNameLabel, column == ResultSortColumn.Name, ascending);
-        SetSortIndicator(SortTypeDirection, SortTypeLabel, column == ResultSortColumn.Type, ascending);
-        SetSortIndicator(SortSizeDirection, SortSizeLabel, column == ResultSortColumn.Size, ascending);
-        SetSortIndicator(SortDateDirection, SortDateLabel, column == ResultSortColumn.Date, ascending);
-    }
-
-    private static void SetSortIndicator(
-        FontIcon icon,
-        TextBlock label,
-        bool active,
-        bool ascending)
-    {
-        icon.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        icon.Glyph = ascending ? "\uE74A" : "\uE74B";
-        label.Foreground = NeutralInteractionBrush.ResolveThemedResource(
-            active
-                ? "TextFillColorPrimaryBrush"
-                : "TextFillColorSecondaryBrush",
-            label);
-    }
-
     // Result row interaction (hover, click, drag, and context menu).
-
-    private void ResultsPanel_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        var point = e.GetCurrentPoint(ResultsPanel);
-        var source = e.OriginalSource as DependencyObject;
-        var row = FindItemRow(source);
-        var item = ResolveResultItem(source);
-        _pressedItem = null;
-
-        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        bool isShiftPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
-        bool isLeft = point.Properties.IsLeftButtonPressed;
-
-        // Ctrl-click / Shift-click on a row: modify the multi-selection while
-        // keeping an explicit range anchor independent from keyboard focus.
-        if (item is not null && isLeft)
-        {
-            if (isCtrlPressed)
-            {
-                SelectResultItem(item, row);
-                _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-                ToggleMultiSelectionItem(item);
-                e.Handled = true;
-                return;
-            }
-
-            if (isShiftPressed)
-            {
-                int anchorIndex = _selectionAnchorIndex >= 0
-                    ? _selectionAnchorIndex
-                    : _viewModel.SelectedIndex;
-                if (anchorIndex >= 0)
-                {
-                    _selectionAnchorIndex = anchorIndex;
-                    RangeSelectItems(anchorIndex, item);
-                    e.Handled = true;
-                    return;
-                }
-            }
-        }
-
-        // Details-view rows are interactive across their complete width. Marquee
-        // selection starts only from actual empty result-surface space, never from
-        // a padding or inter-column gap inside a row.
-        if (SearchResultSelectionPolicy.ShouldStartRubberBand(
-                isLeft,
-                isOverResultRow: row is not null || item is not null,
-                isShiftPressed))
-        {
-            _pressedItem = null;
-            _dragCandidate = null;
-            _dragSourceRow = null;
-            StartRubberBand(e);
-            e.Handled = true;
-            return;
-        }
-
-        bool pointerIsOnDragHandle =
-            item is not null &&
-            row is not null &&
-            IsPointerOnIcon(source, row);
-        bool preserveSelectionForDrag =
-            item is not null &&
-            SearchResultSelectionPolicy.ShouldPreserveSelectionForDrag(
-                _multiSelectedItems.Contains(item),
-                _multiSelectedItems.Count,
-                pointerIsOnDragHandle);
-
-        if (item is not null && isLeft)
-        {
-            if (!preserveSelectionForDrag)
-            {
-                ClearMultiSelection();
-            }
-            SelectResultItem(item, row);
-            _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        }
-
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            _pressedItem = null;
-            _dragCandidate = null;
-            _dragSourceRow = null;
-            _dragOccurred = false;
-            return;
-        }
-
-        // Keep click-to-open independent from drag detection. Only the icon can
-        // start a drag, while every non-blank result cell keeps its click action.
-        _pressedItem = item;
-
-        // Drag is initiated only from the icon column, not the entire row —
-        // and never in an elevated process (see
-        // IsCurrentProcessElevatedForDrag). The icon keeps its click-open
-        // behavior either way.
-        if (item is not null && row is not null && pointerIsOnDragHandle &&
-            !IsCurrentProcessElevatedForDrag())
-        {
-            _dragCandidate = item;
-            _dragSourceRow = row;
-            _dragStartPoint = e.GetCurrentPoint(null).Position;
-        }
-        else
-        {
-            _dragCandidate = null;
-            _dragSourceRow = null;
-        }
-        _dragOccurred = false;
-    }
-
-    private async void ResultsPanel_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        // Update rubber-band selection if active.
-        if (_isRubberBanding)
-        {
-            _rubberBandPointerInViewport = e.GetCurrentPoint(ResultsPanel).Position;
-            UpdateRubberBand(e.GetCurrentPoint(ResultsSurface).Position);
-            e.Handled = true;
-            return;
-        }
-
-        if (_dragCandidate is null || _dragSourceRow is null || _dragOccurred ||
-            string.IsNullOrWhiteSpace(_dragCandidate.DetailPath))
-        {
-            return;
-        }
-
-        var current = e.GetCurrentPoint(null).Position;
-        double dx = current.X - _dragStartPoint.X;
-        double dy = current.Y - _dragStartPoint.Y;
-        if (Math.Sqrt(dx * dx + dy * dy) < 10)
-        {
-            return;
-        }
-
-        // Begin a drag operation carrying the file/folder payload.
-        _dragOccurred = true;
-        var item = _dragCandidate;
-        var row = _dragSourceRow;
-        IReadOnlyList<SearchResultItem> draggedItems =
-            SearchResultSelectionPolicy.ResolveDraggedItems(
-                item,
-                _viewModel.CurrentResults
-                    .Where(_multiSelectedItems.Contains)
-                    .ToList());
-        string[] draggedPaths = draggedItems
-            .Select(result => result.DetailPath)
-            .Where(path =>
-                !string.IsNullOrWhiteSpace(path) &&
-                (File.Exists(path) || Directory.Exists(path)))
-            .Select(path => path!)
-            .ToArray();
-        if (draggedPaths.Length != draggedItems.Count)
-        {
-            draggedItems = [item];
-            draggedPaths = [item.DetailPath!];
-        }
-
-        // The icon itself is the drag source, so the shell drag visual remains
-        // compact and the rest of the row never becomes a wide drag surface.
-        UIElement dragSource = FindIconDragSource(row) ?? row;
-
-        Windows.Foundation.TypedEventHandler<UIElement, DragStartingEventArgs> handler = null!;
-        handler = async (_, args) =>
-        {
-            var deferral = args.GetDeferral();
-            try
-            {
-                args.Data.Properties.Title = draggedPaths.Length == 1
-                    ? item.Title
-                    : draggedPaths.Length.ToString();
-                // AllowedOperations carries the capability set; keeping
-                // RequestedOperation at None means no preferred-operation
-                // flag reaches Explorer, which is what made Windows 10 show
-                // an operation picker on every drop. The payload is broker
-                // StorageItems (not the native Shell object), so Copy stays
-                // the ceiling — Move could authorize source deletion.
-                args.AllowedOperations = DataPackageOperation.Copy;
-                args.Data.RequestedOperation = DataPackageOperation.None;
-                if (draggedPaths.Length == 1)
-                {
-                    await SetDragPayloadAsync(args.Data, draggedPaths[0]);
-                }
-                else
-                {
-                    await SetDragPayloadAsync(args.Data, draggedPaths.ToList());
-                }
-            }
-            finally
-            {
-                deferral.Complete();
-                dragSource.DragStarting -= handler;
-            }
-        };
-        dragSource.DragStarting += handler;
-
-        try
-        {
-            await dragSource.StartDragAsync(e.GetCurrentPoint(dragSource));
-        }
-        finally
-        {
-            dragSource.DragStarting -= handler;
-            _dragCandidate = null;
-            _dragSourceRow = null;
-        }
-    }
-
-    /// <summary>
-    /// Returns the icon container within a result row. It is both the only drag
-    /// handle and the source of the compact system drag visual.
-    /// </summary>
-    private static UIElement? FindIconDragSource(SearchResultRowControl row)
-    {
-        return FindVisualChild<Grid>(row, "IconColumn");
-    }
-
-    /// <summary>
-    /// Recursively walks descendants of <paramref name="root"/> and returns the
-    /// first <typeparamref name="T"/> whose <see cref="FrameworkElement.Name"/>
-    /// equals <paramref name="childName"/>.
-    /// </summary>
-    private static T? FindVisualChild<T>(DependencyObject root, string childName)
-        where T : FrameworkElement
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is T fe && string.Equals(fe.Name, childName, StringComparison.Ordinal))
-            {
-                return fe;
-            }
-            var nested = FindVisualChild<T>(child, childName);
-            if (nested is not null)
-            {
-                return nested;
-            }
-        }
-        return null;
-    }
-
-    private void ResultsPanel_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        // Finalize rubber-band selection.
-        if (_isRubberBanding)
-        {
-            EndRubberBand();
-            e.Handled = true;
-            return;
-        }
-
-        // A normal click selects the row in ResultsPanel_PointerPressed. Opening is
-        // intentionally reserved for DoubleTapped or Enter, matching Explorer and
-        // Everything and preventing the first click of a double-click from hiding
-        // the popup before the second click arrives.
-        _pressedItem = null;
-        _dragCandidate = null;
-        _dragSourceRow = null;
-        _dragOccurred = false;
-    }
-
-    private void ResultsPanel_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        var item = ResolveResultItem(e.OriginalSource as DependencyObject);
-        if (item is null)
-        {
-            return;
-        }
-
-        SelectResultItem(item, FindItemRow(e.OriginalSource as DependencyObject));
-        if (_viewModel.ExecuteItem(item))
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void SelectResultItem(SearchResultItem item, SearchResultRowControl? row = null)
-    {
-        int index = _viewModel.CurrentResults.IndexOf(item);
-        if (index >= 0)
-        {
-            _viewModel.SelectedIndex = index;
-        }
-
-        _viewModel.SelectedItem = item;
-        row ??= FindRowByDataContext(ResultsRepeater, item);
-        if (row is not null)
-        {
-            row.IsTabStop = true;
-            row.Focus(FocusState.Pointer);
-        }
-    }
-
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        switch (e.PropertyName)
-        {
-            case nameof(SearchPopupViewModel.SelectedItem):
-                UpdateSelectionHighlight();
-                UpdateSelectionActions();
-                break;
-
-            case nameof(SearchPopupViewModel.IsSearching):
-            case nameof(SearchPopupViewModel.HasResults):
-            case nameof(SearchPopupViewModel.HasCurrentResults):
-                UpdatePanelVisibility();
-                if (e.PropertyName == nameof(SearchPopupViewModel.HasResults) &&
-                    _viewModel.HasResults)
-                {
-                    if (_viewModel.IsApplyingBackgroundResultRefresh)
-                    {
-                        ResultsPanel.Opacity = 1;
-                    }
-                    else
-                    {
-                        AnimateResultsRefresh();
-                    }
-                }
-                break;
-
-            case nameof(SearchPopupViewModel.SelectedTab):
-                // Tab switches reconcile the results in place, which preserves
-                // the previous vertical offset; return to the top so the
-                // default first-row selection is visible where expected.
-                ResultsPanel.ChangeView(null, 0, null, disableAnimation: true);
-                _measuredResultRowHeight = null;
-                SyncTabSelection();
-                RefreshPreparedResultRows();
-                UpdatePanelVisibility();
-                // SelectedItem can remain the same object across All/File-style
-                // tabs, so its property notification is not guaranteed. Re-run
-                // selection synchronization explicitly, then repeat it after the
-                // ItemsRepeater has processed its collection changes.
-                UpdateSelectionHighlight();
-                QueueTabSelectionRefreshAndFocus();
-                break;
-
-            case nameof(SearchPopupViewModel.ResultFilter):
-                SyncResultFilterCombo();
-                break;
-
-            case nameof(SearchPopupViewModel.SortColumn):
-            case nameof(SearchPopupViewModel.SortAscending):
-                UpdateSortHeaders();
-                break;
-
-            case nameof(SearchPopupViewModel.StatusText):
-                // Result counts and timing remain diagnostic data, not persistent UI.
-                break;
-        }
-    }
-
-    private void QueueTabSelectionRefreshAndFocus()
-    {
-        int generation = ++_tabFocusRestoreGeneration;
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-        {
-            if (generation != _tabFocusRestoreGeneration || !IsPopupVisible)
-            {
-                return;
-            }
-
-            UpdateSelectionHighlight();
-
-            // SelectionChanged runs inside ListView pointer handling. Restoring
-            // focus synchronously can be overwritten when that pointer route
-            // finishes, so perform it on the next low-priority dispatcher pass.
-            SearchTextBox.Focus(FocusState.Programmatic);
-        });
-    }
-
-    /// <summary>
-    /// Highlights the row for the keyboard-selected result and brings it into view.
-    /// </summary>
-    private void UpdateSelectionHighlight()
-    {
-        ++_selectedRowHighlightGeneration;
-        if (_selectedRow is not null)
-        {
-            _selectedRow.IsSelected = false;
-            _selectedRow.IsTabStop = false;
-            _selectedRow = null;
-        }
-
-        if (_viewModel.SelectedItem is not { } selected)
-        {
-            return;
-        }
-
-        if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
-        {
-            SetSelectedRow(row);
-            EnsureSelectedRowVisible(row);
-        }
-        else if (_viewModel.SelectedIndex >= 0)
-        {
-            // Element not realized (off-screen). Scroll the ScrollViewer
-            // so the ItemsRepeater realizes it, then keep retrying the
-            // highlight — realization completes asynchronously.
-            ScrollToSelectedIndex();
-            ScheduleSelectedRowHighlight();
-        }
-    }
-
-    private void EnsureSelectedRowVisible(SearchResultRowControl row)
-    {
-        // Use the row's real viewport-relative position: arithmetic from a
-        // cached row height drifts once heights vary or virtualization
-        // realizes past the viewport, which made navigation skip rows.
-        Windows.Foundation.Rect bounds = row.TransformToVisual(ResultsPanel)
-            .TransformBounds(new Windows.Foundation.Rect(0, 0, row.ActualWidth, row.ActualHeight));
-        double viewportHeight = ResultsPanel.ViewportHeight;
-
-        if (bounds.Y >= 0 && (bounds.Y + bounds.Height) <= viewportHeight)
-        {
-            // Fully visible: keyboard moves must not scroll the list.
-            return;
-        }
-
-        double scrollTarget = bounds.Y < 0
-            ? Math.Max(0, ResultsPanel.VerticalOffset + bounds.Y)
-            : ResultsPanel.VerticalOffset + bounds.Y + bounds.Height - viewportHeight;
-        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
-    }
-
-    private void SetSelectedRow(SearchResultRowControl row)
-    {
-        _selectedRow = row;
-        row.IsSelected = true;
-        row.IsTabStop = true;
-        _measuredResultRowHeight = row.ActualHeight > 0
-            ? row.ActualHeight + row.Margin.Top + row.Margin.Bottom
-            : _measuredResultRowHeight;
-    }
-
-    private void ScheduleSelectedRowHighlight()
-    {
-        int generation = ++_selectedRowHighlightGeneration;
-        App.UiDispatcherQueue?.TryEnqueue(async () =>
-        {
-            // Virtualization realizes the selected row a few frames after the
-            // scroll lands; retry until it appears or the selection moves on.
-            for (int attempt = 0; attempt < 8; attempt++)
-            {
-                await Task.Delay(24);
-                if (generation != _selectedRowHighlightGeneration ||
-                    _viewModel.SelectedItem is not { } selected)
-                {
-                    return;
-                }
-
-                if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
-                {
-                    if (_selectedRow is null)
-                    {
-                        SetSelectedRow(row);
-                    }
-
-                    EnsureSelectedRowVisible(row);
-
-                    return;
-                }
-            }
-        });
-    }
-
-    /// <summary>
-    /// Scrolls the results ScrollViewer to bring the selected index into view.
-    /// Used when the ItemsRepeater has not realized the element yet.
-    /// </summary>
-    private void ScrollToSelectedIndex()
-    {
-        int index = _viewModel.SelectedIndex;
-        if (index < 0)
-        {
-            return;
-        }
-
-        double rowHeight = GetMeasuredResultRowHeight();
-        double targetTop = index * rowHeight;
-        double targetBottom = targetTop + rowHeight;
-        double viewTop = ResultsPanel.VerticalOffset;
-        double viewBottom = viewTop + ResultsPanel.ViewportHeight;
-
-        if (targetTop >= viewTop && targetBottom <= viewBottom)
-        {
-            // Already inside the viewport: scrolling would make the list jump.
-            // Realization is handled by the highlight retry.
-            return;
-        }
-
-        // Selection moves one row at a time, so align the row's edge with the
-        // matching viewport edge — exactly one row of travel per keypress.
-        double scrollTarget = targetTop < viewTop
-            ? Math.Max(0, targetTop)
-            : targetBottom - ResultsPanel.ViewportHeight;
-
-        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
-    }
-
-    private double GetMeasuredResultRowHeight()
-    {
-        if (_measuredResultRowHeight is { } cached && cached > 0)
-        {
-            return cached;
-        }
-
-        if (ResultsRepeater.ItemsSource is System.Collections.ICollection coll)
-        {
-            for (int i = 0; i < Math.Min(coll.Count, 5); i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is FrameworkElement fe && fe.ActualHeight > 0)
-                {
-                    double measured = fe.ActualHeight + fe.Margin.Top + fe.Margin.Bottom;
-                    _measuredResultRowHeight = measured;
-                    return measured;
-                }
-            }
-        }
-
-        return 48; // Fallback estimate
-    }
-
-    /// <summary>
-    /// Freshly populated results are realized one layout pass after the collection
-    /// changes, so a selection made before that finds no row. Re-apply the highlight
-    /// and the lazy icon visuals as each row element is prepared.
-    /// </summary>
-    private void OnResultsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        if (args.Element is not SearchResultRowControl row)
-        {
-            return;
-        }
-
-        // ElementPrepared can run before the DataTemplate root receives its inherited
-        // DataContext. Resolve the item from the repeater index so the one-time compiled
-        // bindings never get refreshed against a transient null value. The DataContext
-        // fallback keeps this safe if the source changes while an element is recycled.
-        SearchResultItem? preparedItem = args.Index >= 0 &&
-                                         args.Index < _viewModel.CurrentResults.Count
-            ? _viewModel.CurrentResults[args.Index]
-            : row.DataContext as SearchResultItem;
-        row.PrepareItem(preparedItem);
-
-        // Lazy shell icon: show the real icon once resolved, otherwise the glyph block.
-        // Recycled rows can be re-bound to the same item instance (no DataContextChanged),
-        // so this must run on every prepare.
-        row.RefreshIconVisuals();
-        row.SetFileColumnsVisible(_viewModel.SelectedTab?.SupportsFileSort == true);
-        if (row.Item is { IconResolved: false } item)
-        {
-            _ = EnrichPreparedResultRowAsync(row, item);
-        }
-
-        bool isSelectedRow = _viewModel.SelectedItem is { } selected &&
-                             ReferenceEquals(row.Item, selected);
-        if (isSelectedRow && !ReferenceEquals(row, _selectedRow))
-        {
-            if (_selectedRow is not null)
-            {
-                _selectedRow.IsSelected = false;
-            }
-
-            _selectedRow = row;
-            row.IsSelected = true;
-            row.IsTabStop = true;
-        }
-        else if (!isSelectedRow && row.IsSelected)
-        {
-            // A recycled element may still carry stale selection visuals.
-            row.IsSelected = false;
-            row.IsTabStop = false;
-        }
-
-        // Sync multi-selection state on recycled elements.
-        row.IsMultiSelected = row.Item is { } rowItem && _multiSelectedItems.Contains(rowItem);
-    }
-
-    private async Task EnrichPreparedResultRowAsync(
-        SearchResultRowControl row,
-        SearchResultItem item)
-    {
-        await _viewModel.EnsureResultMetadataAsync(item);
-        if (!DispatcherQueue.HasThreadAccess)
-        {
-            DispatcherQueue.TryEnqueue(() => RefreshPreparedResultRow(row, item));
-            return;
-        }
-
-        RefreshPreparedResultRow(row, item);
-    }
-
-    private static void RefreshPreparedResultRow(
-        SearchResultRowControl row,
-        SearchResultItem item)
-    {
-        if (ReferenceEquals(row.Item, item))
-        {
-            row.RefreshIconVisuals();
-        }
-    }
-
-    private void ResultsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        _dragCandidate = null;
-        _dragSourceRow = null;
-        _dragOccurred = false;
-
-        var item = ResolveResultItem(e.OriginalSource as DependencyObject);
-        if (item is null)
-        {
-            // Right-click on empty area with multi-selection: show batch context menu.
-            if (_multiSelectedItems.Count > 0)
-            {
-                ShowBatchResultFlyout(ResultsPanel, e.GetPosition(ResultsPanel));
-            }
-            return;
-        }
-
-        // If the right-clicked item is already in multi-selection, show batch menu.
-        if (_multiSelectedItems.Contains(item))
-        {
-            var batchAnchor = FindItemRow(e.OriginalSource as DependencyObject)
-                              as UIElement ?? ResultsPanel;
-            ShowBatchResultFlyout(batchAnchor, e.GetPosition(batchAnchor));
-            e.Handled = true;
-            return;
-        }
-
-        ClearMultiSelection();
-        var row = FindItemRow(e.OriginalSource as DependencyObject);
-        SelectResultItem(item, row);
-        _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        var anchor = (UIElement?)row ?? ResultsPanel;
-        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
-        e.Handled = true;
-    }
-
-    // ── Icon-only drag detection ──
-
-    /// <summary>
-    /// Checks whether the pointer press originated within the icon column of the row.
-    /// </summary>
-    private static bool IsPointerOnIcon(DependencyObject? element, SearchResultRowControl row)
-    {
-        while (element is not null)
-        {
-            if (element is FrameworkElement { Name: "IconColumn" })
-            {
-                return true;
-            }
-            if (ReferenceEquals(element, row))
-            {
-                return false;
-            }
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-        return false;
-    }
-
-    // ── Rubber-band multi-selection ──
-
-    private void StartRubberBand(PointerRoutedEventArgs e)
-    {
-        _isRubberBanding = true;
-        bool isAdditive = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        _rubberBandBaseSelection.Clear();
-        if (isAdditive)
-        {
-            _rubberBandBaseSelection.UnionWith(_multiSelectedItems);
-        }
-        else
-        {
-            _multiSelectedItems.Clear();
-            _selectionAnchorIndex = -1;
-            SyncMultiSelectionVisuals();
-            UpdateSelectionActions();
-        }
-
-        var position = e.GetCurrentPoint(ResultsSurface).Position;
-        _rubberBandStart = position;
-        _rubberBandCurrent = position;
-        _rubberBandPointerInViewport = e.GetCurrentPoint(ResultsPanel).Position;
-        RubberBandRect.Visibility = Visibility.Visible;
-        UpdateRubberBandRect(position, position);
-        ResultsPanel.CapturePointer(e.Pointer);
-        EnsureRubberBandAutoScrollTimer();
-        _rubberBandAutoScrollTimer!.Start();
-    }
-
-    private void UpdateRubberBand(Point position)
-    {
-        _rubberBandCurrent = position;
-        UpdateRubberBandRect(_rubberBandStart, position);
-        SelectItemsIntersectingRubberBand(_rubberBandStart, position);
-    }
-
-    private void EndRubberBand()
-    {
-        _isRubberBanding = false;
-        _rubberBandAutoScrollTimer?.Stop();
-        _rubberBandBaseSelection.Clear();
-        RubberBandRect.Visibility = Visibility.Collapsed;
-        ResultsPanel.ReleasePointerCaptures();
-    }
-
-    private void ResultsPanel_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        if (!_isRubberBanding)
-        {
-            return;
-        }
-
-        _isRubberBanding = false;
-        _rubberBandAutoScrollTimer?.Stop();
-        _rubberBandBaseSelection.Clear();
-        RubberBandRect.Visibility = Visibility.Collapsed;
-    }
-
-    private void EnsureRubberBandAutoScrollTimer()
-    {
-        if (_rubberBandAutoScrollTimer is not null)
-        {
-            return;
-        }
-
-        _rubberBandAutoScrollTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(32)
-        };
-        _rubberBandAutoScrollTimer.Tick += OnRubberBandAutoScrollTick;
-    }
-
-    private void OnRubberBandAutoScrollTick(object? sender, object e)
-    {
-        if (!_isRubberBanding)
-        {
-            _rubberBandAutoScrollTimer?.Stop();
-            return;
-        }
-
-        double delta = SearchResultSelectionPolicy.GetAutoScrollDelta(
-            _rubberBandPointerInViewport.Y,
-            ResultsPanel.ViewportHeight);
-        if (Math.Abs(delta) < 0.1)
-        {
-            return;
-        }
-
-        double previousOffset = ResultsPanel.VerticalOffset;
-        double targetOffset = Math.Clamp(
-            previousOffset + delta,
-            0,
-            ResultsPanel.ScrollableHeight);
-        if (Math.Abs(targetOffset - previousOffset) < 0.1)
-        {
-            return;
-        }
-
-        ResultsPanel.ChangeView(
-            null,
-            targetOffset,
-            null,
-            disableAnimation: true);
-        _rubberBandCurrent = new Point(
-            _rubberBandCurrent.X,
-            _rubberBandCurrent.Y + targetOffset - previousOffset);
-        UpdateRubberBand(_rubberBandCurrent);
-    }
-
-    private void ResultsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        // Keep the transparent selection surface at least as tall as the viewport,
-        // so blank space below a short result list can also start a selection box.
-        ResultsSurface.MinHeight = Math.Max(
-            0,
-            e.NewSize.Height - ResultsPanel.Padding.Top - ResultsPanel.Padding.Bottom);
-    }
-
-    private void ResultsPanel_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
-    {
-        // The keyboard-selected row may finish realizing a frame after the
-        // scroll lands; re-check the highlight whenever the view settles.
-        if (_selectedRow is null && _viewModel.SelectedItem is not null)
-        {
-            ScheduleSelectedRowHighlight();
-        }
-
-        if (_isRubberBanding || !_viewModel.HasMoreResults || _viewModel.IsLoadingMore)
-        {
-            return;
-        }
-
-        double remaining = ResultsPanel.ScrollableHeight - ResultsPanel.VerticalOffset;
-        double threshold = Math.Max(320, ResultsPanel.ViewportHeight * 0.75);
-        if (remaining <= threshold)
-        {
-            _ = _viewModel.LoadMoreResultsAsync();
-        }
-    }
-
-    private void UpdateRubberBandRect(Point start, Point end)
-    {
-        double x = Math.Min(start.X, end.X);
-        double y = Math.Min(start.Y, end.Y);
-        double w = Math.Abs(end.X - start.X);
-        double h = Math.Abs(end.Y - start.Y);
-        RubberBandRect.Width = w;
-        RubberBandRect.Height = h;
-        // Pointer, rows, and rectangle all use ResultsSurface coordinates. This
-        // stays correct across scrolling and avoids hard-coded padding offsets.
-        RubberBandRect.RenderTransform = new TranslateTransform { X = x, Y = y };
-    }
-
-    private static bool Intersects(Rect a, Rect b)
-    {
-        return a.X < b.X + b.Width &&
-               a.X + a.Width > b.X &&
-               a.Y < b.Y + b.Height &&
-               a.Y + a.Height > b.Y;
-    }
-
-    private void SelectItemsIntersectingRubberBand(Point start, Point end)
-    {
-        var rubberRect = new Rect(
-            Math.Min(start.X, end.X),
-            Math.Min(start.Y, end.Y),
-            Math.Abs(end.X - start.X),
-            Math.Abs(end.Y - start.Y));
-
-        // If the rubber band is too small, don't select anything yet.
-        if (rubberRect.Width < 3 && rubberRect.Height < 3)
-        {
-            return;
-        }
-
-        _suppressMultiSelectSync = true;
-        _multiSelectedItems.Clear();
-        _multiSelectedItems.UnionWith(_rubberBandBaseSelection);
-
-        if (_viewModel.CurrentResults is { } results)
-        {
-            for (int i = 0; i < results.Count; i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is not FrameworkElement fe)
-                {
-                    continue;
-                }
-
-                var elementRect = new Rect(
-                    fe.TransformToVisual(ResultsSurface).TransformPoint(new Point(0, 0)),
-                    new Size(fe.ActualWidth, fe.ActualHeight));
-
-                if (Intersects(rubberRect, elementRect))
-                {
-                    _multiSelectedItems.Add(results[i]);
-                }
-            }
-        }
-
-        _suppressMultiSelectSync = false;
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    // ── Multi-selection helpers ──
-
-    private void ToggleMultiSelectionItem(SearchResultItem item)
-    {
-        if (!_multiSelectedItems.Add(item))
-        {
-            _multiSelectedItems.Remove(item);
-        }
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void RangeSelectItems(int fromIndex, SearchResultItem toItem)
-    {
-        int toIndex = _viewModel.CurrentResults.IndexOf(toItem);
-        var range = SearchResultSelectionPolicy.GetRange(
-            fromIndex,
-            toIndex,
-            _viewModel.CurrentResults.Count);
-        if (range.Start < 0)
-        {
-            return;
-        }
-
-        _multiSelectedItems.Clear();
-        for (int i = range.Start; i <= range.End; i++)
-        {
-            _multiSelectedItems.Add(_viewModel.CurrentResults[i]);
-        }
-
-        SelectResultItem(toItem);
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void ClearMultiSelection()
-    {
-        _selectionAnchorIndex = -1;
-        if (_multiSelectedItems.Count == 0)
-        {
-            return;
-        }
-        _multiSelectedItems.Clear();
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void SyncMultiSelectionVisuals()
-    {
-        if (_suppressMultiSelectSync)
-        {
-            return;
-        }
-
-        if (_viewModel.CurrentResults is { } results)
-        {
-            for (int i = 0; i < results.Count; i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is SearchResultRowControl row)
-                {
-                    row.IsMultiSelected = _multiSelectedItems.Contains(results[i]);
-                }
-            }
-        }
-    }
-
-    // ── Batch operations ──
-
-    private void ShowBatchResultFlyout(UIElement anchor, Point point)
-    {
-        var flyout = BuildBatchContextMenu();
-        if (flyout.Items.Count == 0)
-        {
-            return;
-        }
-        _restoreResultFocusAfterFlyout = true;
-        flyout.Closed += (_, _) => _restoreResultFocusAfterFlyout = false;
-        flyout.ShowAt(anchor, point);
-    }
-
-    private MenuFlyout BuildBatchContextMenu()
-    {
-        var flyout = new MenuFlyout();
-        int count = _multiSelectedItems.Count;
-        bool allFileSystem = count > 0 && _multiSelectedItems.All(i =>
-            i.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-            !string.IsNullOrWhiteSpace(i.DetailPath) &&
-            (File.Exists(i.DetailPath) || Directory.Exists(i.DetailPath)));
-
-        if (!allFileSystem)
-        {
-            var openAll = new MenuFlyoutItem
-            {
-                Text = string.Format(_localizationService.T("Search.Batch.OpenAll"), count),
-                Icon = new FontIcon { Glyph = "\uE8E5" }
-            };
-            openAll.Click += (_, _) => _ = OpenSelectedItemsWithGuardAsync();
-            flyout.Items.Add(openAll);
-            return flyout;
-        }
-
-        var copyItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Copy"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyItem.Click += async (_, _) => await CopySelectedItemsAsync(DataPackageOperation.Copy);
-        flyout.Items.Add(copyItem);
-
-        var cutItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Cut"),
-            Icon = new FontIcon { Glyph = "\uE8C6" }
-        };
-        cutItem.Click += async (_, _) => await CopySelectedItemsAsync(DataPackageOperation.Move);
-        flyout.Items.Add(cutItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Delete.Action"),
-            Icon = new FontIcon { Glyph = "\uE74D" }
-        };
-        deleteItem.Click += async (_, _) => await DeleteSelectedItemsAsync();
-        flyout.Items.Add(deleteItem);
-
-        return flyout;
-    }
-
-    private void OpenSelectedItems()
-    {
-        foreach (var item in _multiSelectedItems.ToList())
-        {
-            _viewModel.ExecuteItem(item);
-        }
-        ClearMultiSelection();
-    }
-
-    private async Task OpenSelectedItemsWithGuardAsync()
-    {
-        // Deep review R18 (item C): the batch menu only appears for mixed
-        // selections, where "open all" launches N Shell operations one by
-        // one with no ceiling — a wide query's Ctrl+A could reach hundreds
-        // of items. Explorer confirms past 15; match that precedent.
-        var items = _multiSelectedItems.ToList();
-        const int OpenAllConfirmationThreshold = 15;
-        if (items.Count > OpenAllConfirmationThreshold)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = RootGrid.XamlRoot,
-                Title = _localizationService.Format("Search.Batch.OpenAll.ConfirmTitle", items.Count),
-                Content = _localizationService.Format("Search.Batch.OpenAll.ConfirmBody", items.Count),
-                PrimaryButtonText = _localizationService.T("Common.Open"),
-                CloseButtonText = _localizationService.T("Common.Cancel"),
-                DefaultButton = ContentDialogButton.Primary
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-        }
-
-        OpenSelectedItems();
-    }
-
-    private async Task CopySelectedItemsAsync(DataPackageOperation operation)
-    {
-        var paths = _multiSelectedItems
-            .Where(i => !string.IsNullOrWhiteSpace(i.DetailPath))
-            .Select(i => i.DetailPath!)
-            .ToList();
-        if (paths.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            var data = new DataPackage { RequestedOperation = operation };
-            await SetDragPayloadAsync(data, paths);
-            Clipboard.SetContent(data);
-            Clipboard.Flush();
-            ShowTransientStatus(_localizationService.T(
-                operation == DataPackageOperation.Move
-                    ? "Search.Action.CutReady"
-                    : "Search.Action.CopyReady"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Batch clipboard failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task DeleteSelectedItemsAsync()
-    {
-        var items = _multiSelectedItems
-            .Where(i => !string.IsNullOrWhiteSpace(i.DetailPath))
-            .ToList();
-        if (items.Count == 0)
-        {
-            return;
-        }
-
-        await DeleteFileSystemItemsCoreAsync(
-            items.Select(i => i.DetailPath!),
-            clearMultiSelectionOnSuccess: true);
-    }
-
-    /// <summary>
-    /// Deletes search-result entries through the Shell with an owner window,
-    /// so the native confirmation (recycle or permanent, per the user's own
-    /// Explorer settings) replaces the retired self-drawn dialog: that dialog
-    /// promised a Recycle Bin while the underlying flags silently degraded to
-    /// a permanent delete on volumes without one.
-    /// </summary>
-    private async Task DeleteFileSystemItemsCoreAsync(
-        IEnumerable<string> paths,
-        bool clearMultiSelectionOnSuccess)
-    {
-        var fileService = (App.Current as App)?.FileService;
-        if (fileService is null || _hwnd == IntPtr.Zero)
-        {
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-            return;
-        }
-
-        try
-        {
-            IReadOnlySet<string> deletedPaths = await fileService.DeleteEntriesWithShellAsync(
-                paths,
-                recycle: true,
-                _hwnd);
-            if (deletedPaths.Count > 0)
-            {
-                ShowTransientStatus(_localizationService.T("Search.Action.Deleted"));
-                if (clearMultiSelectionOnSuccess)
-                {
-                    ClearMultiSelection();
-                }
-            }
-
-            await RefreshResultsAfterFileOperationAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Delete failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async void CopySelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CopySelectedItemsAsync(DataPackageOperation.Copy);
-    }
-
-    private async void CutSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CopySelectedItemsAsync(DataPackageOperation.Move);
-    }
-
-    private async void DeleteSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await DeleteSelectedItemsAsync();
-    }
-
-    private void ShowResultFlyout(SearchResultItem item, UIElement anchor, Windows.Foundation.Point point)
-    {
-        var flyout = BuildResultContextMenu(item);
-        if (flyout.Items.Count == 0)
-        {
-            return;
-        }
-
-        _restoreResultFocusAfterFlyout = true;
-        flyout.Closed += (_, _) =>
-        {
-            if (_restoreResultFocusAfterFlyout && IsPopupVisible && _viewModel.SelectedItem is not null)
-            {
-                DispatcherQueue.TryEnqueue(() => FocusSelectedResult());
-            }
-
-            _restoreResultFocusAfterFlyout = false;
-        };
-        flyout.ShowAt(anchor, point);
-    }
-
-    /// <summary>
-    /// Builds a context menu of secondary actions for a search result row.
-    /// </summary>
-    private MenuFlyout BuildResultContextMenu(SearchResultItem item)
-    {
-        var flyout = new MenuFlyout();
-
-        var openItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.Open"),
-            Icon = new FontIcon { Glyph = "\uE8E5" }
-        };
-        openItem.Click += (_, _) =>
-        {
-            _viewModel.ExecuteItem(item);
-        };
-        flyout.Items.Add(openItem);
-
-        bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-                                !string.IsNullOrWhiteSpace(item.DetailPath) &&
-                                (File.Exists(item.DetailPath) || Directory.Exists(item.DetailPath));
-        if (!isFileSystemItem)
-        {
-            return flyout;
-        }
-
-        // Executables and administrator-requiring shortcuts keep the same
-        // entry point here as the grid items menu (#381, #228).
-        if (ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath!))
-        {
-            var runAsAdminItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Widget.RunAsAdministrator"),
-                Icon = new FontIcon { Glyph = "\uE7EF" }
-            };
-            runAsAdminItem.Click += (_, _) =>
-            {
-                ElevatedFileLaunchResult result =
-                    ElevatedFileLauncher.RunAsAdministrator(
-                        _hwnd,
-                        item.DetailPath!);
-                if (result.Status is not (ElevatedFileLaunchStatus.Launched
-                    or ElevatedFileLaunchStatus.Cancelled))
-                {
-                    ShowTransientStatus(_localizationService.T(
-                        result.Status ==
-                        ElevatedFileLaunchStatus.AlreadyRunningUnelevated
-                            ? "Widget.RunAsAdministrator.AlreadyRunning"
-                            : "Widget.Error.OperationIncomplete"));
-                }
-            };
-            flyout.Items.Add(runAsAdminItem);
-        }
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var cutItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Cut"),
-            Icon = new FontIcon { Glyph = "\uE8C6" }
-        };
-        cutItem.Click += async (_, _) => await CopyFileSystemItemAsync(item, DataPackageOperation.Move);
-        flyout.Items.Add(cutItem);
-
-        var copyItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Copy"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyItem.Click += async (_, _) => await CopyFileSystemItemAsync(item, DataPackageOperation.Copy);
-        flyout.Items.Add(copyItem);
-
-        var renameItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Rename"),
-            Icon = new FontIcon { Glyph = "\uE8AC" }
-        };
-        renameItem.Click += async (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            await RenameFileSystemItemAsync(item);
-        };
-        flyout.Items.Add(renameItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var copyPathItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.CopyPath"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyPathItem.Click += (_, _) => CopyPathToClipboard(item);
-        flyout.Items.Add(copyPathItem);
-
-        var openLocationItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.OpenLocation"),
-            Icon = new FontIcon { Glyph = "\uE838" }
-        };
-        openLocationItem.Click += (_, _) => Win32Helper.ShowInExplorer(item.DetailPath!);
-        flyout.Items.Add(openLocationItem);
-
-        var propertiesItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Properties"),
-            Icon = new FontIcon { Glyph = "\uE946" }
-        };
-        propertiesItem.Click += (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            ShowFileSystemItemProperties(item);
-        };
-        flyout.Items.Add(propertiesItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Delete.Action"),
-            Icon = new FontIcon { Glyph = "\uE74D" }
-        };
-        deleteItem.Click += async (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            await DeleteFileSystemItemAsync(item);
-        };
-        flyout.Items.Add(deleteItem);
-
-        return flyout;
-    }
-
-    private async Task CopyFileSystemItemAsync(SearchResultItem item, DataPackageOperation operation)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            var data = new DataPackage { RequestedOperation = operation };
-            await SetDragPayloadAsync(data, item.DetailPath);
-            Clipboard.SetContent(data);
-            Clipboard.Flush();
-            ShowTransientStatus(_localizationService.T(
-                operation == DataPackageOperation.Move
-                    ? "Search.Action.CutReady"
-                    : "Search.Action.CopyReady"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Clipboard operation failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task RenameFileSystemItemAsync(SearchResultItem item)
-    {
-        string path = item.DetailPath ?? string.Empty;
-        if (!File.Exists(path) && !Directory.Exists(path))
-        {
-            return;
-        }
-
-        var nameBox = new TextBox
-        {
-            Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
-            MinWidth = 320,
-            SelectionStart = 0
-        };
-        nameBox.SelectionLength = nameBox.Text.Length;
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = _localizationService.T("Search.Rename.Title"),
-            Content = nameBox,
-            PrimaryButtonText = _localizationService.T("Common.Rename"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        string newName = nameBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(newName) ||
-            newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            ShowTransientStatus(_localizationService.T("Search.Action.InvalidName"));
-            return;
-        }
-
-        string? parent = Path.GetDirectoryName(path.TrimEnd(
-            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (string.IsNullOrWhiteSpace(parent))
-        {
-            return;
-        }
-
-        string targetPath = Path.Combine(parent, newName);
-        if (string.Equals(path, targetPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
-            await Task.Run(() =>
-            {
-                if (File.Exists(path))
-                {
-                    File.Move(path, targetPath);
-                }
-                else
-                {
-                    Directory.Move(path, targetPath);
-                }
-            });
-            ShowTransientStatus(_localizationService.T("Search.Action.Renamed"));
-            await RefreshResultsAfterFileOperationAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Rename failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task DeleteFileSystemItemAsync(SearchResultItem item)
-    {
-        string path = item.DetailPath ?? string.Empty;
-        if (!File.Exists(path) && !Directory.Exists(path))
-        {
-            return;
-        }
-
-        await DeleteFileSystemItemsCoreAsync(
-            [path],
-            clearMultiSelectionOnSuccess: false);
-    }
-
-    private void ShowFileSystemItemProperties(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            if (!ShellContextMenuHelper.ShowProperties(_hwnd, item.DetailPath))
-            {
-                App.Log($"[SearchPopup] Properties failed for '{item.DetailPath}'.");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Properties failed: {ex.Message}");
-        }
-    }
-
-    private async Task RefreshResultsAfterFileOperationAsync()
-    {
-        await Task.Delay(120);
-        await _viewModel.RefreshSearchAsync();
-    }
-
-    private static bool CanAttachItem(SearchResultItem item) =>
-        item.Kind == SearchResultKind.File &&
-        !string.IsNullOrWhiteSpace(item.DetailPath) &&
-        File.Exists(item.DetailPath);
-
-    private static bool CanSaveItem(SearchResultItem item) => CanAttachItem(item);
-
-    private void TryPreviewSelectedItem()
-    {
-        var item = _viewModel.SelectedItem;
-        if (item is not null)
-        {
-            _ = PreviewItemAsync(item);
-        }
-    }
-
-    private async Task PreviewItemAsync(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        bool shown = await _spacePreviewService.TryToggleAsync(item.DetailPath);
-        if (!shown)
-        {
-            App.Log($"[SearchPopup] Space preview unavailable for '{item.DetailPath}'.");
-        }
-    }
-
-    private async Task AttachItemToTodoAsync(SearchResultItem item)
-    {
-        var actionService = (App.Current as App)?.SearchActionService;
-        if (actionService is null)
-        {
-            return;
-        }
-
-        bool ok = await actionService.AttachFileToTodoAsync(item.DetailPath);
-        ShowTransientStatus(_localizationService.T(
-            ok ? "Search.Action.AttachedToTodo" : "Search.Action.AttachFailed"));
-    }
-
-    private async Task SaveItemToNoteAsync(SearchResultItem item)
-    {
-        var actionService = (App.Current as App)?.SearchActionService;
-        if (actionService is null)
-        {
-            return;
-        }
-
-        bool ok = await actionService.SaveFileToNoteAsync(item.DetailPath);
-        ShowTransientStatus(_localizationService.T(
-            ok ? "Search.Action.SavedToNote" : "Search.Action.SaveFailed"));
-    }
-
-    private void CopyPathToClipboard(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(item.DetailPath);
-            Clipboard.SetContent(dataPackage);
-            ShowTransientStatus(_localizationService.T("Search.Action.PathCopied"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Failed to copy path: {ex.Message}");
-        }
-    }
-
-    // File-system clipboard and status helpers.
-
-    /// <summary>
-    /// Shows a transient status message in the footer, auto-hiding after a delay.
-    /// </summary>
-    private void ShowTransientStatus(string message)
-    {
-        SearchFeedbackPresenter.Show(new WidgetFeedbackRequest(
-            message,
-            WidgetFeedbackSeverity.Info,
-            "search-status"));
-    }
-
-    private void AnimateResultsRefresh()
-    {
-        if (!AreSystemAnimationsEnabled() ||
-            ResultsPanel.Visibility != Visibility.Visible)
-        {
-            ResultsPanel.Opacity = 1;
-            return;
-        }
-
-        var storyboard = new Storyboard();
-        var animation = new DoubleAnimation
-        {
-            From = 0.72,
-            To = 1,
-            Duration = TimeSpan.FromMilliseconds(83)
-        };
-        Storyboard.SetTarget(animation, ResultsPanel);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-        storyboard.Children.Add(animation);
-        storyboard.Begin();
-    }
-
-    /// <summary>
-    /// Populates the drag payload with the result's file or folder, falling back to
-    /// the raw path as text when the item cannot be resolved.
-    /// </summary>
-    private static async Task SetDragPayloadAsync(DataPackage data, string path)
-    {
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                var folder = await StorageFolder.GetFolderFromPathAsync(path);
-                data.SetStorageItems(new IStorageItem[] { folder });
-                return;
-            }
-
-            if (File.Exists(path))
-            {
-                var file = await StorageFile.GetFileFromPathAsync(path);
-                data.SetStorageItems(new IStorageItem[] { file });
-                return;
-            }
-        }
-        catch
-        {
-            // Fall through to a plain-text path payload.
-        }
-
-        data.SetText(path);
-    }
-
-    private static async Task SetDragPayloadAsync(DataPackage data, List<string> paths)
-    {
-        var items = new List<IStorageItem>();
-        var fallbackText = new StringBuilder();
-        foreach (var path in paths)
-        {
-            try
-            {
-                if (Directory.Exists(path))
-                {
-                    items.Add(await StorageFolder.GetFolderFromPathAsync(path));
-                }
-                else if (File.Exists(path))
-                {
-                    items.Add(await StorageFile.GetFileFromPathAsync(path));
-                }
-                else
-                {
-                    fallbackText.AppendLine(path);
-                }
-            }
-            catch
-            {
-                fallbackText.AppendLine(path);
-            }
-        }
-
-        if (items.Count > 0)
-        {
-            data.SetStorageItems(items);
-        }
-        if (fallbackText.Length > 0 && items.Count == 0)
-        {
-            data.SetText(fallbackText.ToString().TrimEnd());
-        }
-    }
-
-    private static SearchResultRowControl? FindItemRow(DependencyObject? element)
-    {
-        while (element is not null)
-        {
-            if (element is SearchResultRowControl row)
-            {
-                return row;
-            }
-
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-
-        return null;
-    }
-
-    private static SearchResultItem? ResolveResultItem(DependencyObject? element)
-    {
-        // ItemsRepeater can prepare a row before its inherited DataContext settles.
-        // The typed Item bridge is the authoritative projection in that window and
-        // remains correct when a row is recycled. DataContext is retained only for
-        // non-row surfaces such as recommendation buttons.
-        return FindItemRow(element)?.Item ?? FindDataContext<SearchResultItem>(element);
-    }
-
-    private static SearchResultRowControl? FindRowByDataContext(DependencyObject root, object data)
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is SearchResultRowControl row &&
-                (ReferenceEquals(row.Item, data) || ReferenceEquals(row.DataContext, data)))
-            {
-                return row;
-            }
-
-            if (FindRowByDataContext(child, data) is { } found)
-            {
-                return found;
-            }
-        }
-
-        return null;
-    }
-
-    private static T? FindDataContext<T>(DependencyObject? element) where T : class
-    {
-        while (element is not null)
-        {
-            if (element is FrameworkElement { DataContext: T data })
-            {
-                return data;
-            }
-
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-
-        return null;
-    }
-
-    private void OnViewModelActionRequested(object? sender, string actionId)
-    {
-        HidePopup();
-        ActionRequested?.Invoke(this, actionId);
-    }
-
-    private void RefreshPreparedResultRows()
-    {
-        RefreshPreparedResultRows(ResultsRepeater);
-    }
-
-    private void RefreshPreparedResultRows(DependencyObject root)
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int index = 0; index < count; index++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
-            if (child is SearchResultRowControl row)
-            {
-                row.SetFileColumnsVisible(_viewModel.SelectedTab?.SupportsFileSort == true);
-            }
-
-            RefreshPreparedResultRows(child);
-        }
-    }
-
-    private void UpdateSelectionActions()
-    {
-        var item = _viewModel.SelectedItem;
-        bool hasMulti = _multiSelectedItems.Count > 0;
-        bool show = (item is not null || hasMulti) &&
-                    ResultsPanel.Visibility == Visibility.Visible &&
-                    StatusBar.Visibility != Visibility.Visible;
-        SelectionActionBar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (!show)
-        {
-            return;
-        }
-
-        // Batch action buttons only visible when multiple items are selected.
-        CopySelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
-        CutSelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
-        DeleteSelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
-
-        if (hasMulti)
-        {
-            CopySelectedLabel.Text = _localizationService.T("Common.Copy");
-            CutSelectedLabel.Text = _localizationService.T("Common.Cut");
-            DeleteSelectedLabel.Text = _localizationService.T("Search.Delete.Action");
-            OpenSelectedButton.Visibility = Visibility.Collapsed;
-            OpenLocationButton.Visibility = Visibility.Collapsed;
-            AttachSelectedButton.Visibility = Visibility.Collapsed;
-            SaveSelectedButton.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (item is null)
-        {
-            return;
-        }
-
-        // Single-selection mode: show the standard action buttons.
-        OpenSelectedButton.Visibility = Visibility.Visible;
-        bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-                                !string.IsNullOrWhiteSpace(item.DetailPath);
-        OpenLocationButton.Visibility = isFileSystemItem ? Visibility.Visible : Visibility.Collapsed;
-        AttachSelectedButton.Visibility = CanAttachItem(item) ? Visibility.Visible : Visibility.Collapsed;
-        SaveSelectedButton.Visibility = CanSaveItem(item) ? Visibility.Visible : Visibility.Collapsed;
-    }
-
-    private void OpenSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.ExecuteSelectedItem())
-        {
-            HidePopup();
-        }
-    }
-
-    private void OpenLocationButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.OpenSelectedLocation())
-        {
-            HidePopup();
-        }
-    }
-
-    private async void AttachSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await AttachItemToTodoAsync(item);
-        }
-    }
-
-    private async void SaveSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await SaveItemToNoteAsync(item);
-        }
-    }
 
     private void OnViewModelContentRequested(object? sender, SearchResultItem item)
     {
@@ -4349,41 +3270,225 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        _isWindowClosed = true;
+        IsPopupVisible = false;
         App.Log(
             $"[Search] Popup window closed visible={IsPopupVisible} " +
             $"hwnd=0x{_hwnd.ToInt64():X}");
+        RemovePopupCloseWatcherSubclass();
+        Closed -= OnWindowClosed;
         _viewModel.ActionRequested -= OnViewModelActionRequested;
         _viewModel.ContentRequested -= OnViewModelContentRequested;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.CurrentResults.CollectionChanged -= OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
-        RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
+        ResultsRepeater.ElementClearing -= OnResultsElementClearing;
+
         _viewModel.RecommendationIconsResolved -= OnRecommendationIconsResolved;
+        _viewModel.RecommendationLayoutUpdated -= OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         if (_themeService is not null)
             _themeService.AppearanceChanged -= OnThemeServiceAppearanceChanged;
         Activated -= OnWindowActivated;
-        PopupHideStoryboard.Stop();
+        try
+        {
+            PopupShowStoryboard.Stop();
+            PopupHideStoryboard.Stop();
+        }
+        catch
+        {
+        }
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
-        _searchDebounceTimer?.Stop();
-        _skeletonDelayCancellation?.Cancel();
-        _skeletonDelayCancellation?.Dispose();
+        if (_searchDebounceTimer is { } debounceTimer)
+        {
+            _searchDebounceTimer = null;
+            debounceTimer.Tick -= OnSearchDebounceTick;
+            try
+            {
+                debounceTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
-        _rubberBandAutoScrollTimer?.Stop();
+        if (_rubberBandAutoScrollTimer is { } autoScrollTimer)
+        {
+            _rubberBandAutoScrollTimer = null;
+            autoScrollTimer.Tick -= OnRubberBandAutoScrollTick;
+            try
+            {
+                autoScrollTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        DisposeUnfocusedAutoHideTimer();
+        DisposeColdHiddenCleanupTimer();
+        DisposeExternalDragFadeTimer();
+        StopHeightMorphTimer();
+        _detailsUpdateCoalesceTimer?.Stop();
+        _detailsUpdateCoalesceTimer = null;
+        ClearSelectedResultRow();
+        _multiSelectedItems.Clear();
+        _rubberBandBaseSelection.Clear();
+        ClearRealizedRepeaterVisuals();
+        RecommendedAppsGrid.Dispose();
+        RecommendationOverlays.Dispose();
         ResultsRepeater.ItemsSource = null;
-        RecommendedAppsRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();
+        ClearTransparentWindowBackdrop();
+        _materialBackdropBridge?.Dispose();
+        _materialBackdropBridge = null;
+        ActionRequested = null;
+        ContentRequested = null;
+        PopupShown = null;
+        PopupHidden = null;
+        PopupDeactivated = null;
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
         _viewModel.Dispose();
+        Bindings?.StopTracking();
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
-    private static bool AreSystemAnimationsEnabled()
+    private static bool AreSystemAnimationsEnabled() =>
+        WindowsCompatibilityService.ShouldAnimate;
+
+    // Host contracts for extracted recommendation grid & overlay controls
+    bool ISearchRecommendationGridHost.IsPopupVisible => IsPopupVisible;
+    bool ISearchRecommendationGridHost.IsWindowClosed => _isWindowClosed;
+    bool ISearchRecommendationGridHost.IsDragOutInProgress => _dragOutInProgress;
+    FrameworkElement ISearchRecommendationGridHost.PopupBoundsRoot => RootGrid;
+    bool ISearchRecommendationGridHost.IsAnyOverlayOpen => RecommendationOverlays.IsAnyOverlayOpen;
+    void ISearchRecommendationGridHost.HidePopup() => HidePopup();
+    void ISearchRecommendationGridHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
+    void ISearchRecommendationGridHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationGridHost.OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename) =>
+        RecommendationOverlays.OpenFolder(folderEntry, startRename);
+    void ISearchRecommendationGridHost.CloseOverlays(bool immediate) =>
+        RecommendationOverlays.CloseOverlays(immediate);
+    void ISearchRecommendationGridHost.CancelOverlayDrag() =>
+        RecommendationOverlays.CancelDrag();
+    void ISearchRecommendationGridHost.RefreshOverlayIcons() =>
+        RecommendationOverlays.RefreshIcons();
+    void ISearchRecommendationGridHost.UpdateRecommendationHeaderState() =>
+        UpdateRecommendationHeaderState();
+    void ISearchRecommendationGridHost.SyncEditModeChrome(bool isEditMode, int multiSelectedCount)
     {
-        return WindowsCompatibilityService.ShouldAnimate;
+        SyncEditRecommendationsButtonVisuals();
+        UpdateRecommendationEditStatusHint();
     }
+    void ISearchRecommendationGridHost.TryPreviewSelectedItem() => TryPreviewSelectedItem();
+    bool ISearchRecommendationGridHost.TryStartRecommendedExternalDragOut(
+        UIElement dragSource,
+        PointerRoutedEventArgs e,
+        IReadOnlyList<string> candidatePaths,
+        string originTag,
+        Action suspendInternalDrag) =>
+        TryStartRecommendedExternalDragOut(dragSource, e, candidatePaths, originTag, suspendInternalDrag);
+    void ISearchRecommendationGridHost.QueueRunItemAsAdministrator(SearchResultItem item) =>
+        QueueRunItemAsAdministrator(item, hideOnLaunch: true);
+
+    bool ISearchRecommendationOverlayHost.IsRecommendationEditMode => RecommendedAppsGrid.IsEditMode;
+    bool ISearchRecommendationOverlayHost.IsDragOutInProgress => _dragOutInProgress;
+    bool ISearchRecommendationOverlayHost.IsPopupVisible => IsPopupVisible;
+    bool ISearchRecommendationOverlayHost.IsWindowClosed => _isWindowClosed;
+    IntPtr ISearchRecommendationOverlayHost.OwnerWindowHandle => _hwnd;
+    FrameworkElement ISearchRecommendationOverlayHost.PopupBoundsRoot => RootGrid;
+    FrameworkElement ISearchRecommendationOverlayHost.SearchHeaderElement => SearchBoxRow;
+    void ISearchRecommendationOverlayHost.HidePopup() => HidePopup();
+    void ISearchRecommendationOverlayHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
+    void ISearchRecommendationOverlayHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationOverlayHost.CancelRecommendedGridDrag() => RecommendedAppsGrid.CancelDrag();
+    void ISearchRecommendationOverlayHost.EndRecommendedGridRubberBand() => RecommendedAppsGrid.EndRubberBand();
+    void ISearchRecommendationOverlayHost.UpdatePopupDynamicBounds() => UpdatePopupDynamicBounds();
+    bool ISearchRecommendationOverlayHost.TryStartRecommendedExternalDragOut(
+        UIElement dragSource,
+        PointerRoutedEventArgs e,
+        IReadOnlyList<string> candidatePaths,
+        string originTag,
+        Action suspendInternalDrag) =>
+        TryStartRecommendedExternalDragOut(dragSource, e, candidatePaths, originTag, suspendInternalDrag);
+    void ISearchRecommendationOverlayHost.AppendCommonRecommendedAppActions(MenuFlyout flyout, SearchResultItem item) =>
+        RecommendedAppsGrid.AppendCommonRecommendedAppActions(flyout, item);
+
+    // Pure geometry / projection forwarders preserved for unit tests
+    internal const double DropAnchorDeadband = SearchRecommendationLayoutEngine.DropAnchorDeadband;
+    internal static Rect InflateDropAnchorRect(Rect anchor, double margin) =>
+        SearchRecommendationLayoutEngine.InflateDropAnchorRect(anchor, margin);
+    internal static Rect ComputeTileMergeAnchorRect(Rect tileRect, bool targetIsFolder) =>
+        SearchRecommendationLayoutEngine.ComputeTileMergeAnchorRect(tileRect, targetIsFolder);
+    internal static Rect ComputeTileReorderAnchorRect(
+        Rect tileRect,
+        double relX,
+        double relY,
+        bool beforeTile,
+        bool canMergeOntoTarget,
+        bool targetIsFolder) =>
+        SearchRecommendationLayoutEngine.ComputeTileReorderAnchorRect(
+            tileRect,
+            relX,
+            relY,
+            beforeTile,
+            canMergeOntoTarget,
+            targetIsFolder);
+    internal static Rect ComputeTrailingAppendAnchorRect(
+        Point pointInSurface,
+        Rect lastTileRect,
+        double surfaceWidth,
+        double surfaceHeight) =>
+        SearchRecommendationLayoutEngine.ComputeTrailingAppendAnchorRect(
+            pointInSurface,
+            lastTileRect,
+            surfaceWidth,
+            surfaceHeight);
+    internal static bool IsPointLeavingPopupDragBounds(
+        Point pointInRoot,
+        double rootWidth,
+        double rootHeight) =>
+        SearchRecommendationLayoutEngine.IsPointLeavingPopupDragBounds(
+            pointInRoot,
+            rootWidth,
+            rootHeight);
+    internal static bool WouldBatchReorderChangeOrder(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int targetVisibleIndex) =>
+        SearchRecommendationLayoutEngine.WouldBatchReorderChangeOrder(
+            entries,
+            draggedEntryKeys,
+            targetVisibleIndex);
+    internal static List<string> ProjectReorderedEntryKeys(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int insertIndexInRemaining) =>
+        SearchRecommendationLayoutEngine.ProjectReorderedEntryKeys(
+            entries,
+            draggedEntryKeys,
+            insertIndexInRemaining);
+    internal static bool ShouldMergeOntoTile(
+        double relX,
+        double relY,
+        bool targetIsFolder,
+        bool isBatchDrag) =>
+        SearchRecommendationLayoutEngine.ShouldMergeOntoTile(
+            relX,
+            relY,
+            targetIsFolder,
+            isBatchDrag);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -104,9 +104,10 @@ public sealed class WeatherWidgetContentAdapter :
         ViewModel.OnDeactivated();
     }
 
-    public override void OnWindowVisibilityChanged(bool visible)
+    public override void OnWindowVisibilityChanged(bool isVisible)
     {
-        ViewModel.OnWindowVisibilityChanged(visible);
+        ViewModel.OnAdapterWindowVisibilityChanged(isVisible);
+        (MaterializedView as WeatherWidgetContent)?.OnWindowVisibilityChanged(isVisible);
     }
 
     public override void OnWindowRevealCompleted()
@@ -137,9 +138,15 @@ public sealed class WeatherWidgetContentAdapter :
         ViewModel.CancelResponsiveLayoutTransition();
     }
 
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        (view as WeatherWidgetContent)?.Dispose();
+    }
+
     protected override void Dispose(bool disposing)
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        (MaterializedView as WeatherWidgetContent)?.Dispose();
         ViewModel.Dispose();
     }
 }

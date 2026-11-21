@@ -92,6 +92,8 @@ public sealed partial class CapsuleSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(IsCapsuleActive));
+            OnPropertyChanged(nameof(CollapseSummaryText));
             OnPropertyChanged(nameof(ShowHoverResponseEntry));
             OnPropertyChanged(nameof(IsBarEnabled));
             OnPropertyChanged(nameof(IsBarSpacingEnabled));
@@ -120,6 +122,14 @@ public sealed partial class CapsuleSettingsViewModel : ObservableObject
             return BuildOptions(values, _cachedCollapseBehaviorNames);
         }
     }
+
+    public bool IsCapsuleActive =>
+        !CapsuleOptionKinds.IsCollapseExpanded(_collapseBehavior) || _hasOverrides;
+
+    public string CollapseSummaryText =>
+        _hasOverrides && !string.IsNullOrWhiteSpace(_overrideSummaryText)
+            ? $"{_localize("Settings.CollapseBehavior." + _collapseBehavior)} · {_overrideSummaryText}"
+            : _localize("Settings.CollapseBehavior.Description");
 
     // The hover-response entry is gated on the Smart collapse behavior,
     // including any per-widget/per-group Smart override (pushed by the shell).
@@ -685,6 +695,8 @@ public sealed partial class CapsuleSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(ShowOverridesEmpty));
             OnPropertyChanged(nameof(OverrideSummaryText));
             OnPropertyChanged(nameof(HasWidthOverrides));
+            OnPropertyChanged(nameof(IsCapsuleActive));
+            OnPropertyChanged(nameof(CollapseSummaryText));
             if (smartChanged)
             {
                 OnPropertyChanged(nameof(ShowHoverResponseEntry));
@@ -736,6 +748,8 @@ public sealed partial class CapsuleSettingsViewModel : ObservableObject
                 timing.ExpandDelayMs,
                 timing.CollapseDelayMs);
 
+            OnPropertyChanged(nameof(IsCapsuleActive));
+            OnPropertyChanged(nameof(CollapseSummaryText));
             OnPropertyChanged(nameof(ShowHoverResponseEntry));
             OnPropertyChanged(nameof(IsBarEnabled));
             OnPropertyChanged(nameof(IsBarSpacingEnabled));
@@ -782,6 +796,7 @@ public sealed partial class CapsuleSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableAnimationEffectOptions));
         OnPropertyChanged(nameof(AvailableHoverResponseOptions));
         OnPropertyChanged(nameof(ArrangementDetailsSummary));
+        OnPropertyChanged(nameof(CollapseSummaryText));
     }
 
     private IReadOnlyList<SettingsOption> BuildOptions(string[] values, string[] displayNames)

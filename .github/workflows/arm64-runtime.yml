@@ -2,9 +2,6 @@ name: ARM64 Runtime Gate
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/stage7b-arm64-actions
 
 permissions:
   contents: read
@@ -31,7 +28,7 @@ jobs:
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.402
+          dotnet-version: 10.0.404
 
       - name: Verify native ARM64 host and pinned Rust
         shell: pwsh
@@ -88,7 +85,6 @@ jobs:
             .artifacts/arm64-stage7b-runtime/*.json
             .artifacts/arm64-stage7b-runtime/**/*.trx
             .artifacts/arm64-stage7b-runtime/native/*.dll
-            .artifacts/arm64-stage7b-runtime/search/*.dll
 
       - name: Upload ARM64 CRT distribution evidence
         if: always()

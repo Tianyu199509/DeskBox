@@ -30,12 +30,16 @@ internal static class InlineEditorFocus
         TextBox editor,
         Action<TextBox> applySelection,
         DispatcherQueue dispatcherQueue,
-        string logScope)
+        string logScope,
+        Func<bool>? canContinue = null,
+        Action? onFocused = null)
     {
         long startedAtTick = Environment.TickCount64;
         bool settled = false;
+        bool sawLoaded = editor.IsLoaded;
         bool loggedWaitingForLayout = false;
         RoutedEventHandler? loadedHandler = null;
+        RoutedEventHandler? unloadedHandler = null;
         EventHandler<object>? layoutHandler = null;
         DispatcherQueueTimer? retryTimer = null;
         TypedEventHandler<DispatcherQueueTimer, object>? timerHandler = null;
@@ -43,8 +47,10 @@ internal static class InlineEditorFocus
         void detach()
         {
             editor.Loaded -= loadedHandler;
+            editor.Unloaded -= unloadedHandler;
             editor.LayoutUpdated -= layoutHandler;
             loadedHandler = null;
+            unloadedHandler = null;
             layoutHandler = null;
             if (retryTimer is not null && timerHandler is not null)
             {
@@ -55,15 +61,16 @@ internal static class InlineEditorFocus
             }
         }
 
-        void settle(bool focused)
+        void settle(bool focused, bool cancelled = false)
         {
             settled = true;
             detach();
             if (focused)
             {
+                onFocused?.Invoke();
                 applySelection(editor);
             }
-            else
+            else if (!cancelled)
             {
                 App.Log(
                     $"[{logScope}] Inline editor focus abandoned after " +
@@ -76,6 +83,22 @@ internal static class InlineEditorFocus
         {
             if (settled)
             {
+                return;
+            }
+
+            if (canContinue is not null && !canContinue())
+            {
+                settle(focused: false, cancelled: true);
+                return;
+            }
+
+            if (editor.IsLoaded)
+            {
+                sawLoaded = true;
+            }
+            else if (sawLoaded)
+            {
+                settle(focused: false, cancelled: true);
                 return;
             }
 
@@ -106,9 +129,21 @@ internal static class InlineEditorFocus
             return;
         }
 
-        loadedHandler = (_, _) => tryFocus();
+        loadedHandler = (_, _) =>
+        {
+            sawLoaded = true;
+            tryFocus();
+        };
+        unloadedHandler = (_, _) =>
+        {
+            if (sawLoaded && !settled)
+            {
+                settle(focused: false, cancelled: true);
+            }
+        };
         layoutHandler = (_, _) => tryFocus();
         editor.Loaded += loadedHandler;
+        editor.Unloaded += unloadedHandler;
         editor.LayoutUpdated += layoutHandler;
 
         // Slow backstop only: the layout pass this helper waits for runs when

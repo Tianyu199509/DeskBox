@@ -1,5 +1,4 @@
 using Windows.Graphics.Imaging;
-using Windows.Storage;
 using Windows.UI;
 
 namespace DeskBox.Services;
@@ -15,6 +14,8 @@ internal sealed class GlanceImagePaletteService
 {
     private const uint SampleEdge = 40;
     private const int MaxCacheEntries = 32;
+
+    public static GlanceImagePaletteService Shared { get; } = new();
 
     private sealed record CacheEntry(GlanceImagePalette Palette, long AccessOrder);
 
@@ -54,25 +55,35 @@ internal sealed class GlanceImagePaletteService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-            using var stream = await file.OpenReadAsync();
-            BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
-            uint targetWidth = Math.Max(1, Math.Min(SampleEdge, decoder.PixelWidth));
-            uint targetHeight = Math.Max(1, Math.Min(SampleEdge, decoder.PixelHeight));
-            var transform = new BitmapTransform
+            GlanceImagePalette? palette = await Task.Run(async () =>
             {
-                ScaledWidth = targetWidth,
-                ScaledHeight = targetHeight,
-                InterpolationMode = BitmapInterpolationMode.Fant
-            };
-            PixelDataProvider provider = await decoder.GetPixelDataAsync(
-                BitmapPixelFormat.Bgra8,
-                BitmapAlphaMode.Premultiplied,
-                transform,
-                ExifOrientationMode.RespectExifOrientation,
-                ColorManagementMode.ColorManageToSRgb);
-            cancellationToken.ThrowIfCancellationRequested();
-            GlanceImagePalette? palette = ExtractPalette(provider.DetachPixelData());
+                cancellationToken.ThrowIfCancellationRequested();
+                await using var fileStream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var stream = fileStream.AsRandomAccessStream();
+                BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken).ConfigureAwait(false);
+                uint targetWidth = Math.Max(1, Math.Min(SampleEdge, decoder.PixelWidth));
+                uint targetHeight = Math.Max(1, Math.Min(SampleEdge, decoder.PixelHeight));
+                var transform = new BitmapTransform
+                {
+                    ScaledWidth = targetWidth,
+                    ScaledHeight = targetHeight,
+                    InterpolationMode = BitmapInterpolationMode.Fant
+                };
+                PixelDataProvider provider = await decoder.GetPixelDataAsync(
+                    BitmapPixelFormat.Bgra8,
+                    BitmapAlphaMode.Premultiplied,
+                    transform,
+                    ExifOrientationMode.RespectExifOrientation,
+                    ColorManagementMode.ColorManageToSRgb).AsTask(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                return ExtractPalette(provider.DetachPixelData());
+            }, cancellationToken).ConfigureAwait(false);
             if (palette is null)
             {
                 return null;
@@ -108,35 +119,44 @@ internal sealed class GlanceImagePaletteService
             return null;
         }
 
-        var samples = new List<(double R, double G, double B, double Weight)>(bgraPixels.Length / 4);
+        bool hasAnySample = false;
+        (double R, double G, double B, double Weight) first = default;
         for (int i = 0; i <= bgraPixels.Length - 4; i += 4)
         {
-            double alpha = bgraPixels[i + 3] / 255.0;
-            if (alpha < 0.10)
+            if (!TryReadWeightedSample(bgraPixels, i, out var sample))
             {
                 continue;
             }
 
-            double red = Math.Clamp(bgraPixels[i + 2] / alpha, 0, 255);
-            double green = Math.Clamp(bgraPixels[i + 1] / alpha, 0, 255);
-            double blue = Math.Clamp(bgraPixels[i] / alpha, 0, 255);
-            double maximum = Math.Max(red, Math.Max(green, blue));
-            double minimum = Math.Min(red, Math.Min(green, blue));
-            double saturation = (maximum - minimum) / 255.0;
-            double luminance = ((red * 0.2126) + (green * 0.7152) + (blue * 0.0722)) / 255.0;
-            double midtoneWeight = 0.72 + ((1.0 - Math.Abs(luminance - 0.52)) * 0.28);
-            double weight = alpha * (0.48 + (saturation * 0.92)) * midtoneWeight;
-            samples.Add((red, green, blue, weight));
+            if (!hasAnySample || sample.Weight > first.Weight)
+            {
+                first = sample;
+                hasAnySample = true;
+            }
         }
 
-        if (samples.Count == 0)
+        if (!hasAnySample)
         {
             return null;
         }
 
-        var first = samples.MaxBy(sample => sample.Weight);
-        var second = samples.MaxBy(sample =>
-            ColorDistanceSquared(sample, first) * sample.Weight);
+        (double R, double G, double B, double Weight) second = first;
+        double bestSecondScore = -1;
+        for (int i = 0; i <= bgraPixels.Length - 4; i += 4)
+        {
+            if (!TryReadWeightedSample(bgraPixels, i, out var sample))
+            {
+                continue;
+            }
+
+            double score = ColorDistanceSquared(sample, first) * sample.Weight;
+            if (score > bestSecondScore)
+            {
+                bestSecondScore = score;
+                second = sample;
+            }
+        }
+
         if (ColorDistanceSquared(first, second) < 64)
         {
             return new GlanceImagePalette(ToColor(first), ToColor(first));
@@ -146,8 +166,13 @@ internal sealed class GlanceImagePaletteService
         {
             var firstAccumulator = new ColorAccumulator();
             var secondAccumulator = new ColorAccumulator();
-            foreach (var sample in samples)
+            for (int i = 0; i <= bgraPixels.Length - 4; i += 4)
             {
+                if (!TryReadWeightedSample(bgraPixels, i, out var sample))
+                {
+                    continue;
+                }
+
                 if (ColorDistanceSquared(sample, first) <= ColorDistanceSquared(sample, second))
                 {
                     firstAccumulator.Add(sample);
@@ -171,8 +196,13 @@ internal sealed class GlanceImagePaletteService
 
         double firstWeight = 0;
         double secondWeight = 0;
-        foreach (var sample in samples)
+        for (int i = 0; i <= bgraPixels.Length - 4; i += 4)
         {
+            if (!TryReadWeightedSample(bgraPixels, i, out var sample))
+            {
+                continue;
+            }
+
             if (ColorDistanceSquared(sample, first) <= ColorDistanceSquared(sample, second))
             {
                 firstWeight += sample.Weight;
@@ -186,6 +216,31 @@ internal sealed class GlanceImagePaletteService
         return firstWeight >= secondWeight
             ? new GlanceImagePalette(ToColor(first), ToColor(second))
             : new GlanceImagePalette(ToColor(second), ToColor(first));
+    }
+
+    private static bool TryReadWeightedSample(
+        ReadOnlySpan<byte> bgraPixels,
+        int index,
+        out (double R, double G, double B, double Weight) sample)
+    {
+        double alpha = bgraPixels[index + 3] / 255.0;
+        if (alpha < 0.10)
+        {
+            sample = default;
+            return false;
+        }
+
+        double red = Math.Clamp(bgraPixels[index + 2] / alpha, 0, 255);
+        double green = Math.Clamp(bgraPixels[index + 1] / alpha, 0, 255);
+        double blue = Math.Clamp(bgraPixels[index] / alpha, 0, 255);
+        double maximum = Math.Max(red, Math.Max(green, blue));
+        double minimum = Math.Min(red, Math.Min(green, blue));
+        double saturation = (maximum - minimum) / 255.0;
+        double luminance = ((red * 0.2126) + (green * 0.7152) + (blue * 0.0722)) / 255.0;
+        double midtoneWeight = 0.72 + ((1.0 - Math.Abs(luminance - 0.52)) * 0.28);
+        double weight = alpha * (0.48 + (saturation * 0.92)) * midtoneWeight;
+        sample = (red, green, blue, weight);
+        return true;
     }
 
     private static double ColorDistanceSquared(

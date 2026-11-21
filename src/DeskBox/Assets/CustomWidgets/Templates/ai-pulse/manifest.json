@@ -1,0 +1,571 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.ai-pulse",
+  "name": "${$i18n.widgetName}",
+  "version": "4.1.0",
+  "author": "DeskBox",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🧠",
+  "minSize": {
+    "width": 300,
+    "height": 220
+  },
+  "defaultSize": {
+    "width": 348,
+    "height": 308
+  },
+  "settings": [
+    {
+      "key": "walletCurrency",
+      "type": "choice",
+      "label": "${$i18n.setWalletCurrency}",
+      "default": "CNY",
+      "options": [
+        {
+          "value": "CNY",
+          "label": "${$i18n.curCNY}"
+        },
+        {
+          "value": "USD",
+          "label": "${$i18n.curUSD}"
+        },
+        {
+          "value": "EUR",
+          "label": "${$i18n.curEUR}"
+        },
+        {
+          "value": "TWD",
+          "label": "${$i18n.curTWD}"
+        },
+        {
+          "value": "HKD",
+          "label": "${$i18n.curHKD}"
+        },
+        {
+          "value": "JPY",
+          "label": "${$i18n.curJPY}"
+        },
+        {
+          "value": "KRW",
+          "label": "${$i18n.curKRW}"
+        },
+        {
+          "value": "GBP",
+          "label": "${$i18n.curGBP}"
+        },
+        {
+          "value": "RUB",
+          "label": "${$i18n.curRUB}"
+        },
+        {
+          "value": "BRL",
+          "label": "${$i18n.curBRL}"
+        },
+        {
+          "value": "INR",
+          "label": "${$i18n.curINR}"
+        },
+        {
+          "value": "SAR",
+          "label": "${$i18n.curSAR}"
+        },
+        {
+          "value": "BDT",
+          "label": "${$i18n.curBDT}"
+        }
+      ]
+    },
+    {
+      "key": "walletTargetBalance",
+      "type": "number",
+      "label": "${$i18n.setWalletTarget}",
+      "description": "${$i18n.descWalletTarget}",
+      "default": 100
+    },
+    {
+      "key": "quotaDisplayMode",
+      "type": "choice",
+      "label": "${$i18n.setQuotaMode}",
+      "default": "remaining",
+      "options": [
+        {
+          "value": "remaining",
+          "label": "${$i18n.optQuotaRem}"
+        },
+        {
+          "value": "used",
+          "label": "${$i18n.optQuotaUsed}"
+        }
+      ]
+    },
+    {
+      "key": "refreshIntervalMs",
+      "type": "choice",
+      "label": "${$i18n.setRefresh}",
+      "default": "60000",
+      "options": [
+        {
+          "value": "60000",
+          "label": "${$i18n.optRef1m}"
+        },
+        {
+          "value": "300000",
+          "label": "${$i18n.optRef5m}"
+        },
+        {
+          "value": "900000",
+          "label": "${$i18n.optRef15m}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "hoveredDayText": "",
+    "expandedProvider": ""
+  },
+  "sources": [
+    {
+      "type": "aiMonitor",
+      "intervalMs": 60000
+    }
+  ],
+  "capsule": {
+    "title": "${$ai.capsuleTitle}",
+    "summary": "${$ai.capsuleSummary}",
+    "glyph": "🧠",
+    "badge": "${$ai.capsuleBadge}",
+    "badgeIsWarning": "${$ai.capsuleIsWarning}",
+    "progress": "${$ai.capsuleProgress}",
+    "primaryAction": {
+      "icon": "refresh",
+      "tooltip": "${$i18n.refreshTooltip}",
+      "onClick": {
+        "type": "ai.refresh"
+      }
+    }
+  },
+  "root": "rootstack",
+  "elements": {
+    "rootstack": {
+      "id": "rootStack",
+      "type": "Stack",
+      "spacing": 8,
+      "padding": "14,14,14,12",
+      "children": [
+        "toptimelinesection",
+        "topsectiondivider",
+        "emptystatecard",
+        "providerledgerlist"
+      ]
+    },
+    "toptimelinesection": {
+      "id": "topTimelineSection",
+      "type": "Stack",
+      "spacing": 7,
+      "children": [
+        "headergrid",
+        "daily28strip",
+        "timelinefooterrow"
+      ]
+    },
+    "headergrid": {
+      "id": "headerGrid",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 8,
+      "children": [
+        "headerleftstack",
+        "headerrightkpistack"
+      ]
+    },
+    "headerleftstack": {
+      "id": "headerLeftStack",
+      "type": "Stack",
+      "column": 0,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "eyebrow28d",
+        "overviewtitletext"
+      ]
+    },
+    "eyebrow28d": {
+      "type": "Text",
+      "text": "${$i18n.last28DaysEyebrow}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "overviewtitletext": {
+      "id": "overviewTitleText",
+      "type": "Text",
+      "text": "${$i18n.overviewTitle}",
+      "style": "subtitle",
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "headerrightkpistack": {
+      "id": "headerRightKpiStack",
+      "type": "Stack",
+      "column": 1,
+      "spacing": 2,
+      "horizontalAlignment": "right",
+      "verticalAlignment": "center",
+      "children": [
+        "cost30drow",
+        "subkpicache",
+        "subkpionline"
+      ]
+    },
+    "cost30drow": {
+      "id": "cost30dRow",
+      "type": "Stack",
+      "orientation": "horizontal",
+      "spacing": 4,
+      "horizontalAlignment": "right",
+      "verticalAlignment": "center",
+      "children": [
+        "cost30dval",
+        "cost30dsuffix"
+      ]
+    },
+    "cost30dval": {
+      "id": "cost30dVal",
+      "type": "Text",
+      "text": "${$ai.monthCost}",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "emerald",
+      "maxLines": 1
+    },
+    "cost30dsuffix": {
+      "id": "cost30dSuffix",
+      "type": "Text",
+      "text": "${$i18n.per30dSuffix}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "subkpicache": {
+      "id": "subKpiCache",
+      "type": "Text",
+      "when": "${$ai.hasLocalCliData == 'true'}",
+      "text": "${$i18n.cacheHitPrefix} ${$ai.cacheHitPercent}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "right",
+      "maxLines": 1
+    },
+    "subkpionline": {
+      "id": "subKpiOnline",
+      "type": "Text",
+      "when": "${$ai.hasLocalCliData != 'true'}",
+      "text": "${$ai.activeCount}${$i18n.onlineUnit}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "right",
+      "maxLines": 1
+    },
+    "daily28strip": {
+      "id": "daily28Strip",
+      "type": "ProgressBar",
+      "variant": "segmented",
+      "height": 15,
+      "tickStep": 28,
+      "items": "$ai.daily28",
+      "bind": "hoveredDayText"
+    },
+    "timelinefooterrow": {
+      "id": "timelineFooterRow",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 8,
+      "children": [
+        "dailysummarycaption",
+        "toolbarbtns"
+      ]
+    },
+    "dailysummarycaption": {
+      "id": "dailySummaryCaption",
+      "type": "Text",
+      "column": 0,
+      "text": "${$state.hoveredDayText != '' ? $state.hoveredDayText : $ai.daily28Summary}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "toolbarbtns": {
+      "id": "toolbarBtns",
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btnrefreshai",
+        "btnopencreds"
+      ]
+    },
+    "btnrefreshai": {
+      "id": "btnRefreshAi",
+      "type": "IconButton",
+      "icon": "refresh",
+      "size": 24,
+      "tooltip": "${$i18n.refreshTooltip}",
+      "onClick": {
+        "type": "ai.refresh"
+      }
+    },
+    "btnopencreds": {
+      "id": "btnOpenCreds",
+      "type": "IconButton",
+      "icon": "key",
+      "size": 24,
+      "tooltip": "${$i18n.credTooltip}",
+      "popover": "__ai_credentials"
+    },
+    "topsectiondivider": {
+      "id": "topSectionDivider",
+      "type": "Divider"
+    },
+    "emptystatecard": {
+      "id": "emptyStateCard",
+      "type": "Card",
+      "when": "${$ai.hasActiveProviders != 'true'}",
+      "tone": "subtle",
+      "padding": "12,12,12,12",
+      "spacing": 8,
+      "children": [
+        "emptytitletext",
+        "emptysubtext",
+        "btnemptyconnect"
+      ]
+    },
+    "emptytitletext": {
+      "id": "emptyTitleText",
+      "type": "Text",
+      "text": "${$i18n.emptyFocusTitle}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "emptysubtext": {
+      "id": "emptySubText",
+      "type": "Text",
+      "text": "${$i18n.emptyFocusSub}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 3
+    },
+    "btnemptyconnect": {
+      "id": "btnEmptyConnect",
+      "type": "Button",
+      "icon": "key",
+      "text": "${$i18n.connectBtn}",
+      "variant": "accent",
+      "popover": "__ai_credentials"
+    },
+    "providerledgerlist": {
+      "id": "providerLedgerList",
+      "type": "List",
+      "when": "${$ai.hasActiveProviders == 'true'}",
+      "variant": "divided",
+      "spacing": 0,
+      "items": "$ai.providers",
+      "itemTemplate": "provrowcontainer"
+    },
+    "provrowcontainer": {
+      "id": "provRowContainer",
+      "type": "Stack",
+      "padding": "0,7,0,7",
+      "spacing": 6,
+      "onClick": {
+        "type": "state.set",
+        "key": "expandedProvider",
+        "value": "${$state.expandedProvider == $item.id ? '' : $item.id}"
+      },
+      "children": [
+        "provmaingrid",
+        "provexpandednote"
+      ]
+    },
+    "provmaingrid": {
+      "id": "provMainGrid",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 10,
+      "children": [
+        "provleftinfo",
+        "provquotaright",
+        "provwalletright",
+        "proverrorright"
+      ]
+    },
+    "provleftinfo": {
+      "id": "provLeftInfo",
+      "type": "Stack",
+      "column": 0,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "provtitleline",
+        "provsummaryline"
+      ]
+    },
+    "provtitleline": {
+      "id": "provTitleLine",
+      "type": "Stack",
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "provnametext",
+        "provplantag"
+      ]
+    },
+    "provnametext": {
+      "id": "provNameText",
+      "type": "Text",
+      "text": "${$item.name}",
+      "style": "body",
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "provplantag": {
+      "id": "provPlanTag",
+      "type": "Text",
+      "when": "${$item.badge != ''}",
+      "text": "${$item.badge}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "provsummaryline": {
+      "id": "provSummaryLine",
+      "type": "Text",
+      "text": "${$item.ledgerSummary}",
+      "style": "caption",
+      "color": "${$item.hasError == 'true' ? 'warning' : 'muted'}",
+      "maxLines": 1
+    },
+    "provquotaright": {
+      "id": "provQuotaRight",
+      "type": "Grid",
+      "column": 1,
+      "when": "${$item.isWindowQuota == 'true' && $item.hasError != 'true'}",
+      "columns": "64,38",
+      "rows": "Auto",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "provquotaslimbar",
+        "provquotapcttext"
+      ]
+    },
+    "provquotaslimbar": {
+      "id": "provQuotaSlimBar",
+      "type": "ProgressBar",
+      "column": 0,
+      "height": 6,
+      "progress": "${$item.percent}",
+      "color": "${$item.tone}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999,
+      "verticalAlignment": "center"
+    },
+    "provquotapcttext": {
+      "id": "provQuotaPctText",
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.valueText}",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "${$item.tone}",
+      "horizontalAlignment": "right",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "provwalletright": {
+      "id": "provWalletRight",
+      "type": "Stack",
+      "column": 1,
+      "when": "${$item.isWindowQuota != 'true' && $item.hasError != 'true'}",
+      "orientation": "horizontal",
+      "spacing": 7,
+      "verticalAlignment": "center",
+      "children": [
+        "provwalletpill",
+        "provwalletamount"
+      ]
+    },
+    "provwalletpill": {
+      "id": "provWalletPill",
+      "type": "Badge",
+      "variant": "pill",
+      "text": "${$item.badgeText}",
+      "tone": "${$item.tone}",
+      "verticalAlignment": "center"
+    },
+    "provwalletamount": {
+      "id": "provWalletAmount",
+      "type": "Text",
+      "text": "${$item.valueText}",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "${$item.tone == 'emerald' ? 'default' : $item.tone}",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "proverrorright": {
+      "id": "provErrorRight",
+      "type": "Badge",
+      "column": 1,
+      "when": "${$item.hasError == 'true'}",
+      "variant": "pill",
+      "icon": "warning",
+      "text": "${$item.badgeText}",
+      "tone": "warning",
+      "verticalAlignment": "center",
+      "popover": "__ai_credentials"
+    },
+    "provexpandednote": {
+      "id": "provExpandedNote",
+      "type": "Grid",
+      "when": "${$state.expandedProvider == $item.id && $item.hasDetail == 'true'}",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 8,
+      "padding": "0,2,0,0",
+      "children": [
+        "provdetailleft",
+        "provdetailright"
+      ]
+    },
+    "provdetailleft": {
+      "id": "provDetailLeft",
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.detailLabel}${$item.detailLabel != '' ? ' · ' : ''}${$item.detailSubtext}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "provdetailright": {
+      "id": "provDetailRight",
+      "type": "Text",
+      "column": 1,
+      "when": "${$item.detailValue != ''}",
+      "text": "${$item.detailValue}",
+      "style": "mono",
+      "color": "${$item.detailTone}",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    }
+  }
+}

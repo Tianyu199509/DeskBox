@@ -9,6 +9,8 @@ public sealed partial class FileSurfaceContent
 {
     private ScrollViewer? _gridRenderWindowScrollViewer;
     private ScrollViewer? _listRenderWindowScrollViewer;
+    private int _lastLayoutGrowRenderedCount = -1;
+    private double _lastLayoutGrowExtentHeight = -1;
 
     /// <summary>
     /// Grows the view model's render window as the user approaches the end of
@@ -41,6 +43,8 @@ public sealed partial class FileSurfaceContent
         ItemsList.Loaded -= ItemsView_LoadedForRenderWindow;
         ItemsGrid.LayoutUpdated -= ItemsView_LayoutUpdatedForRenderWindow;
         ItemsList.LayoutUpdated -= ItemsView_LayoutUpdatedForRenderWindow;
+        ItemsGrid.LayoutUpdated -= RetryRenderWindowScrollHook;
+        ItemsList.LayoutUpdated -= RetryRenderWindowScrollHook;
         ItemsGrid.SizeChanged -= ItemsView_SizeChangedForRenderWindow;
         ItemsList.SizeChanged -= ItemsView_SizeChangedForRenderWindow;
         ViewModel.PropertyChanged -= ViewModel_PropertyChangedForRenderWindow;
@@ -60,7 +64,7 @@ public sealed partial class FileSurfaceContent
     private void ViewModel_RenderWindowSourceChanged() =>
         QueueRenderWindowViewportCoverage();
 
-    private void QueueRenderWindowViewportCoverage()
+    internal void QueueRenderWindowViewportCoverage()
     {
         if (_isDisposed)
         {
@@ -74,7 +78,7 @@ public sealed partial class FileSurfaceContent
         {
             if (!_isDisposed)
             {
-                EnsureRenderWindowCoversViewport(GetActiveItemsView());
+                EnsureRenderWindowCoversViewport(GetMainItemsView());
             }
         });
     }
@@ -103,7 +107,7 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private void EnsureRenderWindowCoversViewport(ListViewBase? itemsView)
     {
-        if (_isDisposed || itemsView is null)
+        if (_isDisposed || itemsView is null || itemsView.ItemsSource is null)
         {
             return;
         }
@@ -175,6 +179,17 @@ public sealed partial class FileSurfaceContent
         if (FindDescendantScrollViewer(itemsView) is { } scrollViewer)
         {
             StoreRenderWindowScrollViewer(itemsView, scrollViewer);
+            if ((_gridRenderWindowScrollViewer is not null || !ItemsGrid.IsLoaded) &&
+                (_listRenderWindowScrollViewer is not null || !ItemsList.IsLoaded))
+            {
+                ItemsGrid.LayoutUpdated -= RetryRenderWindowScrollHook;
+                ItemsList.LayoutUpdated -= RetryRenderWindowScrollHook;
+            }
+            else
+            {
+                itemsView.LayoutUpdated -= RetryRenderWindowScrollHook;
+            }
+
             scrollViewer.ViewChanged -= ItemsView_ViewChangedForRenderWindow;
             scrollViewer.ViewChanged += ItemsView_ViewChangedForRenderWindow;
             EnsureRenderWindowCoversViewport(itemsView);
@@ -186,18 +201,29 @@ public sealed partial class FileSurfaceContent
         {
             // The templated ScrollViewer may not exist during the first
             // Loaded pass; retry once layout has produced it.
+            itemsView.LayoutUpdated -= RetryRenderWindowScrollHook;
             itemsView.LayoutUpdated += RetryRenderWindowScrollHook;
         }
     }
 
     private void RetryRenderWindowScrollHook(object? sender, object e)
     {
-        if (sender is ListViewBase itemsView)
+        ItemsGrid.LayoutUpdated -= RetryRenderWindowScrollHook;
+        ItemsList.LayoutUpdated -= RetryRenderWindowScrollHook;
+        if (_isDisposed)
         {
-            itemsView.LayoutUpdated -= RetryRenderWindowScrollHook;
+            return;
         }
 
-        HookRenderWindowScrollViewer(sender as ListViewBase, retry: false);
+        if (_gridRenderWindowScrollViewer is null && ItemsGrid.IsLoaded)
+        {
+            HookRenderWindowScrollViewer(ItemsGrid, retry: false);
+        }
+
+        if (_listRenderWindowScrollViewer is null && ItemsList.IsLoaded)
+        {
+            HookRenderWindowScrollViewer(ItemsList, retry: false);
+        }
     }
 
     private void ItemsView_ViewChangedForRenderWindow(
@@ -232,12 +258,33 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private void ItemsView_LayoutUpdatedForRenderWindow(object? sender, object e)
     {
-        if (_isDisposed || sender is not ListViewBase itemsView)
+        if (_isDisposed || !IsLoaded || (!_isWindowVisible && _hasBeenWindowVisible))
         {
             return;
         }
 
-        TryGrowRenderWindowToFillViewport(GetRenderWindowScrollViewer(itemsView));
+        ListViewBase itemsView = sender as ListViewBase ?? GetMainItemsView();
+        if (itemsView.ItemsSource is null)
+        {
+            return;
+        }
+
+        ScrollViewer? scrollViewer = GetRenderWindowScrollViewer(itemsView);
+        if (scrollViewer is null ||
+            (ViewModel.RenderedItems.Count == _lastLayoutGrowRenderedCount &&
+             scrollViewer.ExtentHeight == _lastLayoutGrowExtentHeight))
+        {
+            return;
+        }
+
+        int countBefore = ViewModel.RenderedItems.Count;
+        double extentBefore = scrollViewer.ExtentHeight;
+        TryGrowRenderWindowToFillViewport(scrollViewer);
+        if (ViewModel.RenderedItems.Count != countBefore)
+        {
+            _lastLayoutGrowRenderedCount = ViewModel.RenderedItems.Count;
+            _lastLayoutGrowExtentHeight = extentBefore;
+        }
     }
 
     private void TryGrowRenderWindowToFillViewport(ScrollViewer? scrollViewer)

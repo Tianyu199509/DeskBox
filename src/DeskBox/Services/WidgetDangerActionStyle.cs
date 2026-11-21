@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -15,10 +16,10 @@ internal static class WidgetDangerActionStyle
     internal const string CriticalBrushResourceKey =
         "SystemFillColorCriticalBrush";
 
-    internal static void Apply(MenuFlyoutItem item)
+    internal static void Apply(MenuFlyoutItem item, DependencyObject? themeScope = null)
     {
         ArgumentNullException.ThrowIfNull(item);
-        Brush brush = ResolveBrush();
+        Brush brush = ResolveBrush(themeScope ?? item);
         item.Foreground = brush;
         if (item.Icon is FontIcon icon)
         {
@@ -26,18 +27,16 @@ internal static class WidgetDangerActionStyle
         }
     }
 
-    private static Brush ResolveBrush()
+    internal static Brush ResolveBrush(DependencyObject? themeScope = null)
     {
-        if (Application.Current?.Resources.TryGetValue(
-                CriticalBrushResourceKey,
-                out object? resource) == true &&
-            resource is Brush brush)
+        if (NeutralInteractionBrush.ResolveThemedResource(CriticalBrushResourceKey, themeScope) is { } brush)
         {
             return brush;
         }
 
-        // Fluent light-theme critical foreground fallback (#C42B1C).
-        return new SolidColorBrush(
-            ColorHelper.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
+        // Fluent critical foreground fallback (#FF99A4 in dark, #C42B1C in light).
+        return NeutralInteractionBrush.IsDarkTheme(themeScope)
+            ? new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xFF, 0x99, 0xA4))
+            : new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xC4, 0x2B, 0x1C));
     }
 }

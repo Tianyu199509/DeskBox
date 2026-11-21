@@ -1,3 +1,5 @@
+using DeskBox.Platform;
+
 namespace DeskBox.Services;
 
 public sealed partial class FileService
@@ -30,6 +32,17 @@ public sealed partial class FileService
         ThrowIfExactDestinationEntryExists(
             sourcePath,
             destinationPath);
+
+        // NTFS and ReFS support single-step in-place case-only renames via
+        // MoveFileExW(dwFlags: 0) without exposing an intermediate temporary
+        // filename. Fall back to the two-hop rename only on filesystems such
+        // as FAT32/exFAT that reject same-case-insensitive target names.
+        if (await Task.Run(() => StorageMigrationNativeMethods.TryRenameCaseOnlyInPlace(
+                sourcePath,
+                destinationPath)))
+        {
+            return;
+        }
 
         string temporaryPath = CreateCaseOnlyRenameTemporaryPath(
             sourcePath);

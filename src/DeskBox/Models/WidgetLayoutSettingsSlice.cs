@@ -93,6 +93,12 @@ public sealed class WidgetLayoutSettingsSlice
     public string WidgetDisplayDisconnectBehavior { get; set; } = "MoveToRemaining";
 
     /// <summary>
+    /// "屏幕尺寸或缩放变化时"：FixedSize（默认，保持格子固定尺寸，仅空间不足时收缩）/
+    /// ElasticScale（随屏幕空间等比缩放）。
+    /// </summary>
+    public string WidgetDisplayScalingMode { get; set; } = "FixedSize";
+
+    /// <summary>
     /// Replaces every member with <paramref name="other"/>'s values. The
     /// layout store keeps this slice as the live object for the session
     /// (AppSettings.WidgetLayout is get-only by the 2A facade contract), so
@@ -117,5 +123,6 @@ public sealed class WidgetLayoutSettingsSlice
         WidgetDefaultBoundScreenId = other.WidgetDefaultBoundScreenId;
         WidgetNewPlacementTarget = other.WidgetNewPlacementTarget;
         WidgetDisplayDisconnectBehavior = other.WidgetDisplayDisconnectBehavior;
+        WidgetDisplayScalingMode = other.WidgetDisplayScalingMode;
     }
 }

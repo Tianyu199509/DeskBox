@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -14,7 +15,7 @@ internal static class AutoStartDefaultPolicy
     internal static bool ShouldApply(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        return !settings.AutoStartDefaultApplied;
+        return !settings.Core.AutoStartDefaultApplied;
     }
 
     /// <summary>
@@ -33,6 +34,15 @@ internal static class AutoStartDefaultPolicy
             : state;
     }
 
+    internal static async Task<StartupOperationResult> ResolveAsync(IStartupService startupService)
+    {
+        ArgumentNullException.ThrowIfNull(startupService);
+        StartupOperationResult status = await startupService.GetStatusAsync().ConfigureAwait(false);
+        return status.State == StartupRegistrationState.NotRegistered
+            ? await startupService.EnableAsync().ConfigureAwait(false)
+            : status;
+    }
+
     internal static bool IsEnabledState(StartupRegistrationState state) =>
         state is StartupRegistrationState.Enabled or StartupRegistrationState.Pending;
 
@@ -44,4 +54,55 @@ internal static class AutoStartDefaultPolicy
     /// </summary>
     internal static bool ShouldMarkApplied(StartupRegistrationState effectiveState) =>
         effectiveState != StartupRegistrationState.BlockedOrFailed;
+
+    internal static bool HasAutoStartDefaultAppliedProperty(string json)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(prop.Name, "autoStartDefaultApplied", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Deserialization already succeeded; treat unexpected shapes as absent.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Legacy settings.json files written before <c>autoStartDefaultApplied</c>
+    /// existed omit the property completely. When such a profile explicitly has
+    /// <c>autoStart=false</c>, mark the one-time default as already applied so
+    /// upgrading does not silently re-enable autostart. Modern installs whose
+    /// first attempt hit <see cref="StartupRegistrationState.BlockedOrFailed"/>
+    /// persist explicit <c>"autoStartDefaultApplied": false</c> and keep retrying.
+    /// </summary>
+    internal static bool TryPreserveLegacyOptOut(
+        AppSettings settings,
+        bool loadedFromDisk,
+        bool hadAutoStartDefaultAppliedProperty)
+    {
+        if (loadedFromDisk &&
+            !hadAutoStartDefaultAppliedProperty &&
+            !settings.Core.AutoStart &&
+            !settings.Core.AutoStartDefaultApplied)
+        {
+            settings.Core.AutoStartDefaultApplied = true;
+            return true;
+        }
+
+        return false;
+    }
 }

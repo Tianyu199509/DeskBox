@@ -251,11 +251,13 @@ public sealed partial class WidgetManager
         GetVisibleQuickLookSurfaceHosts()
     {
         var hosts = new List<QuickLookSurfaceHost>();
-        hosts.AddRange(_fileWidgets.Values.Select(session =>
-            new QuickLookSurfaceHost(
-                session.Host,
-                session.Content,
-                session.Content.RequireSurface())));
+        hosts.AddRange(_fileWidgets.Values
+            .Where(session => session.Content.Surface is { IsLoaded: true })
+            .Select(session =>
+                new QuickLookSurfaceHost(
+                    session.Host,
+                    session.Content,
+                    session.Content.RequireSurface())));
         hosts.AddRange(_contentWidgets.Values
             .Distinct()
             .Where(window => window.CurrentContent is FileWidgetContentAdapter

@@ -23,6 +23,8 @@ public sealed class WidgetMoveAllUndoToken
         string? BoundScreenId,
         string? BoundScreenLabel,
         string? DisconnectCollapsedForScreenId,
+        DateTimeOffset? LastUserPlacementUtc,
+        string? LastUserPlacementTopologyKey,
         double X, double Y,
         string? Anchor,
         double MarginX, double MarginY,
@@ -94,6 +96,8 @@ public sealed partial class WidgetManager
                 group?.BoundScreenId ?? config.BoundScreenId,
                 group?.BoundScreenLabel ?? config.BoundScreenLabel,
                 group?.DisconnectCollapsedForScreenId ?? config.DisconnectCollapsedForScreenId,
+                group?.LastUserPlacementUtc ?? config.LastUserPlacementUtc,
+                group?.LastUserPlacementTopologyKey ?? config.LastUserPlacementTopologyKey,
                 group?.X ?? config.X,
                 group?.Y ?? config.Y,
                 group?.PositionAnchor ?? config.PositionAnchor,
@@ -168,6 +172,8 @@ public sealed partial class WidgetManager
                 group.BoundScreenId = snapshot.BoundScreenId;
                 group.BoundScreenLabel = snapshot.BoundScreenLabel;
                 group.DisconnectCollapsedForScreenId = snapshot.DisconnectCollapsedForScreenId;
+                group.LastUserPlacementUtc = snapshot.LastUserPlacementUtc;
+                group.LastUserPlacementTopologyKey = snapshot.LastUserPlacementTopologyKey;
                 group.X = snapshot.X;
                 group.Y = snapshot.Y;
                 group.PositionAnchor = snapshot.Anchor;
@@ -185,6 +191,8 @@ public sealed partial class WidgetManager
             config.BoundScreenId = snapshot.BoundScreenId;
             config.BoundScreenLabel = snapshot.BoundScreenLabel;
             config.DisconnectCollapsedForScreenId = snapshot.DisconnectCollapsedForScreenId;
+            config.LastUserPlacementUtc = snapshot.LastUserPlacementUtc;
+            config.LastUserPlacementTopologyKey = snapshot.LastUserPlacementTopologyKey;
             config.X = snapshot.X;
             config.Y = snapshot.Y;
             config.PositionAnchor = snapshot.Anchor;
@@ -220,6 +228,34 @@ public sealed partial class WidgetManager
     /// Single-surface move (spec 5.10) — semantic wrapper over
     /// ApplyScreenBindingAsync for menu/settings callers.
     /// </summary>
+    /// <summary>
+    /// Manually recalibrates active display topology layout and repositions all
+    /// loaded widget windows onto their resolved bounds for the current topology.
+    /// </summary>
+    public async Task<int> RecalibrateDisplayLayoutAsync()
+    {
+        int surfaceCount = 0;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            var settings = _settingsService.Settings;
+            _ = _topologyLayoutService.RecalibrateCurrentTopology(settings);
+            surfaceCount = EnumerateLayoutSurfaces(settings).Count();
+        });
+
+        RepositionAllLoadedWindows();
+        await Task.Yield();
+        ApplyDisconnectCollapsePolicy(
+            DeskBox.Platform.Win32Helper.GetMonitorWorkAreaInfos()
+                .Select(area => string.IsNullOrWhiteSpace(area.StableId)
+                    ? DeskBox.Platform.Win32Helper.ResolveStableMonitorId(area.DeviceName)
+                    : area.StableId)
+                .ToList());
+        ScheduleCapsuleArrangementConsistencyCheck("manual-display-recalibrate");
+        _settingsService.SaveDebounced(notifySubscribers: false);
+        NotifyScreenHomeChangedAction?.Invoke();
+        return surfaceCount;
+    }
+
     public Task MoveSurfaceToDisplayAsync(string widgetId, string displayStableId) =>
         ApplyScreenBindingAsync(widgetId, WidgetScreenBindingMode.Pinned, displayStableId);
 

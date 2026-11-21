@@ -69,15 +69,6 @@ public sealed class IdleWidgetZOrderPolicyTests
     }
 
     [Fact]
-    public void ShouldNormalizeIdlePeerOrder_OnlyRunsWhileDropShadowsAreEnabled()
-    {
-        Assert.True(IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(
-            windowDropShadowEnabled: true));
-        Assert.False(IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(
-            windowDropShadowEnabled: false));
-    }
-
-    [Fact]
     public void MatchesRequestedOrder_AcceptsAlreadyAppliedOrder()
     {
         var requested = Handles(10, 20, 30);

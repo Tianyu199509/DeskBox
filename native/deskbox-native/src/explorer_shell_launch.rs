@@ -226,13 +226,24 @@ pub(crate) unsafe fn execute(
     result.attempted_phases |= DESKBOX_EXPLORER_SHELL_LAUNCH_PHASE_EXECUTE;
     // SAFETY: ABI validation guarantees all three UTF-16 slices remain readable.
     let path = BSTR::from_wide(unsafe { input_slice(&request.path) });
-    // SAFETY: ABI validation guarantees all three UTF-16 slices remain readable.
-    let working_directory = VARIANT::from(BSTR::from_wide(unsafe {
-        input_slice(&request.working_directory)
-    }));
-    // SAFETY: ABI validation guarantees all three UTF-16 slices remain readable.
-    let verb = VARIANT::from(BSTR::from_wide(unsafe { input_slice(&request.verb) }));
-    let arguments = VARIANT::from(BSTR::new());
+    // Pass VT_EMPTY when working_directory or verb is omitted so IShellDispatch2::ShellExecute
+    // executes the true Desktop double-click default verb rather than an explicit "open" verb
+    // that fails silently on default-verb-only classes (.cpl, .ttf, .otf, custom ProgIds).
+    let working_directory = if request.working_directory.length_chars == 0 {
+        VARIANT::default()
+    } else {
+        // SAFETY: ABI validation guarantees all three UTF-16 slices remain readable.
+        VARIANT::from(BSTR::from_wide(unsafe {
+            input_slice(&request.working_directory)
+        }))
+    };
+    let verb = if request.verb.length_chars == 0 {
+        VARIANT::default()
+    } else {
+        // SAFETY: ABI validation guarantees all three UTF-16 slices remain readable.
+        VARIANT::from(BSTR::from_wide(unsafe { input_slice(&request.verb) }))
+    };
+    let arguments = VARIANT::default();
     let show = VARIANT::from(SHOW_NORMAL);
     // SAFETY: Every BSTR/VARIANT remains alive for the duration of the synchronous call.
     match unsafe {

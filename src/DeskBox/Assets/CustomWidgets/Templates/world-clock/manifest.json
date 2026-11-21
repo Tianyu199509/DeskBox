@@ -1,0 +1,1105 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.world-clock",
+  "name": "${$i18n.widgetName}",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🌍",
+  "version": "3.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "capabilities": [
+    "world-clock",
+    "vector-canvas",
+    "popover-and-markdown",
+    "script-sandbox",
+    "advanced-inputs-and-styling"
+  ],
+  "defaultSize": {
+    "width": 332,
+    "height": 368
+  },
+  "minSize": {
+    "width": 276,
+    "height": 220
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "sources": [
+    {
+      "id": "clock",
+      "type": "clock",
+      "intervalMs": 1000
+    }
+  ],
+  "settings": [
+    {
+      "key": "city1",
+      "type": "choice",
+      "label": "${$i18n.setCity1}",
+      "default": "America/Los_Angeles",
+      "options": [
+        {
+          "value": "America/Los_Angeles",
+          "label": "${tzCity('America/Los_Angeles')}"
+        },
+        {
+          "value": "America/New_York",
+          "label": "${tzCity('America/New_York')}"
+        },
+        {
+          "value": "America/Chicago",
+          "label": "${tzCity('America/Chicago')}"
+        },
+        {
+          "value": "America/Toronto",
+          "label": "${tzCity('America/Toronto')}"
+        },
+        {
+          "value": "America/Sao_Paulo",
+          "label": "${tzCity('America/Sao_Paulo')}"
+        },
+        {
+          "value": "America/Mexico_City",
+          "label": "${tzCity('America/Mexico_City')}"
+        },
+        {
+          "value": "Europe/London",
+          "label": "${tzCity('Europe/London')}"
+        },
+        {
+          "value": "Europe/Paris",
+          "label": "${tzCity('Europe/Paris')}"
+        },
+        {
+          "value": "Europe/Berlin",
+          "label": "${tzCity('Europe/Berlin')}"
+        },
+        {
+          "value": "Europe/Moscow",
+          "label": "${tzCity('Europe/Moscow')}"
+        },
+        {
+          "value": "Europe/Istanbul",
+          "label": "${tzCity('Europe/Istanbul')}"
+        },
+        {
+          "value": "Asia/Shanghai",
+          "label": "${tzCity('Asia/Shanghai')}"
+        },
+        {
+          "value": "Asia/Hong_Kong",
+          "label": "${tzCity('Asia/Hong_Kong')}"
+        },
+        {
+          "value": "Asia/Taipei",
+          "label": "${tzCity('Asia/Taipei')}"
+        },
+        {
+          "value": "Asia/Singapore",
+          "label": "${tzCity('Asia/Singapore')}"
+        },
+        {
+          "value": "Asia/Tokyo",
+          "label": "${tzCity('Asia/Tokyo')}"
+        },
+        {
+          "value": "Asia/Seoul",
+          "label": "${tzCity('Asia/Seoul')}"
+        },
+        {
+          "value": "Asia/Kolkata",
+          "label": "${tzCity('Asia/Kolkata')}"
+        },
+        {
+          "value": "Asia/Bangkok",
+          "label": "${tzCity('Asia/Bangkok')}"
+        },
+        {
+          "value": "Asia/Dubai",
+          "label": "${tzCity('Asia/Dubai')}"
+        },
+        {
+          "value": "Asia/Riyadh",
+          "label": "${tzCity('Asia/Riyadh')}"
+        },
+        {
+          "value": "Australia/Sydney",
+          "label": "${tzCity('Australia/Sydney')}"
+        },
+        {
+          "value": "Australia/Perth",
+          "label": "${tzCity('Australia/Perth')}"
+        },
+        {
+          "value": "Pacific/Auckland",
+          "label": "${tzCity('Pacific/Auckland')}"
+        },
+        {
+          "value": "UTC",
+          "label": "UTC"
+        }
+      ]
+    },
+    {
+      "key": "city2",
+      "type": "choice",
+      "label": "${$i18n.setCity2}",
+      "default": "Europe/London",
+      "optionsFrom": "city1"
+    },
+    {
+      "key": "city3",
+      "type": "choice",
+      "label": "${$i18n.setCity3}",
+      "default": "Asia/Tokyo",
+      "optionsFrom": "city1"
+    },
+    {
+      "key": "city4",
+      "type": "choice",
+      "label": "${$i18n.setCity4}",
+      "default": "America/New_York",
+      "options": [
+        {
+          "value": "none",
+          "label": "${$i18n.cityNone}"
+        }
+      ],
+      "optionsFrom": "city1"
+    },
+    {
+      "key": "dialStyle",
+      "type": "choice",
+      "label": "${$i18n.setDialStyle}",
+      "default": "modern",
+      "options": [
+        {
+          "value": "modern",
+          "label": "${$i18n.optDialModern}"
+        },
+        {
+          "value": "classic",
+          "label": "${$i18n.optDialClassic}"
+        }
+      ]
+    },
+    {
+      "key": "hourFormat",
+      "type": "choice",
+      "label": "${$i18n.setHourFormat}",
+      "default": "24h",
+      "options": [
+        {
+          "value": "24h",
+          "label": "${$i18n.optHf24}"
+        },
+        {
+          "value": "12h",
+          "label": "${$i18n.optHf12}"
+        }
+      ]
+    },
+    {
+      "key": "workWindow",
+      "type": "choice",
+      "label": "${$i18n.setWorkWindow}",
+      "default": "09-18",
+      "options": [
+        {
+          "value": "08-17",
+          "label": "${$i18n.optWw0817}"
+        },
+        {
+          "value": "09-18",
+          "label": "${$i18n.optWw0918}"
+        },
+        {
+          "value": "10-19",
+          "label": "${$i18n.optWw1019}"
+        }
+      ]
+    },
+    {
+      "key": "showDevUnix",
+      "type": "toggle",
+      "label": "${$i18n.setDevUnix}",
+      "default": true
+    }
+  ],
+  "state": {
+    "focusSlot": "local",
+    "focusZone": "local",
+    "scrubHours": 0
+  },
+  "capsule": {
+    "title": "${$settings.hourFormat == '12h' ? tz(state.focusZone, 'h:mm tt', state.scrubHours) : tz(state.focusZone, 'HH:mm', state.scrubHours)} ${state.focusSlot == 'local' ? $i18n.localShort : tzCity(state.focusZone)}",
+    "summary": "${tzCity($settings.city3)} ${tz($settings.city3, 'HH:mm', state.scrubHours)} · ${tzCity($settings.city2)} ${tz($settings.city2, 'HH:mm', state.scrubHours)}",
+    "glyph": "🌍",
+    "badge": "${$computed.shortUtcBadge}",
+    "badgeIsWarning": "${state.scrubHours > 0}",
+    "progress": "${tzHourFloat(state.focusZone, state.scrubHours) * 100 / 24}"
+  },
+  "root": "main",
+  "popovers": {
+    "meetingPopover": {
+      "title": "${$i18n.scrubTitle}",
+      "width": 320,
+      "root": "pop_meeting_planner_body"
+    },
+    "toolsPopover": {
+      "title": "${$i18n.tipTools}",
+      "width": 320,
+      "root": "pop_clock_tools_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "padding": "10,10,10,8",
+      "spacing": 7,
+      "children": [
+        "hero_clock_card",
+        "grid_world_cities",
+        "overlap_summary_card"
+      ]
+    },
+    "hero_clock_card": {
+      "type": "Card",
+      "tone": "${tzDayPhase(state.focusZone, state.scrubHours) == 'night' ? 'subtle' : 'default'}",
+      "padding": "11,8,11,8",
+      "spacing": 5,
+      "children": [
+        "hero_clock_header_grid",
+        "hero_clock_body_grid"
+      ]
+    },
+    "hero_clock_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto,Auto,Auto",
+      "columnSpacing": 4,
+      "children": [
+        "btn_focus_local",
+        "btn_reset_scrub_offset",
+        "badge_day_work_state",
+        "btn_open_meeting_planner",
+        "btn_open_clock_tools"
+      ]
+    },
+    "btn_focus_local": {
+      "type": "Button",
+      "column": 0,
+      "icon": "${state.focusSlot == 'local' ? 'location' : 'reset'}",
+      "text": "${state.focusSlot == 'local' ? $i18n.localNow : tzCity(state.focusZone)}",
+      "variant": "subtle",
+      "padding": "5,1,5,1",
+      "horizontalAlignment": "left",
+      "tooltip": "${$i18n.backLocal}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "focusLocal"
+        }
+      ]
+    },
+    "btn_reset_scrub_offset": {
+      "type": "Button",
+      "column": 1,
+      "when": "${state.scrubHours > 0}",
+      "dir": "ltr",
+      "text": "+${state.scrubHours}h ↺",
+      "variant": "subtle",
+      "padding": "5,1,5,1",
+      "tooltip": "${$i18n.backToNow}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "scrubHours",
+          "value": "0"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "badge_day_work_state": {
+      "type": "Badge",
+      "column": 2,
+      "tone": "${tzWorkState(state.focusZone, $settings.workWindow, state.scrubHours) == 'work' ? 'emerald' : (tzWorkState(state.focusZone, $settings.workWindow, state.scrubHours) == 'sleep' ? 'subtle' : (tzHourFloat(state.focusZone, state.scrubHours) < 12 ? 'cyan' : 'warning'))}",
+      "text": "${(tzDayPhase(state.focusZone, state.scrubHours) == 'dawn' ? '🌅 ' : (tzDayPhase(state.focusZone, state.scrubHours) == 'day' ? '☀️ ' : (tzDayPhase(state.focusZone, state.scrubHours) == 'dusk' ? '🌆 ' : '🌙 ')))}${tzWorkState(state.focusZone, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : (tzWorkState(state.focusZone, $settings.workWindow, state.scrubHours) == 'sleep' ? $i18n.stSleep : (tzHourFloat(state.focusZone, state.scrubHours) < 12 ? $i18n.stMorning : $i18n.stEvening))}"
+    },
+    "btn_open_meeting_planner": {
+      "type": "IconButton",
+      "column": 3,
+      "icon": "calendar",
+      "size": 24,
+      "variant": "subtle",
+      "popover": "meetingPopover",
+      "tooltip": "${$i18n.tipMeeting}"
+    },
+    "btn_open_clock_tools": {
+      "type": "IconButton",
+      "column": 4,
+      "icon": "settings",
+      "size": 24,
+      "variant": "subtle",
+      "popover": "toolsPopover",
+      "tooltip": "${$i18n.tipTools}"
+    },
+    "hero_clock_body_grid": {
+      "type": "Grid",
+      "columns": "74,*",
+      "columnSpacing": 12,
+      "children": [
+        "canvas_analog_dial",
+        "hero_digital_clock_stack"
+      ]
+    },
+    "canvas_analog_dial": {
+      "type": "Canvas",
+      "column": 0,
+      "width": 72,
+      "height": 72,
+      "verticalAlignment": "center",
+      "viewBox": "0 0 100 100",
+      "elementsSource": "${$computed.dialMarks}",
+      "elements": [
+        {
+          "type": "circle",
+          "cx": "50",
+          "cy": "50",
+          "r": "${$settings.dialStyle == 'classic' ? 46 : 45}",
+          "fill": "transparent",
+          "stroke": "${$settings.dialStyle == 'classic' ? 'default' : 'secondary'}",
+          "strokeWidth": "${$settings.dialStyle == 'classic' ? 1.2 : 1.1}",
+          "opacity": "${$settings.dialStyle == 'classic' ? 0.45 : 0.32}"
+        },
+        {
+          "type": "circle",
+          "cx": "50",
+          "cy": "50",
+          "r": "43.5",
+          "fill": "transparent",
+          "stroke": "secondary",
+          "strokeWidth": 0.7,
+          "opacity": "${$settings.dialStyle == 'classic' ? 0.28 : 0}"
+        },
+        {
+          "type": "line",
+          "x1": "50",
+          "y1": "53",
+          "x2": "50",
+          "y2": "27",
+          "cx": "50",
+          "cy": "50",
+          "rotation": "${(tzHourFloat(state.focusZone, state.scrubHours) % 12) * 30}",
+          "stroke": "default",
+          "strokeWidth": "${$settings.dialStyle == 'classic' ? 3.2 : 3.0}",
+          "strokeCap": "round"
+        },
+        {
+          "type": "line",
+          "x1": "50",
+          "y1": "${$settings.dialStyle == 'classic' ? 56 : 55}",
+          "x2": "50",
+          "y2": "${$settings.dialStyle == 'classic' ? 15 : 16}",
+          "cx": "50",
+          "cy": "50",
+          "rotation": "${(tzHourFloat(state.focusZone, state.scrubHours) % 1) * 360}",
+          "stroke": "default",
+          "strokeWidth": 2.0,
+          "strokeCap": "round"
+        },
+        {
+          "type": "line",
+          "x1": "50",
+          "y1": "${$settings.dialStyle == 'classic' ? 60 : 59}",
+          "x2": "50",
+          "y2": "${$settings.dialStyle == 'classic' ? 12 : 13}",
+          "cx": "50",
+          "cy": "50",
+          "rotation": "${tz(state.focusZone, 'ss', state.scrubHours) * 6}",
+          "stroke": "#0EA5E9",
+          "strokeWidth": 1.2,
+          "strokeCap": "round"
+        },
+        {
+          "type": "circle",
+          "cx": "50",
+          "cy": "50",
+          "r": "3.0",
+          "fill": "#0EA5E9"
+        },
+        {
+          "type": "circle",
+          "cx": "50",
+          "cy": "50",
+          "r": "1.1",
+          "fill": "default"
+        }
+      ]
+    },
+    "hero_digital_clock_stack": {
+      "type": "Stack",
+      "column": 1,
+      "verticalAlignment": "center",
+      "spacing": 2,
+      "children": [
+        "hero_time_digits_row",
+        "txt_hero_date_utc"
+      ]
+    },
+    "hero_time_digits_row": {
+      "type": "Stack",
+      "direction": "horizontal",
+      "spacing": 3,
+      "verticalAlignment": "bottom",
+      "children": [
+        "txt_hero_time_main",
+        "txt_hero_time_seconds",
+        "txt_hero_time_ampm"
+      ]
+    },
+    "txt_hero_time_main": {
+      "type": "Text",
+      "text": "${$settings.hourFormat == '12h' ? tz(state.focusZone, 'h:mm', state.scrubHours) : tz(state.focusZone, 'HH:mm', state.scrubHours)}",
+      "fontFamily": "mono",
+      "fontSize": 28,
+      "fontWeight": "bold",
+      "maxLines": 1
+    },
+    "txt_hero_time_seconds": {
+      "type": "Text",
+      "when": "${$settings.hourFormat != '12h'}",
+      "text": ":${tz(state.focusZone, 'ss', state.scrubHours)}",
+      "style": "mono",
+      "color": "muted",
+      "margin": "0,0,0,4"
+    },
+    "txt_hero_time_ampm": {
+      "type": "Text",
+      "when": "${$settings.hourFormat == '12h'}",
+      "text": "${tz(state.focusZone, 'tt', state.scrubHours)}",
+      "style": "caption",
+      "color": "secondary",
+      "margin": "0,0,0,4"
+    },
+    "txt_hero_date_utc": {
+      "type": "Text",
+      "text": "${tz(state.focusZone, 'M', state.scrubHours)} · ${tz(state.focusZone, 'dddd', state.scrubHours)} · UTC${tz(state.focusZone, 'zzz', state.scrubHours)}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "grid_world_cities": {
+      "type": "ItemsGrid",
+      "items": "${$computed.cities}",
+      "columns": "2",
+      "spacing": 7,
+      "minItemWidth": 120,
+      "emptyState": {
+        "icon": "🌍",
+        "title": "${$i18n.emptyCitiesTitle}",
+        "subtitle": "${$i18n.emptyCitiesSub}"
+      },
+      "itemTemplate": "card_world_city"
+    },
+    "card_world_city": {
+      "type": "Card",
+      "tone": "${(tzDayPhase($item.zone, state.scrubHours) == 'night' || tzDayPhase($item.zone, state.scrubHours) == 'dusk') ? 'subtle' : 'default'}",
+      "padding": "10,6,10,6",
+      "spacing": 2,
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleFocus",
+          "args": {
+            "slot": "${$item.slot}"
+          }
+        }
+      ],
+      "children": [
+        "city_card_header_grid",
+        "txt_city_clock_time",
+        "txt_city_offset_human"
+      ]
+    },
+    "city_card_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 4,
+      "children": [
+        "city_name_row",
+        "txt_city_work_state"
+      ]
+    },
+    "city_name_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_city_phase_emoji",
+        "txt_city_name"
+      ]
+    },
+    "txt_city_phase_emoji": {
+      "type": "Text",
+      "text": "${tzDayPhase($item.zone, state.scrubHours) == 'dawn' ? '🌅' : (tzDayPhase($item.zone, state.scrubHours) == 'day' ? '☀️' : (tzDayPhase($item.zone, state.scrubHours) == 'dusk' ? '🌆' : '🌙'))}",
+      "fontSize": 12,
+      "verticalAlignment": "center"
+    },
+    "txt_city_name": {
+      "type": "Text",
+      "text": "${tzCity($item.zone)}",
+      "style": "bodyStrong",
+      "color": "${state.focusSlot == $item.slot ? 'accent' : 'default'}",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_city_work_state": {
+      "type": "Text",
+      "column": 1,
+      "text": "${tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : (tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'sleep' ? $i18n.stSleep : (tzHourFloat($item.zone, state.scrubHours) < 12 ? $i18n.stMorning : $i18n.stEvening))}",
+      "style": "caption",
+      "color": "${tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'work' ? 'emerald' : (tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'sleep' ? 'muted' : (tzHourFloat($item.zone, state.scrubHours) < 12 ? 'accent' : 'warning'))}",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "txt_city_clock_time": {
+      "type": "Text",
+      "text": "${$settings.hourFormat == '12h' ? tz($item.zone, 'h:mm tt', state.scrubHours) : tz($item.zone, 'HH:mm', state.scrubHours)}",
+      "fontFamily": "mono",
+      "fontSize": 20,
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "txt_city_offset_human": {
+      "type": "Text",
+      "text": "${$item.offsetHuman}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "overlap_summary_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6,10,6",
+      "popover": "meetingPopover",
+      "children": [
+        "overlap_summary_grid"
+      ]
+    },
+    "overlap_summary_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "overlap_label_row",
+        "txt_overlap_summary"
+      ]
+    },
+    "overlap_label_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_overlap_emoji",
+        "txt_overlap_range_label"
+      ]
+    },
+    "txt_overlap_emoji": {
+      "type": "Text",
+      "text": "🤝",
+      "style": "caption",
+      "verticalAlignment": "center"
+    },
+    "txt_overlap_range_label": {
+      "type": "Text",
+      "text": "${$i18n.overlapBarLabel} ${$computed.bestOverlapRange}",
+      "style": "caption",
+      "color": "secondary",
+      "fontWeight": "semiBold",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_overlap_summary": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.bestOverlapSummary} ›",
+      "style": "caption",
+      "color": "accent",
+      "verticalAlignment": "center"
+    },
+    "pop_meeting_planner_body": {
+      "type": "Stack",
+      "spacing": 10,
+      "children": [
+        "overlap_timeline_card",
+        "time_scrubber_stack",
+        "meeting_city_preview_card",
+        "btn_copy_meeting_times"
+      ]
+    },
+    "overlap_timeline_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8,10,8",
+      "spacing": 6,
+      "children": [
+        "overlap_timeline_header_grid",
+        "canvas_overlap_timeline",
+        "btn_jump_golden_window"
+      ]
+    },
+    "overlap_timeline_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "txt_overlap_timeline_title",
+        "txt_overlap_timeline_best"
+      ]
+    },
+    "txt_overlap_timeline_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.overlapTitle}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "txt_overlap_timeline_best": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.bestOverlapRange} · ${$computed.bestOverlapSummary}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "color": "accent"
+    },
+    "canvas_overlap_timeline": {
+      "type": "Canvas",
+      "height": 34,
+      "stretch": "fill",
+      "viewBox": "0 0 280 34",
+      "elementsSource": "${$computed.overlapBars}",
+      "elements": [
+        {
+          "type": "rect",
+          "x": "${4 + tzFloorHour('local', state.scrubHours) * 11.25}",
+          "y": "1",
+          "width": "10.4",
+          "height": "26",
+          "rx": "3",
+          "fill": "#0EA5E9",
+          "opacity": 0.16,
+          "stroke": "accent",
+          "strokeWidth": 1.4
+        },
+        {
+          "type": "text",
+          "x": "9.5",
+          "y": "30",
+          "text": "00",
+          "align": "center",
+          "fontSize": 7.5,
+          "fill": "secondary"
+        },
+        {
+          "type": "text",
+          "x": "140",
+          "y": "30",
+          "text": "12",
+          "align": "center",
+          "fontSize": 7.5,
+          "fill": "secondary"
+        },
+        {
+          "type": "text",
+          "x": "273",
+          "y": "30",
+          "text": "23",
+          "align": "right",
+          "fontSize": 7.5,
+          "fill": "secondary"
+        }
+      ]
+    },
+    "btn_jump_golden_window": {
+      "type": "Button",
+      "text": "${$i18n.jumpGolden} · ${$computed.bestOverlapRange}",
+      "icon": "target",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "jumpBestOverlap"
+        }
+      ]
+    },
+    "time_scrubber_stack": {
+      "type": "Stack",
+      "spacing": 6,
+      "children": [
+        "scrubber_status_grid",
+        "slider_scrub_hours",
+        "scrubber_presets_grid"
+      ]
+    },
+    "scrubber_status_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_scrubber_local_time",
+        "badge_scrubber_live",
+        "badge_scrubber_offset"
+      ]
+    },
+    "txt_scrubber_local_time": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.localNow} ${$settings.hourFormat == '12h' ? tz('local', 'h:mm tt', state.scrubHours) : tz('local', 'HH:mm', state.scrubHours)}",
+      "style": "bodyStrong"
+    },
+    "badge_scrubber_live": {
+      "type": "Badge",
+      "column": 1,
+      "when": "${state.scrubHours == 0}",
+      "tone": "cyan",
+      "text": "${$i18n.liveShort}"
+    },
+    "badge_scrubber_offset": {
+      "type": "Badge",
+      "column": 1,
+      "when": "${state.scrubHours > 0}",
+      "dir": "ltr",
+      "tone": "warning",
+      "text": "+${state.scrubHours}h"
+    },
+    "slider_scrub_hours": {
+      "type": "Slider",
+      "bind": "state.scrubHours",
+      "min": 0,
+      "max": 23.5,
+      "step": 0.5,
+      "showValue": false,
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "scrubber_presets_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "columnSpacing": 6,
+      "children": [
+        "btn_scrub_now",
+        "btn_scrub_one_hour",
+        "btn_scrub_three_hours",
+        "btn_scrub_eight_hours"
+      ]
+    },
+    "btn_scrub_now": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$i18n.backToNow}",
+      "variant": "subtle",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "scrubHours",
+          "value": "0"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "btn_scrub_one_hour": {
+      "type": "Button",
+      "column": 1,
+      "text": "+1h",
+      "variant": "subtle",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "scrubHours",
+          "value": "1"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "btn_scrub_three_hours": {
+      "type": "Button",
+      "column": 2,
+      "text": "+3h",
+      "variant": "subtle",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "scrubHours",
+          "value": "3"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "btn_scrub_eight_hours": {
+      "type": "Button",
+      "column": 3,
+      "text": "+8h",
+      "variant": "subtle",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "scrubHours",
+          "value": "8"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshScrub"
+        }
+      ]
+    },
+    "meeting_city_preview_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8,10,8",
+      "spacing": 5,
+      "children": [
+        "txt_meeting_preview_title",
+        "grid_meeting_city_rows"
+      ]
+    },
+    "txt_meeting_preview_title": {
+      "type": "Text",
+      "text": "${$i18n.cityPreviewTitle}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "grid_meeting_city_rows": {
+      "type": "ItemsGrid",
+      "items": "${$computed.meetingRows}",
+      "columns": "1",
+      "spacing": 5,
+      "emptyState": {
+        "icon": "🌍",
+        "title": "${$i18n.emptyCitiesTitle}",
+        "subtitle": "${$i18n.emptyCitiesSub}"
+      },
+      "itemTemplate": "row_meeting_city_item"
+    },
+    "row_meeting_city_item": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_meeting_city_name",
+        "txt_meeting_city_time",
+        "badge_meeting_city_state"
+      ]
+    },
+    "txt_meeting_city_name": {
+      "type": "Text",
+      "column": 0,
+      "text": "${tzCity($item.zone)}",
+      "style": "body",
+      "maxLines": 1
+    },
+    "txt_meeting_city_time": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$settings.hourFormat == '12h' ? tz($item.zone, 'h:mm tt', state.scrubHours) : tz($item.zone, 'HH:mm', state.scrubHours)}",
+      "style": "mono"
+    },
+    "badge_meeting_city_state": {
+      "type": "Badge",
+      "column": 2,
+      "tone": "${tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'work' ? 'success' : tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'edge' ? 'warning' : 'subtle'}",
+      "text": "${tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : (tzWorkState($item.zone, $settings.workWindow, state.scrubHours) == 'sleep' ? $i18n.stSleep : (tzHourFloat($item.zone, state.scrubHours) < 12 ? $i18n.stMorning : $i18n.stEvening))}"
+    },
+    "btn_copy_meeting_times": {
+      "type": "Button",
+      "text": "${$i18n.copyTimes}",
+      "icon": "copy",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "copyMeetingTimes",
+          "args": {
+            "localLabel": "${$i18n.localNow}",
+            "c1Label": "${tzCity($settings.city1)}",
+            "c2Label": "${tzCity($settings.city2)}",
+            "c3Label": "${tzCity($settings.city3)}",
+            "c4Label": "${tzCity($settings.city4)}",
+            "hasC4": "${$settings.city4 != 'none'}"
+          }
+        }
+      ]
+    },
+    "pop_clock_tools_body": {
+      "type": "Stack",
+      "spacing": 10,
+      "children": [
+        "dial_style_setting_grid",
+        "hour_format_setting_grid",
+        "div_tools_cities",
+        "quick_cities_section_stack",
+        "dev_timestamps_section_stack"
+      ]
+    },
+    "dial_style_setting_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_dial_style_label",
+        "seg_dial_style"
+      ]
+    },
+    "txt_dial_style_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.setDialStyle}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center"
+    },
+    "seg_dial_style": {
+      "type": "Segmented",
+      "column": 1,
+      "bind": "$settings.dialStyle"
+    },
+    "hour_format_setting_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_hour_format_label",
+        "seg_hour_format"
+      ]
+    },
+    "txt_hour_format_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.setHourFormat}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center"
+    },
+    "seg_hour_format": {
+      "type": "Segmented",
+      "column": 1,
+      "bind": "$settings.hourFormat"
+    },
+    "div_tools_cities": {
+      "type": "Divider"
+    },
+    "quick_cities_section_stack": {
+      "type": "Stack",
+      "spacing": 6,
+      "children": [
+        "txt_quick_cities_header",
+        "select_city_first",
+        "select_city_second",
+        "select_city_third",
+        "select_city_fourth"
+      ]
+    },
+    "txt_quick_cities_header": {
+      "type": "Text",
+      "text": "${$i18n.secQuickCities}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "select_city_first": {
+      "type": "Select",
+      "title": "${$i18n.setCity1}",
+      "bind": "$settings.city1"
+    },
+    "select_city_second": {
+      "type": "Select",
+      "title": "${$i18n.setCity2}",
+      "bind": "$settings.city2"
+    },
+    "select_city_third": {
+      "type": "Select",
+      "title": "${$i18n.setCity3}",
+      "bind": "$settings.city3"
+    },
+    "select_city_fourth": {
+      "type": "Select",
+      "title": "${$i18n.setCity4}",
+      "bind": "$settings.city4"
+    },
+    "dev_timestamps_section_stack": {
+      "type": "Stack",
+      "when": "${$settings.showDevUnix == 'true'}",
+      "spacing": 6,
+      "children": [
+        "div_tools_dev_timestamps",
+        "txt_dev_timestamps_header",
+        "grid_dev_timestamps"
+      ]
+    },
+    "div_tools_dev_timestamps": {
+      "type": "Divider"
+    },
+    "txt_dev_timestamps_header": {
+      "type": "Text",
+      "text": "${$i18n.secDevUnix}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "grid_dev_timestamps": {
+      "type": "ItemsGrid",
+      "items": "${$computed.devTimestamps}",
+      "columns": "2",
+      "spacing": 6,
+      "minItemWidth": 120,
+      "itemTemplate": "card_dev_timestamp"
+    },
+    "card_dev_timestamp": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "8,5,8,5",
+      "spacing": 1,
+      "onClick": [
+        {
+          "type": "clipboard.copy",
+          "text": "${$item.value}"
+        }
+      ],
+      "children": [
+        "txt_dev_timestamp_label",
+        "txt_dev_timestamp_value"
+      ]
+    },
+    "txt_dev_timestamp_label": {
+      "type": "Text",
+      "text": "${$item.label}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "txt_dev_timestamp_value": {
+      "type": "Text",
+      "text": "${$item.value}",
+      "style": "mono",
+      "maxLines": 1
+    }
+  }
+}

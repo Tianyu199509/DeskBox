@@ -88,9 +88,9 @@ public sealed class BackupRuntime : IBackupCommands, IAsyncDisposable
         token => _backend.CreateSnapshotAsync(true, token),
         new LocalBackupResult(BackupOutcome.AlreadyRunning), result => result.Outcome, cancellationToken);
 
-    public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default) => RunAsync(
+    public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default, bool includeClipboard = false) => RunAsync(
         BackupWorkKind.Local, scheduled: false, queueWhenBusy: true,
-        token => _backend.ExportAsync(destinationDirectory, token), string.Empty, _ => BackupOutcome.Succeeded, cancellationToken);
+        token => _backend.ExportAsync(destinationDirectory, token, includeClipboard), string.Empty, _ => BackupOutcome.Succeeded, cancellationToken);
 
     public Task<CloudBackupRunResult> UploadNowAsync(CancellationToken cancellationToken = default) => RunAsync(
         BackupWorkKind.Cloud, scheduled: false, queueWhenBusy: false,

@@ -8,22 +8,70 @@ public sealed partial class DesktopOrganizationTaskView
 {
     private bool _appearanceSubscribed;
     private bool _appearanceRefreshQueued;
+    private bool _isPermanentlyClosed;
+
+    private void TaskView_ActualThemeChanged(FrameworkElement sender, object args) =>
+        QueueAppearanceRefresh();
 
     private void TaskView_Loaded(object sender, RoutedEventArgs e)
     {
+        if (_isPermanentlyClosed) return;
+        _dragController.Attach(WorkspaceRootGrid);
         if (_appearanceSubscribed) return;
         _appearanceSubscribed = true;
         App.Current.SettingsService.SettingsChanged += QueueAppearanceRefresh;
         App.Current.SettingsService.AppearancePreviewChanged += QueueAppearanceRefresh;
         App.Current.ThemeService.AppearanceChanged += QueueAppearanceRefresh;
         WindowsCompatibilityService.TextScaleFactorChanged += QueueAppearanceRefresh;
-        if (_plan is not null && !_hasCompletedExecution && _targetCards.Count == 0) RenderPlan(_plan);
+        if (Session.EffectivePlan is not null && !_hasCompletedExecution && _targetCards.Count == 0)
+        {
+            RenderSessionPlan();
+        }
         QueueAppearanceRefresh();
     }
 
-    private void TaskView_Unloaded(object sender, RoutedEventArgs e)
+    private void TaskView_Unloaded(object sender, RoutedEventArgs e) =>
+        ReleaseMountedStateCore();
+
+    /// <summary>
+    /// Deterministic teardown invoked from <c>DesktopOrganizationWindow.Closed</c>.
+    /// WinUI 3 <c>Window.Close()</c> does not reliably fire child <c>UserControl.Unloaded</c>
+    /// unless detached, which would otherwise leave singleton/static events and decoded
+    /// preview thumbnails pinned in memory.
+    /// </summary>
+    public void CleanupForWindowClosed()
+    {
+        if (_isPermanentlyClosed)
+        {
+            return;
+        }
+
+        _isPermanentlyClosed = true;
+        Loaded -= TaskView_Loaded;
+        Unloaded -= TaskView_Unloaded;
+        ActualThemeChanged -= TaskView_ActualThemeChanged;
+        ReleaseMountedStateCore();
+        UnwirePointerDragController();
+        _dragController.Dispose();
+        _scanCts?.Dispose();
+        _scanCts = null;
+        _executionCts?.Dispose();
+        _executionCts = null;
+        _completedItems.Clear();
+        _restoredItems.Clear();
+        _runtimeRetainedItems.Clear();
+        DestinationPathsPanel.Children.Clear();
+        _session = null;
+        _lastExecutionPlan = null;
+        _coordinator = null;
+        Bindings?.StopTracking();
+        Content = null;
+    }
+
+    private void ReleaseMountedStateCore()
     {
         CancelPendingWork();
+        _dragController.Detach();
         if (_appearanceSubscribed)
         {
             _appearanceSubscribed = false;
@@ -57,13 +105,17 @@ public sealed partial class DesktopOrganizationTaskView
             if (!_appearanceSubscribed) return;
             RequestedTheme = App.Current.ThemeService.CurrentTheme;
             foreach (var card in _targetCards) card.RefreshAppearance();
-            foreach (var card in _retainedCards) card.RefreshAppearance();
             foreach (var card in _completedCards) card.RefreshAppearance();
-            if (!_isScanning && !_isExecuting && !_hasCompletedExecution && _basePlan is not null &&
-                !string.Equals(_basePlan.StorageRootPath, SettingsService.NormalizeManagedStorageRootPath(
-                    App.Current.SettingsService.Settings.DefaultManagedStorageRootPath), StringComparison.OrdinalIgnoreCase))
+            if (!_hasCompletedExecution && !_dragController.IsDragging && Session.EffectivePlan is not null)
+            {
+                RenderExcludedItems();
+            }
+            if (!_isScanning && !_isExecuting && !_hasCompletedExecution && Session.BasePlan is not null &&
+                !string.Equals(Session.BasePlan.StorageRootPath, SettingsService.NormalizeManagedStorageRootPath(
+                    App.Current.SettingsService.Settings.FileWidget.DefaultManagedStorageRootPath), StringComparison.OrdinalIgnoreCase))
+            {
                 _ = ScanAsync(preserveSelection: true);
-            LayoutTargetCards();
+            }
             UpdateSectionVisibility();
         });
     }

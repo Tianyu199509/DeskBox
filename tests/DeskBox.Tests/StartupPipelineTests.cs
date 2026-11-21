@@ -117,13 +117,9 @@ public sealed class StartupPipelineTests
         var pipeline = CreatePipeline(out List<string> log, out _);
         pipeline.RunOptional("ok", () => { });
         pipeline.RunOptional("degraded-step", () => throw new InvalidOperationException("why"));
-        try
-        {
-            pipeline.RunCritical("failed-step", () => throw new InvalidOperationException("fatal"));
-        }
-        catch (InvalidOperationException)
-        {
-        }
+        var fatal = Assert.Throws<InvalidOperationException>(
+            () => pipeline.RunCritical("failed-step", () => throw new InvalidOperationException("fatal")));
+        Assert.Equal("fatal", fatal.Message);
 
         pipeline.WriteSummary();
 

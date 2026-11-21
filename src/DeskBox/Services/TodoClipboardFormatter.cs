@@ -105,8 +105,8 @@ public static class TodoClipboardFormatter
         DateTimeOffset localValue = value.ToLocalTime();
         var today = DateTimeOffset.Now.Date;
         string time = localValue.Second == 0
-            ? localValue.ToString("HH:mm")
-            : localValue.ToString("HH:mm:ss");
+            ? localValue.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : localValue.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
 
         if (localValue.Date == today)
         {
@@ -119,8 +119,8 @@ public static class TodoClipboardFormatter
         }
 
         return localValue.Second == 0
-            ? localValue.ToString("yyyy/M/d HH:mm")
-            : localValue.ToString("yyyy/M/d HH:mm:ss");
+            ? localValue.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : localValue.ToString("yyyy/M/d HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string GetColorMarkerEmoji(string? colorMarker)
@@ -133,6 +133,8 @@ public static class TodoClipboardFormatter
             "green" => "\U0001F7E2",
             "blue" => "\U0001F535",
             "purple" => "\U0001F7E3",
+            "teal" => "\U0001F7E6",
+            "pink" => "\U0001F497",
             _ => string.Empty
         };
     }

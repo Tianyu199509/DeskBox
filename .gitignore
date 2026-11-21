@@ -9,6 +9,7 @@ TestResults/
 native/target/
 
 *.log
+*.binlog
 stdout.txt
 stderr.txt
 build_*.txt
@@ -75,6 +76,7 @@ shots/
 
 # Local product-video workspace and rendered previews
 /video-shotcraft/
+/promo-video/
 
 # Auto-generated code audit reports
 docs/audit/
@@ -114,3 +116,26 @@ store-listing/
 
 # Agent scratch workspace (review/fix iteration artifacts)
 .scratch/
+
+# Local-only repository archives, internal architecture/ops docs, prebuilt native cache, and local tooling
+docs/archive/
+docs/architecture/
+docs/acceptance/
+docs/requirements/
+docs/press-kit/
+docs/baselines/
+scripts/*-protocol.md
+scripts/publish_widget_catalog.py
+scripts/store-*.py
+native/prebuilt/
+/AGENTS.md
+/CLAUDE.md
+/.zcodeignore
+/deskbox-aot-curve-samples.csv
+.agents/
+.cursor/
+.gemini/
+
+# Python bytecode cache (scripts run locally)
+__pycache__/
+*.pyc

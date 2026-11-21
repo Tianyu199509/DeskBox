@@ -35,6 +35,12 @@ public sealed class WidgetGroupConfig
 
     public double PositionMarginY { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LastUserPlacementUtc { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastUserPlacementTopologyKey { get; set; }
+
     public string? PositionMonitorKey { get; set; }
 
     public string? PositionMonitorDeviceName { get; set; }

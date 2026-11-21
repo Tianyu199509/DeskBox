@@ -49,6 +49,7 @@ internal sealed partial class FolderMappingConflictWindow : Window
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private FolderMappingConflictResult _primaryResult;
     private FolderMappingConflictResult? _secondaryResult;
+    private FolderMappingConflictResult _selectedResult = FolderMappingConflictResult.None;
 
     /// <summary>
     /// Pure, testable button selection. The actions must fit the conflict:
@@ -100,7 +101,9 @@ internal sealed partial class FolderMappingConflictWindow : Window
             SetPrimary(repickLabel, FolderMappingConflictResult.Repick);
         }
 
-        Closed += (_, _) => _completion.TrySetResult(FolderMappingConflictResult.None);
+        // Complete after Closed so the window is already torn down before any
+        // continuation (such as Repick opening a new picker) runs.
+        Closed += (_, _) => _completion.TrySetResult(_selectedResult);
 
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd);
@@ -144,7 +147,7 @@ internal sealed partial class FolderMappingConflictWindow : Window
 
     private void Complete(FolderMappingConflictResult result)
     {
-        _completion.TrySetResult(result);
+        _selectedResult = result;
         Close();
     }
 

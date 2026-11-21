@@ -94,23 +94,30 @@ public sealed class DesktopOrganizationScanner
             foreach (string path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.TopDirectoryOnly))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (string.Equals(Path.GetFileName(path), "desktop.ini", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 // Manual scanning can opt into public items. Auto organization
                 // continues to pass the public root to CreateSnapshot and excludes it.
-                sourceItems.Add(CreateSnapshot(path, string.Empty, includeSlowItems) with { SourceScope = scope });
+                sourceItems.Add(CreateSnapshot(path, string.Empty, includeSlowItems, cancellationToken) with { SourceScope = scope });
             }
             if (!includeSlowItems) ApplyQuickBatchLimit(sourceItems);
             items.AddRange(sourceItems);
         }
     }
 
-    private static void ApplyQuickBatchLimit(
-        IList<DesktopOrganizationFileSnapshot> items)
+    internal static void ApplyQuickBatchLimit(
+        IList<DesktopOrganizationFileSnapshot> items,
+        IReadOnlySet<string>? exemptSourcePaths = null)
     {
         long acceptedBytes = 0;
         int acceptedCount = 0;
         foreach (int index in items
                      .Select((item, index) => new { item, index })
-                     .Where(entry => entry.item.IsEligible)
+                     .Where(entry =>
+                         entry.item.IsEligible &&
+                         (exemptSourcePaths is null || !exemptSourcePaths.Contains(entry.item.SourcePath)))
                      .OrderBy(entry => entry.item.Size)
                      .ThenBy(entry => entry.item.Name, StringComparer.OrdinalIgnoreCase)
                      .Select(entry => entry.index))
@@ -134,7 +141,8 @@ public sealed class DesktopOrganizationScanner
     private DesktopOrganizationFileSnapshot CreateSnapshot(
         string path,
         string publicDesktopPath,
-        bool includeSlowItems)
+        bool includeSlowItems,
+        CancellationToken cancellationToken = default)
     {
         string fullPath = Path.GetFullPath(path);
         string name = Path.GetFileName(fullPath);
@@ -156,20 +164,39 @@ public sealed class DesktopOrganizationScanner
             // Safety classifications take precedence over the optional folder
             // classification. A junction, hidden system folder, placeholder,
             // or temporary directory must never become selectable merely
-            // because it also carries the Directory attribute.
+            // because it also carries the Directory attribute. Locally hydrated
+            // cloud files/folders (IO_REPARSE_TAG_CLOUD* with no unhydrated
+            // recall flags) are permitted so OneDrive Desktop Backup users can
+            // organize local files normally.
+            const uint UnhydratedAttributeMask = 0x00001000u | 0x00040000u | 0x00400000u;
+            DesktopOrganizationExclusionReason? reparseOrCloudExclusion = null;
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                if (!DeskBox.Platform.StorageMigrationNativeMethods.IsHydratedCloudReparsePoint(
+                        fullPath,
+                        out bool isUnhydratedCloud))
+                {
+                    reparseOrCloudExclusion = isUnhydratedCloud
+                        ? DesktopOrganizationExclusionReason.OfflinePlaceholder
+                        : DesktopOrganizationExclusionReason.ReparsePoint;
+                }
+            }
+            else if (((uint)attributes & UnhydratedAttributeMask) != 0)
+            {
+                reparseOrCloudExclusion = DesktopOrganizationExclusionReason.OfflinePlaceholder;
+            }
+
             reason = isHiddenOrSystem
                 ? DesktopOrganizationExclusionReason.HiddenOrSystem
-                : (attributes & FileAttributes.ReparsePoint) != 0
-                    ? DesktopOrganizationExclusionReason.ReparsePoint
-                    : (attributes & FileAttributes.Offline) != 0
-                        ? DesktopOrganizationExclusionReason.OfflinePlaceholder
-                        : isTemporary
-                            ? DesktopOrganizationExclusionReason.TemporaryOrDownloading
-                            : IsUnderPath(fullPath, publicDesktopPath)
-                                ? DesktopOrganizationExclusionReason.PublicDesktopItem
-                                : isDirectory
-                                    ? DesktopOrganizationExclusionReason.Folder
-                                    : DesktopOrganizationExclusionReason.None;
+                : reparseOrCloudExclusion is { } cloudOrReparse
+                    ? cloudOrReparse
+                    : isTemporary
+                        ? DesktopOrganizationExclusionReason.TemporaryOrDownloading
+                        : IsUnderPath(fullPath, publicDesktopPath)
+                            ? DesktopOrganizationExclusionReason.PublicDesktopItem
+                            : isDirectory
+                                ? DesktopOrganizationExclusionReason.Folder
+                                : DesktopOrganizationExclusionReason.None;
 
             if (!isDirectory)
             {
@@ -186,7 +213,27 @@ public sealed class DesktopOrganizationScanner
             else
             {
                 lastWriteTimeUtc = Directory.GetLastWriteTimeUtc(fullPath);
+                if (reason is DesktopOrganizationExclusionReason.Folder or DesktopOrganizationExclusionReason.None)
+                {
+                    size = InspectDirectoryTreeSafe(
+                        fullPath,
+                        cancellationToken,
+                        out bool containsDisallowedReparsePoint,
+                        out bool containsOfflinePlaceholder);
+                    if (containsDisallowedReparsePoint)
+                    {
+                        reason = DesktopOrganizationExclusionReason.ReparsePoint;
+                    }
+                    else if (containsOfflinePlaceholder)
+                    {
+                        reason = DesktopOrganizationExclusionReason.OfflinePlaceholder;
+                    }
+                }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {
@@ -203,6 +250,90 @@ public sealed class DesktopOrganizationScanner
             classification.SubtypeId,
             reason,
             isDirectory);
+    }
+
+    private static long InspectDirectoryTreeSafe(
+        string rootDirectoryPath,
+        CancellationToken cancellationToken,
+        out bool containsDisallowedReparsePoint,
+        out bool containsOfflinePlaceholder)
+    {
+        const uint UnhydratedAttributeMask = 0x00001000u | 0x00040000u | 0x00400000u;
+        containsDisallowedReparsePoint = false;
+        containsOfflinePlaceholder = false;
+        long totalBytes = 0;
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(rootDirectoryPath);
+        while (pendingDirectories.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string currentDir = pendingDirectories.Pop();
+            IEnumerable<FileSystemInfo> entries;
+            try
+            {
+                entries = new DirectoryInfo(currentDir).EnumerateFileSystemInfos();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (FileSystemInfo entry in entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    FileAttributes attrs = entry.Attributes;
+                    if ((attrs & FileAttributes.ReparsePoint) != 0)
+                    {
+                        if (!DeskBox.Platform.StorageMigrationNativeMethods.IsHydratedCloudReparsePoint(
+                                entry.FullName,
+                                out bool childUnhydratedCloud))
+                        {
+                            if (childUnhydratedCloud)
+                            {
+                                containsOfflinePlaceholder = true;
+                                continue;
+                            }
+
+                            containsDisallowedReparsePoint = true;
+                            return totalBytes;
+                        }
+                    }
+                    else if (((uint)attrs & UnhydratedAttributeMask) != 0)
+                    {
+                        containsOfflinePlaceholder = true;
+                        continue;
+                    }
+
+                    if (entry is DirectoryInfo)
+                    {
+                        pendingDirectories.Push(entry.FullName);
+                    }
+                    else if (entry is FileInfo fileInfo)
+                    {
+                        totalBytes = checked(totalBytes + fileInfo.Length);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (OverflowException)
+                {
+                    return long.MaxValue;
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        return totalBytes;
     }
 
     private static bool HasTemporarySuffix(string name) =>

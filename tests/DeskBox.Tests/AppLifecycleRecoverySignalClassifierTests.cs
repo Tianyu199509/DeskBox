@@ -71,6 +71,50 @@ public sealed class AppLifecycleRecoverySignalClassifierTests
         Assert.Equal(expected, reason);
     }
 
+    [Theory]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionLock, "session-locked", null)]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionLogoff, "session-locked", null)]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionRemoteDisconnect, "session-locked", null)]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionUnlock, "session-unlocked", "session-unlock")]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionLogon, "session-unlocked", "session-reconnect")]
+    [InlineData(AppLifecycleRecoverySignalClassifier.WtsSessionRemoteConnect, "session-unlocked", "session-reconnect")]
+    public void SessionSignals_MapBothGateEventAndRecoveryReason(
+        uint sessionEvent,
+        string expectedGateEvent,
+        string? expectedRecoveryReason)
+    {
+        string? gateEvent = AppLifecycleRecoverySignalClassifier.ResolveGateEvent(
+            AppLifecycleRecoverySignalClassifier.WmWtsSessionChange,
+            new UIntPtr(sessionEvent));
+        string? recoveryReason = AppLifecycleRecoverySignalClassifier.ResolveRecoveryReason(
+            AppLifecycleRecoverySignalClassifier.WmWtsSessionChange,
+            new UIntPtr(sessionEvent),
+            TaskbarCreatedMessage);
+
+        Assert.Equal(expectedGateEvent, gateEvent);
+        Assert.Equal(expectedRecoveryReason, recoveryReason);
+    }
+
+    [Fact]
+    public void SessionLockThenUnlock_ClosesAndReopensTopologyGate()
+    {
+        var gate = new DisplayTopologyGate();
+
+        string? lockEvent = AppLifecycleRecoverySignalClassifier.ResolveGateEvent(
+            AppLifecycleRecoverySignalClassifier.WmWtsSessionChange,
+            new UIntPtr(AppLifecycleRecoverySignalClassifier.WtsSessionLock));
+        Assert.Equal("session-locked", lockEvent);
+        gate.Close(DisplayTopologyGateReason.SessionLocked);
+        Assert.True(gate.IsClosed);
+
+        string? unlockEvent = AppLifecycleRecoverySignalClassifier.ResolveGateEvent(
+            AppLifecycleRecoverySignalClassifier.WmWtsSessionChange,
+            new UIntPtr(AppLifecycleRecoverySignalClassifier.WtsSessionUnlock));
+        Assert.Equal("session-unlocked", unlockEvent);
+        gate.Open(DisplayTopologyGateReason.SessionLocked);
+        Assert.False(gate.IsClosed);
+    }
+
     [Fact]
     public void DisplayPowerOn_RequestsHookRecovery()
     {

@@ -1,5 +1,7 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
+using DeskBox.Services.DragDrop;
 using DeskBox.ViewModels;
 
 namespace DeskBox.Services;
@@ -29,7 +31,7 @@ internal static class ItemDropBehaviorPolicy
             return ItemDropBehavior.StackImport;
         }
 
-        if (item.IsFolder && item.Path.Length > 0)
+        if (TryGetFolderDropDestinationPath(item, out _))
         {
             return ItemDropBehavior.FolderImport;
         }
@@ -47,5 +49,52 @@ internal static class ItemDropBehaviorPolicy
         return ShortcutLaunchPolicy.EvaluateItem(item) == ShortcutLaunchDecision.Launch
             ? ItemDropBehavior.Launch
             : ItemDropBehavior.None;
+    }
+
+    internal static bool TryGetFolderDropDestinationPath(
+        WidgetItem? item,
+        out string destinationPath)
+    {
+        destinationPath = string.Empty;
+        if (item is null || item is WidgetStackItem)
+        {
+            return false;
+        }
+
+        if (item.IsFolder && item.Path.Length > 0)
+        {
+            if (StoreVirtualizedPathPolicy.IsWriteBlockedDestination(item.Path))
+            {
+                return false;
+            }
+
+            destinationPath = item.Path;
+            return true;
+        }
+
+        if (!item.IsShortcut ||
+            string.IsNullOrWhiteSpace(item.Path) ||
+            !ShortcutHelper.IsShellLinkPath(item.Path))
+        {
+            return false;
+        }
+
+        if (!ShortcutTargetProbe.TryResolveShortcutLocalTarget(
+                item.Path,
+                item.TargetPath,
+                out string resolvedLocalTarget,
+                out bool targetIsDirectory,
+                out bool hasStoredArguments) ||
+            hasStoredArguments ||
+            !targetIsDirectory ||
+            resolvedLocalTarget.Length == 0 ||
+            DriveMediaInterop.IsProtectedDragOutSource([resolvedLocalTarget]) ||
+            StoreVirtualizedPathPolicy.IsWriteBlockedDestination(resolvedLocalTarget))
+        {
+            return false;
+        }
+
+        destinationPath = resolvedLocalTarget;
+        return true;
     }
 }

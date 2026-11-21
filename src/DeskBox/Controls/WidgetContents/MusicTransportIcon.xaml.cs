@@ -13,6 +13,33 @@ public enum MusicTransportIconKind
 
 public sealed partial class MusicTransportIcon : UserControl
 {
+    public const string PreviousGlyph = "\uF8AC"; // BackSolidBold (Win11)
+    public const string PlayGlyph = "\uF5B0";     // PlaySolid
+    public const string PauseGlyph = "\uF8AE";    // PauseBold (Win11)
+    public const string NextGlyph = "\uF8AD";     // ForwardSolidBold (Win11)
+
+    internal const string Win10PreviousGlyph = "\uE892";
+    internal const string Win10PlayGlyph = "\uE768";
+    internal const string Win10PauseGlyph = "\uE769";
+    internal const string Win10NextGlyph = "\uE893";
+
+    internal static string ResolveGlyph(MusicTransportIconKind kind, bool isWindows11OrLater) =>
+        isWindows11OrLater
+            ? kind switch
+            {
+                MusicTransportIconKind.Previous => PreviousGlyph,
+                MusicTransportIconKind.Pause => PauseGlyph,
+                MusicTransportIconKind.Next => NextGlyph,
+                _ => PlayGlyph
+            }
+            : kind switch
+            {
+                MusicTransportIconKind.Previous => Win10PreviousGlyph,
+                MusicTransportIconKind.Pause => Win10PauseGlyph,
+                MusicTransportIconKind.Next => Win10NextGlyph,
+                _ => Win10PlayGlyph
+            };
+
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register(
         nameof(Kind),
         typeof(MusicTransportIconKind),
@@ -41,17 +68,8 @@ public sealed partial class MusicTransportIcon : UserControl
 
     private void ApplyKind()
     {
-        PreviousSurface.Visibility = Kind == MusicTransportIconKind.Previous
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        PlaySurface.Visibility = Kind == MusicTransportIconKind.Play
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        PauseSurface.Visibility = Kind == MusicTransportIconKind.Pause
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        NextSurface.Visibility = Kind == MusicTransportIconKind.Next
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        TransportGlyphIcon.Glyph = ResolveGlyph(
+            Kind,
+            DeskBox.Services.WindowsCompatibilityService.IsWindows11OrLater);
     }
 }

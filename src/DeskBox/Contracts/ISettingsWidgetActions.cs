@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Contracts;
+namespace DeskBox.Contracts;
 
 using System.Threading;
 using DeskBox.Models;
@@ -22,6 +22,20 @@ public sealed record DesktopOrganizationUndoResult(
     int RestoredCount = 0,
     int RemainingCount = 0,
     string? Error = null);
+
+public sealed record CustomWidgetSettingsMutation(
+    string WidgetId,
+    Dictionary<string, string>? Settings = null,
+    Dictionary<string, string>? Secrets = null,
+    bool ClearAllData = false,
+    Dictionary<string, bool>? Permissions = null,
+    string? ChromeModeOverride = null,
+    bool UpdateChromeMode = false);
+
+public sealed record CustomWidgetCreateOptions(
+    string? Spec,
+    Dictionary<string, string>? InitialSettings = null,
+    Dictionary<string, string>? InitialSecrets = null);
 
 /// <summary>
 /// Settings-side surface for widget-host operations, which live in the main
@@ -95,6 +109,7 @@ public interface ISettingsWidgetActions
 
     void NotifyWidgetGroupPresentationSettingsChanged();
 
+
     // ── Widget groups ───────────────────────────────────────────────
 
     Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId);
@@ -126,6 +141,21 @@ public interface ISettingsWidgetActions
         string newRootPath,
         ManagedStorageMigrationOptions? options);
 
+    Task<ManagedStorageMigrationResult?> TrySwitchEmptyManagedStorageRootAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult<ManagedStorageMigrationResult?>(null);
+
+    Task<ManagedStorageMigrationCleanupResult> RetryManagedStorageSourceCleanupAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
+
+    Task<ManagedStorageMigrationCleanupResult> CleanupInterruptedMigrationCopiesAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
+
     // ── Glance instances ────────────────────────────────────────────
 
     IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances();
@@ -143,12 +173,37 @@ public interface ISettingsWidgetActions
 
     Task RenameWidgetAsync(string widgetId, string newName);
 
+    // ── Custom widget instances ─────────────────────────────────────
+
+    Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync();
+
+    Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec);
+
+    Task<GlanceWidgetInstanceInfo> CreateCustomWidgetWithSetupAsync(CustomWidgetCreateOptions options);
+
+    Task ApplyCustomWidgetMutationAsync(CustomWidgetSettingsMutation mutation);
+
+    Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled);
+
+    Task<bool> LocateCustomWidgetAsync(string widgetId);
+
+    /// <summary>
+    /// Opens the standalone Widget Workshop window in the main process, either
+    /// to create a widget (optionally starting from <paramref name="initialIdea"/>)
+    /// or to modify <paramref name="widgetId"/> with AI.
+    /// </summary>
+    Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea);
+
+    Task RemoveCustomWidgetAsync(string widgetId);
+
     // ── Displays ────────────────────────────────────────────────────
 
     Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
         string displayStableId);
 
     Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token);
+
+    Task<int> RecalibrateDisplayLayoutAsync();
 
     Task ApplyScreenBindingAsync(
         string widgetId,

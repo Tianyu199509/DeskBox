@@ -82,8 +82,16 @@ public sealed class InfoTipContractTests
         // FontSize matching its context, so sizes intentionally differ.
         // (The "?" badge is manufactured in code by InfoTip.CreateAnchorButton —
         // card-side anchors carry keys only, so XAML holds no literal Text="?".)
-        Assert.DoesNotContain("Glyph=\"&#xE946;\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Glyph=\"&#xE897;\"", xaml, StringComparison.Ordinal);
+        // Strip SettingsCard/SettingsExpander HeaderIcon blocks first so
+        // legitimate leading card icons (e.g., E946 "Info" on the Todo footer
+        // card) do not collide with the InfoTip anchor glyph ban.
+        string nonHeaderIconXaml = System.Text.RegularExpressions.Regex.Replace(
+            xaml,
+            @"<toolkit:Settings(?:Card|Expander)\.HeaderIcon\b[^>]*>[\s\S]*?</toolkit:Settings(?:Card|Expander)\.HeaderIcon>",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        Assert.DoesNotContain("Glyph=\"&#xE946;\"", nonHeaderIconXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Glyph=\"&#xE897;\"", nonHeaderIconXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("ScaleY=\"-0.0078125\"", xaml, StringComparison.Ordinal);
 
         // The anchor Button elements must stay out of the HeaderKey/

@@ -13,8 +13,9 @@
 | Read guides and answers | The [wiki](https://github.com/Tianyu199509/DeskBox/wiki) and [README](README.md) |
 | Report a security problem | See [SECURITY.md](SECURITY.md) — private channels only |
 | Download the latest version | [Releases](https://github.com/Tianyu199509/DeskBox/releases) or [deskbox.fun](https://deskbox.fun) |
+| Commercial licensing / OEM / enterprise inquiries | See [LICENSING.md](LICENSING.md), or email **1047078635@qq.com** with `[DeskBox Commercial]` in the subject |
 
-DeskBox is maintained by a solo developer; please allow time for replies. Commercial support is not offered.
+DeskBox is maintained by a solo developer, so please allow time for community issue replies. For commercial licensing, OEM bundling, or enterprise inquiries, see [LICENSING.md](LICENSING.md).
 
 ---
 
@@ -27,5 +28,6 @@ DeskBox is maintained by a solo developer; please allow time for replies. Commer
 | 看指南和解答 | [Wiki](https://github.com/Tianyu199509/DeskBox/wiki) 与 [README](README.zh-CN.md) |
 | 报告安全问题 | 见 [SECURITY.md](SECURITY.md)——仅走私有渠道 |
 | 下载最新版 | [Releases](https://github.com/Tianyu199509/DeskBox/releases) 或 [deskbox.fun](https://deskbox.fun) |
+| 商业授权 / OEM / 企业合作咨询 | 见 [LICENSING.md](LICENSING.md)，或发邮件至 **1047078635@qq.com**（标题注明 `[DeskBox Commercial]`） |
 
-DeskBox 由个人独立维护，回复可能不及时，请谅解。不提供商业支持。
+DeskBox 由个人独立维护，社区 Issue 回复可能不及时，敬请谅解。如需商业授权、OEM 预装或企业合作，请参阅 [LICENSING.md](LICENSING.md)。

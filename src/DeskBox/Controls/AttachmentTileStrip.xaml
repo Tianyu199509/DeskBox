@@ -67,12 +67,14 @@
                                         HorizontalAlignment="Stretch"
                                         VerticalAlignment="Bottom"
                                         Background="{ThemeResource WidgetOverlaySurfaceBrush}">
-                                        <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
-                                            FontSize="11"
-                                            MaxLines="1"
-                                            Text="{x:Bind DisplayName, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis" />
+                                        <Grid>
+                                            <TextBlock
+                                                helpers:WidgetTextShadow.Cast="True"
+                                                FontSize="11"
+                                                MaxLines="1"
+                                                Text="{x:Bind DisplayName, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </Grid>
                                     </Border>
                                 </Grid>
                             </Border>

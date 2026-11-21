@@ -50,17 +50,17 @@
         <Border
             x:Name="RichBackdrop"
             IsHitTestVisible="False"
-            Visibility="{Binding RichSkinVisibility}">
+            Visibility="{x:Bind ViewModel.RichSkinVisibility, Mode=OneWay}">
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                     <GradientStop
                         x:Name="RichBackdropTop"
                         Offset="0"
-                        Color="{Binding RichBackdropTopColor}" />
+                        Color="{x:Bind ViewModel.RichBackdropTopColor, Mode=OneWay}" />
                     <GradientStop
                         x:Name="RichBackdropBottom"
                         Offset="1"
-                        Color="{Binding RichBackdropBottomColor}" />
+                        Color="{x:Bind ViewModel.RichBackdropBottomColor, Mode=OneWay}" />
                 </LinearGradientBrush>
             </Border.Background>
             <Grid>
@@ -96,9 +96,11 @@
         <!-- Mini: one open hero, with no nested cards or metric pills. -->
         <Grid
             x:Name="MiniLayout"
+            x:Load="{x:Bind IsMiniLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="10,7"
             RowSpacing="2"
-            Visibility="{Binding MiniLayoutVisibility}">
+            Visibility="{x:Bind ViewModel.MiniLayoutVisibility, Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -117,22 +119,22 @@
                     Orientation="Horizontal"
                     Spacing="4"
                     VerticalAlignment="Center"
-                    Visibility="{Binding MiniLocationVisibility}">
+                    Visibility="{x:Bind ViewModel.MiniLocationVisibility, Mode=OneWay}">
                     <TextBlock
-                        FontSize="{Binding CaptionTextSize}"
+                        FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{Binding LocationDisplay}"
+                        Text="{x:Bind ViewModel.LocationDisplay, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                     <FontIcon
                         FontSize="10"
                         Foreground="{ThemeResource SystemFillColorCautionBrush}"
                         Glyph="&#xE7BA;"
-                        ToolTipService.ToolTip="{Binding LocationFallbackTooltip}"
-                        Visibility="{Binding LocationFallbackVisibility}" />
+                        ToolTipService.ToolTip="{x:Bind ViewModel.LocationFallbackTooltip, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.LocationFallbackVisibility, Mode=OneWay}" />
                 </StackPanel>
-                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
+                <Button AutomationProperties.Name="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}"
                     Grid.Column="1"
                     Width="20"
                     Height="20"
@@ -140,7 +142,7 @@
                     MinHeight="20"
                     Click="RefreshButton_Click"
                     Style="{StaticResource WeatherIconButtonStyle}"
-                    ToolTipService.ToolTip="{Binding RefreshTooltip}">
+                    ToolTipService.ToolTip="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}">
                     <FontIcon FontSize="10" Glyph="&#xE72C;" />
                 </Button>
             </Grid>
@@ -157,10 +159,10 @@
                 <Image
                     Grid.Column="0"
                     VerticalAlignment="Center"
-                    Width="{Binding CurrentEmojiSize}"
-                    Height="{Binding CurrentEmojiSize}"
+                    Width="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
+                    Height="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
                     IsHitTestVisible="False"
-                    Source="{Binding CurrentIcon}"
+                    Source="{x:Bind ViewModel.CurrentIcon, Mode=OneWay}"
                     Stretch="Uniform" />
                 <StackPanel
                     Grid.Column="1"
@@ -169,23 +171,23 @@
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock
                             VerticalAlignment="Center"
-                            FontSize="{Binding TemperatureTextSize}"
+                            FontSize="{x:Bind ViewModel.TemperatureTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding CurrentTemperatureText}"
+                            Text="{x:Bind ViewModel.CurrentTemperatureText, Mode=OneWay}"
                             TextWrapping="NoWrap" />
                         <TextBlock
                             VerticalAlignment="Center"
-                            FontSize="{Binding CaptionTextSize}"
+                            FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{Binding CurrentDescription}"
+                            Text="{x:Bind ViewModel.CurrentDescription, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap"
-                            Visibility="{Binding MiniDescriptionVisibility}" />
+                            Visibility="{x:Bind ViewModel.MiniDescriptionVisibility, Mode=OneWay}" />
                     </StackPanel>
                     <TextBlock
                         FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding ApparentTemperatureText}"
+                        Text="{x:Bind ViewModel.ApparentTemperatureText, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap"
                         Visibility="{x:Bind ViewModel.MiniDetailsVisibility, Mode=OneWay}" />
@@ -196,9 +198,11 @@
         <!-- Compact: open hero plus a single typographic metric band. -->
         <Grid
             x:Name="CompactLayout"
+            x:Load="{x:Bind IsCompactLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="11,8"
             RowSpacing="4"
-            Visibility="{Binding CompactLayoutVisibility}">
+            Visibility="{x:Bind ViewModel.CompactLayoutVisibility, Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -213,20 +217,20 @@
                 <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                     <TextBlock
                         x:Name="CompactLocationText"
-                        FontSize="{Binding CaptionTextSize}"
+                        FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{Binding LocationDisplay}"
+                        Text="{x:Bind ViewModel.LocationDisplay, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                     <FontIcon
                         FontSize="10"
                         Foreground="{ThemeResource SystemFillColorCautionBrush}"
                         Glyph="&#xE7BA;"
-                        ToolTipService.ToolTip="{Binding LocationFallbackTooltip}"
-                        Visibility="{Binding LocationFallbackVisibility}" />
+                        ToolTipService.ToolTip="{x:Bind ViewModel.LocationFallbackTooltip, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.LocationFallbackVisibility, Mode=OneWay}" />
                 </StackPanel>
-                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
+                <Button AutomationProperties.Name="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}"
                     Grid.Column="1"
                     Width="24"
                     Height="24"
@@ -234,7 +238,7 @@
                     MinHeight="24"
                     Click="RefreshButton_Click"
                     Style="{StaticResource WeatherIconButtonStyle}"
-                    ToolTipService.ToolTip="{Binding RefreshTooltip}">
+                    ToolTipService.ToolTip="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}">
                     <FontIcon FontSize="11" Glyph="&#xE72C;" />
                 </Button>
             </Grid>
@@ -250,10 +254,10 @@
                 </Grid.ColumnDefinitions>
                 <Image
                     VerticalAlignment="Center"
-                    Width="{Binding CurrentEmojiSize}"
-                    Height="{Binding CurrentEmojiSize}"
+                    Width="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
+                    Height="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
                     IsHitTestVisible="False"
-                    Source="{Binding CurrentIcon}"
+                    Source="{x:Bind ViewModel.CurrentIcon, Mode=OneWay}"
                     Stretch="Uniform" />
                 <StackPanel
                     Grid.Column="1"
@@ -262,23 +266,23 @@
                     <StackPanel Orientation="Horizontal" Spacing="7">
                         <TextBlock
                             x:Name="CompactTemperatureText"
-                            FontSize="{Binding TemperatureTextSize}"
+                            FontSize="{x:Bind ViewModel.TemperatureTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding CurrentTemperatureText}"
+                            Text="{x:Bind ViewModel.CurrentTemperatureText, Mode=OneWay}"
                             TextWrapping="NoWrap" />
                         <TextBlock
                             x:Name="CompactDescriptionText"
                             VerticalAlignment="Center"
-                            FontSize="{Binding BodyTextSize}"
+                            FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding CurrentDescription}"
+                            Text="{x:Bind ViewModel.CurrentDescription, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
                     <TextBlock
-                        FontSize="{Binding CaptionTextSize}"
+                        FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding ApparentTemperatureText}"
+                        Text="{x:Bind ViewModel.ApparentTemperatureText, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                 </StackPanel>
@@ -290,7 +294,7 @@
                 Padding="0,7,0,2"
                 BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
                 BorderThickness="0,1,0,0"
-                Visibility="{Binding PrimaryMetricsVisibility}">
+                Visibility="{x:Bind ViewModel.PrimaryMetricsVisibility, Mode=OneWay}">
                 <Grid ColumnSpacing="6">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -301,19 +305,19 @@
                         Grid.Column="0"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding HumidityText}"
-                        Visibility="{Binding HumidityVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.HumidityText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.HumidityVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding HumidityLabel}" />
+                            Text="{x:Bind ViewModel.HumidityLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="CompactHumidityValueText"
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding HumidityValueText}"
+                            Text="{x:Bind ViewModel.HumidityValueText, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
@@ -321,19 +325,19 @@
                         Grid.Column="1"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding WindText}"
-                        Visibility="{Binding WindVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.WindText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.WindVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding WindLabel}" />
+                            Text="{x:Bind ViewModel.WindLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="CompactWindText"
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding WindValueText}"
+                            Text="{x:Bind ViewModel.WindValueText, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
@@ -341,19 +345,19 @@
                         Grid.Column="2"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding PrecipitationText}"
-                        Visibility="{Binding PrecipitationVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.PrecipitationText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.PrecipitationVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding PrecipitationLabel}" />
+                            Text="{x:Bind ViewModel.PrecipitationLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="CompactPrecipitationValueText"
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding PrecipitationValueText}"
+                            Text="{x:Bind ViewModel.PrecipitationValueText, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
@@ -364,9 +368,11 @@
         <!-- Expanded: one continuous hierarchy instead of a dashboard of cards. -->
         <Grid
             x:Name="ExpandedLayout"
+            x:Load="{x:Bind IsExpandedLayoutLoaded}"
+            Loaded="ExpandedLayout_Loaded"
             Padding="14,9"
             RowSpacing="5"
-            Visibility="{Binding ExpandedLayoutVisibility}">
+            Visibility="{x:Bind ViewModel.ExpandedLayoutVisibility, Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -389,17 +395,17 @@
                     VerticalAlignment="Center">
                     <TextBlock
                         x:Name="ExpandedLocationText"
-                        FontSize="{Binding BodyTextSize}"
+                        FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
-                        Text="{Binding LocationDisplay}"
+                        Text="{x:Bind ViewModel.LocationDisplay, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                     <FontIcon
                         FontSize="11"
                         Foreground="{ThemeResource SystemFillColorCautionBrush}"
                         Glyph="&#xE7BA;"
-                        ToolTipService.ToolTip="{Binding LocationFallbackTooltip}"
-                        Visibility="{Binding LocationFallbackVisibility}" />
+                        ToolTipService.ToolTip="{x:Bind ViewModel.LocationFallbackTooltip, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.LocationFallbackVisibility, Mode=OneWay}" />
                 </StackPanel>
 
                 <toolkit:Segmented
@@ -408,45 +414,45 @@
                     MinHeight="32"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    FontSize="{Binding CaptionTextSize}"
+                    FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                     SelectionChanged="WeatherViewSegmented_SelectionChanged"
                     Style="{StaticResource PivotSegmentedStyle}"
-                    Visibility="{Binding ViewSwitchVisibility}">
+                    Visibility="{x:Bind ViewModel.ViewSwitchVisibility, Mode=OneWay}">
                     <toolkit:SegmentedItem
                         MinHeight="32"
                         MinWidth="30"
                         Padding="5,1,5,3"
-                        ToolTipService.ToolTip="{Binding TodayViewText}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.TodayViewText, Mode=OneWay}">
                         <TextBlock
                             MinHeight="16"
                             VerticalAlignment="Center"
-                            FontSize="{Binding CaptionTextSize}"
+                            FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             FontWeight="Normal"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{Binding DayViewText}"
+                            Text="{x:Bind ViewModel.DayViewText, Mode=OneWay}"
                             TextAlignment="Center" />
                     </toolkit:SegmentedItem>
                     <toolkit:SegmentedItem
                         MinHeight="32"
                         MinWidth="30"
                         Padding="5,1,5,3"
-                        ToolTipService.ToolTip="{Binding WeekViewText}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.WeekViewText, Mode=OneWay}">
                         <TextBlock
                             MinHeight="16"
                             VerticalAlignment="Center"
-                            FontSize="{Binding CaptionTextSize}"
+                            FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             FontWeight="Normal"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{Binding WeekViewShortText}"
+                            Text="{x:Bind ViewModel.WeekViewShortText, Mode=OneWay}"
                             TextAlignment="Center" />
                     </toolkit:SegmentedItem>
                 </toolkit:Segmented>
 
-                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
+                <Button AutomationProperties.Name="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}"
                     Grid.Column="2"
                     Click="RefreshButton_Click"
                     Style="{StaticResource WeatherIconButtonStyle}"
-                    ToolTipService.ToolTip="{Binding RefreshTooltip}">
+                    ToolTipService.ToolTip="{x:Bind ViewModel.RefreshTooltip, Mode=OneWay}">
                     <FontIcon FontSize="12" Glyph="&#xE72C;" />
                 </Button>
             </Grid>
@@ -462,10 +468,10 @@
                 </Grid.ColumnDefinitions>
                 <Image
                     VerticalAlignment="Center"
-                    Width="{Binding CurrentEmojiSize}"
-                    Height="{Binding CurrentEmojiSize}"
+                    Width="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
+                    Height="{x:Bind ViewModel.CurrentEmojiSize, Mode=OneWay}"
                     IsHitTestVisible="False"
-                    Source="{Binding CurrentIcon}"
+                    Source="{x:Bind ViewModel.CurrentIcon, Mode=OneWay}"
                     Stretch="Uniform" />
                 <StackPanel
                     Grid.Column="1"
@@ -474,23 +480,23 @@
                     <StackPanel Orientation="Horizontal" Spacing="9">
                         <TextBlock
                             x:Name="ExpandedTemperatureText"
-                            FontSize="{Binding TemperatureTextSize}"
+                            FontSize="{x:Bind ViewModel.TemperatureTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding CurrentTemperatureText}"
+                            Text="{x:Bind ViewModel.CurrentTemperatureText, Mode=OneWay}"
                             TextWrapping="NoWrap" />
                         <TextBlock
                             x:Name="ExpandedDescriptionText"
                             VerticalAlignment="Center"
-                            FontSize="{Binding TitleTextSize}"
+                            FontSize="{x:Bind ViewModel.TitleTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding CurrentDescription}"
+                            Text="{x:Bind ViewModel.CurrentDescription, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
                     <TextBlock
-                        FontSize="{Binding CaptionTextSize}"
+                        FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding ApparentTemperatureText}"
+                        Text="{x:Bind ViewModel.ApparentTemperatureText, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
                 </StackPanel>
@@ -502,7 +508,7 @@
                 Padding="0,5"
                 BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
                 BorderThickness="0,1,0,1"
-                Visibility="{Binding PrimaryMetricsVisibility}">
+                Visibility="{x:Bind ViewModel.PrimaryMetricsVisibility, Mode=OneWay}">
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -513,37 +519,37 @@
                         Grid.Column="0"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding HumidityText}"
-                        Visibility="{Binding HumidityVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.HumidityText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.HumidityVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding HumidityLabel}" />
+                            Text="{x:Bind ViewModel.HumidityLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="ExpandedHumidityValueText"
                             HorizontalAlignment="Center"
-                            FontSize="{Binding BodyTextSize}"
+                            FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding HumidityValueText}" />
+                            Text="{x:Bind ViewModel.HumidityValueText, Mode=OneWay}" />
                     </StackPanel>
                     <StackPanel
                         Grid.Column="1"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding WindText}"
-                        Visibility="{Binding WindVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.WindText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.WindVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding WindLabel}" />
+                            Text="{x:Bind ViewModel.WindLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="ExpandedWindText"
                             HorizontalAlignment="Center"
-                            FontSize="{Binding BodyTextSize}"
+                            FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding WindText}"
+                            Text="{x:Bind ViewModel.WindText, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                     </StackPanel>
@@ -551,19 +557,19 @@
                         Grid.Column="2"
                         HorizontalAlignment="Center"
                         Spacing="1"
-                        ToolTipService.ToolTip="{Binding PrecipitationText}"
-                        Visibility="{Binding PrecipitationVisibility}">
+                        ToolTipService.ToolTip="{x:Bind ViewModel.PrecipitationText, Mode=OneWay}"
+                        Visibility="{x:Bind ViewModel.PrecipitationVisibility, Mode=OneWay}">
                         <TextBlock
                             HorizontalAlignment="Center"
                             FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="{Binding PrecipitationLabel}" />
+                            Text="{x:Bind ViewModel.PrecipitationLabel, Mode=OneWay}" />
                         <TextBlock
                             x:Name="ExpandedPrecipitationValueText"
                             HorizontalAlignment="Center"
-                            FontSize="{Binding BodyTextSize}"
+                            FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{Binding PrecipitationValueText}" />
+                            Text="{x:Bind ViewModel.PrecipitationValueText, Mode=OneWay}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -573,36 +579,36 @@
                 HorizontalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="24"
-                Visibility="{Binding ExpandedSecondaryMetricsVisibility}">
+                Visibility="{x:Bind ViewModel.ExpandedSecondaryMetricsVisibility, Mode=OneWay}">
                 <StackPanel
                     x:Name="ExpandedUvMetric"
                     Orientation="Horizontal"
                     Spacing="6"
-                    Visibility="{Binding UvIndexVisibility}">
+                    Visibility="{x:Bind ViewModel.UvIndexVisibility, Mode=OneWay}">
                     <TextBlock
                         FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding UvIndexLabel}" />
+                        Text="{x:Bind ViewModel.UvIndexLabel, Mode=OneWay}" />
                     <TextBlock
                         x:Name="ExpandedUvValueText"
-                        FontSize="{Binding BodyTextSize}"
+                        FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
-                        Text="{Binding UvIndexValueText}" />
+                        Text="{x:Bind ViewModel.UvIndexValueText, Mode=OneWay}" />
                 </StackPanel>
                 <StackPanel
                     x:Name="ExpandedPressureMetric"
                     Orientation="Horizontal"
                     Spacing="6"
-                    Visibility="{Binding PressureVisibility}">
+                    Visibility="{x:Bind ViewModel.PressureVisibility, Mode=OneWay}">
                     <TextBlock
                         FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding PressureLabel}" />
+                        Text="{x:Bind ViewModel.PressureLabel, Mode=OneWay}" />
                     <TextBlock
                         x:Name="ExpandedPressureValueText"
-                        FontSize="{Binding BodyTextSize}"
+                        FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
-                        Text="{Binding PressureValueText}" />
+                        Text="{x:Bind ViewModel.PressureValueText, Mode=OneWay}" />
                 </StackPanel>
             </StackPanel>
 
@@ -612,7 +618,7 @@
                 MinHeight="32"
                 Margin="5,0"
                 ColumnSpacing="12"
-                Visibility="{Binding ExpandedSunriseVisibility}">
+                Visibility="{x:Bind ViewModel.ExpandedSunriseVisibility, Mode=OneWay}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -625,11 +631,11 @@
                     <TextBlock
                         FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding SunriseLabel}" />
+                        Text="{x:Bind ViewModel.SunriseLabel, Mode=OneWay}" />
                     <TextBlock
-                        FontSize="{Binding BodyTextSize}"
+                        FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
-                        Text="{Binding SunriseText}" />
+                        Text="{x:Bind ViewModel.SunriseText, Mode=OneWay}" />
                 </StackPanel>
                 <Grid
                     Grid.Column="1"
@@ -682,19 +688,19 @@
                         HorizontalAlignment="Right"
                         FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{Binding SunsetLabel}" />
+                        Text="{x:Bind ViewModel.SunsetLabel, Mode=OneWay}" />
                     <TextBlock
                         HorizontalAlignment="Right"
-                        FontSize="{Binding BodyTextSize}"
+                        FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                         FontWeight="SemiBold"
-                        Text="{Binding SunsetText}" />
+                        Text="{x:Bind ViewModel.SunsetText, Mode=OneWay}" />
                 </StackPanel>
             </Grid>
 
             <Grid
                 x:Name="ExpandedHourlyForecastSection"
                 Grid.Row="5"
-                Visibility="{Binding ForecastVisibility}">
+                Visibility="{x:Bind ViewModel.ForecastVisibility, Mode=OneWay}">
                 <Border
                     Height="1"
                     VerticalAlignment="Top"
@@ -702,7 +708,7 @@
                     Visibility="{x:Bind ViewModel.ExpandedHourlyDividerVisibility, Mode=OneWay}" />
                 <ScrollViewer
                     x:Name="ExpandedHourlyScroll"
-                    Height="{Binding ExpandedHourlyCardHeight}"
+                    Height="{x:Bind ViewModel.ExpandedHourlyCardHeight, Mode=OneWay}"
                     Margin="0,6,0,0"
                     HorizontalScrollBarVisibility="Hidden"
                     HorizontalScrollMode="Enabled"
@@ -721,14 +727,14 @@
                         x:Name="ExpandedHourlyItems"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Bottom"
-                        ItemsSource="{Binding HourlyForecastItemsSource}">
+                        ItemsSource="{x:Bind ViewModel.HourlyForecastItemsSource, Mode=OneWay}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="viewModels:WeatherHourViewModel">
+                            <DataTemplate>
                                 <Grid
                                     Width="{Binding DataContext.HourlyCardWidth, ElementName=ExpandedLayout}"
                                     Height="{Binding DataContext.ExpandedHourlyCardHeight, ElementName=ExpandedLayout}">
@@ -745,7 +751,7 @@
                                             x:Name="HourlyHourText"
                                             Grid.Row="0"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                             Text="{Binding HourLabel}" />
                                         <Image
@@ -769,7 +775,7 @@
                                             helpers:WidgetTextShadow.Cast="True"
                                             Grid.Row="3"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{StaticResource WeatherAccentBrush}"
                                             Text="{Binding PrecipitationText}"
                                             Visibility="{Binding DataContext.ExpandedHourlyPrecipVisibility, ElementName=ExpandedLayout}" />
@@ -796,7 +802,7 @@
                 Padding="0,2,0,0"
                 BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
                 BorderThickness="0,1,0,0"
-                Visibility="{Binding WeekForecastVisibility}">
+                Visibility="{x:Bind ViewModel.WeekForecastVisibility, Mode=OneWay}">
                 <ScrollViewer
                     x:Name="ExpandedWeekScroll"
                     HorizontalScrollBarVisibility="Disabled"
@@ -812,7 +818,7 @@
                     VerticalScrollMode="Enabled">
                     <ItemsControl
                         x:Name="ExpandedDailyItems"
-                        ItemsSource="{Binding DailyForecastItemsSource}">
+                        ItemsSource="{x:Bind ViewModel.DailyForecastItemsSource, Mode=OneWay}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border
@@ -901,17 +907,19 @@
             BorderThickness="1"
             CornerRadius="{StaticResource WidgetCornerRadiusMedium}"
             Visibility="Collapsed">
-            <TextBlock
-                FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="{Binding RefreshStatusText}" />
+            <Grid>
+                <TextBlock
+                    FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind ViewModel.RefreshStatusText, Mode=OneWay}" />
+            </Grid>
         </Border>
 
         <Grid
             x:Name="LoadingOverlay"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             IsHitTestVisible="False"
-            Visibility="{Binding LoadingVisibility}">
+            Visibility="{x:Bind ViewModel.LoadingVisibility, Mode=OneWay}">
             <StackPanel
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
@@ -919,12 +927,12 @@
                 <ProgressRing
                     Width="24"
                     Height="24"
-                    IsActive="True" />
+                    IsActive="{x:Bind IsLoadingActive(ViewModel.LoadingVisibility), Mode=OneWay}" />
                 <TextBlock
                     HorizontalAlignment="Center"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{Binding LoadingText}" />
+                    Text="{x:Bind ViewModel.LoadingText, Mode=OneWay}" />
             </StackPanel>
         </Grid>
 
@@ -933,7 +941,7 @@
              recovery (HasData) both retire it through ErrorVisibility. The
              cover and texts pass input through (like LoadingOverlay) so the
              header stays operable; only the retry button is interactive. -->
-        <Grid x:Name="ErrorOverlay" Visibility="{Binding ErrorVisibility}">
+        <Grid x:Name="ErrorOverlay" Visibility="{x:Bind ViewModel.ErrorVisibility, Mode=OneWay}">
             <Border
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 IsHitTestVisible="False" />
@@ -953,21 +961,21 @@
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                    Text="{Binding ErrorTitle}" />
+                    Text="{x:Bind ViewModel.ErrorTitle, Mode=OneWay}" />
                 <TextBlock
                     HorizontalAlignment="Center"
                     IsHitTestVisible="False"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     MaxLines="2"
-                    Text="{Binding ErrorBody}"
+                    Text="{x:Bind ViewModel.ErrorBody, Mode=OneWay}"
                     TextAlignment="Center"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
                 <Button
                     HorizontalAlignment="Center"
                     Click="RefreshButton_Click"
-                    Content="{Binding ErrorRetryText}" />
+                    Content="{x:Bind ViewModel.ErrorRetryText, Mode=OneWay}" />
             </StackPanel>
         </Grid>
     </Grid>

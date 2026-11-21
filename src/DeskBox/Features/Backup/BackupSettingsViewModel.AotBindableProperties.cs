@@ -18,6 +18,7 @@ namespace DeskBox.Features.Backup;
     nameof(AvailableRetentionOptions),
     nameof(CanRepairDragDrop),
     nameof(CanResyncRuntime),
+    nameof(CloudBackupEnabled),
     nameof(ConnectionStatusText),
     nameof(CredentialStatusText),
     nameof(CustomDirectoryRecoveryNoteText),
@@ -52,7 +53,8 @@ namespace DeskBox.Features.Backup;
     nameof(StatusText),
     nameof(IncludeTodoData),
     nameof(Username),
-    nameof(IncludeWidgetStyle)
+    nameof(IncludeWidgetStyle),
+    nameof(IncludeCustomWidgets)
 ], [])]
 public sealed partial class BackupSettingsViewModel
 {

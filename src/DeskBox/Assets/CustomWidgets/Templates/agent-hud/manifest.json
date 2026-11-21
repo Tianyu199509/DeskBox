@@ -1,0 +1,592 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.agent-hud",
+  "name": "${$i18n.widgetName}",
+  "version": "4.1.0",
+  "author": "DeskBox",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🤖",
+  "minSize": {
+    "width": 292,
+    "height": 320
+  },
+  "defaultSize": {
+    "width": 348,
+    "height": 388
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "settings": [
+    {
+      "key": "defaultAgentName",
+      "type": "text",
+      "label": "${$i18n.setAgentName}",
+      "default": "Agent Bridge"
+    },
+    {
+      "key": "showProgressRow",
+      "type": "toggle",
+      "label": "${$i18n.setShowProgress}",
+      "default": true
+    },
+    {
+      "key": "compactStream",
+      "type": "toggle",
+      "label": "${$i18n.setCompactStream}",
+      "default": false
+    }
+  ],
+  "state": {
+    "agentName": "Agent Bridge",
+    "taskTitle": "",
+    "currentTask": "",
+    "statusText": "",
+    "status": "",
+    "stepLabel": "",
+    "level": "",
+    "progress": "0",
+    "isBusy": "false",
+    "updatedAt": "",
+    "demoStage": "0",
+    "eventFilter": "all"
+  },
+  "collections": {
+    "events": {
+      "maxItems": 80,
+      "sort": "newestFirst"
+    }
+  },
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.heroTask}",
+    "glyph": "🤖",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${state.level == 'error' || state.level == 'warning'}",
+    "progress": "${state.progress}",
+    "enableBounceOnUpdate": true,
+    "primaryAction": {
+      "icon": "play",
+      "tooltip": "${$i18n.demoTooltip}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "simulateStep"
+      }
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "bridgePopover": {
+      "width": 340,
+      "height": 296,
+      "placement": "bottom",
+      "root": "popbridgeroot"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "spacing": 8,
+      "padding": "10",
+      "children": [
+        "hudherocard",
+        "hudstreamheader",
+        "hudeventlist"
+      ]
+    },
+    "hudherocard": {
+      "id": "hudHeroCard",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "14,12,14,10",
+      "spacing": 8,
+      "children": [
+        "hudtopheader",
+        "hudherodivider",
+        "hudtaskrow",
+        "hudpipelinesection"
+      ]
+    },
+    "hudtopheader": {
+      "id": "hudTopHeader",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 8,
+      "children": [
+        "hudtitlestack",
+        "hudactionstrip"
+      ]
+    },
+    "hudtitlestack": {
+      "id": "hudTitleStack",
+      "type": "Stack",
+      "column": 0,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "hudeyebrow",
+        "hudagenttitle"
+      ]
+    },
+    "hudeyebrow": {
+      "id": "hudEyebrow",
+      "type": "Text",
+      "text": "${$computed.stepLabel} · ${state.updatedAt != '' ? state.updatedAt : $i18n.defaultUpdated}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "hudagenttitle": {
+      "id": "hudAgentTitle",
+      "type": "Text",
+      "text": "${$computed.agentTitle}",
+      "style": "subtitle",
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "hudactionstrip": {
+      "id": "hudActionStrip",
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "btndemostep",
+        "btnmarkdone",
+        "btnresethud",
+        "btnconnectbridge"
+      ]
+    },
+    "btndemostep": {
+      "id": "btnDemoStep",
+      "type": "IconButton",
+      "icon": "play",
+      "size": 26,
+      "tooltip": "${$i18n.demoTooltip}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "simulateStep"
+      }
+    },
+    "btnmarkdone": {
+      "id": "btnMarkDone",
+      "type": "IconButton",
+      "when": "${state.isBusy == 'true'}",
+      "icon": "check",
+      "size": 26,
+      "tooltip": "${$i18n.markDoneTooltip}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "markComplete"
+      }
+    },
+    "btnresethud": {
+      "id": "btnResetHud",
+      "type": "IconButton",
+      "when": "${$computed.canReset == 'true'}",
+      "icon": "reset",
+      "size": 26,
+      "tooltip": "${$i18n.clearBtn}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "resetHud"
+      }
+    },
+    "btnconnectbridge": {
+      "id": "btnConnectBridge",
+      "type": "IconButton",
+      "icon": "code",
+      "size": 26,
+      "tooltip": "${$i18n.copyCmdTooltip}",
+      "popover": "bridgePopover"
+    },
+    "hudherodivider": {
+      "id": "hudHeroDivider",
+      "type": "Divider"
+    },
+    "hudtaskrow": {
+      "id": "hudTaskRow",
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "rows": "Auto",
+      "spacing": 8,
+      "children": [
+        "hudtasktext",
+        "hudpcttext",
+        "hudstatuspill"
+      ]
+    },
+    "hudtasktext": {
+      "id": "hudTaskText",
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.heroTask != '' ? $computed.heroTask : $i18n.defaultTask}",
+      "style": "body",
+      "color": "${$computed.heroTaskColor}",
+      "maxLines": 2,
+      "verticalAlignment": "center"
+    },
+    "hudpcttext": {
+      "id": "hudPctText",
+      "type": "Text",
+      "column": 1,
+      "when": "${state.progress != '0' || state.isBusy == 'true'}",
+      "text": "${state.progress}%",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "${$computed.barTone}",
+      "verticalAlignment": "center"
+    },
+    "hudstatuspill": {
+      "id": "hudStatusPill",
+      "type": "Badge",
+      "column": 2,
+      "variant": "pill",
+      "icon": "${$computed.statusIcon}",
+      "text": "${$computed.heroStatus != '' ? $computed.heroStatus : $i18n.defaultStatus}",
+      "tone": "${$computed.heroTone != '' ? $computed.heroTone : 'subtle'}",
+      "verticalAlignment": "center"
+    },
+    "hudpipelinesection": {
+      "id": "hudPipelineSection",
+      "type": "Stack",
+      "when": "${$settings.showProgressRow != 'false'}",
+      "spacing": 5,
+      "children": [
+        "hudsegmentedprogress",
+        "hudstagestrip"
+      ]
+    },
+    "hudsegmentedprogress": {
+      "id": "hudSegmentedProgress",
+      "type": "ProgressBar",
+      "variant": "segmented",
+      "height": 12,
+      "tickStep": 28,
+      "progress": "${state.progress}",
+      "color": "${$computed.barTone}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    },
+    "hudstagestrip": {
+      "id": "hudStageStrip",
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "rows": "Auto",
+      "spacing": 4,
+      "children": [
+        "lblstage1",
+        "lblstage2",
+        "lblstage3",
+        "lblstage4"
+      ]
+    },
+    "lblstage1": {
+      "id": "lblStage1",
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.stepBadge1}",
+      "style": "mono",
+      "color": "${state.progress >= 20 ? 'emerald' : 'muted'}",
+      "maxLines": 1
+    },
+    "lblstage2": {
+      "id": "lblStage2",
+      "type": "Text",
+      "column": 1,
+      "text": "${$i18n.stepBadge2}",
+      "style": "mono",
+      "color": "${state.progress >= 55 ? 'emerald' : 'muted'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "lblstage3": {
+      "id": "lblStage3",
+      "type": "Text",
+      "column": 2,
+      "text": "${$i18n.stepBadge3}",
+      "style": "mono",
+      "color": "${state.progress >= 85 ? 'emerald' : 'muted'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "lblstage4": {
+      "id": "lblStage4",
+      "type": "Text",
+      "column": 3,
+      "text": "${$i18n.stepBadge4}",
+      "style": "mono",
+      "color": "${state.progress == '100' ? 'emerald' : 'muted'}",
+      "horizontalAlignment": "right",
+      "maxLines": 1
+    },
+    "hudstreamheader": {
+      "id": "hudStreamHeader",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "spacing": 6,
+      "padding": "4,0,4,0",
+      "children": [
+        "hudstreamtitlegroup",
+        "hudeventfilterseg"
+      ]
+    },
+    "hudstreamtitlegroup": {
+      "id": "hudStreamTitleGroup",
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "hudstreamlabel",
+        "hudeventcountbadge"
+      ]
+    },
+    "hudstreamlabel": {
+      "id": "hudStreamLabel",
+      "type": "Text",
+      "text": "${$i18n.streamHeader}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "hudeventcountbadge": {
+      "id": "hudEventCountBadge",
+      "type": "InfoBadge",
+      "when": "${collections.events.count != '0'}",
+      "value": "${collections.events.count}",
+      "tone": "subtle"
+    },
+    "hudeventfilterseg": {
+      "id": "hudEventFilterSeg",
+      "type": "Segmented",
+      "column": 1,
+      "bind": "state.eventFilter",
+      "onChange": {
+        "type": "script.run",
+        "fn": "refreshView"
+      },
+      "options": [
+        {
+          "value": "all",
+          "label": "${$i18n.filterAll}"
+        },
+        {
+          "value": "key",
+          "label": "${$i18n.filterKey}"
+        }
+      ]
+    },
+    "hudeventlist": {
+      "id": "hudEventList",
+      "type": "List",
+      "variant": "divided",
+      "items": "${$computed.displayEvents}",
+      "emptyState": {
+        "icon": "fire",
+        "title": "${$i18n.emptyTitle}",
+        "subtitle": "${$i18n.emptySubtitle}"
+      },
+      "hoverActions": [
+        "btncopyevent",
+        "btndeleteevent"
+      ],
+      "itemTemplate": "hudeventrow"
+    },
+    "btncopyevent": {
+      "id": "btnCopyEvent",
+      "type": "IconButton",
+      "icon": "copy",
+      "size": 22,
+      "tooltip": "${$i18n.copyEventTooltip}",
+      "onClick": {
+        "type": "clipboard.copy",
+        "text": "${$item.bodyText}"
+      }
+    },
+    "btndeleteevent": {
+      "id": "btnDeleteEvent",
+      "type": "IconButton",
+      "icon": "close",
+      "size": 22,
+      "tooltip": "${$i18n.clearBtn}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "removeEvent",
+        "args": {
+          "id": "${$item.id}"
+        }
+      }
+    },
+    "hudeventrow": {
+      "id": "hudEventRow",
+      "type": "Grid",
+      "horizontalAlignment": "stretch",
+      "columns": "Auto,*,Auto",
+      "spacing": 8,
+      "padding": "4,7,4,7",
+      "children": [
+        "hudeventtagbadge",
+        "hudeventbodytext",
+        "hudeventtimetext"
+      ]
+    },
+    "hudeventtagbadge": {
+      "id": "hudEventTagBadge",
+      "type": "Badge",
+      "column": 0,
+      "variant": "pill",
+      "text": "${$item.badgeText}",
+      "tone": "${$item.badgeTone}"
+    },
+    "hudeventbodytext": {
+      "id": "hudEventBodyText",
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.bodyText}",
+      "style": "body",
+      "verticalAlignment": "center",
+      "maxLines": 2
+    },
+    "hudeventtimetext": {
+      "id": "hudEventTimeText",
+      "type": "Text",
+      "column": 2,
+      "when": "${$settings.compactStream != 'true'}",
+      "text": "${$item.timeDisplay}",
+      "style": "mono",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "popbridgeroot": {
+      "id": "popBridgeRoot",
+      "type": "Stack",
+      "spacing": 8,
+      "padding": "12",
+      "children": [
+        "popbridgehead",
+        "popbridgedesc",
+        "popwidgetidrow",
+        "btncopycompanionprompt",
+        "popdivider",
+        "popcliheader",
+        "popclicode"
+      ]
+    },
+    "popbridgehead": {
+      "id": "popBridgeHead",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "popbridgetitletext",
+        "popbridgechip"
+      ]
+    },
+    "popbridgetitletext": {
+      "id": "popBridgeTitleText",
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.popBridgeTitle}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center"
+    },
+    "popbridgechip": {
+      "id": "popBridgeChip",
+      "type": "Badge",
+      "variant": "pill",
+      "column": 1,
+      "tone": "emerald",
+      "text": "MCP · CLI"
+    },
+    "popbridgedesc": {
+      "id": "popBridgeDesc",
+      "type": "Text",
+      "text": "${$i18n.popBridgeSub}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 2
+    },
+    "popwidgetidrow": {
+      "id": "popWidgetIdRow",
+      "type": "Stack",
+      "orientation": "horizontal",
+      "spacing": 6,
+      "children": [
+        "popwidgetidbadge"
+      ]
+    },
+    "popwidgetidbadge": {
+      "id": "popWidgetIdBadge",
+      "type": "Badge",
+      "variant": "pill",
+      "tone": "subtle",
+      "text": "${$computed.widgetIdChip}"
+    },
+    "btncopycompanionprompt": {
+      "id": "btnCopyCompanionPrompt",
+      "type": "Button",
+      "icon": "copy",
+      "text": "${$i18n.copyPromptBtn}",
+      "variant": "accent",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "clipboard.copy",
+          "text": "${$computed.copyPromptText}"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "bridgePopover"
+        }
+      ]
+    },
+    "popdivider": {
+      "id": "popDivider",
+      "type": "Divider"
+    },
+    "popcliheader": {
+      "id": "popCliHeader",
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "popclilabel",
+        "btncopyclishort"
+      ]
+    },
+    "popclilabel": {
+      "id": "popCliLabel",
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.cliSnippetLabel}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "btncopyclishort": {
+      "id": "btnCopyCliShort",
+      "type": "Button",
+      "column": 1,
+      "icon": "copy",
+      "text": "${$i18n.copyCliShortBtn}",
+      "variant": "subtle",
+      "onClick": {
+        "type": "clipboard.copy",
+        "text": "${$computed.cliQuickCmd}"
+      }
+    },
+    "popclicode": {
+      "id": "popCliCode",
+      "type": "CodeBlock",
+      "text": "${$computed.cliQuickCmd}",
+      "wrapText": true,
+      "maxHeight": 72
+    }
+  }
+}

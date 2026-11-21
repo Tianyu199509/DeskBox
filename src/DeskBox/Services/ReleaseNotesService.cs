@@ -18,9 +18,10 @@ public sealed record ReleaseNotesLoadResult(
 /// Resolves release notes from the manifest first, then from a safe HTTPS
 /// endpoint, and keeps a small version/locale keyed cache for offline viewing.
 /// </summary>
-public sealed class ReleaseNotesService
+public sealed partial class ReleaseNotesService
 {
     public const int MaxCharacters = SimpleMarkdownRenderer.MaxCharacters;
+    private static readonly HttpClient s_sharedHttpClient = CreateHttpClient();
     private readonly HttpClient _httpClient;
     private readonly string _cacheRootPath;
 
@@ -29,7 +30,7 @@ public sealed class ReleaseNotesService
         _cacheRootPath = string.IsNullOrWhiteSpace(cacheRootPath)
             ? Path.Combine(DeskBoxDataPathService.Current.UpdatesDirectory, "release-notes")
             : cacheRootPath;
-        _httpClient = httpClient ?? CreateHttpClient();
+        _httpClient = httpClient ?? s_sharedHttpClient;
     }
 
     /// <summary>
@@ -107,9 +108,8 @@ public sealed class ReleaseNotesService
         }
     }
 
-    private static readonly Regex CacheFileNamePattern = new(
-        @"^(?<version>.+)\.(?<locale>all|[A-Za-z]{2}(?:[-_][A-Za-z0-9]{2,8})?)\.md$",
-        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    [GeneratedRegex(@"^(?<version>.+)\.(?<locale>all|[A-Za-z]{2}(?:[-_][A-Za-z0-9]{2,8})?)\.md$", RegexOptions.CultureInvariant)]
+    private static partial Regex CacheFileNamePattern { get; }
 
     /// <summary>
     /// Distinct versions that have an on-disk notes cache, newest first.
@@ -172,7 +172,7 @@ public sealed class ReleaseNotesService
     /// </summary>
     public static readonly IReadOnlyList<string> KnownReleaseVersions =
     [
-        "1.5.9", "1.5.8", "1.5.7", "1.5.6", "1.5.5", "1.5.4", "1.5.3", "1.5.2",
+        "1.6.0", "1.5.9", "1.5.8", "1.5.7", "1.5.6", "1.5.5", "1.5.4", "1.5.3", "1.5.2",
         "1.5.1", "1.5.0", "1.4.9", "1.4.8", "1.4.7", "1.4.6", "1.4.3", "1.4.2",
         "1.4.1", "1.4.0",
     ];
@@ -326,7 +326,13 @@ public sealed class ReleaseNotesService
 
     private static HttpClient CreateHttpClient()
     {
-        var client = new HttpClient
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+            AutomaticDecompression = System.Net.DecompressionMethods.All
+        };
+        var client = new HttpClient(handler)
         {
             Timeout = TimeSpan.FromSeconds(10)
         };

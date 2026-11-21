@@ -235,7 +235,8 @@ public sealed class WidgetCompactBoundsCalculatorTests
     [InlineData(SettingsService.WidgetCornerPreferenceSquare, 0, 0)]
     [InlineData(SettingsService.WidgetCornerPreferenceSmall, 4, 2)]
     [InlineData(SettingsService.WidgetCornerPreferenceRound, 8, 4)]
-    [InlineData("Default", 8, 4)]
+    [InlineData(SettingsService.WidgetCornerPreferenceLarge, 16, 8)]
+    [InlineData("Default", 16, 8)]
     public void CompactCornerRadii_FollowWindowCornerPreference(
         string preference,
         double expectedOuter,

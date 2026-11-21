@@ -8,6 +8,20 @@ internal enum WidgetCompactViewState
     Pinned
 }
 
+internal enum WidgetCompactDragAffordanceStage
+{
+    Hidden,
+    ScrimAndGrip,
+    LockedCue
+}
+
+internal readonly record struct WidgetCompactResizeChromeMetrics(
+    double TopBorderHeight,
+    double BottomBorderHeight,
+    double HorizontalBorderWidth,
+    bool AllowVerticalHitTest,
+    bool AllowHorizontalHitTest);
+
 internal readonly record struct WidgetCompactInteractionSnapshot(
     bool IsCollapsed,
     bool IsPinned,
@@ -136,6 +150,183 @@ internal static class WidgetCompactInteractionPolicy
             ResolveResizeDirection(
                 isCompactBoundsStateActive,
                 direction) is "Left" or "Right";
+    }
+
+    public static WidgetCompactResizeChromeMetrics ResolveResizeChrome(
+        bool isCompactBoundsStateActive,
+        bool isSizeLocked,
+        bool isCompactTransitionActive)
+    {
+        if (!isCompactBoundsStateActive)
+        {
+            bool allowExpandedResize = !isSizeLocked && !isCompactTransitionActive;
+            return new WidgetCompactResizeChromeMetrics(
+                TopBorderHeight: 4,
+                BottomBorderHeight: 8,
+                HorizontalBorderWidth: 8,
+                AllowVerticalHitTest: allowExpandedResize,
+                AllowHorizontalHitTest: allowExpandedResize);
+        }
+
+        // Capsules have a fixed 42 DIP height and never resize vertically.
+        // Removing top/bottom hit-testing returns the full vertical span to
+        // WidgetShell, while narrowing left/right to 4 DIPs prevents the
+        // right resize border from colliding with CompactActionHost buttons.
+        bool allowHorizontalResize = !isSizeLocked && !isCompactTransitionActive;
+        return new WidgetCompactResizeChromeMetrics(
+            TopBorderHeight: 0,
+            BottomBorderHeight: 0,
+            HorizontalBorderWidth: allowHorizontalResize ? 4 : 0,
+            AllowVerticalHitTest: false,
+            AllowHorizontalHitTest: allowHorizontalResize);
+    }
+
+    public static bool ShouldShowCompactActions(
+        bool isCollapsed,
+        bool usesSmartBehavior,
+        bool isPointerOverShell,
+        bool isKeyboardFocused,
+        bool hasActionButtons)
+    {
+        return isCollapsed &&
+            !usesSmartBehavior &&
+            hasActionButtons &&
+            (isPointerOverShell || isKeyboardFocused);
+    }
+
+    public static WidgetCompactDragAffordanceStage ResolveLeftDragAffordanceStage(
+        bool isCollapsed,
+        bool isPositionLocked,
+        bool isPointerOverLeftDragZone,
+        bool isActiveMoveDrag)
+    {
+        if (!isCollapsed)
+        {
+            return WidgetCompactDragAffordanceStage.Hidden;
+        }
+
+        if (isPositionLocked)
+        {
+            return isPointerOverLeftDragZone
+                ? WidgetCompactDragAffordanceStage.LockedCue
+                : WidgetCompactDragAffordanceStage.Hidden;
+        }
+
+        return isPointerOverLeftDragZone || isActiveMoveDrag
+            ? WidgetCompactDragAffordanceStage.ScrimAndGrip
+            : WidgetCompactDragAffordanceStage.Hidden;
+    }
+
+    public const double CompactWheelStep = 120;
+    public const int CompactWheelDetentMinIntervalMilliseconds = 35;
+    public const int CompactTouchpadQuietPeriodMilliseconds = 180;
+
+    public static bool CanPromoteCompactBodyPressToDrag(
+        bool isCollapsed,
+        bool usesSmartBehavior,
+        bool isPositionLocked,
+        bool pressedMoveHandle,
+        bool pressedReorderHandle)
+    {
+        return isCollapsed &&
+            !usesSmartBehavior &&
+            !isPositionLocked &&
+            !pressedMoveHandle &&
+            !pressedReorderHandle;
+    }
+
+    public static bool CanAcceptCompactGroupWheel(
+        bool isCollapsed,
+        bool isCompactTransitionActive,
+        bool isDragActive,
+        int memberCount)
+    {
+        return isCollapsed &&
+            !isCompactTransitionActive &&
+            !isDragActive &&
+            memberCount >= 2;
+    }
+
+    public static bool TryConsumeCompactWheelStep(
+        ref double accumulator,
+        ref DateTimeOffset lastObservedAt,
+        ref DateTimeOffset lastCommittedAt,
+        ref int lastDirection,
+        ref bool touchpadStepCommitted,
+        double wheelDelta,
+        DateTimeOffset observedAt,
+        out int direction)
+    {
+        direction = 0;
+        if (wheelDelta == 0 || !double.IsFinite(wheelDelta))
+        {
+            return false;
+        }
+
+        int inputDirection = wheelDelta < 0 ? 1 : -1;
+        bool isDiscreteMouseWheel =
+            Math.Abs(wheelDelta) >= CompactWheelStep &&
+            Math.Abs(wheelDelta % CompactWheelStep) < 0.01;
+
+        if (isDiscreteMouseWheel)
+        {
+            TimeSpan sinceLastCommit = observedAt - lastCommittedAt;
+            bool isSameDirectionDuplicateBounce =
+                lastCommittedAt != default &&
+                inputDirection == lastDirection &&
+                sinceLastCommit >= TimeSpan.Zero &&
+                sinceLastCommit < TimeSpan.FromMilliseconds(CompactWheelDetentMinIntervalMilliseconds);
+
+            lastObservedAt = observedAt;
+            accumulator = 0;
+            touchpadStepCommitted = false;
+            if (isSameDirectionDuplicateBounce)
+            {
+                return false;
+            }
+
+            lastCommittedAt = observedAt;
+            lastDirection = inputDirection;
+            direction = inputDirection;
+            return true;
+        }
+
+        TimeSpan sinceObserved = observedAt - lastObservedAt;
+        bool startsNewTouchpadGesture =
+            lastObservedAt == default ||
+            inputDirection != lastDirection ||
+            sinceObserved < TimeSpan.Zero ||
+            sinceObserved >= TimeSpan.FromMilliseconds(CompactTouchpadQuietPeriodMilliseconds);
+        lastObservedAt = observedAt;
+        lastDirection = inputDirection;
+
+        if (startsNewTouchpadGesture)
+        {
+            accumulator = 0;
+            touchpadStepCommitted = false;
+        }
+
+        if (touchpadStepCommitted)
+        {
+            return false;
+        }
+
+        if (accumulator != 0 && Math.Sign(accumulator) != Math.Sign(wheelDelta))
+        {
+            accumulator = 0;
+        }
+
+        accumulator += wheelDelta;
+        if (Math.Abs(accumulator) < CompactWheelStep)
+        {
+            return false;
+        }
+
+        direction = accumulator < 0 ? 1 : -1;
+        accumulator = 0;
+        touchpadStepCommitted = true;
+        lastCommittedAt = observedAt;
+        return true;
     }
 
     public static bool CanTrustPointerOwnership(

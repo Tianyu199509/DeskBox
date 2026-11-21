@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Contracts;
+namespace DeskBox.Contracts;
 
 /// <summary>
 /// Canonical widget material kinds plus the material capability matrix the
@@ -46,9 +46,10 @@ public static class WidgetCornerKinds
     public const string Square = "Square";
     public const string Small = "Small";
     public const string Round = "Round";
+    public const string Large = "Large";
 
     public static string Normalize(string? preference) =>
-        preference is Square or Small ? preference : Round;
+        preference is Square or Small or Round or Large ? preference : Round;
 }
 
 /// <summary>Canonical widget background modes (global, appearance-level).</summary>
@@ -247,6 +248,7 @@ public static class WidgetAnimationKinds
     public const string EffectEdgeScale = "EdgeScale";
     public const string EffectTilt = "Tilt";
     public const string EffectWipe = "Wipe";
+    public const string EffectScreenEdgeSlide = "ScreenEdgeSlide";
 
     public const string SpeedVeryFast = "VeryFast";
     public const string SpeedFast = "Fast";
@@ -255,6 +257,7 @@ public static class WidgetAnimationKinds
     public const string SpeedSlow = "Slow";
 
     public const string DirectionNone = "None";
+    public const string DirectionAuto = "Auto";
     public const string DirectionLeft = "Left";
     public const string DirectionRight = "Right";
     public const string DirectionUp = "Up";
@@ -266,83 +269,102 @@ public static class WidgetAnimationKinds
     public const string EasingStrong = "Strong";
     public const string EasingSpring = "Spring";
 
-    public const string PresetGentle = "Gentle";
-    public const string PresetStandard = "Standard";
-    public const string PresetEmphasized = "Emphasized";
-    public const string PresetCustom = "Custom";
+    public static string? TryExtractLegacyDirection(string? effect) =>
+        effect switch
+        {
+            EffectSlideLeft or EffectSlideLeftFade => DirectionLeft,
+            EffectSlideRight or EffectSlideRightFade => DirectionRight,
+            EffectSlideUp or EffectSlideUpFade => DirectionUp,
+            EffectSlideDown or EffectSlideDownFade => DirectionDown,
+            _ => null
+        };
 
     public static string NormalizeEffect(string? effect) =>
-        effect is
-            EffectFade or EffectSlideRight or EffectSlideLeft or EffectSlideUp or
-            EffectSlideDown or EffectScaleFade or EffectSlideFade or EffectZoom or
-            EffectSlideUpFade or EffectSlideDownFade or EffectSlideLeftFade or
-            EffectSlideRightFade or EffectScaleSlide or
-            EffectEdgeScale or EffectTilt or EffectWipe
-            ? effect
-            : EffectSlideFade;
+        effect switch
+        {
+            EffectScaleFade or
+            EffectSlideFade or
+            EffectScreenEdgeSlide or
+            EffectWipe or
+            EffectFade or
+            EffectNone => effect,
+            EffectZoom or EffectTilt => EffectScaleFade,
+            EffectEdgeScale => EffectWipe,
+            EffectSlideLeft or EffectSlideRight or EffectSlideUp or EffectSlideDown =>
+                EffectScreenEdgeSlide,
+            EffectSlideLeftFade or EffectSlideRightFade or EffectSlideUpFade or
+            EffectSlideDownFade or EffectScaleSlide =>
+                EffectSlideFade,
+            _ => EffectScreenEdgeSlide
+        };
 
     public static string NormalizeSpeed(string? speed) =>
-        speed is SpeedVeryFast or SpeedFast or SpeedStandard or SpeedRelaxed or SpeedSlow
-            ? speed
-            : SpeedStandard;
+        speed switch
+        {
+            SpeedFast or SpeedVeryFast => SpeedFast,
+            SpeedStandard => SpeedStandard,
+            SpeedRelaxed or SpeedSlow => SpeedRelaxed,
+            _ => SpeedRelaxed
+        };
 
     public static string NormalizeSlideDirection(string? direction) =>
-        direction is DirectionNone or DirectionLeft or DirectionRight or DirectionUp or DirectionDown
+        direction is
+            DirectionNone or
+            DirectionAuto or
+            DirectionLeft or
+            DirectionRight or
+            DirectionUp or
+            DirectionDown
             ? direction
             : DirectionRight;
 
+    public static string NormalizeSlideDirectionForEffect(string? effect, string? direction)
+    {
+        string? legacyDirection = TryExtractLegacyDirection(effect);
+        string normalizedEffect = NormalizeEffect(effect);
+        if (!UsesSlideDirection(normalizedEffect))
+        {
+            return DirectionNone;
+        }
+
+        if (normalizedEffect == EffectScreenEdgeSlide)
+        {
+            if (legacyDirection is not null)
+            {
+                return legacyDirection;
+            }
+
+            return direction switch
+            {
+                DirectionAuto or DirectionLeft or DirectionRight or DirectionUp or DirectionDown => direction,
+                DirectionNone => DirectionAuto,
+                _ => DirectionRight
+            };
+        }
+
+        string normalizedDirection = legacyDirection ?? NormalizeSlideDirection(direction);
+        return normalizedDirection is
+            DirectionLeft or DirectionRight or DirectionUp or DirectionDown
+            ? normalizedDirection
+            : DirectionDown;
+    }
+
     public static string NormalizeEasingIntensity(string? intensity) =>
-        intensity is EasingNone or EasingLight or EasingStandard or EasingStrong or EasingSpring
-            ? intensity
+        intensity == EasingSpring
+            ? EasingSpring
             : EasingStandard;
 
     /// <summary>
     /// Effects whose visual result depends on the configured slide
-    /// direction: the travel direction for slides, the anchor edge for
-    /// edge-scale, the tilt sign, and the wipe side. The settings
-    /// persistence normalizer uses this to decide whether a stored
-    /// direction is meaningful, and the appearance editor to enable the
-    /// direction picker.
+    /// direction: the travel direction for short-throw and screen-edge slides,
+    /// and the reveal/collapse side for wipe.
     /// </summary>
     public static bool UsesSlideDirection(string? effect)
     {
         return NormalizeEffect(effect) is
             EffectSlideFade or
-            EffectScaleSlide or
-            EffectEdgeScale or
-            EffectTilt or
+            EffectScreenEdgeSlide or
             EffectWipe;
-    }
-
-    public static string ResolvePreset(
-        string effect,
-        string speed,
-        string slideDirection,
-        string easingIntensity)
-    {
-        if (effect == EffectFade &&
-            speed == SpeedRelaxed &&
-            easingIntensity == EasingLight)
-        {
-            return PresetGentle;
-        }
-
-        if (effect == EffectSlideFade &&
-            speed == SpeedStandard &&
-            slideDirection == DirectionRight &&
-            easingIntensity == EasingStandard)
-        {
-            return PresetStandard;
-        }
-
-        if (effect == EffectScaleFade &&
-            speed == SpeedRelaxed &&
-            easingIntensity == EasingStrong)
-        {
-            return PresetEmphasized;
-        }
-
-        return PresetCustom;
     }
 }
 
@@ -471,6 +493,7 @@ public interface IAppearanceSettings
     void SetWidgetBackgroundUnifiedFit(string? fit);
     AppearanceValueUpdate UpdateWidgetBackgroundDim(double percent);
     int ClearPerWidgetBackgrounds();
+    int CountPerWidgetBackgroundOverrides();
 
     bool ReadWidgetTextShadowEnabled();
     void SetWidgetTextShadowEnabled(bool enabled);

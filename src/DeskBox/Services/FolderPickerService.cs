@@ -18,28 +18,56 @@ public readonly record struct FolderPickResult(
 
 public static class FolderPickerService
 {
+    private static int s_pickInFlight;
+
+    internal static bool IsPickInFlight => Volatile.Read(ref s_pickInFlight) != 0;
+
     /// <summary>
     /// The folder-pick entrance. This deliberately shows the native common
-    /// item dialog instead of the WinAppSDK picker: the WinAppSDK
-    /// implementation runs IFileOpenDialog::Show on a background MTA thread
-    /// and folds every failure — including the dialog never appearing —
-    /// into a silent null, which surfaced to users as "clicking does
-    /// nothing" on some machines (intermittently, elevated sessions
-    /// included). The native dialog shows on the caller's STA thread and
-    /// reports failures as exceptions, so every outcome is logged with its
-    /// HRESULT and real failures can surface visibly.
+    /// item dialog on a dedicated background STA thread with a same-thread
+    /// owner window instead of blocking the main XAML UI thread or using the
+    /// WinAppSDK MTA picker:
+    /// - WinAppSDK runs IFileOpenDialog::Show on an MTA worker and folds
+    ///   failures into a silent null;
+    /// - running Show directly on the main UI thread freezes all of DeskBox
+    ///   whenever Shell/Quick Access/NAS/sleeping drives stall inside the
+    ///   dialog and allows non-owner windows to re-enter nested modal loops.
+    /// Isolating the dialog on its own STA thread keeps the UI responsive,
+    /// avoids cross-thread HWND message coupling, enforces single-flight
+    /// dialog activation, and logs every outcome with its HRESULT.
     /// </summary>
-    public static FolderPickResult PickFolderWithOutcome(
+    public static Task<FolderPickResult> PickFolderWithOutcomeAsync(
         IntPtr ownerHwnd,
         string? ownerLabel = null)
     {
+        return PickFolderWithOutcomeCoreAsync(
+            ownerHwnd,
+            ownerLabel,
+            static referenceOwnerHwnd => NativeFileOpenDialog.RunOnDedicatedStaAsync(
+                referenceOwnerHwnd,
+                static staOwnerHwnd => NativeFileOpenDialog.ShowPickFolder(staOwnerHwnd)));
+    }
+
+    internal static async Task<FolderPickResult> PickFolderWithOutcomeCoreAsync(
+        IntPtr ownerHwnd,
+        string? ownerLabel,
+        Func<IntPtr, Task<string?>> showPickerAsync)
+    {
         ValidateOwnerWindowHandle(ownerHwnd);
+        ArgumentNullException.ThrowIfNull(showPickerAsync);
 
         string owner = ownerLabel ?? "unlabeled";
+        if (Interlocked.CompareExchange(ref s_pickInFlight, 1, 0) != 0)
+        {
+            _ = Task.Run(NativeFileOpenDialog.TryActivateActiveFolderDialog);
+            App.Log($"[FolderPicker] outcome=busy owner={owner} elapsedMs=0");
+            return new FolderPickResult(null, FolderPickOutcome.Cancelled, 0);
+        }
+
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            string? folder = NativeFileOpenDialog.ShowPickFolder(ownerHwnd);
+            string? folder = await showPickerAsync(ownerHwnd).ConfigureAwait(false);
             stopwatch.Stop();
             App.Log($"[FolderPicker] outcome={(folder is null ? "cancel" : "picked")} " +
                 $"owner={owner} elapsedMs={stopwatch.ElapsedMilliseconds}");
@@ -55,11 +83,16 @@ public static class FolderPickerService
                 $"owner={owner} elapsedMs={stopwatch.ElapsedMilliseconds} ex={ex.Message}");
             return new FolderPickResult(null, FolderPickOutcome.Failed, ex.HResult);
         }
+        finally
+        {
+            Interlocked.Exchange(ref s_pickInFlight, 0);
+        }
     }
 
-    public static Task<string?> PickFolderAsync(IntPtr ownerHwnd, string? ownerLabel = null)
+    public static async Task<string?> PickFolderAsync(IntPtr ownerHwnd, string? ownerLabel = null)
     {
-        return Task.FromResult(PickFolderWithOutcome(ownerHwnd, ownerLabel).Folder);
+        FolderPickResult result = await PickFolderWithOutcomeAsync(ownerHwnd, ownerLabel);
+        return result.Folder;
     }
 
     internal static void ValidateOwnerWindowHandle(IntPtr ownerHwnd)

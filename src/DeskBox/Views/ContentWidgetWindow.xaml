@@ -66,6 +66,27 @@
             <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
             <StaticResource x:Key="ListViewItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
             <StaticResource x:Key="ListViewItemForegroundSelectedPressed" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="SegmentedItemForeground" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="SegmentedItemForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="SegmentedItemForegroundPressed" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="SegmentedItemForegroundDisabled" ResourceKey="TextFillColorDisabledBrush" />
+            <StaticResource x:Key="SegmentedItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="ButtonItemForeground" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundPressed" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundDisabled" ResourceKey="TextFillColorDisabledBrush" />
+            <StaticResource x:Key="ButtonItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundSelectedPressed" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="ButtonItemForegroundSelectedDisabled" ResourceKey="TextFillColorDisabledBrush" />
+            <StaticResource x:Key="PivotItemForeground" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundPressed" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundDisabled" ResourceKey="TextFillColorDisabledBrush" />
+            <StaticResource x:Key="PivotItemForegroundSelected" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundSelectedPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundSelectedPressed" ResourceKey="TextFillColorSecondaryBrush" />
+            <StaticResource x:Key="PivotItemForegroundSelectedDisabled" ResourceKey="TextFillColorDisabledBrush" />
         </Grid.Resources>
 
         <controls:WidgetShell
@@ -75,11 +96,11 @@
             DragHandlePointerPressed="DragHandle_PointerPressed"
             DragHandlePointerReleased="DragHandle_PointerReleased"
             AddRequested="AddButton_Click"
+            QuickSettingsRequested="QuickSettingsButton_Click"
             MoreRequested="MoreButton_Click"
             PositionLockRequested="PositionLockButton_Click"
             SizeLockRequested="SizeLockButton_Click"
             OverlayTitle="{Binding DisplayName}"
-            TitleDoubleTapped="ContentWidgetShell_TitleDoubleTapped"
             TitlePointerMoved="TitleBarGrid_PointerMoved"
             TitlePointerPressed="TitleBarGrid_PointerPressed"
             TitlePointerReleased="TitleBarGrid_PointerReleased"
@@ -89,14 +110,14 @@
             x:Name="ResizeGrid"
             IsHitTestVisible="True">
             <Grid.RowDefinitions>
-                <RowDefinition Height="4" />
+                <RowDefinition x:Name="ResizeTopRow" Height="4" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="8" />
+                <RowDefinition x:Name="ResizeBottomRow" Height="8" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="ResizeLeftColumn" Width="8" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="ResizeRightColumn" Width="8" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Row="0" Grid.Column="0" Background="Transparent" Tag="TopLeft" PointerPressed="ResizeBorder_PointerPressed" />

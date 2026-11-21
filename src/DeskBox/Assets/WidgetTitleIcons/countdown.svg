@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+  <defs>
+    <linearGradient id="cd_page" x1="12.5" y1="18" x2="8.2" y2="6.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BAE6FD" />
+      <stop offset="1" stop-color="#E0F2FE" />
+    </linearGradient>
+    <linearGradient id="cd_glow" x1="11.5" y1="10.5" x2="14" y2="18.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E0F2FE" stop-opacity="0" />
+      <stop offset="1" stop-color="#818CF8" stop-opacity="0.45" />
+    </linearGradient>
+    <linearGradient id="cd_header" x1="3" y1="3" x2="16.5" y2="6.8" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8" />
+      <stop offset="1" stop-color="#2563EB" />
+    </linearGradient>
+    <linearGradient id="cd_star" x1="7.5" y1="8.4" x2="12.8" y2="15" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0284C7" />
+      <stop offset="1" stop-color="#1D4ED8" />
+    </linearGradient>
+  </defs>
+  <path d="M17 6.2H3v8.3A2.5 2.5 0 0 0 5.5 17h9a2.5 2.5 0 0 0 2.5-2.5V6.2Z" fill="url(#cd_page)" />
+  <path d="M17 6.2H3v8.3A2.5 2.5 0 0 0 5.5 17h9a2.5 2.5 0 0 0 2.5-2.5V6.2Z" fill="url(#cd_glow)" />
+  <path d="M17 5.5A2.5 2.5 0 0 0 14.5 3h-9A2.5 2.5 0 0 0 3 5.5V7h14V5.5Z" fill="url(#cd_header)" />
+  <path d="M10 8.35c.22 0 .42.14.5.35l.58 1.56 1.66.12c.46.03.65.6.3.9l-1.27 1.08.4 1.62c.1.44-.37.8-.76.56L10 13.66l-1.41.88c-.39.24-.86-.12-.76-.56l.4-1.62-1.27-1.08c-.35-.3-.16-.87.3-.9l1.66-.12.58-1.56c.08-.21.28-.35.5-.35Z" fill="url(#cd_star)" />
+</svg>

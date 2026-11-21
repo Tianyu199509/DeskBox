@@ -53,6 +53,7 @@ public sealed class WidgetStyleProjectionContractTests
         "widgetCompactWidthMode", "widgetCompactExpansionDirection", // compact geometry
         "widgetCompactExpandDelayMs", "widgetCompactCollapseDelayMs", // compact hover timing
         "widgetLayerMode",                                     // window z-layer
+        "dynamicClickRaiseScope",                              // dynamic click raise scope
         "keepWidgetsVisibleOnShowDesktop",                     // window behavior
         "resizeSnapEnabled", "widgetSnapSpacing",              // snap geometry
         "focusClickedWidgetOnRaise",                           // raise behavior
@@ -88,7 +89,7 @@ public sealed class WidgetStyleProjectionContractTests
         "screenBindingMode", "boundScreenId", "boundScreenLabel",
         "disconnectCollapsedForScreenId",
         "compactPlacement",
-        "lastUserPlacementUtc",
+        "lastUserPlacementUtc", "lastUserPlacementTopologyKey",
         // file bindings + item payloads
         "mappedFolderPath", "followsDefaultStoragePath", "managedFolderName",
         "items", "fileAddedAtByPath", "fileAddedAtTrackingInitialized",

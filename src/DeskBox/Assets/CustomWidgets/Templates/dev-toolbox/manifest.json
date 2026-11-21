@@ -1,0 +1,1077 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.dev-toolbox",
+  "name": "${$i18n.widgetName}",
+  "version": "4.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🛠️",
+  "minSize": {
+    "width": 288,
+    "height": 280
+  },
+  "defaultSize": {
+    "width": 344,
+    "height": 356
+  },
+  "settings": [
+    {
+      "key": "autoCopyResult",
+      "type": "toggle",
+      "label": "${$i18n.settingAutoCopy}",
+      "default": true
+    },
+    {
+      "key": "enableClipboardSniffer",
+      "type": "toggle",
+      "label": "${$i18n.settingSniffer}",
+      "default": true
+    },
+    {
+      "key": "jsonIndent",
+      "type": "select",
+      "label": "${$i18n.settingJsonIndent}",
+      "default": "2",
+      "options": [
+        {
+          "value": "2",
+          "label": "${$i18n.settingJsonIndent2}"
+        },
+        {
+          "value": "4",
+          "label": "${$i18n.settingJsonIndent4}"
+        }
+      ]
+    },
+    {
+      "key": "uuidCase",
+      "type": "select",
+      "label": "${$i18n.settingUuidCase}",
+      "default": "lower",
+      "options": [
+        {
+          "value": "lower",
+          "label": "${$i18n.settingUuidLower}"
+        },
+        {
+          "value": "upper",
+          "label": "${$i18n.settingUuidUpper}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "draft": "",
+    "output": "",
+    "activeTab": "daily",
+    "editing": "false",
+    "focusSeq": "0",
+    "stepLabel": "",
+    "historyJson": "[]",
+    "jwtMode": "false",
+    "jwtView": "payload",
+    "jwtToken": "",
+    "jwtHeaderJson": "",
+    "jwtPayloadJson": "",
+    "structKind": "",
+    "kvUnit": "s",
+    "lastSelfCopied": "",
+    "dismissedClip": "",
+    "copySeq": "0",
+    "errorMsg": "",
+    "errorOffset": "-1",
+    "errorSeq": "0",
+    "autoCopyOverride": ""
+  },
+  "sources": [
+    {
+      "type": "clipboard",
+      "intervalMs": 2000
+    }
+  ],
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 5000
+  },
+  "capsule": {
+    "title": "${$i18n.widgetName}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "🛠️",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${$computed.capsuleBadgeWarning}",
+    "enableBounceOnUpdate": false,
+    "primaryAction": {
+      "icon": "copy",
+      "tooltip": "${$computed.capsuleActionTooltip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runCapsuleAction"
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "expandPop": {
+      "title": "${$i18n.expandPopTitle}",
+      "width": 440,
+      "placement": "bottom",
+      "root": "pop_expand_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "padding": "10",
+      "spacing": 6,
+      "children": [
+        "clip_accordion",
+        "workspace_card",
+        "neutral_tab_tray",
+        "daily_actions_grid",
+        "encode_actions_grid",
+        "json_actions_grid",
+        "gen_actions_grid",
+        "result_status_card"
+      ]
+    },
+    "clip_accordion": {
+      "id": "clip-accordion",
+      "type": "Card",
+      "when": "${$computed.showClipBanner == 'true'}",
+      "tone": "subtle",
+      "padding": "8,4,6,4",
+      "children": [
+        "clip_banner_grid"
+      ]
+    },
+    "clip_banner_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto,Auto",
+      "spacing": 6,
+      "children": [
+        "clip_kind_badge",
+        "clip_preview_text",
+        "btn_load_clipboard",
+        "btn_dismiss_clipboard"
+      ]
+    },
+    "clip_kind_badge": {
+      "type": "Badge",
+      "column": 0,
+      "text": "${$computed.clipKindLabel}",
+      "tone": "cyan",
+      "style": "compact",
+      "verticalAlignment": "center"
+    },
+    "clip_preview_text": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.clipPreview}",
+      "style": "caption",
+      "fontFamily": "mono",
+      "color": "secondary",
+      "maxLines": 1,
+      "textTrimming": "characterEllipsis",
+      "verticalAlignment": "center"
+    },
+    "btn_load_clipboard": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$computed.clipLoadLabel}",
+      "variant": "standard",
+      "padding": "8,2,8,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "loadClipboard"
+        }
+      ]
+    },
+    "btn_dismiss_clipboard": {
+      "type": "IconButton",
+      "column": 3,
+      "icon": "close",
+      "style": "sm",
+      "size": 22,
+      "tooltip": "${$i18n.clipIgnoreTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "dismissClipboard"
+        }
+      ]
+    },
+    "workspace_card": {
+      "id": "workspace-card",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,7,10,8",
+      "spacing": 5,
+      "children": [
+        "workspace_header_grid",
+        "jwt_view_tabs_row",
+        "workspace_draft_input",
+        "error_banner_card"
+      ]
+    },
+    "workspace_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "workspace_status_row",
+        "workspace_toolbar_row"
+      ]
+    },
+    "workspace_status_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "breadcrumb_trail_row",
+        "jwt_status_row"
+      ]
+    },
+    "breadcrumb_trail_row": {
+      "type": "Stack",
+      "when": "${$computed.isJwtMode != 'true'}",
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_trail_prev_older",
+        "trail_sep_older",
+        "btn_trail_prev_latest",
+        "trail_sep_latest",
+        "current_step_label"
+      ]
+    },
+    "btn_trail_prev_older": {
+      "type": "Button",
+      "when": "${$computed.hasTrail0 == 'true'}",
+      "text": "${$computed.trailLabel0}",
+      "variant": "subtle",
+      "padding": "4,1,4,1",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "jumpHistory",
+          "args": {
+            "index": "0"
+          }
+        }
+      ]
+    },
+    "trail_sep_older": {
+      "type": "Text",
+      "when": "${$computed.hasTrail0 == 'true'}",
+      "text": "›",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "btn_trail_prev_latest": {
+      "type": "Button",
+      "when": "${$computed.hasTrail1 == 'true'}",
+      "text": "${$computed.trailLabel1}",
+      "variant": "subtle",
+      "padding": "4,1,4,1",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "jumpHistory",
+          "args": {
+            "index": "1"
+          }
+        }
+      ]
+    },
+    "trail_sep_latest": {
+      "type": "Text",
+      "when": "${$computed.hasTrail1 == 'true'}",
+      "text": "›",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "current_step_label": {
+      "type": "Text",
+      "text": "${$computed.currentStepLabel}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "jwt_status_row": {
+      "type": "Stack",
+      "when": "${$computed.isJwtMode == 'true'}",
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "jwt_status_dot",
+        "jwt_status_text"
+      ]
+    },
+    "jwt_status_dot": {
+      "type": "Text",
+      "text": "●",
+      "color": "${$computed.jwtStatusColor}",
+      "fontSize": 10,
+      "verticalAlignment": "center"
+    },
+    "jwt_status_text": {
+      "type": "Text",
+      "text": "${$computed.jwtStatusText}",
+      "style": "caption",
+      "color": "${$computed.jwtStatusColor}",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "workspace_toolbar_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_paste_clipboard",
+        "btn_undo_step",
+        "btn_clear_workspace",
+        "btn_expand_workspace"
+      ]
+    },
+    "btn_paste_clipboard": {
+      "type": "Button",
+      "icon": "paste",
+      "text": "${$i18n.btnPaste}",
+      "variant": "subtle",
+      "padding": "6,2,6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "pasteClipboard"
+        }
+      ]
+    },
+    "btn_undo_step": {
+      "type": "IconButton",
+      "when": "${$computed.canUndo == 'true'}",
+      "icon": "undo",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.undoTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "undoStep"
+        }
+      ]
+    },
+    "btn_clear_workspace": {
+      "type": "IconButton",
+      "when": "${$computed.canClear == 'true'}",
+      "icon": "delete",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.clearTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearWorkspace"
+        }
+      ]
+    },
+    "btn_expand_workspace": {
+      "type": "IconButton",
+      "when": "${$computed.hasDraft == 'true'}",
+      "icon": "expand",
+      "size": 24,
+      "variant": "subtle",
+      "popover": "expandPop",
+      "tooltip": "${$i18n.expandTip}"
+    },
+    "jwt_view_tabs_row": {
+      "type": "Stack",
+      "when": "${$computed.isJwtMode == 'true'}",
+      "orientation": "horizontal",
+      "spacing": 4,
+      "children": [
+        "btn_jwt_payload",
+        "btn_jwt_header",
+        "btn_jwt_raw"
+      ]
+    },
+    "btn_jwt_payload": {
+      "type": "Button",
+      "text": "${$i18n.jwtSegPayload}",
+      "variant": "${$computed.jwtView == 'payload' ? 'standard' : 'subtle'}",
+      "padding": "8,2,8,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setJwtView",
+          "args": {
+            "view": "payload"
+          }
+        }
+      ]
+    },
+    "btn_jwt_header": {
+      "type": "Button",
+      "text": "${$i18n.jwtSegHeader}",
+      "variant": "${$computed.jwtView == 'header' ? 'standard' : 'subtle'}",
+      "padding": "8,2,8,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setJwtView",
+          "args": {
+            "view": "header"
+          }
+        }
+      ]
+    },
+    "btn_jwt_raw": {
+      "type": "Button",
+      "text": "${$i18n.jwtSegRaw}",
+      "variant": "${$computed.jwtView == 'raw' ? 'standard' : 'subtle'}",
+      "padding": "8,2,8,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setJwtView",
+          "args": {
+            "view": "raw"
+          }
+        }
+      ]
+    },
+    "workspace_draft_input": {
+      "type": "TextArea",
+      "bind": "state.draft",
+      "placeholder": "${$i18n.editorPlaceholder}",
+      "minHeight": 72,
+      "maxHeight": 82,
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "onDraftChange"
+        }
+      ],
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "runPrimary"
+        }
+      ]
+    },
+    "error_banner_card": {
+      "type": "Card",
+      "when": "${$computed.hasError == 'true'}",
+      "tone": "danger",
+      "padding": "8,3,8,3",
+      "children": [
+        "error_banner_grid"
+      ]
+    },
+    "error_banner_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "error_message_text",
+        "btn_locate_error"
+      ]
+    },
+    "error_message_text": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.errorMsg}",
+      "style": "caption",
+      "color": "danger",
+      "maxLines": 2,
+      "verticalAlignment": "center"
+    },
+    "btn_locate_error": {
+      "type": "Button",
+      "column": 1,
+      "when": "${$computed.hasErrorOffset == 'true'}",
+      "text": "${$i18n.locateBtn}",
+      "variant": "subtle",
+      "padding": "6,2,6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "focusError"
+        }
+      ]
+    },
+    "neutral_tab_tray": {
+      "id": "neutral-tab-tray",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "3",
+      "children": [
+        "tool_tabs_grid"
+      ]
+    },
+    "tool_tabs_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "columnSpacing": 3,
+      "children": [
+        "btn_tab_daily",
+        "btn_tab_encode",
+        "btn_tab_json",
+        "btn_tab_gen"
+      ]
+    },
+    "btn_tab_daily": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$i18n.tabDaily}",
+      "variant": "${state.activeTab == 'daily' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "switchTab",
+          "args": {
+            "tab": "daily"
+          }
+        }
+      ]
+    },
+    "btn_tab_encode": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$i18n.tabEncode}",
+      "variant": "${state.activeTab == 'encode' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "switchTab",
+          "args": {
+            "tab": "encode"
+          }
+        }
+      ]
+    },
+    "btn_tab_json": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$i18n.tabJson}",
+      "variant": "${state.activeTab == 'json' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "switchTab",
+          "args": {
+            "tab": "json"
+          }
+        }
+      ]
+    },
+    "btn_tab_gen": {
+      "type": "Button",
+      "column": 3,
+      "text": "${$i18n.tabGen}",
+      "variant": "${state.activeTab == 'gen' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "switchTab",
+          "args": {
+            "tab": "gen"
+          }
+        }
+      ]
+    },
+    "daily_actions_grid": {
+      "type": "Grid",
+      "when": "${state.activeTab == 'daily'}",
+      "columns": "*,*",
+      "spacing": 5,
+      "children": [
+        "btn_op_word_stats",
+        "btn_op_clean_whitespace",
+        "btn_op_toggle_case",
+        "btn_op_dedupe_lines"
+      ]
+    },
+    "btn_op_word_stats": {
+      "type": "Button",
+      "row": 0,
+      "column": 0,
+      "icon": "file",
+      "text": "${$i18n.actWordStats}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "wordStats"
+          }
+        }
+      ]
+    },
+    "btn_op_clean_whitespace": {
+      "type": "Button",
+      "row": 0,
+      "column": 1,
+      "icon": "align-left",
+      "text": "${$i18n.actCleanSpace}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "cleanWhitespace"
+          }
+        }
+      ]
+    },
+    "btn_op_toggle_case": {
+      "type": "Button",
+      "row": 1,
+      "column": 0,
+      "icon": "font-size",
+      "text": "${$i18n.actCaseToggle}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "toggleCase"
+          }
+        }
+      ]
+    },
+    "btn_op_dedupe_lines": {
+      "type": "Button",
+      "row": 1,
+      "column": 1,
+      "icon": "library",
+      "text": "${$i18n.actDedupeLines}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "dedupeLines"
+          }
+        }
+      ]
+    },
+    "encode_actions_grid": {
+      "type": "Grid",
+      "when": "${state.activeTab == 'encode'}",
+      "columns": "*,*",
+      "spacing": 5,
+      "children": [
+        "btn_op_url_decode",
+        "btn_op_url_encode",
+        "btn_op_b64_decode",
+        "btn_op_b64_encode"
+      ]
+    },
+    "btn_op_url_decode": {
+      "type": "Button",
+      "row": 0,
+      "column": 0,
+      "icon": "globe",
+      "text": "${$i18n.actUrlDecode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "urlDecode"
+          }
+        }
+      ]
+    },
+    "btn_op_url_encode": {
+      "type": "Button",
+      "row": 0,
+      "column": 1,
+      "icon": "link",
+      "text": "${$i18n.actUrlEncode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "urlEncode"
+          }
+        }
+      ]
+    },
+    "btn_op_b64_decode": {
+      "type": "Button",
+      "row": 1,
+      "column": 0,
+      "icon": "paste",
+      "text": "${$i18n.actB64Decode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "base64Decode"
+          }
+        }
+      ]
+    },
+    "btn_op_b64_encode": {
+      "type": "Button",
+      "row": 1,
+      "column": 1,
+      "icon": "code",
+      "text": "${$i18n.actB64Encode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "base64Encode"
+          }
+        }
+      ]
+    },
+    "json_actions_grid": {
+      "type": "Grid",
+      "when": "${state.activeTab == 'json'}",
+      "columns": "*,*",
+      "spacing": 5,
+      "children": [
+        "btn_op_json_pretty",
+        "btn_op_json_minify",
+        "btn_op_unicode_decode",
+        "btn_op_jwt_decode"
+      ]
+    },
+    "btn_op_json_pretty": {
+      "type": "Button",
+      "row": 0,
+      "column": 0,
+      "icon": "library",
+      "text": "${$i18n.actJsonPretty}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "jsonPretty"
+          }
+        }
+      ]
+    },
+    "btn_op_json_minify": {
+      "type": "Button",
+      "row": 0,
+      "column": 1,
+      "icon": "dictionary",
+      "text": "${$i18n.actJsonMinify}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "jsonMinify"
+          }
+        }
+      ]
+    },
+    "btn_op_unicode_decode": {
+      "type": "Button",
+      "row": 1,
+      "column": 0,
+      "icon": "font-size",
+      "text": "${$i18n.actUnicodeDecode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "unicodeUnescape"
+          }
+        }
+      ]
+    },
+    "btn_op_jwt_decode": {
+      "type": "Button",
+      "row": 1,
+      "column": 1,
+      "icon": "key",
+      "text": "${$i18n.actJwtDecode}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "jwtDecode"
+          }
+        }
+      ]
+    },
+    "gen_actions_grid": {
+      "type": "Grid",
+      "when": "${state.activeTab == 'gen'}",
+      "columns": "*,*",
+      "spacing": 5,
+      "children": [
+        "btn_op_smart_time",
+        "btn_op_gen_password",
+        "btn_op_uuid_v7",
+        "btn_op_sha256"
+      ]
+    },
+    "btn_op_smart_time": {
+      "type": "Button",
+      "row": 0,
+      "column": 0,
+      "icon": "clock",
+      "text": "${$i18n.actSmartTime}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "smartTime"
+          }
+        }
+      ]
+    },
+    "btn_op_gen_password": {
+      "type": "Button",
+      "row": 0,
+      "column": 1,
+      "icon": "lock",
+      "text": "${$i18n.actGenPassword}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "genPassword"
+          }
+        }
+      ]
+    },
+    "btn_op_uuid_v7": {
+      "type": "Button",
+      "row": 1,
+      "column": 0,
+      "icon": "key",
+      "text": "${$i18n.actUuidV7}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "uuidv7"
+          }
+        }
+      ]
+    },
+    "btn_op_sha256": {
+      "type": "Button",
+      "row": 1,
+      "column": 1,
+      "icon": "lock",
+      "text": "${$i18n.actSha256}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "padding": "8,4,8,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "runTransform",
+          "args": {
+            "op": "sha256"
+          }
+        }
+      ]
+    },
+    "result_status_card": {
+      "id": "result-status-card",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6,10,6",
+      "children": [
+        "result_status_grid"
+      ]
+    },
+    "result_status_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "copied_status_badge",
+        "result_summary_text",
+        "btn_toggle_auto_copy",
+        "btn_copy_current"
+      ]
+    },
+    "copied_status_badge": {
+      "type": "Badge",
+      "column": 0,
+      "when": "${$computed.showCopiedBadge == 'true'}",
+      "text": "${$i18n.copiedBtn}",
+      "tone": "emerald",
+      "verticalAlignment": "center"
+    },
+    "result_summary_text": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.resultSummaryText}",
+      "style": "caption",
+      "color": "${$computed.hasError == 'true' ? 'danger' : 'secondary'}",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "btn_toggle_auto_copy": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$computed.autoCopyLabel}",
+      "variant": "subtle",
+      "padding": "5,1,5,1",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleAutoCopy"
+        }
+      ]
+    },
+    "btn_copy_current": {
+      "type": "Button",
+      "column": 3,
+      "when": "${$computed.canCopy == 'true'}",
+      "icon": "copy",
+      "text": "${$i18n.copyBtn}",
+      "variant": "standard",
+      "padding": "7,2,7,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "copyCurrent"
+        }
+      ]
+    },
+    "pop_expand_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "expand_header_grid",
+        "expand_code_block",
+        "expand_metrics_text"
+      ]
+    },
+    "expand_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 8,
+      "children": [
+        "expand_step_title",
+        "btn_expand_copy"
+      ]
+    },
+    "expand_step_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.currentStepLabel}",
+      "style": "subtitle",
+      "verticalAlignment": "center"
+    },
+    "btn_expand_copy": {
+      "type": "Button",
+      "column": 1,
+      "icon": "copy",
+      "text": "${$i18n.copyBtn}",
+      "variant": "standard",
+      "padding": "10,4,10,4",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "copyCurrent"
+        }
+      ]
+    },
+    "expand_code_block": {
+      "type": "CodeBlock",
+      "variant": "lined",
+      "language": "${$computed.displayLanguage}",
+      "text": "${$computed.displayCode}",
+      "color": "${$computed.displayCodeColor}",
+      "wrapText": true,
+      "showCopyButton": true,
+      "maxHeight": 320
+    },
+    "expand_metrics_text": {
+      "type": "Text",
+      "text": "${$computed.statusMetrics}",
+      "style": "caption",
+      "color": "muted",
+      "fontFamily": "mono"
+    }
+  }
+}

@@ -118,14 +118,14 @@ public sealed class FileWidgetFolderNavigationContractTests
             "private static ShortcutInfo? ReadStoredMetadataUncached",
             StringComparison.Ordinal);
         int fastReadEnd = shortcutHelper.IndexOf(
-            "private static ShortcutInfo ReadShellLinkMetadata",
+            "internal static string? TryReadEffectiveTargetPath",
             fastReadStart,
             StringComparison.Ordinal);
         Assert.True(fastReadStart >= 0 && fastReadEnd > fastReadStart);
-        Assert.DoesNotContain(
-            "link.Resolve(",
-            shortcutHelper[fastReadStart..fastReadEnd],
-            StringComparison.Ordinal);
+        string fastReadBody = shortcutHelper[fastReadStart..fastReadEnd];
+        Assert.Contains("ShortcutNativeBackend.ReadStoredRaw(", fastReadBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResolveNoUi(", fastReadBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("link.Resolve(", fastReadBody, StringComparison.Ordinal);
     }
 
     [Fact]

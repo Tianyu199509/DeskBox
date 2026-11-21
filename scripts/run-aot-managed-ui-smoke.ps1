@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$SummaryPath,
 
@@ -857,9 +857,9 @@ function Assert-PersistenceStateEqual {
         -Actual $Actual.fileWidget `
         -Name "$Name.fileWidget"
     Assert-PersistenceWidgetEqual `
-        -Expected $Expected.searchWidget `
-        -Actual $Actual.searchWidget `
-        -Name "$Name.searchWidget"
+        -Expected $Expected.musicWidget `
+        -Actual $Actual.musicWidget `
+        -Name "$Name.musicWidget"
 }
 
 function Assert-QuickCaptureStateEqual {
@@ -946,7 +946,7 @@ function Assert-GlanceEvidenceState {
     $viewModel = $State.viewModel
     $surface = $State.surface
     $commonStoreValid =
-        [int]$store.version -eq 10 -and
+        [int]$store.version -eq 11 -and
         [string]$store.backgroundSource -ceq "LocalFiles" -and
         $null -eq $store.localFolderPath -and
         [bool]$store.showTime -and
@@ -1522,11 +1522,11 @@ function Invoke-PersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-file", "aot-5b4a-search") `
+        -Expected @("aot-5b4a-file", "aot-5b4a-music") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("File", "Search") `
+        -Expected @("File", "Music") `
         -Name "$Phase.visibleWidgetKinds"
 
     $requiredSteps = @(
@@ -1731,11 +1731,11 @@ function Invoke-QuickCapturePersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2b1-quick-capture") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2b1-quick-capture") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("QuickCapture", "Search") `
+        -Expected @("Music", "QuickCapture") `
         -Name "$Phase.visibleWidgetKinds"
 
     $requiredSteps = @(
@@ -1961,11 +1961,11 @@ function Invoke-TodoPersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2b2a-todo") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2b2a-todo") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Search", "Todo") `
+        -Expected @("Music", "Todo") `
         -Name "$Phase.visibleWidgetKinds"
 
     $requiredSteps = @(
@@ -2202,11 +2202,11 @@ function Invoke-TodoStepsPersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2b2b1-todo-steps") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2b2b1-todo-steps") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Search", "Todo") `
+        -Expected @("Music", "Todo") `
         -Name "$Phase.visibleWidgetKinds"
 
     $requiredSteps = @(
@@ -2443,11 +2443,11 @@ function Invoke-TodoAttachmentsPersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2b2b2-todo-attachments") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2b2b2-todo-attachments") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Search", "Todo") `
+        -Expected @("Music", "Todo") `
         -Name "$Phase.visibleWidgetKinds"
 
     $requiredSteps = @(
@@ -2620,11 +2620,11 @@ function Invoke-GlancePersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2c1-glance") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2c1-glance") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Glance", "Search") `
+        -Expected @("Glance", "Music") `
         -Name "$Phase.visibleWidgetKinds"
 
     $beforeMutation = $Phase -ceq "VerifyRestore"
@@ -2792,15 +2792,15 @@ function Invoke-WeatherSettingsPersistencePhase {
         [long]$phaseResult.trayOwnerWindowHandle -eq 0 -or
         [int]$phaseResult.loadedSurfaceCount -ne 1 -or
         [int]$phaseResult.visibleSurfaceCount -ne 1) {
-        throw "Weather settings phase '$Phase' did not retain only the Search host."
+        throw "Weather settings phase '$Phase' did not retain only the Music host."
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2c2a-weather") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2c2a-weather") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Search") `
+        -Expected @("Music") `
         -Name "$Phase.visibleWidgetKinds"
 
     Assert-WeatherSettingsEvidenceState `
@@ -2972,11 +2972,11 @@ function Invoke-WeatherSurfacePersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4b2c2b-weather") `
+        -Expected @("aot-5b4a-music", "aot-5b4b2c2b-weather") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("Search", "Weather") `
+        -Expected @("Music", "Weather") `
         -Name "$Phase.visibleWidgetKinds"
 
     Assert-WeatherSurfaceEvidenceState `
@@ -3151,11 +3151,11 @@ function Invoke-LocalFilePersistencePhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4c1a-file") `
+        -Expected @("aot-5b4a-music", "aot-5b4c1a-file") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("File", "Search") `
+        -Expected @("File", "Music") `
         -Name "$Phase.visibleWidgetKinds"
 
     Assert-LocalFileEvidenceState `
@@ -3381,11 +3381,11 @@ function Invoke-RecycleBinPhase {
     }
     Assert-StringSequence `
         -Actual @($phaseResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4c1b1-file") `
+        -Expected @("aot-5b4a-music", "aot-5b4c1b1-file") `
         -Name "$Phase.seededWidgetIds"
     Assert-StringSequence `
         -Actual @($phaseResult.visibleWidgetKinds) `
-        -Expected @("File", "Search") `
+        -Expected @("File", "Music") `
         -Name "$Phase.visibleWidgetKinds"
 
     if ($Phase -cne "Compensate") {
@@ -3610,9 +3610,8 @@ $settings = [ordered]@{
     featureWidgetEnabledStates = [ordered]@{
         QuickCapture = $false
         Todo = $false
-        Music = $false
+        Music = $true
         Weather = $false
-        Search = $true
         Glance = $false
     }
     searchSaveHistory = $false
@@ -3644,15 +3643,15 @@ $settings = [ordered]@{
             fileAddedAtTrackingInitialized = $true
         },
         [ordered]@{
-            id = "aot-5b4a-search"
-            name = "AOT Search Fixture"
+            id = "aot-5b4a-music"
+            name = "AOT Music Fixture"
             isDefaultTitle = $false
             x = 420
             y = 80
             boundsCoordinateVersion = 1
             width = 300
             height = 360
-            widgetKind = "Search"
+            widgetKind = "Music"
             viewMode = "Icon"
             isVisible = $true
             isDisabled = $false
@@ -3682,7 +3681,7 @@ if ($scenario -ceq "DeepSettingsReadOnly") {
 elseif ($scenario -ceq "RecycleBinMenuPersistenceRestart") {
     $settings["fileWidgetFolderOpenBehavior"] = "Embedded"
     $fileWidget = $settings["widgets"][0]
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $fileWidget["id"] = "aot-5b4c1b1-file"
     $fileWidget["name"] = "AOT Recycle Bin Menu Fixture"
     $fileWidget["width"] = 380
@@ -3691,7 +3690,7 @@ elseif ($scenario -ceq "RecycleBinMenuPersistenceRestart") {
     $fileWidget["metadata"] = [ordered]@{
         FolderOpenBehavior = "Embedded"
     }
-    $settings["widgets"] = @($fileWidget, $searchWidget)
+    $settings["widgets"] = @($fileWidget, $musicWidget)
 
     $recycleBinMultiFolderPath = Join-Path `
         $recycleBinWidgetRoot `
@@ -3721,7 +3720,7 @@ elseif ($scenario -ceq "RecycleBinMenuPersistenceRestart") {
 elseif ($scenario -ceq "LocalFileSurfacePersistenceRestart") {
     $settings["fileWidgetFolderOpenBehavior"] = "Embedded"
     $fileWidget = $settings["widgets"][0]
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $fileWidget["id"] = "aot-5b4c1a-file"
     $fileWidget["name"] = "AOT Local File Surface Fixture"
     $fileWidget["width"] = 380
@@ -3730,7 +3729,7 @@ elseif ($scenario -ceq "LocalFileSurfacePersistenceRestart") {
     $fileWidget["metadata"] = [ordered]@{
         FolderOpenBehavior = "Embedded"
     }
-    $settings["widgets"] = @($fileWidget, $searchWidget)
+    $settings["widgets"] = @($fileWidget, $musicWidget)
 
     New-Item -ItemType Directory -Path $localFileNestedRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $localFileSourceRoot -Force | Out-Null
@@ -3758,7 +3757,7 @@ elseif ($scenario -ceq "QuickCapturePersistenceRestart") {
     $settings["quickCaptureShowRecordsTab"] = $true
     $settings["quickCaptureShowPinnedTab"] = $false
     $settings["quickCaptureShowRecentTab"] = $false
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $settings["widgets"] = @(
         [ordered]@{
             id = "aot-5b4b2b1-quick-capture"
@@ -3783,7 +3782,7 @@ elseif ($scenario -ceq "QuickCapturePersistenceRestart") {
             fileAddedAtByPath = [ordered]@{}
             fileAddedAtTrackingInitialized = $true
         },
-        $searchWidget)
+        $musicWidget)
     New-Item `
         -ItemType Directory `
         -Path (Split-Path -Parent $quickCaptureAttachmentFixturePath) `
@@ -3801,6 +3800,7 @@ elseif ($scenario -in @(
     $settings["todoShowAllTab"] = $true
     $settings["todoShowActiveTab"] = $false
     $settings["todoShowTodayTab"] = $false
+    $settings["todoShowOverdueTab"] = $false
     $settings["todoShowThisWeekTab"] = $false
     $settings["todoShowThisMonthTab"] = $false
     $settings["todoShowImportantTab"] = $false
@@ -3808,7 +3808,7 @@ elseif ($scenario -in @(
     $settings["todoReminderEnabled"] = $false
     $settings["todoLayoutMode"] = "SinglePane"
     $settings["todoAutoSelectFirstInWideLayout"] = $false
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $todoWidgetId = switch ($scenario) {
         "TodoStepsPersistenceRestart" { "aot-5b4b2b2b1-todo-steps" }
         "TodoAttachmentsPersistenceRestart" { "aot-5b4b2b2b2-todo-attachments" }
@@ -3843,7 +3843,7 @@ elseif ($scenario -in @(
             fileAddedAtByPath = [ordered]@{}
             fileAddedAtTrackingInitialized = $true
         },
-        $searchWidget)
+        $musicWidget)
     if ($scenario -ceq "TodoAttachmentsPersistenceRestart") {
         New-Item `
             -ItemType Directory `
@@ -3872,7 +3872,7 @@ elseif ($scenario -ceq "WeatherSurfacePersistenceRestart") {
     $settings["weatherShowWind"] = $true
     $settings["weatherShowPressure"] = $true
     $settings["weatherRefreshIntervalMinutes"] = 60
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $settings["widgets"] = @(
         [ordered]@{
             id = "aot-5b4b2c2b-weather"
@@ -3899,7 +3899,7 @@ elseif ($scenario -ceq "WeatherSurfacePersistenceRestart") {
             fileAddedAtByPath = [ordered]@{}
             fileAddedAtTrackingInitialized = $true
         },
-        $searchWidget)
+        $musicWidget)
 }
 elseif ($scenario -ceq "WeatherSettingsPersistenceRestart") {
     $settings["weatherAutoLocation"] = $false
@@ -3919,7 +3919,7 @@ elseif ($scenario -ceq "WeatherSettingsPersistenceRestart") {
     $settings["weatherShowWind"] = $true
     $settings["weatherShowPressure"] = $false
     $settings["weatherRefreshIntervalMinutes"] = 60
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $settings["widgets"] = @(
         [ordered]@{
             id = "aot-5b4b2c2a-weather"
@@ -3946,11 +3946,11 @@ elseif ($scenario -ceq "WeatherSettingsPersistenceRestart") {
             fileAddedAtByPath = [ordered]@{}
             fileAddedAtTrackingInitialized = $true
         },
-        $searchWidget)
+        $musicWidget)
 }
 elseif ($scenario -ceq "GlancePersistenceRestart") {
     $settings["featureWidgetEnabledStates"]["Glance"] = $true
-    $searchWidget = $settings["widgets"][1]
+    $musicWidget = $settings["widgets"][1]
     $settings["widgets"] = @(
         [ordered]@{
             id = "aot-5b4b2c1-glance"
@@ -3975,7 +3975,7 @@ elseif ($scenario -ceq "GlancePersistenceRestart") {
             fileAddedAtByPath = [ordered]@{}
             fileAddedAtTrackingInitialized = $true
         },
-        $searchWidget)
+        $musicWidget)
 
     New-Item `
         -ItemType Directory `
@@ -3993,7 +3993,7 @@ elseif ($scenario -ceq "GlancePersistenceRestart") {
         $glanceStoreDirectory `
         "aot-5b4b2c1-glance.json"
     # Seed the fixture at an old schema form (version 8). The evidence gate
-    # below expects version 10, so the scenario verifies that the glance
+    # below expects version 11, so the scenario verifies that the glance
     # preference store's Normalize pass stamps the current schema version on
     # load instead of echoing whatever the fixture shipped.
     $glanceBaseline = [ordered]@{
@@ -6748,11 +6748,11 @@ try {
 
     Assert-StringSequence `
         -Actual @($smokeResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-file", "aot-5b4a-search") `
+        -Expected @("aot-5b4a-file", "aot-5b4a-music") `
         -Name "seededWidgetIds"
     Assert-StringSequence `
         -Actual @($smokeResult.visibleWidgetKinds) `
-        -Expected @("File", "Search") `
+        -Expected @("File", "Music") `
         -Name "visibleWidgetKinds"
     if ([int]$smokeResult.loadedSurfaceCount -ne 2 -or
         [int]$smokeResult.visibleSurfaceCount -ne 2) {
@@ -6837,8 +6837,6 @@ try {
             -not [bool]$smokeResult.search.hasCurrentResults -or
             [int]$smokeResult.search.currentResultsCount -le 0 -or
             [string]$smokeResult.search.selectedTabId -cne "all" -or
-            -not [bool]$smokeResult.search.resultFilterBarVisible -or
-            -not [bool]$smokeResult.search.sortHeaderRowVisible -or
             -not [bool]$smokeResult.search.hasOpenSettingsAction -or
             [string]$smokeResult.search.finalResultFilter -cne "All" -or
             [string]$smokeResult.search.finalSortColumn -cne "Relevance" -or
@@ -6867,16 +6865,14 @@ try {
             MusicSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
             WeatherSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
             GlanceSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
-            SearchSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
+            SearchSettings = @{ parent = $null; nav = "SearchSettings" }
             AppearanceMaterialSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceDensitySettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceWindowSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceAnimationSettings = @{ parent = "Appearance"; nav = "Appearance" }
             CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             BackupRestoreSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
-            DataHealthSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
-            CompatibilityDiagnosticsSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             PerformanceSettings = @{ parent = "General"; nav = "General" }
+            CustomWidgetSettings = @{ parent = $null; nav = "CustomWidgetSettings" }
+            ClipboardSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
+            AiSettings = @{ parent = $null; nav = "AiSettings" }
         }
         $pageTransitions = @($deepSettings.pageTransitions)
         $searchSuggestions = @($deepSettings.searchSuggestions)

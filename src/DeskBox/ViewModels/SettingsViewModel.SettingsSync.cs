@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -151,9 +151,11 @@ private void OnLanguageChanged()
 
         RefreshSelectionProperties(refreshLocalizedOptions: false);
         RefreshGlobalHotkeyState();
+        RefreshAutoStartState();
+        NotifyWidgetChromeOverrideCommandsChanged();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        ClipboardSettingsRefreshRequested?.Invoke();
         NotifyCapsuleOverridePropertiesChanged();
-        RefreshQuickCaptureClipboardDiagnostics();
         _ = RefreshQuickAccessStateAsync();
     }
 
@@ -175,10 +177,10 @@ private void OnLanguageChanged()
             {
                 UpdateStatusText = _localizationService.T("Settings.Update.Status.Ready");
                 UpdateDetailText = GetReadyUpdateDetailText();
+                NotifyUpdateActionPropertiesChanged();
             }
         }
         OnPropertyChanged(nameof(AutoStartStatusText));
-        OnPropertyChanged(nameof(AvailableAutoStartModeOptions));
         // The global-hotkey card text lives on the interaction editor now;
         // the shell refreshes it through the editor push instead of shell
         // property notifications.
@@ -190,7 +192,6 @@ private void OnLanguageChanged()
         // The group-navigation editor rebuilds its option tables itself; the
         // existing-groups projection rebuild follows.
         RefreshWidgetGroupSettings();
-        RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void RefreshSelectionProperties(bool refreshLocalizedOptions)

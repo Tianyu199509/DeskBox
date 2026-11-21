@@ -104,4 +104,19 @@ public sealed class DeskBoxDataPathIsolationTests
                 "recovery journal stay off the real data directory.");
         }
     }
+
+    [Fact]
+    public void TestHost_IsolatesSharedDataRootOffProductionProfile()
+    {
+        DeskBoxDataPathService current = DeskBoxDataPathService.Current;
+        string productionRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DeskBox")));
+        string tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.GetTempPath()));
+        string actualRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(current.RootPath));
+
+        Assert.True(current.IsDevelopmentRoot);
+        Assert.StartsWith(tempRoot + Path.DirectorySeparatorChar, actualRoot, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(productionRoot, actualRoot, StringComparer.OrdinalIgnoreCase);
+    }
 }

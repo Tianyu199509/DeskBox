@@ -94,6 +94,25 @@ internal static partial class DesktopBlankHitTest
 
         Win32Helper.GetWindowThreadProcessId(shellWindow, out uint shellProcessId);
         Win32Helper.GetWindowThreadProcessId(listView, out uint listProcessId);
+        return IsShellDesktopListViewForProcessIds(listView, shellWindow, shellProcessId, listProcessId);
+    }
+
+    internal static bool IsShellDesktopListViewForProcessIds(
+        IntPtr listView,
+        IntPtr shellWindow,
+        uint shellProcessId,
+        uint listProcessId)
+    {
+        if (listView == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (shellWindow == IntPtr.Zero)
+        {
+            return true;
+        }
+
         return shellProcessId == 0 ||
                listProcessId == 0 ||
                shellProcessId == listProcessId;
@@ -133,10 +152,69 @@ internal static partial class DesktopBlankHitTest
                shellProcessId == rootProcessId;
     }
 
-    private static bool IsBlankListViewPoint(
+    internal static bool IsVerifiedDesktopShellWindow(
+        IntPtr windowHandle,
+        bool allowDefView = true)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(windowHandle, Win32Helper.GA_ROOT);
+        if (root != IntPtr.Zero)
+        {
+            string rootClass = GetWindowClass(root);
+            // An Explorer folder window (CabinetWClass/ExploreWClass) or common
+            // file dialog (#32770) also hosts SHELLDLL_DefView inside explorer.exe
+            // or the host app, and must never be mistaken for the desktop surface.
+            if (string.Equals(rootClass, "CabinetWClass", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "ExploreWClass", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "#32770", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        IntPtr current = windowHandle;
+        while (current != IntPtr.Zero)
+        {
+            string className = GetWindowClass(current);
+            if (string.Equals(className, "Progman", StringComparison.Ordinal) ||
+                string.Equals(className, "WorkerW", StringComparison.Ordinal) ||
+                (allowDefView &&
+                 string.Equals(className, "SHELLDLL_DefView", StringComparison.Ordinal)))
+            {
+                return IsDesktopHostWindow(current);
+            }
+
+            current = Win32Helper.GetParent(current);
+        }
+
+        if (root != IntPtr.Zero)
+        {
+            string rootClass = GetWindowClass(root);
+            if (string.Equals(rootClass, "Progman", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "WorkerW", StringComparison.Ordinal))
+            {
+                return IsDesktopHostWindow(root);
+            }
+        }
+
+        return false;
+    }
+
+    private static unsafe bool IsBlankListViewPoint(
         IntPtr listView,
         Win32Helper.POINT screenPoint)
     {
+        // When Windows "Show desktop icons" is unchecked, SHELLDLL_DefView hides
+        // its child SysListView32. Every point on the desktop is visually blank.
+        if (!Win32Helper.IsWindowVisible(listView))
+        {
+            return true;
+        }
+
         Win32Helper.POINT clientPoint = screenPoint;
         if (!Win32Helper.ScreenToClient(listView, ref clientPoint))
         {
@@ -158,12 +236,10 @@ internal static partial class DesktopBlankHitTest
             return false;
         }
 
-        int structureSize = Marshal.SizeOf<ListViewHitTestInfo>();
-        IntPtr localBuffer = IntPtr.Zero;
+        int structureSize = sizeof(ListViewHitTestInfo);
         IntPtr remoteBuffer = IntPtr.Zero;
         try
         {
-            localBuffer = Marshal.AllocHGlobal(structureSize);
             var hitTest = new ListViewHitTestInfo
             {
                 Point = clientPoint,
@@ -171,7 +247,6 @@ internal static partial class DesktopBlankHitTest
                 SubItemIndex = -1,
                 GroupIndex = -1
             };
-            Marshal.StructureToPtr(hitTest, localBuffer, false);
 
             remoteBuffer = RemoteProcessMemoryNativeMethods.VirtualAllocEx(
                 process,
@@ -183,7 +258,7 @@ internal static partial class DesktopBlankHitTest
                 !RemoteProcessMemoryNativeMethods.WriteProcessMemory(
                     process,
                     remoteBuffer,
-                    localBuffer,
+                    (IntPtr)(&hitTest),
                     (UIntPtr)structureSize,
                     out _))
             {
@@ -202,14 +277,13 @@ internal static partial class DesktopBlankHitTest
                 !RemoteProcessMemoryNativeMethods.ReadProcessMemory(
                     process,
                     remoteBuffer,
-                    localBuffer,
+                    (IntPtr)(&hitTest),
                     (UIntPtr)structureSize,
                     out _))
             {
                 return false;
             }
 
-            hitTest = Marshal.PtrToStructure<ListViewHitTestInfo>(localBuffer);
             return hitTest.ItemIndex < 0;
         }
         finally
@@ -219,23 +293,15 @@ internal static partial class DesktopBlankHitTest
                 RemoteProcessMemoryNativeMethods.VirtualFreeEx(process, remoteBuffer, UIntPtr.Zero, MemRelease);
             }
 
-            if (localBuffer != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(localBuffer);
-            }
-
             RemoteProcessMemoryNativeMethods.CloseHandle(process);
         }
     }
 
     private static string GetWindowClass(IntPtr windowHandle)
     {
-        var className = new StringBuilder(128);
-        int length = Win32Helper.GetClassName(
-            windowHandle,
-            className,
-            className.Capacity);
-        return length > 0 ? className.ToString() : string.Empty;
+        Span<char> className = stackalloc char[128];
+        int length = Win32Helper.GetClassName(windowHandle, className);
+        return length > 0 ? new string(className[..length]) : string.Empty;
     }
 
     [StructLayout(LayoutKind.Sequential)]

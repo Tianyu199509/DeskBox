@@ -52,7 +52,6 @@ $properties = @(
     "-p:SelfContained=true",
     "-p:WindowsAppSDKSelfContained=false",
     "-p:PublishSingleFile=false",
-    "-p:PublishTrimmed=false",
     "-p:UapAppxPackageBuildMode=$PackageBuildMode",
     "-p:AppxBundle=$AppxBundle",
     "-p:AppxPackageDir=$appxPackageDir",
@@ -65,11 +64,15 @@ if ($NativeAot.IsPresent) {
         "-p:DeskBoxAotSmokeHarness=false",
         "-p:PublishAot=true",
         "-p:DeskBoxRustNative=true",
+        "-p:DeskBoxQjsNative=true",
         "-p:DeskBoxRustCrtLinkage=Static",
         "-p:JsonSerializerIsReflectionEnabledByDefault=false",
         "-p:IlcUseEnvironmentalTools=true",
         "-p:PublishTrimmed=true"
     )
+}
+else {
+    $properties += "-p:PublishTrimmed=false"
 }
 
 if (-not [string]::IsNullOrWhiteSpace($PackageCertificateKeyFile)) {

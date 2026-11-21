@@ -12,14 +12,6 @@ namespace DeskBox.Tests;
 /// </summary>
 public sealed class UiDispatchTests : IDisposable
 {
-    // The CI unit-test host has no Windows App SDK WinRT classes registered —
-    // DispatcherQueueController activation throws REGDB_E_CLASSNOTREG (the
-    // same host limitation behind the empty-restore Application.Current
-    // guard). The two tests that exercise the Ready phase against a REAL
-    // dispatcher queue early-out where the runtime is unavailable; every
-    // interactive environment (dev box, real machines) runs them in full.
-    private static readonly bool s_realDispatcherQueueAvailable = ProbeRealDispatcherQueue();
-
     public UiDispatchTests()
     {
         UiDispatch.ResetForTests();
@@ -28,19 +20,6 @@ public sealed class UiDispatchTests : IDisposable
     public void Dispose()
     {
         UiDispatch.ResetForTests();
-    }
-
-    private static bool ProbeRealDispatcherQueue()
-    {
-        try
-        {
-            using var probe = new DispatcherQueueThread();
-            return true;
-        }
-        catch (COMException)
-        {
-            return false;
-        }
     }
 
     [Fact]
@@ -77,11 +56,6 @@ public sealed class UiDispatchTests : IDisposable
     [Fact]
     public async Task Headless_ForeignThreadWithOrigin_DefersUntilReady()
     {
-        if (!s_realDispatcherQueueAvailable)
-        {
-            return;
-        }
-
         UiDispatch.MarkUiOriginThread();
         using var dispatcher = new DispatcherQueueThread();
 
@@ -118,11 +92,6 @@ public sealed class UiDispatchTests : IDisposable
     [Fact]
     public async Task Ready_ForeignThread_Enqueues()
     {
-        if (!s_realDispatcherQueueAvailable)
-        {
-            return;
-        }
-
         using var dispatcher = new DispatcherQueueThread();
         await dispatcher.RunOnQueueAsync(() => UiDispatch.MarkReady(dispatcher.Queue));
         Assert.Equal(UiDispatch.PhaseKind.Ready, UiDispatch.Phase);
@@ -163,11 +132,6 @@ public sealed class UiDispatchTests : IDisposable
     [Fact]
     public async Task Shutdown_OnReadyDispatcherThread_KeepsIdentity_ButDropsWork()
     {
-        if (!s_realDispatcherQueueAvailable)
-        {
-            return;
-        }
-
         using var dispatcher = new DispatcherQueueThread();
         bool accessAfterShutdown = false;
         bool ranAfterShutdown = false;

@@ -24,10 +24,10 @@ public sealed class SettingsDeferredSectionsTests
         Assert.NotEmpty(expected);
         Assert.Equal(expected, SettingsSearchCatalog.Entries);
         Assert.Contains(SettingsSearchCatalog.Entries, entry =>
-            entry.SectionTag == "PerformanceSettings" &&
-            entry.HeaderKey == "Settings.Performance.ImmediateHiddenWorkingSetTrim.Title");
+            entry.SectionTag == "General" &&
+            entry.HeaderKey == "Settings.Performance.IdleWorkingSetTrim.Title");
         Assert.Contains(SettingsSearchCatalog.Entries, entry =>
-            entry.SectionTag == "FileStorageSettings" &&
+            entry.SectionTag == "AppearanceDetail" &&
             entry.HeaderKey == "Settings.ManagedPath.DesktopShortcut.Title");
     }
 
@@ -47,9 +47,14 @@ public sealed class SettingsDeferredSectionsTests
             // Batch 45: the file-stack template's compiled x:Bind surface is
             // typed to its section editor; every other template still carries
             // the shell view model.
-            string expectedDataType = GetSectionTag(section) == "FileStackSettings"
-                ? "fileStack:FileStackSettingsViewModel"
-                : "viewModels:SettingsViewModel";
+            string expectedDataType = GetSectionTag(section) switch
+            {
+                "FileStackSettings" => "fileStack:FileStackSettingsViewModel",
+                "MusicSettings" => "music:MusicSettingsViewModel",
+                "QuickCaptureSettings" => "quickCapture:QuickCaptureSettingsViewModel",
+                "TodoSettings" => "todo:TodoSettingsViewModel",
+                _ => "viewModels:SettingsViewModel"
+            };
             Assert.Equal(expectedDataType, (string?)template.Attribute(Xaml + "DataType"));
             Assert.Null(section.Attribute(Xaml + "Load"));
         });

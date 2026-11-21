@@ -26,10 +26,12 @@ public sealed class PerformanceSettingsPolicyTests
         Assert.Equal(
             PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
             effective.HiddenCacheCleanupScope);
+        Assert.False(effective.KeepCapsuleContentWarm);
         Assert.True(effective.AllowTextMarqueeAnimations);
         Assert.True(effective.AllowVinylRotationAnimations);
         Assert.True(effective.AllowGlanceImageAutoRotation);
         Assert.True(effective.AllowCompactAmbientAnimations);
+        Assert.True(PerformanceSettingsPolicy.Normalize(settings));
         Assert.False(PerformanceSettingsPolicy.Normalize(settings));
     }
 
@@ -66,6 +68,7 @@ public sealed class PerformanceSettingsPolicyTests
         Assert.Equal(
             PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
             effective.HiddenCacheCleanupScope);
+        Assert.False(effective.KeepCapsuleContentWarm);
         Assert.True(effective.AllowTextMarqueeAnimations);
         Assert.False(effective.AllowVinylRotationAnimations);
         Assert.True(effective.AllowGlanceImageAutoRotation);
@@ -156,7 +159,7 @@ public sealed class PerformanceSettingsPolicyTests
             PerformanceSettingsPolicy.CacheBudgetLarge,
             effective.CacheBudget);
         Assert.Equal(
-            PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+            PerformanceSettingsPolicy.HiddenCacheCleanupScopeWarm,
             effective.HiddenCacheCleanupScope);
         Assert.False(effective.AllowTextMarqueeAnimations);
         Assert.True(effective.AllowVinylRotationAnimations);
@@ -258,7 +261,7 @@ public sealed class PerformanceSettingsPolicyTests
     }
 
     [Fact]
-    public void Normalize_RepairsUnknownHiddenCleanupScopeToFullRecreatable()
+    public void Normalize_RepairsUnknownHiddenCleanupScopeToWarm()
     {
         var settings = new AppSettings
         {
@@ -268,7 +271,7 @@ public sealed class PerformanceSettingsPolicyTests
 
         Assert.True(PerformanceSettingsPolicy.Normalize(settings));
         Assert.Equal(
-            PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+            PerformanceSettingsPolicy.HiddenCacheCleanupScopeWarm,
             settings.HiddenCacheCleanupScope);
     }
 

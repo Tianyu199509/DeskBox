@@ -27,6 +27,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     private WinSpaceHotkeyStateMachine _modifierSpaceStateMachine = new();
     private readonly WindowsTapHotkeyStateMachine _windowsTapStateMachine = new();
     private readonly DoubleControlHotkeyStateMachine _doubleControlStateMachine = new();
+    private readonly DoubleModifierHotkeyStateMachine _doubleShiftStateMachine = new(Models.HotkeyModifierKeys.Shift);
+    private readonly DoubleModifierHotkeyStateMachine _doubleAltStateMachine = new(Models.HotkeyModifierKeys.Alt);
+    private readonly DoubleModifierHotkeyStateMachine _doubleWindowsStateMachine = new(Models.HotkeyModifierKeys.Windows);
+    private readonly DoubleSpaceHotkeyStateMachine _doubleSpaceStateMachine = new();
     private Thread? _thread;
     private uint _threadId;
     private IntPtr _hookHandle;
@@ -264,24 +268,12 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             lock (_sync)
             {
                 hookHandle = _hookHandle;
+                _hookHandle = IntPtr.Zero;
             }
 
-            if (hookHandle != IntPtr.Zero)
+            if (hookHandle != IntPtr.Zero && !Win32Helper.UnhookWindowsHookEx(hookHandle))
             {
-                if (Win32Helper.UnhookWindowsHookEx(hookHandle))
-                {
-                    lock (_sync)
-                    {
-                        if (_hookHandle == hookHandle)
-                        {
-                            _hookHandle = IntPtr.Zero;
-                        }
-                    }
-                }
-                else
-                {
-                    RecordLastWin32Error();
-                }
+                RecordLastWin32Error();
             }
 
             if (threadId != 0)
@@ -371,6 +363,7 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             }
 
             bool startupWasCancelled;
+            bool hookInstalled = installedHook != IntPtr.Zero;
             lock (_sync)
             {
                 startupWasCancelled = _disposed || generation != _lifecycleGeneration;
@@ -378,12 +371,13 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                 {
                     _threadId = threadId;
                     _hookHandle = installedHook;
+                    installedHook = IntPtr.Zero;
                     _startupError = startupError;
                 }
             }
 
             ready.TrySetResult(true);
-            if (installedHook == IntPtr.Zero || startupWasCancelled)
+            if (!hookInstalled || startupWasCancelled)
             {
                 return;
             }
@@ -409,16 +403,17 @@ internal sealed class ReservedHotkeyHookService : IDisposable
         }
         finally
         {
-            if (installedHook != IntPtr.Zero)
-            {
-                Win32Helper.UnhookWindowsHookEx(installedHook);
-            }
-
+            IntPtr hookToUnhook = installedHook;
             ResetStateMachine();
             lock (_sync)
             {
                 if (ReferenceEquals(_thread, Thread.CurrentThread))
                 {
+                    if (hookToUnhook == IntPtr.Zero)
+                    {
+                        hookToUnhook = _hookHandle;
+                    }
+
                     _thread = null;
                     _threadId = 0;
                     _hookHandle = IntPtr.Zero;
@@ -426,16 +421,34 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                     _notificationMessage = 0;
                 }
             }
+
+            if (hookToUnhook != IntPtr.Zero)
+            {
+                Win32Helper.UnhookWindowsHookEx(hookToUnhook);
+            }
+
             ready.TrySetResult(true);
         }
     }
 
-    private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    private unsafe IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        IntPtr hookHandle = IntPtr.Zero;
+        try
+        {
+            return KeyboardHookProcCore(nCode, wParam, lParam, out hookHandle);
+        }
+        catch
+        {
+            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+    }
+
+    private unsafe IntPtr KeyboardHookProcCore(int nCode, IntPtr wParam, IntPtr lParam, out IntPtr hookHandle)
     {
         // A delivered callback is the only observable proof the hook is still
         // installed; Windows removes timed-out hooks without notification.
         Volatile.Write(ref _lastCallbackTicks, Environment.TickCount64);
-        IntPtr hookHandle;
         IntPtr notificationWindow;
         uint notificationMessage;
         lock (_sync)
@@ -449,13 +462,13 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                          wParam == Win32Helper.WM_SYSKEYDOWN;
         bool isKeyUp = wParam == Win32Helper.WM_KEYUP ||
                        wParam == Win32Helper.WM_SYSKEYUP;
-        if (nCode < 0 || (!isKeyDown && !isKeyUp))
+        if (nCode < 0 || lParam == IntPtr.Zero || (!isKeyDown && !isKeyUp))
         {
             return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
         }
 
-        Win32Helper.KBDLLHOOKSTRUCT data =
-            Marshal.PtrToStructure<Win32Helper.KBDLLHOOKSTRUCT>(lParam);
+        ref readonly Win32Helper.KBDLLHOOKSTRUCT data =
+            ref *(Win32Helper.KBDLLHOOKSTRUCT*)lParam;
         if ((data.flags & Win32Helper.LLKHF_INJECTED) != 0 ||
             data.dwExtraInfo == InjectedEventTag)
         {
@@ -471,6 +484,12 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             {
                 ReservedHotkeyMode.DoubleControl =>
                     _doubleControlStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleShift =>
+                    _doubleShiftStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleAlt =>
+                    _doubleAltStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleWindows =>
+                    _doubleWindowsStateMachine.Process(data.vkCode, isKeyDown, data.time),
                 ReservedHotkeyMode.WindowsTap =>
                     _windowsTapStateMachine.Process(data.vkCode, isKeyDown),
                 _ => _modifierSpaceStateMachine.Process(data.vkCode, isKeyDown)
@@ -560,6 +579,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             {
                 _modifierSpaceStateMachine.CancelSuppression();
             }
+            else if (_mode == ReservedHotkeyMode.DoubleSpace)
+            {
+                _doubleSpaceStateMachine.CancelSuppression();
+            }
         }
     }
 
@@ -573,6 +596,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                 : new WinSpaceHotkeyStateMachine();
             _windowsTapStateMachine.Reset();
             _doubleControlStateMachine.Reset();
+            _doubleShiftStateMachine.Reset();
+            _doubleAltStateMachine.Reset();
+            _doubleWindowsStateMachine.Reset();
+            _doubleSpaceStateMachine.Reset();
         }
     }
 
@@ -583,6 +610,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             _modifierSpaceStateMachine.Reset();
             _windowsTapStateMachine.Reset();
             _doubleControlStateMachine.Reset();
+            _doubleShiftStateMachine.Reset();
+            _doubleAltStateMachine.Reset();
+            _doubleWindowsStateMachine.Reset();
+            _doubleSpaceStateMachine.Reset();
         }
     }
 

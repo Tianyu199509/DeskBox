@@ -22,17 +22,24 @@ public sealed class QuickLookPreviewService
     internal const string CloseMessage = "QuickLook.App.PipeMessages.Close";
     private const string ProcessName = "QuickLook";
     private const int ConnectTimeoutMs = 600;
+    private const long NegativeProcessProbeTtlMs = 1_500;
 
     // Cached pipe name — SID never changes within a session.
     private static string? s_cachedPipeName;
     private static bool s_pipeNameResolved;
+
+    // Cached running PID + short negative-lookup TTL to avoid full OS process
+    // table snapshots (LOH allocations) on the UI thread per Spacebar press.
+    private static int s_cachedRunningPid;
+    private static long s_lastNegativeProcessProbeTicks;
+    private static bool s_hasNegativeProcessProbeCache;
 
     // Integrity check: run at most once per process lifetime.
     private static bool s_integrityChecked;
 
     /// <summary>
     /// Quick, non-intrusive availability check.
-    /// Only enumerates processes — does NOT touch the named pipe.
+    /// Only probes process liveness — does NOT touch the named pipe.
     /// </summary>
     public bool CanPreview(string? path) =>
         IsPreviewablePath(path) && IsQuickLookRunning();
@@ -91,6 +98,8 @@ public sealed class QuickLookPreviewService
                                    OperationCanceledException or
                                    ObjectDisposedException)
         {
+            Volatile.Write(ref s_cachedRunningPid, 0);
+            Volatile.Write(ref s_hasNegativeProcessProbeCache, false);
             App.Log($"[QuickLook] Pipe send failed for '{path}': {ex.GetType().Name}");
             return false;
         }
@@ -113,21 +122,38 @@ public sealed class QuickLookPreviewService
 
         s_integrityChecked = true;
 
+        int cachedPid = Volatile.Read(ref s_cachedRunningPid);
+        if (cachedPid > 0 && IsProcessIdAlive(cachedPid))
+        {
+            if (IsProcessElevated(cachedPid) && !IsCurrentProcessElevated())
+            {
+                LogIntegrityMismatchMessage();
+            }
+
+            return;
+        }
+
         try
         {
-            foreach (Process proc in Process.GetProcessesByName(ProcessName))
+            Process[] processes = Process.GetProcessesByName(ProcessName);
+            try
             {
-                using (proc)
+                foreach (Process proc in processes)
                 {
                     if (proc.HasExited) continue;
 
                     if (IsProcessElevated(proc.Id) && !IsCurrentProcessElevated())
                     {
-                        App.Log("[QuickLook] Integrity mismatch detected: QuickLook is running as administrator " +
-                                "but DeskBox is not. Windows blocks pipe access between different integrity levels. " +
-                                "To fix: run QuickLook as a normal user (not as administrator).");
+                        LogIntegrityMismatchMessage();
                         return;
                     }
+                }
+            }
+            finally
+            {
+                foreach (Process proc in processes)
+                {
+                    proc.Dispose();
                 }
             }
         }
@@ -137,6 +163,13 @@ public sealed class QuickLookPreviewService
         {
             // Best-effort check — ignore failures.
         }
+    }
+
+    private static void LogIntegrityMismatchMessage()
+    {
+        App.Log("[QuickLook] Integrity mismatch detected: QuickLook is running as administrator " +
+                "but DeskBox is not. Windows blocks pipe access between different integrity levels. " +
+                "To fix: run QuickLook as a normal user (not as administrator).");
     }
 
     private static bool IsProcessElevated(int processId)
@@ -185,18 +218,66 @@ public sealed class QuickLookPreviewService
 
     internal static string BuildCloseMessage() => $"{CloseMessage}||";
 
+    private static bool IsProcessIdAlive(int processId)
+    {
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        IntPtr hProcess = QuickLookElevationNativeMethods.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            false,
+            processId);
+        if (hProcess == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        _ = QuickLookElevationNativeMethods.CloseHandle(hProcess);
+        return true;
+    }
+
     private static bool IsQuickLookRunning()
     {
+        int cachedPid = Volatile.Read(ref s_cachedRunningPid);
+        if (cachedPid > 0)
+        {
+            if (IsProcessIdAlive(cachedPid))
+            {
+                return true;
+            }
+
+            Volatile.Write(ref s_cachedRunningPid, 0);
+        }
+
+        long nowTicks = Environment.TickCount64;
+        if (Volatile.Read(ref s_hasNegativeProcessProbeCache) &&
+            nowTicks - Volatile.Read(ref s_lastNegativeProcessProbeTicks) < NegativeProcessProbeTtlMs)
+        {
+            return false;
+        }
+
         try
         {
-            foreach (Process process in Process.GetProcessesByName(ProcessName))
+            Process[] processes = Process.GetProcessesByName(ProcessName);
+            try
             {
-                using (process)
+                foreach (Process process in processes)
                 {
                     if (!process.HasExited)
                     {
+                        Volatile.Write(ref s_hasNegativeProcessProbeCache, false);
+                        Volatile.Write(ref s_cachedRunningPid, process.Id);
                         return true;
                     }
+                }
+            }
+            finally
+            {
+                foreach (Process process in processes)
+                {
+                    process.Dispose();
                 }
             }
         }
@@ -207,6 +288,9 @@ public sealed class QuickLookPreviewService
             // A process can exit while the snapshot is being inspected.
         }
 
+        Volatile.Write(ref s_cachedRunningPid, 0);
+        Volatile.Write(ref s_lastNegativeProcessProbeTicks, nowTicks);
+        Volatile.Write(ref s_hasNegativeProcessProbeCache, true);
         return false;
     }
 
@@ -234,7 +318,7 @@ public sealed class QuickLookPreviewService
         return s_cachedPipeName;
     }
 
-    // ── Win32 interop (integrity check only) ──
+    // ── Win32 interop (integrity & liveness check only) ──
 
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const uint TOKEN_QUERY = 0x0008;

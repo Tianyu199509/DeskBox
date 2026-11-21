@@ -1,3 +1,6 @@
+using DeskBox.Platform;
+using DeskBox.Services;
+
 namespace DeskBox.Helpers;
 
 /// <summary>
@@ -32,50 +35,39 @@ internal static class NativeDropEffectPolicy
         bool hasShellApplicationData = false,
         bool defaultMove = true,
         bool followWindows = false,
-        bool sameVolume = true)
+        bool sameVolume = true,
+        bool protectDefaultMoveAsCopy = false,
+        bool hasMappedFolder = true,
+        TransferTargetKind targetKind = TransferTargetKind.DirectorySurface,
+        TransferDomain domain = TransferDomain.ExternalInbound,
+        SourceOriginSnapshot? sourceOrigin = null)
     {
-        if (hasShellApplicationData)
-        {
-            if ((allowedEffects & Link) != 0)
-            {
-                return Link;
-            }
-
-            // Some third-party Start replacements expose application objects
-            // as copy-only payloads. DeskBox still creates a shortcut and never
-            // authorizes source cleanup.
-            return (allowedEffects & Copy) != 0 ? Copy : None;
-        }
-
-        if (!hasFileData)
-        {
-            return None;
-        }
-
-        FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
-            hasMappedFolder: true,
-            forceCopy: hasVirtualFileData,
-            controlDown: (keyState & ControlKeyState) != 0,
-            shiftDown: (keyState & ShiftKeyState) != 0,
-            defaultMove: defaultMove,
-            canCopy: (allowedEffects & Copy) != 0,
-            canMove: (allowedEffects & Move) != 0,
-            altDown: (keyState & AltKeyState) != 0,
-            followWindows: followWindows,
-            sameVolume: sameVolume,
-            // The native source may omit DROPEFFECT_LINK even though DeskBox
-            // can safely create a local .lnk from the extracted path. The
-            // visual still falls back to Copy when Link is not advertised.
-            canLink: true);
-        return intent switch
-        {
-            FileDropIntent.Copy => Copy,
-            FileDropIntent.Move => Move,
-            FileDropIntent.Shortcut when (allowedEffects & Link) != 0 => Link,
-            FileDropIntent.Shortcut when (allowedEffects & Copy) != 0 => Copy,
-            FileDropIntent.Shortcut when (allowedEffects & Move) != 0 => Move,
-            _ => None
-        };
+        SourceOriginSnapshot origin = sourceOrigin ?? new SourceOriginSnapshot(
+            protectDefaultMoveAsCopy
+                ? InboundSourceProtectionKind.ExternalRemovableOrNetwork
+                : InboundSourceProtectionKind.None,
+            HasMoveProtectedRoot: false,
+            HasUnhydratedCloudPlaceholder: false,
+            HasApplicationCacheSource: false,
+            HasTransientTempOrMsixCacheSource: false);
+        return TransferIntentEngine.Evaluate(new TransferIntentRequest(
+            Domain: domain,
+            TargetKind: targetKind,
+            HasFileData: hasFileData,
+            HasVirtualFileData: hasVirtualFileData,
+            HasShellApplicationOrNamespaceData: hasShellApplicationData,
+            ForceCopy: hasVirtualFileData,
+            HasMappedFolder: hasMappedFolder,
+            ControlDown: (keyState & ControlKeyState) != 0,
+            ShiftDown: (keyState & ShiftKeyState) != 0,
+            AltDown: (keyState & AltKeyState) != 0,
+            AllowedEffects: allowedEffects,
+            NoOperationMetadata: false,
+            DefaultMove: defaultMove,
+            FollowWindows: followWindows,
+            SameVolume: sameVolume,
+            CanLink: true,
+            SourceOrigin: origin)).FeedbackEffect;
     }
 
     public static bool ShouldCopyMappedTransfer(
@@ -85,8 +77,16 @@ internal static class NativeDropEffectPolicy
         bool followWindows = false,
         bool sameVolume = true,
         bool canCopy = true,
-        bool canMove = true)
+        bool canMove = true,
+        bool protectDefaultMoveAsCopy = false,
+        SourceOriginSnapshot? sourceOrigin = null,
+        TransferDomain domain = TransferDomain.ExternalInbound)
     {
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return false;
+        }
+
         FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: true,
             forceCopy: containsTemporaryFiles,
@@ -97,18 +97,48 @@ internal static class NativeDropEffectPolicy
             canMove: canMove,
             altDown: (keyState & AltKeyState) != 0,
             followWindows: followWindows,
-            sameVolume: sameVolume);
-        return intent != FileDropIntent.Move;
+            sameVolume: sameVolume,
+            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
+            sourceOrigin: sourceOrigin,
+            domain: domain);
+        return intent != FileDropIntent.Move && intent != FileDropIntent.Shortcut;
     }
 
     public static bool ShouldCreateMappedShortcut(
         bool containsTemporaryFiles,
-        uint keyState)
+        uint keyState,
+        bool followWindows = false,
+        uint allowedEffects = Copy | Move | Link,
+        SourceOriginSnapshot? sourceOrigin = null)
     {
-        return !containsTemporaryFiles &&
-               ((keyState & AltKeyState) != 0 ||
-                (keyState & (ControlKeyState | ShiftKeyState)) ==
-                    (ControlKeyState | ShiftKeyState));
+        if (containsTemporaryFiles)
+        {
+            return false;
+        }
+
+        bool linkAllowed = (allowedEffects & Link) != 0;
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return linkAllowed || (allowedEffects & Copy) != 0;
+        }
+
+        if ((keyState & AltKeyState) != 0 ||
+            (keyState & (ControlKeyState | ShiftKeyState)) == (ControlKeyState | ShiftKeyState))
+        {
+            return true;
+        }
+
+        bool ctrlOnly = (keyState & ControlKeyState) != 0 && (keyState & ShiftKeyState) == 0;
+        bool shiftOnly = (keyState & ShiftKeyState) != 0 && (keyState & ControlKeyState) == 0;
+        if (sourceOrigin?.PrefersShortcutByDefault == true &&
+            !ctrlOnly &&
+            !shiftOnly &&
+            linkAllowed)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public static bool IsRightButtonDrag(uint keyState)
@@ -119,14 +149,20 @@ internal static class NativeDropEffectPolicy
     public static uint ResolveCompletionEffect(
         bool hasExtractedPaths,
         uint allowedEffects,
-        bool createdShellApplicationLinks = false)
+        bool createdShellApplicationLinks = false,
+        bool hasVirtualOnlyData = false)
     {
         if (!hasExtractedPaths)
         {
             return None;
         }
 
-        if (createdShellApplicationLinks)
+        bool linkOnlyOffer =
+            (allowedEffects & (Copy | Move)) == 0 &&
+            (allowedEffects & Link) != 0;
+        if (createdShellApplicationLinks ||
+            linkOnlyOffer ||
+            (hasVirtualOnlyData && (allowedEffects & Copy) == 0))
         {
             return (allowedEffects & Link) != 0
                 ? Link

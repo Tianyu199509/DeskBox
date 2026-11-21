@@ -21,6 +21,17 @@ public sealed class SelectedNameExpansionPolicyTests
     }
 
     [Fact]
+    public void ExpansionDisabledWhenSurfaceWindowIsUnfocused()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldExpandSelectedItemName(
+            isDoubleClickToOpen: true,
+            selectedItemCount: 1,
+            isBoxSelecting: false,
+            isDragActive: false,
+            isWindowFocused: false));
+    }
+
+    [Fact]
     public void ExpansionRejectsMultiSelection()
     {
         Assert.False(SelectedNameExpansionPolicy.ShouldExpandSelectedItemName(
@@ -70,6 +81,17 @@ public sealed class SelectedNameExpansionPolicyTests
     }
 
     [Fact]
+    public void SlowClickRenameDisabledWhenSurfaceWindowIsUnfocused()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldStartRenameFromItemClick(
+            isDoubleClickToOpen: true,
+            hasModifierKey: false,
+            wasSoleSelectedItemBeforeClick: true,
+            pointerPressedOnLabel: true,
+            isWindowFocused: false));
+    }
+
+    [Fact]
     public void SlowClickRenameRejectsModifiersIconPressesAndFreshSelections()
     {
         // Ctrl/Shift clicks change the selection, not the name.
@@ -97,6 +119,96 @@ public sealed class SelectedNameExpansionPolicyTests
             hasModifierKey: false,
             wasSoleSelectedItemBeforeClick: true,
             pointerPressedOnLabel: true));
+    }
+
+    [Fact]
+    public void ExpansionDisabledWhenOpenIsInFlightOrSuppressed()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldExpandSelectedItemName(
+            isDoubleClickToOpen: true,
+            selectedItemCount: 1,
+            isBoxSelecting: false,
+            isDragActive: false,
+            isWindowFocused: true,
+            isOpenInFlightOrSuppressed: true));
+    }
+
+    [Fact]
+    public void SlowClickRenameRequiresSettledSelectionAndNoActiveOpen()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldStartRenameFromItemClick(
+            isDoubleClickToOpen: true,
+            hasModifierKey: false,
+            wasSoleSelectedItemBeforeClick: true,
+            pointerPressedOnLabel: true,
+            isWindowFocused: true,
+            isSelectionSettledPastDoubleClick: false));
+
+        Assert.False(SelectedNameExpansionPolicy.ShouldStartRenameFromItemClick(
+            isDoubleClickToOpen: true,
+            hasModifierKey: false,
+            wasSoleSelectedItemBeforeClick: true,
+            pointerPressedOnLabel: true,
+            isWindowFocused: true,
+            isSelectionSettledPastDoubleClick: true,
+            isOpenInFlightOrSuppressed: true));
+    }
+
+    [Fact]
+    public void SoleSelectionSettlementBlocksSecondClickWithinDoubleClickWindow()
+    {
+        Assert.False(SelectedNameExpansionPolicy.IsSoleSelectionSettledForSlowClickRename(
+            nowTick64: 1_200,
+            soleSelectionCommittedTick64: 0,
+            doubleClickTimeMs: 500));
+        Assert.False(SelectedNameExpansionPolicy.IsSoleSelectionSettledForSlowClickRename(
+            nowTick64: 1_180,
+            soleSelectionCommittedTick64: 1_000,
+            doubleClickTimeMs: 500));
+        Assert.True(SelectedNameExpansionPolicy.IsSoleSelectionSettledForSlowClickRename(
+            nowTick64: 1_500,
+            soleSelectionCommittedTick64: 1_000,
+            doubleClickTimeMs: 500));
+    }
+
+    [Fact]
+    public void DoubleTapSuppressionWindowCoversTrailingItemClickAndSlowRenameTimerTick()
+    {
+        // Never double-tapped: not suppressed.
+        Assert.False(SelectedNameExpansionPolicy.IsWithinRecentDoubleTapSuppressionWindow(
+            nowTick64: 5_000,
+            lastDoubleTapTick64: 0,
+            doubleClickTimeMs: 500,
+            graceMs: 150));
+
+        // Trailing ItemClick arriving 60ms after DoubleTapped: suppressed.
+        Assert.True(SelectedNameExpansionPolicy.IsWithinRecentDoubleTapSuppressionWindow(
+            nowTick64: 1_180,
+            lastDoubleTapTick64: 1_120,
+            doubleClickTimeMs: 500,
+            graceMs: 150));
+
+        // Previously armed 650ms timer firing 710ms after DoubleTapped while app opens: suppressed.
+        Assert.True(SelectedNameExpansionPolicy.IsWithinRecentDoubleTapSuppressionWindow(
+            nowTick64: 1_830,
+            lastDoubleTapTick64: 1_120,
+            doubleClickTimeMs: 500,
+            graceMs: 150));
+
+        // Deliberate slow-click rename well after double-click settled: allowed.
+        Assert.False(SelectedNameExpansionPolicy.IsWithinRecentDoubleTapSuppressionWindow(
+            nowTick64: 2_300,
+            lastDoubleTapTick64: 1_120,
+            doubleClickTimeMs: 500,
+            graceMs: 150));
+    }
+
+    [Fact]
+    public void PointerNameExpansionDelayStaysWithinResponsiveDoubleClickBounds()
+    {
+        Assert.Equal(325, SelectedNameExpansionPolicy.ComputePointerNameExpansionDelayMs(500));
+        Assert.Equal(200, SelectedNameExpansionPolicy.ComputePointerNameExpansionDelayMs(200));
+        Assert.Equal(380, SelectedNameExpansionPolicy.ComputePointerNameExpansionDelayMs(900));
     }
 
     [Fact]

@@ -29,6 +29,71 @@ public partial class WidgetViewModel
     public bool CanNavigateUp =>
         IsEmbeddedFolderNavigationEnabled && !IsAtMappedRoot;
 
+    public bool TryGetParentNavigationFolderTarget(
+        out string folderPath,
+        out string displayName)
+    {
+        folderPath = string.Empty;
+        displayName = string.Empty;
+        if (!CanNavigateUp ||
+            string.IsNullOrWhiteSpace(CurrentFolderPath) ||
+            string.IsNullOrWhiteSpace(MappedFolderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string rootPath = GetMappedFolderTraversalPath();
+            DirectoryInfo? parent = Directory.GetParent(Path.GetFullPath(CurrentFolderPath));
+            if (parent is null || !FileService.IsPathUnderDirectory(parent.FullName, rootPath))
+            {
+                return false;
+            }
+
+            folderPath = parent.FullName;
+            displayName = PathsEqual(folderPath, rootPath)
+                ? (string.IsNullOrWhiteSpace(Name) ? GetFolderDisplayName(MappedFolderPath) : Name)
+                : GetFolderDisplayName(folderPath);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool TryGetRootNavigationFolderTarget(
+        out string folderPath,
+        out string displayName)
+    {
+        folderPath = string.Empty;
+        displayName = string.Empty;
+        if (!CanNavigateUp || string.IsNullOrWhiteSpace(MappedFolderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string rootPath = GetMappedFolderTraversalPath();
+            if (string.IsNullOrWhiteSpace(rootPath) || PathsEqual(CurrentFolderPath, rootPath))
+            {
+                return false;
+            }
+
+            folderPath = rootPath;
+            displayName = string.IsNullOrWhiteSpace(Name)
+                ? GetFolderDisplayName(MappedFolderPath)
+                : Name;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public Visibility FolderNavigationVisibility =>
         IsEmbeddedFolderNavigationEnabled && !IsAtMappedRoot
             ? Visibility.Visible
@@ -437,9 +502,20 @@ public partial class WidgetViewModel
             return CurrentFolderPath;
         }
 
+        string previousTraversalPath = CurrentFolderPath;
         _mappedFolderTraversalPath = refreshedRoot;
-        if (!PathsEqual(CurrentFolderPath, refreshedRoot))
+        if (!PathsEqual(previousTraversalPath, refreshedRoot))
         {
+            if (WidgetPathRebaseHelper.RebaseFolderTree(
+                    Config,
+                    previousTraversalPath,
+                    refreshedRoot,
+                    rebaseMappedFolderPath: false))
+            {
+                ApplyStackSettings();
+                _settingsService.UpdateWidget(Config, notifySubscribers: false);
+                _settingsService.SaveDebounced(notifySubscribers: false);
+            }
             SetCurrentFolderPath(refreshedRoot);
             await ConfigureFolderWatchersAsync(
                 refreshedRoot,
@@ -480,6 +556,9 @@ public partial class WidgetViewModel
         OnPropertyChanged(nameof(FolderNavigationVisibility));
         OnPropertyChanged(nameof(CurrentFolderDisplayName));
         OnPropertyChanged(nameof(CurrentFolderRelativePath));
+        OnPropertyChanged(nameof(EffectiveSortMode));
+        OnPropertyChanged(nameof(EffectiveSortDescending));
+        OnPropertyChanged(nameof(SortModeLabel));
     }
 
     private string GetFolderDisplayName(string? folderPath)

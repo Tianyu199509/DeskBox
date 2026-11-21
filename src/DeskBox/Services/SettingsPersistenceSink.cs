@@ -11,7 +11,8 @@ using DeskBox.Models;
 public sealed record SettingsPersistenceCommit(
     long CommitId,
     AppSettings Snapshot,
-    bool WidgetLayoutMerged);
+    bool WidgetLayoutMerged,
+    bool AllowUnchangedSettingsSkip = false);
 
 /// <summary>
 /// Seam for settings.json persistence (settings-process split, batch 3a).

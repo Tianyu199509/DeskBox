@@ -6,11 +6,12 @@ members = [
 ]
 resolver = "3"
 
+# deskbox-native is loaded in-process and guards its FFI exports with
+# catch_unwind, which requires unwinding; the out-of-process thumbnail proxy
+# keeps panic=abort via -C panic=abort in build-rust-thumbnail-proxy.ps1.
 [profile.dev]
-panic = "abort"
 
 [profile.release]
 codegen-units = 1
 lto = "thin"
-panic = "abort"
 strip = "none"

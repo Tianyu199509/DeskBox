@@ -1,0 +1,607 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.news-rss",
+  "name": "${$i18n.widgetName}",
+  "version": "4.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "📰",
+  "minSize": {
+    "width": 312,
+    "height": 340
+  },
+  "defaultSize": {
+    "width": 356,
+    "height": 428
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "settings": [
+    {
+      "key": "presetFeed",
+      "type": "choice",
+      "label": "${$i18n.setPresetFeed}",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "${$i18n.feedAuto}"
+        },
+        {
+          "value": "https://www.chinanews.com.cn/rss/scroll-news.xml",
+          "label": "${$i18n.chNewsFull}"
+        },
+        {
+          "value": "https://rss.huxiu.com/",
+          "label": "${$i18n.chFinanceFull}"
+        },
+        {
+          "value": "https://sspai.com/feed",
+          "label": "${$i18n.chLifeFull}"
+        },
+        {
+          "value": "https://www.ifanr.com/feed",
+          "label": "${$i18n.chTrendFull}"
+        },
+        {
+          "value": "https://www.ithome.com/rss/",
+          "label": "${$i18n.chDigitalFull}"
+        },
+        {
+          "value": "https://hnrss.org/frontpage",
+          "label": "Hacker News"
+        },
+        {
+          "value": "https://techcrunch.com/feed/",
+          "label": "TechCrunch"
+        },
+        {
+          "value": "https://www.theverge.com/rss/index.xml",
+          "label": "The Verge"
+        },
+        {
+          "value": "https://github.blog/feed/",
+          "label": "GitHub Blog"
+        },
+        {
+          "value": "custom",
+          "label": "${$i18n.feedCustom}"
+        }
+      ]
+    },
+    {
+      "key": "feedUrl",
+      "type": "text",
+      "label": "${$i18n.setFeedUrl}",
+      "default": "",
+      "placeholder": "https://example.com/feed.xml"
+    }
+  ],
+  "state": {
+    "feedTitle": "",
+    "feedCount": "0",
+    "topHeadline": "",
+    "sourceStatus": "idle",
+    "sourceError": "",
+    "sourceUpdatedAt": "--:--",
+    "activeChannelKey": "auto",
+    "syncedSettingsFeed": "",
+    "searchOpen": "false",
+    "searchQuery": "",
+    "readerTitle": "",
+    "readerSummary": "",
+    "readerUrl": "",
+    "readerMeta": ""
+  },
+  "collections": {
+    "articles": {
+      "maxItems": 20,
+      "sort": "newestFirst",
+      "fields": [
+        "title",
+        "summary",
+        "url",
+        "publishedAt",
+        "author",
+        "category"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "mainFeed",
+      "type": "rss",
+      "url": "${$computed.feedUrl}",
+      "targetCollection": "articles",
+      "intervalMs": 900000,
+      "maxItems": 15
+    }
+  ],
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "📰",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${state.sourceStatus == 'error'}",
+    "primaryAction": {
+      "icon": "refresh",
+      "tooltip": "${$i18n.refreshTooltip}",
+      "onClick": {
+        "type": "source.refresh",
+        "targetId": "mainFeed"
+      }
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "readerPopover": {
+      "title": "${$computed.channelTitle}",
+      "placement": "side",
+      "width": 320,
+      "root": "pop_reader_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "header_toolbar_grid",
+        "search_bar_grid",
+        "lead_article_card",
+        "article_stream_card"
+      ]
+    },
+    "header_toolbar_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "channel_tabs_card",
+        "btn_toggle_search",
+        "btn_refresh_feed"
+      ]
+    },
+    "channel_tabs_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "subtle",
+      "padding": "2",
+      "verticalAlignment": "center",
+      "children": [
+        "channel_tabs_grid"
+      ]
+    },
+    "channel_tabs_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*,*",
+      "columnSpacing": 2,
+      "children": [
+        "btn_channel_first",
+        "btn_channel_second",
+        "btn_channel_third",
+        "btn_channel_fourth",
+        "btn_channel_fifth",
+        "btn_channel_custom"
+      ]
+    },
+    "btn_channel_first": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$computed.ch0Label}",
+      "variant": "${$computed.activeChannelSlot == 'slot0' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "slot0"
+        }
+      }
+    },
+    "btn_channel_second": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$computed.ch1Label}",
+      "variant": "${$computed.activeChannelSlot == 'slot1' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "slot1"
+        }
+      }
+    },
+    "btn_channel_third": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$computed.ch2Label}",
+      "variant": "${$computed.activeChannelSlot == 'slot2' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "slot2"
+        }
+      }
+    },
+    "btn_channel_fourth": {
+      "type": "Button",
+      "column": 3,
+      "text": "${$computed.ch3Label}",
+      "variant": "${$computed.activeChannelSlot == 'slot3' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "slot3"
+        }
+      }
+    },
+    "btn_channel_fifth": {
+      "type": "Button",
+      "column": 4,
+      "when": "${$computed.hasCustomFeed != 'true'}",
+      "text": "${$computed.ch4Label}",
+      "variant": "${$computed.activeChannelSlot == 'slot4' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "slot4"
+        }
+      }
+    },
+    "btn_channel_custom": {
+      "type": "Button",
+      "column": 4,
+      "when": "${$computed.hasCustomFeed == 'true'}",
+      "text": "${$i18n.chCustomShort}",
+      "variant": "${$computed.activeChannelSlot == 'custom' ? 'standard' : 'ghost'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3,4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectChannel",
+        "args": {
+          "slot": "custom"
+        }
+      }
+    },
+    "btn_toggle_search": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "search",
+      "size": 26,
+      "variant": "${state.searchOpen == 'true' ? 'accent' : 'subtle'}",
+      "tooltip": "${$i18n.searchToggleTip}",
+      "verticalAlignment": "center",
+      "onClick": {
+        "type": "script.run",
+        "fn": "toggleSearch"
+      }
+    },
+    "btn_refresh_feed": {
+      "type": "IconButton",
+      "column": 2,
+      "icon": "refresh",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.refreshTooltip}",
+      "verticalAlignment": "center",
+      "onClick": {
+        "type": "source.refresh",
+        "targetId": "mainFeed"
+      }
+    },
+    "search_bar_grid": {
+      "type": "Grid",
+      "when": "${state.searchOpen == 'true'}",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "inp_search_query",
+        "btn_clear_search"
+      ]
+    },
+    "inp_search_query": {
+      "type": "Input",
+      "column": 0,
+      "bind": "state.searchQuery",
+      "placeholder": "${$i18n.searchPlaceholder}",
+      "onChange": {
+        "type": "script.run",
+        "fn": "onSearchChange"
+      }
+    },
+    "btn_clear_search": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "close",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.clearSearchTip}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "clearSearch"
+      }
+    },
+    "lead_article_card": {
+      "type": "Card",
+      "when": "${$computed.hasLead == 'true'}",
+      "tone": "subtle",
+      "padding": "12,10",
+      "spacing": 5,
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "openLeadReader"
+        },
+        {
+          "type": "popover.open",
+          "popoverId": "readerPopover"
+        }
+      ],
+      "children": [
+        "lead_header_grid",
+        "txt_lead_title",
+        "txt_lead_summary"
+      ]
+    },
+    "lead_header_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 7,
+      "children": [
+        "badge_lead_story",
+        "txt_lead_meta",
+        "btn_open_lead_article"
+      ]
+    },
+    "badge_lead_story": {
+      "type": "Badge",
+      "column": 0,
+      "variant": "pill",
+      "tone": "accent",
+      "text": "${$i18n.leadBadge}",
+      "verticalAlignment": "center"
+    },
+    "txt_lead_meta": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.leadMeta}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "btn_open_lead_article": {
+      "type": "IconButton",
+      "column": 2,
+      "icon": "open",
+      "size": 22,
+      "variant": "subtle",
+      "tooltip": "${$i18n.openArticleTooltip}",
+      "onClick": {
+        "type": "url.open",
+        "url": "${$computed.leadUrl}"
+      }
+    },
+    "txt_lead_title": {
+      "type": "Text",
+      "text": "${$computed.leadTitle}",
+      "style": "bodyStrong",
+      "maxLines": 2
+    },
+    "txt_lead_summary": {
+      "type": "Text",
+      "when": "${$computed.leadSummary != ''}",
+      "text": "${$computed.leadSummary}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 2
+    },
+    "article_stream_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,9",
+      "spacing": 6,
+      "children": [
+        "stream_header_grid",
+        "list_articles"
+      ]
+    },
+    "stream_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_stream_header",
+        "txt_feed_status"
+      ]
+    },
+    "txt_stream_header": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.listHeader}",
+      "style": "caption",
+      "color": "secondary",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "txt_feed_status": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.statusText}",
+      "style": "caption",
+      "color": "${state.sourceStatus == 'error' ? 'danger' : 'muted'}",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "list_articles": {
+      "type": "List",
+      "variant": "divided",
+      "items": "${$computed.streamRows}",
+      "emptyState": {
+        "icon": "article",
+        "title": "${$computed.emptyTitleText}",
+        "subtitle": "${$computed.emptySubText}"
+      },
+      "hoverActions": [
+        "btn_article_quick_read"
+      ],
+      "itemTemplate": "row_article_item"
+    },
+    "btn_article_quick_read": {
+      "type": "IconButton",
+      "icon": "article",
+      "size": 22,
+      "variant": "subtle",
+      "tooltip": "${$i18n.quickReadTooltip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "openItemReader",
+          "args": {
+            "title": "${$item.title}",
+            "summary": "${$item.summary}",
+            "url": "${$item.url}",
+            "time": "${$item.time}",
+            "category": "${$item.category}"
+          }
+        },
+        {
+          "type": "popover.open",
+          "popoverId": "readerPopover"
+        }
+      ]
+    },
+    "row_article_item": {
+      "type": "Grid",
+      "columns": "16,*,Auto",
+      "columnSpacing": 8,
+      "padding": "0,3",
+      "onClick": {
+        "type": "url.open",
+        "url": "${$item.url}"
+      },
+      "children": [
+        "txt_article_rank",
+        "txt_article_title",
+        "txt_article_time"
+      ]
+    },
+    "txt_article_rank": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.rank}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "color": "${$item.isTop == 'true' ? 'accent' : 'muted'}",
+      "verticalAlignment": "center"
+    },
+    "txt_article_title": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.title}",
+      "style": "body",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_article_time": {
+      "type": "Text",
+      "column": 2,
+      "when": "${$item.time != ''}",
+      "text": "${$item.time}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "pop_reader_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "txt_reader_meta",
+        "txt_reader_title",
+        "div_reader_header",
+        "txt_reader_summary",
+        "reader_actions_grid"
+      ]
+    },
+    "txt_reader_meta": {
+      "type": "Text",
+      "text": "${state.readerMeta}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "txt_reader_title": {
+      "type": "Text",
+      "text": "${state.readerTitle}",
+      "style": "subtitle",
+      "maxLines": 3
+    },
+    "div_reader_header": {
+      "type": "Divider"
+    },
+    "txt_reader_summary": {
+      "type": "Text",
+      "text": "${state.readerSummary != '' ? state.readerSummary : $i18n.noSummary}",
+      "style": "body",
+      "color": "secondary",
+      "maxLines": 10
+    },
+    "reader_actions_grid": {
+      "type": "Grid",
+      "columns": "*,*",
+      "columnSpacing": 8,
+      "children": [
+        "btn_copy_article_url",
+        "btn_open_reader_article"
+      ]
+    },
+    "btn_copy_article_url": {
+      "type": "Button",
+      "column": 0,
+      "icon": "copy",
+      "text": "${$i18n.copyUrlBtn}",
+      "variant": "subtle",
+      "horizontalAlignment": "stretch",
+      "onClick": {
+        "type": "clipboard.copy",
+        "text": "${state.readerUrl}"
+      }
+    },
+    "btn_open_reader_article": {
+      "type": "Button",
+      "column": 1,
+      "icon": "open",
+      "text": "${$i18n.openArticleBtn}",
+      "variant": "accent",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "url.open",
+          "url": "${state.readerUrl}"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "readerPopover"
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -10,20 +10,25 @@ public sealed class AotPublishContractTests
     [Fact]
     public void AuditProfile_IsOptInAndPropagatesAotToUpdater()
     {
+        XDocument sharedProps = XDocument.Load(TestPaths.FromRepository("src/Directory.Build.props"));
         XDocument project = XDocument.Load(TestPaths.FromRepository("src/DeskBox/DeskBox.csproj"));
 
-        XElement defaultAuditProperty = project
+        XElement defaultAuditProperty = sharedProps
             .Descendants("DeskBoxAotAudit")
             .Single(element => element.Attribute("Condition") is not null);
         Assert.Equal("false", defaultAuditProperty.Value);
 
-        XElement auditGroup = project
+        XElement sharedAuditGroup = sharedProps
             .Descendants("PropertyGroup")
             .Single(element => (string?)element.Attribute("Condition") == "'$(DeskBoxAotAudit)' == 'true'");
-        Assert.Equal("true", auditGroup.Element("PublishAot")?.Value);
-        Assert.Equal("true", auditGroup.Element("SelfContained")?.Value);
-        Assert.Equal("false", auditGroup.Element("WindowsAppSDKSelfContained")?.Value);
-        Assert.Equal("false", auditGroup.Element("PublishSingleFile")?.Value);
+        Assert.Equal("true", sharedAuditGroup.Element("PublishAot")?.Value);
+        Assert.Equal("true", sharedAuditGroup.Element("SelfContained")?.Value);
+        Assert.Equal("false", sharedAuditGroup.Element("PublishSingleFile")?.Value);
+
+        XElement appAuditGroup = project
+            .Descendants("PropertyGroup")
+            .Single(element => (string?)element.Attribute("Condition") == "'$(DeskBoxAotAudit)' == 'true'");
+        Assert.Equal("false", appAuditGroup.Element("WindowsAppSDKSelfContained")?.Value);
 
         XElement nativeAotGroup = project
             .Descendants("PropertyGroup")
@@ -48,6 +53,15 @@ public sealed class AotPublishContractTests
     [Fact]
     public void AuditProfile_DisablesDefaultJsonReflectionOnlyForAuditBuilds()
     {
+        XDocument sharedProps = XDocument.Load(TestPaths.FromRepository("src/Directory.Build.props"));
+        XElement reflectionSwitch = Assert.Single(
+            sharedProps.Descendants("JsonSerializerIsReflectionEnabledByDefault"));
+
+        Assert.Equal("false", reflectionSwitch.Value);
+        Assert.Equal(
+            "'$(DeskBoxAotAudit)' == 'true'",
+            (string?)reflectionSwitch.Parent?.Attribute("Condition"));
+
         foreach (string projectPath in new[]
                  {
                      "src/DeskBox/DeskBox.csproj",
@@ -55,13 +69,7 @@ public sealed class AotPublishContractTests
                  })
         {
             XDocument project = XDocument.Load(TestPaths.FromRepository(projectPath));
-            XElement reflectionSwitch = Assert.Single(
-                project.Descendants("JsonSerializerIsReflectionEnabledByDefault"));
-
-            Assert.Equal("false", reflectionSwitch.Value);
-            Assert.Equal(
-                "'$(DeskBoxAotAudit)' == 'true'",
-                (string?)reflectionSwitch.Parent?.Attribute("Condition"));
+            Assert.Empty(project.Descendants("JsonSerializerIsReflectionEnabledByDefault"));
         }
 
         string script = File.ReadAllText(
@@ -88,14 +96,18 @@ public sealed class AotPublishContractTests
     {
         XDocument project = XDocument.Load(TestPaths.FromRepository("src/DeskBox/DeskBox.csproj"));
 
-        foreach (string targetName in new[] { "BuildDeskBoxUpdater", "CopyDeskBoxUpdater" })
-        {
-            XElement target = project
-                .Descendants("Target")
-                .Single(element => (string?)element.Attribute("Name") == targetName);
-            string condition = Assert.IsType<string>((string?)target.Attribute("Condition"));
-            Assert.Contains("'$(PublishAot)' != 'true'", condition, StringComparison.Ordinal);
-        }
+        XElement updaterRef = project
+            .Descendants("ProjectReference")
+            .Single(element => ((string?)element.Attribute("Include"))?.Contains("DeskBox.Updater.csproj", StringComparison.Ordinal) == true);
+        Assert.Equal("false", (string?)updaterRef.Attribute("ReferenceOutputAssembly"));
+        string refGroupCondition = Assert.IsType<string>((string?)updaterRef.Parent?.Attribute("Condition"));
+        Assert.Contains("'$(PublishAot)' != 'true'", refGroupCondition, StringComparison.Ordinal);
+
+        XElement copyTarget = project
+            .Descendants("Target")
+            .Single(element => (string?)element.Attribute("Name") == "CopyDeskBoxUpdater");
+        string condition = Assert.IsType<string>((string?)copyTarget.Attribute("Condition"));
+        Assert.Contains("'$(PublishAot)' != 'true'", condition, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -211,7 +223,7 @@ public sealed class AotPublishContractTests
         using JsonDocument globalJson = JsonDocument.Parse(
             File.ReadAllText(TestPaths.FromRepository("global.json")));
         JsonElement sdk = globalJson.RootElement.GetProperty("sdk");
-        Assert.Equal("10.0.402", sdk.GetProperty("version").GetString());
+        Assert.Equal("10.0.404", sdk.GetProperty("version").GetString());
         Assert.Equal("latestPatch", sdk.GetProperty("rollForward").GetString());
 
         string rustToolchain = File.ReadAllText(TestPaths.FromRepository("rust-toolchain.toml"));
@@ -244,15 +256,20 @@ public sealed class AotPublishContractTests
             TestPaths.FromRepository("native/deskbox-native/src/shortcut.rs"));
         string header = File.ReadAllText(TestPaths.FromRepository("native/include/deskbox_native.h"));
         string buildScript = File.ReadAllText(TestPaths.FromRepository("scripts/build-rust-native.ps1"));
-        string contract = File.ReadAllText(
-            TestPaths.FromRepository("docs/architecture/shortcut-native-abi-v2.md"));
         string lockFile = File.ReadAllText(TestPaths.FromRepository("native/Cargo.lock"));
 
         Assert.Contains("members = [", workspace, StringComparison.Ordinal);
         Assert.Contains("\"deskbox-native\"", workspace, StringComparison.Ordinal);
         Assert.Contains("\"deskbox-audio-session-fixture\"", workspace, StringComparison.Ordinal);
         Assert.DoesNotContain("\"deskbox-search-core\"", workspace, StringComparison.Ordinal);
-        Assert.Contains("panic = \"abort\"", workspace, StringComparison.Ordinal);
+        // The in-process DLL unwinds so its FFI exports can catch_unwind panics;
+        // the out-of-process thumbnail proxy keeps panic=abort via build flags.
+        Assert.DoesNotContain("panic = \"abort\"", workspace, StringComparison.Ordinal);
+        string proxyBuildScript = File.ReadAllText(
+            TestPaths.FromRepository("scripts/build-rust-thumbnail-proxy.ps1"));
+        Assert.Contains("\"panic=abort\"", proxyBuildScript, StringComparison.Ordinal);
+        Assert.Contains("catch_unwind", source, StringComparison.Ordinal);
+        Assert.Contains("ffi_status_guard", source, StringComparison.Ordinal);
         Assert.Contains("crate-type = [\"cdylib\"]", crate, StringComparison.Ordinal);
         Assert.Contains("rust-version = \"1.96\"", crate, StringComparison.Ordinal);
         Assert.Contains("windows = { version = \"0.62.2\"", crate, StringComparison.Ordinal);
@@ -289,7 +306,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("SetArguments", shortcutSource, StringComparison.Ordinal);
         Assert.Contains("SetWorkingDirectory", shortcutSource, StringComparison.Ordinal);
         Assert.Contains("SetIconLocation", shortcutSource, StringComparison.Ordinal);
-        Assert.Contains("DIAGNOSTIC_ARGUMENT_CAPACITY: usize = 512", shortcutSource, StringComparison.Ordinal);
+        Assert.Contains("ARGUMENT_FIELD_CAPACITY: usize = 4096", shortcutSource, StringComparison.Ordinal);
         Assert.Contains("#define DESKBOX_NATIVE_ABI_VERSION 2u", header, StringComparison.Ordinal);
         Assert.Contains("#define DESKBOX_NATIVE_CAPABILITIES_STAGE_3C2", header, StringComparison.Ordinal);
         Assert.Contains("#define DESKBOX_NATIVE_CAPABILITIES_STAGE_4C", header, StringComparison.Ordinal);
@@ -332,13 +349,6 @@ public sealed class AotPublishContractTests
         Assert.Contains("CargoTargetDirectory", buildScript, StringComparison.Ordinal);
         Assert.Contains("--target-dir", buildScript, StringComparison.Ordinal);
         Assert.Contains("ValidateOnly", buildScript, StringComparison.Ordinal);
-        Assert.Contains("能力掩码", contract, StringComparison.Ordinal);
-        Assert.Contains("RPC_E_CHANGED_MODE", contract, StringComparison.Ordinal);
-        Assert.Contains("SLR_NO_UI | SLR_NOSEARCH", contract, StringComparison.Ordinal);
-        Assert.Contains(
-            "SLR_UPDATE | SLR_NOSEARCH | SLR_OFFER_DELETE_WITHOUT_FILE",
-            contract,
-            StringComparison.Ordinal);
         Assert.Contains("name = \"windows\"", lockFile, StringComparison.Ordinal);
         Assert.Contains("version = \"0.62.2\"", lockFile, StringComparison.Ordinal);
     }
@@ -360,9 +370,8 @@ public sealed class AotPublishContractTests
             TestPaths.FromRepository(
                 "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.Navigation.cs"));
 
-        Assert.Contains("DESKBOX_SHORTCUT_BACKEND", loader, StringComparison.Ordinal);
-        Assert.Contains("RuntimeFeature.IsDynamicCodeSupported", loader, StringComparison.Ordinal);
-        Assert.Contains("return ShortcutBackendMode.Rust", loader, StringComparison.Ordinal);
+        Assert.Contains("ShortcutBackendMode.Rust", loader, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShortcutBackendMode.CSharp", loader, StringComparison.Ordinal);
         Assert.Contains("Kernel32NativeMethods.LoadLibraryEx(", loader, StringComparison.Ordinal);
         Assert.Contains("LoadLibrarySearchDllLoadDir", loader, StringComparison.Ordinal);
         Assert.Contains("LoadLibrarySearchSystem32", loader, StringComparison.Ordinal);
@@ -378,7 +387,7 @@ public sealed class AotPublishContractTests
         Assert.DoesNotContain("LibraryImport(\"deskbox_native", loader, StringComparison.OrdinalIgnoreCase);
 
         int urlDispatch = helper.IndexOf(".Equals(\".url\"", StringComparison.Ordinal);
-        int backendDispatch = helper.IndexOf("ShortcutBackendPolicy.Current", StringComparison.Ordinal);
+        int backendDispatch = helper.IndexOf("ShortcutNativeBackend.", StringComparison.Ordinal);
         Assert.True(urlDispatch >= 0 && backendDispatch > urlDispatch);
         Assert.Contains("ShortcutNativeBackend.ReadStoredRaw", helper, StringComparison.Ordinal);
         Assert.Contains("ShortcutNativeBackend.ResolveNoUi", helper, StringComparison.Ordinal);
@@ -419,9 +428,9 @@ public sealed class AotPublishContractTests
         string diagnostics = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"));
 
-        Assert.Contains("#if DESKBOX_NATIVE_AOT", loader, StringComparison.Ordinal);
-        Assert.Contains("#if !DESKBOX_NATIVE_AOT", helper, StringComparison.Ordinal);
-        Assert.Contains("#if !DESKBOX_NATIVE_AOT", dragDrop, StringComparison.Ordinal);
+        Assert.DoesNotContain("#if !DESKBOX_NATIVE_AOT", loader, StringComparison.Ordinal);
+        Assert.DoesNotContain("#if !DESKBOX_NATIVE_AOT", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("#if !DESKBOX_NATIVE_AOT", dragDrop, StringComparison.Ordinal);
         Assert.DoesNotContain("public void OpenItem(WidgetItem item)", operations, StringComparison.Ordinal);
         Assert.Contains(
             "public FileService.OpenItemResult OpenItem(WidgetItem item, IntPtr ownerHwnd)",
@@ -465,7 +474,7 @@ public sealed class AotPublishContractTests
         XElement defaultRustProperty = project
             .Descendants("DeskBoxRustNative")
             .Single(element => element.Attribute("Condition") is not null);
-        Assert.Equal("false", defaultRustProperty.Value);
+        Assert.Equal("true", defaultRustProperty.Value);
 
         XElement buildTarget = project
             .Descendants("Target")
@@ -531,7 +540,8 @@ public sealed class AotPublishContractTests
         Assert.Contains("cargo metadata", script, StringComparison.Ordinal);
         Assert.Contains("lockedPackageCount", script, StringComparison.Ordinal);
         Assert.Contains("lockedPackages = @($rustLockedPackages)", script, StringComparison.Ordinal);
-        Assert.Contains("explicitOptInEnvironmentVariable = \"DESKBOX_SHORTCUT_BACKEND\"", script, StringComparison.Ordinal);
+        Assert.Contains("jitDefault = \"rust\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("jitDefault = \"csharp\"", script, StringComparison.Ordinal);
         Assert.Contains("fallbackOnNativeFailure = $false", script, StringComparison.Ordinal);
         Assert.Contains("nativeAotCompileTimeDefine = \"DESKBOX_NATIVE_AOT\"", script, StringComparison.Ordinal);
         Assert.Contains("allowedWarningCodes", script, StringComparison.Ordinal);
@@ -543,7 +553,7 @@ public sealed class AotPublishContractTests
 
     [Theory]
     [InlineData("src/DeskBox/ViewModels/SearchPopupViewModel.cs", 15)]
-    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 18)]
+    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 17)]
     public void AotSensitiveViewModels_UseObservablePartialProperties(
         string relativePath,
         int expectedCount)
@@ -623,7 +633,7 @@ public sealed class AotPublishContractTests
         int suppressionStart = source.IndexOf("_isRestoringDefaults = true;", constructorStart, StringComparison.Ordinal);
         Assert.True(suppressionStart >= 0);
 
-        int firstMigratedAssignment = source.IndexOf("AutoStart = StartupService.IsEnabled();", constructorStart, StringComparison.Ordinal);
+        int firstMigratedAssignment = source.IndexOf("AutoStart = settings.Core.AutoStart;", constructorStart, StringComparison.Ordinal);
         // Batch 50 moved the performance trim toggles to the performance
         // editor; the hover-button selection remains the last facade
         // assignment covered by the constructor's suppression window.

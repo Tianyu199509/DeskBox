@@ -12,6 +12,7 @@ public partial class App
         CancelBackgroundMemoryCleanup();
         if (_desktopOrganizationWindow is null)
         {
+            EnsureXamlLoopLifelineIfNoOtherWindows();
             var window = new DesktopOrganizationWindow();
             _desktopOrganizationWindow = window;
             ThemeService.TrackWindow(window);
@@ -52,7 +53,10 @@ public partial class App
             _desktopOrganizationWindow = null;
         }
 
-        _settingsWindow?.RefreshDesktopOrganizationState();
+#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
+        RefreshInProcessSettingsDesktopOrganizationForSmoke();
+#endif
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);
         ScheduleBackgroundMemoryCleanup("desktop-organization-closed");
     }

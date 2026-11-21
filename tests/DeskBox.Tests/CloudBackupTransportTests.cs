@@ -115,18 +115,250 @@ public sealed class CloudBackupTransportTests : IDisposable
     [Fact]
     public async Task EnsureDirectory_MkcolProgressively_ToleratesExisting()
     {
+        int leafProbeCount = 0;
         var handler = new RecordingHandler(request =>
-            request.RequestUri!.AbsolutePath.EndsWith("/backups", StringComparison.Ordinal)
-                ? new HttpResponseMessage(HttpStatusCode.Created)
-                : new HttpResponseMessage(HttpStatusCode.MethodNotAllowed));
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (request.Method.Method == "PROPFIND")
+            {
+                if (path == "/dav/DeskBox/")
+                {
+                    return XmlResponse(
+                        HttpStatusCode.MultiStatus,
+                        """
+                        <D:multistatus xmlns:D="DAV:">
+                          <D:response>
+                            <D:href>/dav/DeskBox/</D:href>
+                            <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+                          </D:response>
+                        </D:multistatus>
+                        """);
+                }
+
+                if (path == "/dav/DeskBox/backups/" && leafProbeCount++ == 0)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound);
+                }
+            }
+
+            if (request.Method.Method == "MKCOL" && path == "/dav/DeskBox/backups/")
+            {
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
         var transport = new WebDavBackupTransport(Options(), handler);
 
         await transport.EnsureDirectoryAsync("DeskBox/backups");
 
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal("PROPFIND", handler.Requests[0].Method);
+        Assert.Equal("https://dav.example.com/dav/DeskBox/backups/", handler.Requests[0].Uri);
+        Assert.Equal("PROPFIND", handler.Requests[1].Method);
+        Assert.Equal("https://dav.example.com/dav/DeskBox/", handler.Requests[1].Uri);
+        Assert.Equal("MKCOL", handler.Requests[2].Method);
+        Assert.Equal("https://dav.example.com/dav/DeskBox/backups/", handler.Requests[2].Uri);
+    }
+
+    [Fact]
+    public async Task EnsureDirectory_FastPath_SkipsMkcolWhenLeafAlreadyExists()
+    {
+        var handler = new RecordingHandler(_ => XmlResponse(
+            HttpStatusCode.MultiStatus,
+            """
+            <D:multistatus xmlns:D="DAV:">
+              <D:response>
+                <D:href>/dav/DeskBox/backups/</D:href>
+                <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+              </D:response>
+            </D:multistatus>
+            """));
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        await transport.EnsureDirectoryAsync("DeskBox/backups");
+
+        RecordingHandler.Captured request = Assert.Single(handler.Requests);
+        Assert.Equal("PROPFIND", request.Method);
+        Assert.Equal("0", request.Headers["Depth"]);
+        Assert.Equal("https://dav.example.com/dav/DeskBox/backups/", request.Uri);
+    }
+
+    [Fact]
+    public async Task EnsureDirectory_WhenMkcolReturns403ForExistingFolder_SucceedsViaPropfindRecheck()
+    {
+        int leafProbeCount = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            if (request.Method.Method == "PROPFIND")
+            {
+                if (path == "/dav/DeskBox/")
+                {
+                    return XmlResponse(
+                        HttpStatusCode.MultiStatus,
+                        """
+                        <D:multistatus xmlns:D="DAV:">
+                          <D:response>
+                            <D:href>/dav/DeskBox/</D:href>
+                            <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+                          </D:response>
+                        </D:multistatus>
+                        """);
+                }
+
+                if (path == "/dav/DeskBox/backups/")
+                {
+                    if (leafProbeCount++ == 0)
+                    {
+                        return new HttpResponseMessage(HttpStatusCode.NotFound);
+                    }
+
+                    return XmlResponse(
+                        HttpStatusCode.MultiStatus,
+                        """
+                        <D:multistatus xmlns:D="DAV:">
+                          <D:response>
+                            <D:href>/dav/DeskBox/backups/</D:href>
+                            <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+                          </D:response>
+                        </D:multistatus>
+                        """);
+                }
+            }
+
+            if (request.Method.Method == "MKCOL" && path == "/dav/DeskBox/backups/")
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        await transport.EnsureDirectoryAsync("DeskBox/backups");
+
+        Assert.Equal(4, handler.Requests.Count);
+
+        // When recheck also denies access, surface HTTP 403 distinctly without blaming credentials.
+        var deniedHandler = new RecordingHandler(request =>
+        {
+            if (request.Method.Method == "PROPFIND" && request.RequestUri!.AbsolutePath == "/dav/DeskBox/")
+            {
+                return XmlResponse(HttpStatusCode.MultiStatus);
+            }
+
+            if (request.Method.Method == "PROPFIND")
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Forbidden);
+        });
+        var deniedTransport = new WebDavBackupTransport(Options(), deniedHandler);
+
+        CloudBackupTransportException ex = await Assert.ThrowsAsync<CloudBackupTransportException>(
+            () => deniedTransport.EnsureDirectoryAsync("DeskBox/backups"));
+        Assert.Equal(HttpStatusCode.Forbidden, ex.StatusCode);
+        Assert.Contains("403", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("authentication failed", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task List_FollowsSameOriginTrailingSlashRedirect_PreservingPropfindAndAuth()
+    {
+        int attempt = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            if (attempt++ == 0)
+            {
+                var redirect = new HttpResponseMessage(HttpStatusCode.PermanentRedirect);
+                redirect.Headers.Location = new Uri("https://dav.example.com/dav/gateway/DeskBox/backups/");
+                return redirect;
+            }
+
+            return XmlResponse(
+                HttpStatusCode.MultiStatus,
+                """
+                <D:multistatus xmlns:D="DAV:">
+                  <D:response>
+                    <D:href>/dav/gateway/DeskBox/backups/</D:href>
+                    <D:propstat><D:prop><D:resourcetype><D:collection/></D:resourcetype></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+                  </D:response>
+                  <D:response>
+                    <D:href>/dav/gateway/DeskBox/backups/DeskBox-CloudBackup-20261117T010000Z-abcdef12.zip</D:href>
+                    <D:propstat><D:prop><D:getcontentlength>512</D:getcontentlength><D:resourcetype/></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+                  </D:response>
+                </D:multistatus>
+                """);
+        });
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        IReadOnlyList<CloudBackupRemoteEntry> entries = await transport.ListAsync("DeskBox/backups");
+
+        CloudBackupRemoteEntry item = Assert.Single(entries);
+        Assert.Equal("DeskBox-CloudBackup-20261117T010000Z-abcdef12.zip", item.Name);
         Assert.Equal(2, handler.Requests.Count);
-        Assert.All(handler.Requests, r => Assert.Equal("MKCOL", r.Method));
-        Assert.Equal("https://dav.example.com/dav/DeskBox", handler.Requests[0].Uri);
-        Assert.Equal("https://dav.example.com/dav/DeskBox/backups", handler.Requests[1].Uri);
+        Assert.All(handler.Requests, req =>
+        {
+            Assert.Equal("PROPFIND", req.Method);
+            Assert.Equal("1", req.Headers["Depth"]);
+            Assert.StartsWith("Basic ", req.Headers["Authorization"]);
+        });
+        Assert.Equal("https://dav.example.com/dav/gateway/DeskBox/backups/", handler.Requests[1].Uri);
+    }
+
+    [Theory]
+    [InlineData("http://dav.example.com/dav/")]
+    [InlineData("https://evil.example.com/dav/")]
+    public async Task Redirect_RefusesHttpsToHttpDowngradeOrCrossOrigin(string redirectTarget)
+    {
+        var handler = new RecordingHandler(_ =>
+        {
+            var redirect = new HttpResponseMessage(HttpStatusCode.MovedPermanently);
+            redirect.Headers.Location = new Uri(redirectTarget);
+            return redirect;
+        });
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        await Assert.ThrowsAsync<CloudBackupTransportException>(() => transport.ProbeAsync());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task List_ParsesLowercaseDavNamespace_ChineseFolder_AndPercentEncodedNamesWithoutDoubleUnescape()
+    {
+        const string multistatus =
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <multistatus xmlns="dav:">
+              <response>
+                <href>/dav/%E6%88%91%E7%9A%84%E5%9D%9A%E6%9E%9C%E4%BA%91/%E5%A4%87%E4%BB%BD/</href>
+                <propstat>
+                  <prop><resourcetype><collection/></resourcetype></prop>
+                  <status>HTTP/2 200</status>
+                </propstat>
+              </response>
+              <response>
+                <href>/dav/%E6%88%91%E7%9A%84%E5%9D%9A%E6%9E%9C%E4%BA%91/%E5%A4%87%E4%BB%BD/DeskBox-CloudBackup-20261117T010000Z-12345678%2520.zip</href>
+                <propstat>
+                  <prop>
+                    <getcontentlength>1024</getcontentlength>
+                    <resourcetype/>
+                  </prop>
+                </propstat>
+              </response>
+            </multistatus>
+            """;
+        var handler = new RecordingHandler(_ => XmlResponse(HttpStatusCode.MultiStatus, multistatus));
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        IReadOnlyList<CloudBackupRemoteEntry> entries = await transport.ListAsync("我的坚果云/备份");
+
+        CloudBackupRemoteEntry file = Assert.Single(entries);
+        Assert.Equal("DeskBox-CloudBackup-20261117T010000Z-12345678%20.zip", file.Name);
+        Assert.Equal(1024, file.Length);
+        Assert.False(file.IsCollection);
     }
 
     [Fact]
@@ -142,6 +374,39 @@ public sealed class CloudBackupTransportTests : IDisposable
         Assert.Equal("PUT", request.Method);
         Assert.Equal("https://dav.example.com/dav/DeskBox/backups/my%20file.zip", request.Uri);
         Assert.Equal(payload, request.ContentBytes);
+    }
+
+    [Fact]
+    public async Task Upload_SetsZipContentTypeAndContentLength_AndRewindsOnSameOriginRedirect()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes("zip-payload-12345");
+        var contentTypes = new List<string?>();
+        var contentLengths = new List<long?>();
+        int attempt = 0;
+        var handler = new RecordingHandler(request =>
+        {
+            contentTypes.Add(request.Content?.Headers.ContentType?.MediaType);
+            contentLengths.Add(request.Content?.Headers.ContentLength);
+            if (attempt++ == 0)
+            {
+                var redirect = new HttpResponseMessage(HttpStatusCode.TemporaryRedirect);
+                redirect.Headers.Location = new Uri("https://dav.example.com/dav/v2/DeskBox/backups/snap.zip");
+                return redirect;
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Created);
+        });
+        var transport = new WebDavBackupTransport(Options(), handler);
+
+        using var stream = new MemoryStream(payload);
+        await transport.UploadAsync("DeskBox/backups/snap.zip", stream);
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("PUT", handler.Requests[1].Method);
+        Assert.Equal("https://dav.example.com/dav/v2/DeskBox/backups/snap.zip", handler.Requests[1].Uri);
+        Assert.Equal(payload, handler.Requests[1].ContentBytes);
+        Assert.All(contentTypes, ct => Assert.Equal("application/zip", ct));
+        Assert.All(contentLengths, len => Assert.Equal(payload.Length, len));
     }
 
     [Fact]
@@ -671,6 +936,29 @@ public sealed class CloudBackupTransportTests : IDisposable
         Assert.True(info.Uploaded);
         Assert.True(info.UploadUnverified);
         Assert.False(info.IsFirstFailureSinceSuccess);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_WhenListingThrowsDuringVerification_StillMarksUnverifiedSuccess()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport
+        {
+            ListRequested = () => throw new CloudBackupTransportException(
+                "Access denied", HttpStatusCode.Forbidden)
+        };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        service.VerificationRetryDelayMs = [0, 0, 0];
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        Assert.True(result.Uploaded);
+        Assert.True(result.UploadUnverified);
+        Assert.Single(transport.Files);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks > 0);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastUnverifiedUtcTicks > 0);
         Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
     }
 

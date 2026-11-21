@@ -57,6 +57,11 @@ public sealed class WidgetGroupSwitchAnimationPolicyTests
             WidgetGroupSwitchAnimationPolicy.ResolveEffect(
                 WidgetGroupSwitchAnimationStyles.Auto,
                 WidgetGroupNavigationStyles.Tabs));
+        Assert.Equal(
+            WidgetGroupSwitchAnimationEffect.Horizontal,
+            WidgetGroupSwitchAnimationPolicy.ResolveEffect(
+                WidgetGroupSwitchAnimationStyles.Auto,
+                WidgetGroupNavigationStyles.EqualTabs));
 
         // The collapsed stack keeps the vertical push.
         Assert.Equal(

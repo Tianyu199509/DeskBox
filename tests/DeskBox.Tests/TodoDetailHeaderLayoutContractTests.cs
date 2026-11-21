@@ -20,9 +20,11 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.DoesNotContain("x:Name=\"DetailCompletionCheckBox\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"DetailCompletionButton\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DetailCompletionButton_Click", code, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"DetailSaveButton\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Click=\"DetailSaveButton_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding CanSaveEdit}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"DetailSaveButton\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DetailSaveButton_Click", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"QuickAddBar\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("_titleAutosaveTimer", code, StringComparison.Ordinal);
+        Assert.Contains("FlushDetailTitleAsync", code, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailImportantButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailDeleteButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"DetailDeleteButton_Click\"", xaml, StringComparison.Ordinal);
@@ -31,20 +33,10 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.DoesNotContain("DetailDeleteMenuItem_Click", code, StringComparison.Ordinal);
         Assert.Contains("ViewModel.FinalizeDetailAsync(", code, StringComparison.Ordinal);
         Assert.Contains("ShowTodoStatus(\"Todo.Status.Saved\")", code, StringComparison.Ordinal);
-        Assert.True(
-            xaml.IndexOf("x:Name=\"DetailSaveButton\"", StringComparison.Ordinal) <
-            xaml.IndexOf("x:Name=\"DetailHeaderActions\"", StringComparison.Ordinal));
-        Assert.Contains("Grid.Column=\"1\"", xaml[xaml.IndexOf(
-            "x:Name=\"DetailSaveButton\"", StringComparison.Ordinal)..], StringComparison.Ordinal);
-        Assert.Contains(
-            "bool showSave = ViewModel?.SelectedDetailItem is not null",
-            masterDetailCode,
-            StringComparison.Ordinal);
         Assert.Contains(
             "if (e.PropertyName == nameof(TodoWidgetViewModel.SelectedDetailItem))",
             code,
             StringComparison.Ordinal);
-        Assert.Contains("ApplyDetailSaveButtonVisibility();", code, StringComparison.Ordinal);
         Assert.Contains(
             "if (ViewModel.IsCreatingDetailItem)",
             code,
@@ -92,10 +84,52 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.DoesNotContain("x:Name=\"DetailCompletionCheckBox\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CheckBoxCheckBackgroundFillChecked", xaml, StringComparison.Ordinal);
         Assert.Contains("ResourceKey=\"TextFillColorPrimaryBrush\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Foreground=\"{ThemeResource TextFillColorSecondaryBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("DeskBoxCheckFillCheckedBrush", xaml, StringComparison.Ordinal);
+        Assert.Contains("DeskBoxCheckGlyphBrush", xaml, StringComparison.Ordinal);
+        Assert.Contains("CornerRadius=\"5\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("StrokeEndLineCap=\"Round\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource WidgetCompactStepCheckBoxStyle}\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"TodoCompletionBox\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"DetailCompletionBox\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("completionAccentBrush", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildTonedCheckPalette_TonesDownOverlyBrightAccentsAndMaintainsContrast()
+    {
+        Windows.UI.Color[] testAccents =
+        [
+            DeskBox.Helpers.AccentColorHelper.FromHex("#0078D4"), // Default Windows Blue
+            DeskBox.Helpers.AccentColorHelper.FromHex("#60CDFF"), // Bright Win11 Sky Cyan
+            DeskBox.Helpers.AccentColorHelper.FromHex("#FFEB3B"), // Bright Yellow
+            DeskBox.Helpers.AccentColorHelper.FromHex("#00FF66"), // Neon Green
+            DeskBox.Helpers.AccentColorHelper.FromHex("#FFFFFF"), // Pure White
+            DeskBox.Helpers.AccentColorHelper.FromHex("#050508")  // Ultra-Dark Black
+        ];
+
+        foreach (bool isDark in new[] { true, false })
+        {
+            foreach (Windows.UI.Color accent in testAccents)
+            {
+                var palette = DeskBox.Helpers.AccentColorHelper.BuildTonedCheckPalette(accent, isDark);
+                double fillLum = DeskBox.Helpers.AccentColorHelper.GetRelativeLuminance(palette.FillChecked);
+                double glyphLum = DeskBox.Helpers.AccentColorHelper.GetRelativeLuminance(palette.GlyphForeground);
+
+                Assert.True(fillLum <= (isDark ? 0.24 : 0.28),
+                    $"FillChecked luminance {fillLum:F3} is too bright for accent {DeskBox.Helpers.AccentColorHelper.ToHex(accent)} (isDark={isDark}).");
+                if (isDark)
+                {
+                    Assert.True(fillLum >= 0.08,
+                        $"FillChecked luminance {fillLum:F3} is too dark in dark mode for accent {DeskBox.Helpers.AccentColorHelper.ToHex(accent)}.");
+                }
+
+                double lighter = Math.Max(fillLum, glyphLum);
+                double darker = Math.Min(fillLum, glyphLum);
+                double contrast = (lighter + 0.05) / (darker + 0.05);
+                Assert.True(contrast >= 3.5,
+                    $"Checkmark contrast {contrast:F2}:1 is too low for accent {DeskBox.Helpers.AccentColorHelper.ToHex(accent)} (isDark={isDark}).");
+            }
+        }
     }
 
     [Fact]
@@ -158,7 +192,7 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.Contains("private void ScheduleDetailAutoSave()", code, StringComparison.Ordinal);
         Assert.Contains("if (!_isCreatingDetail && _detailHasUnsavedChanges)", code, StringComparison.Ordinal);
         Assert.Contains(
-            "if (_isCreatingDetail)\n        {\n            ClearDetailForViewChange();",
+            "if (_isCreatingDetail && !HasNewDetailContent())\n        {\n            ClearDetailForViewChange();",
             code.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(

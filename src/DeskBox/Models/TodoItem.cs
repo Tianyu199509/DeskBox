@@ -35,6 +35,8 @@ public sealed class TodoItem
 
     public DateTimeOffset? DueDate { get; set; }
 
+    public bool HasDueTime { get; set; } = true;
+
     public TodoRecurrence? Recurrence { get; set; }
 
     public List<TodoStep> Steps { get; set; } = [];
@@ -58,6 +60,8 @@ public sealed class TodoItem
     public string? RecurrenceSeriesId { get; set; }
 
     public string? GeneratedNextItemId { get; set; }
+
+    public bool IsGeneratedOccurrence { get; set; }
 
     public int SortOrder { get; set; }
 

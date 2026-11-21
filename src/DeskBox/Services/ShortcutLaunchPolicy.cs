@@ -20,35 +20,88 @@ internal enum ShortcutLaunchDecision
 /// </summary>
 internal static class ShortcutLaunchPolicy
 {
+    internal static readonly string[] ExecutableLaunchExtensions =
+    [
+        ".exe",
+        ".bat",
+        ".cmd",
+        ".com",
+        ".msc",
+    ];
+
+    internal static bool IsExecutableLaunchTargetPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string ext;
+        try
+        {
+            ext = Path.GetExtension(path.Trim());
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(ext))
+        {
+            return false;
+        }
+
+        foreach (string allowed in ExecutableLaunchExtensions)
+        {
+            if (string.Equals(ext, allowed, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static ShortcutLaunchDecision Evaluate(
         bool isShortcut,
         string? path,
         string? targetPath,
         bool targetIsDirectory)
     {
-        if (!isShortcut ||
-            string.IsNullOrWhiteSpace(path) ||
-            !ShortcutHelper.IsShellLinkPath(path))
+        if (string.IsNullOrWhiteSpace(path) || targetIsDirectory)
         {
             return ShortcutLaunchDecision.None;
         }
 
-        if (ShortcutTargetProbe.Classify(ExpandTargetPath(targetPath)) !=
+        // Explorer parity (D7): direct local executables (.exe/.bat/.cmd/.com/.msc)
+        // accept dropped files as launch arguments just like application shortcuts.
+        if (!isShortcut)
+        {
+            return !ShortcutHelper.IsShellLinkPath(path) &&
+                   IsExecutableLaunchTargetPath(path)
+                ? ShortcutLaunchDecision.Launch
+                : ShortcutLaunchDecision.None;
+        }
+
+        if (!ShortcutHelper.IsShellLinkPath(path))
+        {
+            return ShortcutLaunchDecision.None;
+        }
+
+        string expandedTarget = ExpandTargetPath(targetPath);
+        if (ShortcutTargetProbe.Classify(expandedTarget) !=
             ShortcutTargetKind.LocalFileSystem)
         {
             return ShortcutLaunchDecision.None;
         }
 
-        // A folder shortcut keeps its import semantics: delegating a drop to it
-        // would let the shell move or copy user files into the target folder.
-        // A missing stored target stays eligible on purpose - Windows link
-        // tracking can still resolve it, exactly like a drop in Explorer.
-        if (targetIsDirectory)
-        {
-            return ShortcutLaunchDecision.None;
-        }
-
-        return ShortcutLaunchDecision.Launch;
+        // Document shortcuts (e.g., Report.docx.lnk, Notes.pdf.lnk) must behave as
+        // ordinary file tiles rather than swallowing dropped files as a launch verb.
+        // Only shortcuts targeting executable images (.exe/.bat/.cmd/.com/.msc)
+        // qualify, including missing targets so Windows link tracking still resolves.
+        return IsExecutableLaunchTargetPath(expandedTarget)
+            ? ShortcutLaunchDecision.Launch
+            : ShortcutLaunchDecision.None;
     }
 
     /// <summary>
@@ -70,11 +123,12 @@ internal static class ShortcutLaunchPolicy
         bool isDeskBoxFileDrag,
         bool isStackPopoverMemberDrag,
         IReadOnlyList<string> paths,
-        string shortcutPath)
+        string shortcutPath,
+        bool targetHostedInStackPopover = false)
     {
         ArgumentNullException.ThrowIfNull(paths);
         return isDeskBoxFileDrag &&
-            !isStackPopoverMemberDrag &&
+            !(isStackPopoverMemberDrag && targetHostedInStackPopover) &&
             paths.Count > 0 &&
             !ContainsSameFile(paths, shortcutPath)
                 ? ShortcutLaunchDecision.Launch
@@ -183,32 +237,40 @@ internal static class ShortcutLaunchPolicy
 
     internal static ShortcutLaunchDecision EvaluateItem(WidgetItem item)
     {
-        string? targetPath = item.TargetPath;
-        if (string.IsNullOrWhiteSpace(targetPath))
-        {
-            // FileService.OpenItem resolves the stored metadata on click, so a
-            // shortcut tile whose TargetPath was not materialized still needs a
-            // stat against the stored link data here.
-            targetPath = ShortcutHelper.ReadStoredMetadata(item.Path)?.TargetPath;
-        }
-
-        // Classification is a pure string check; the directory stat below can
-        // probe the network for UNC/mapped-drive targets. DragOver fires on
-        // every pointer move, so reject non-local targets before any I/O.
-        if (string.IsNullOrWhiteSpace(targetPath) ||
-            ShortcutTargetProbe.Classify(targetPath) != ShortcutTargetKind.LocalFileSystem)
+        if (item.IsFolder || string.IsNullOrWhiteSpace(item.Path))
         {
             return ShortcutLaunchDecision.None;
         }
 
-        // Deliberately not cached: a stale "not a directory" would let a
-        // folder-shortcut drop be delegated to the shell, which moves user
-        // files into the target - the one red line this policy enforces.
+        if (!item.IsShortcut)
+        {
+            return Evaluate(
+                isShortcut: false,
+                item.Path,
+                targetPath: null,
+                targetIsDirectory: false);
+        }
+
+        if (!ShortcutHelper.IsShellLinkPath(item.Path))
+        {
+            return ShortcutLaunchDecision.None;
+        }
+
+        if (!ShortcutTargetProbe.TryResolveShortcutLocalTarget(
+                item.Path,
+                item.TargetPath,
+                out string resolvedLocalTarget,
+                out bool targetIsDirectory,
+                out _))
+        {
+            return ShortcutLaunchDecision.None;
+        }
+
         return Evaluate(
             item.IsShortcut,
             item.Path,
-            targetPath,
-            IsExpandedTargetDirectory(targetPath));
+            resolvedLocalTarget,
+            targetIsDirectory);
     }
 
     internal static string ExpandTargetPath(string? targetPath)

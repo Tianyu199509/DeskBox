@@ -1,0 +1,2395 @@
+{
+  "schemaVersion": 1,
+  "capabilities": [
+    {
+      "id": "weather",
+      "emoji": "🌤️",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "天气预报",
+      "titleEn": "Weather Forecast",
+      "summaryZh": "内置免密钥气象服务，提供实时温湿度、风速、紫外线与未来 7 天预报。",
+      "summaryEn": "Zero-key weather service providing live conditions, UV/wind metrics, and a 7-day forecast.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "weather"
+      ],
+      "triggerTokenPrefixes": [
+        "$weather."
+      ],
+      "triggerKeywords": [
+        "气象",
+        "天气",
+        "气温",
+        "温度",
+        "下雨",
+        "晴天",
+        "阴晴",
+        "空气",
+        "预报",
+        "穿衣",
+        "weather",
+        "forecast",
+        "temperature",
+        "humidity",
+        "rain",
+        "uv"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"weather\", \"targetCollection\": \"forecast\" }",
+          "kind": "Source",
+          "descriptionZh": "在 sources 中声明内置天气源；省略 city 时自动跟随默认城市",
+          "descriptionEn": "Declares built-in weather source; inherits host city when omitted"
+        },
+        {
+          "name": "${$weather.city} / ${$weather.tempText} / ${$weather.condition}",
+          "kind": "Token",
+          "descriptionZh": "城市名、实时温度（如 22°C）、天气状况文案",
+          "descriptionEn": "City name, formatted temperature (22°C), and condition"
+        },
+        {
+          "name": "${$weather.icon} / ${$weather.rangeText} / ${$weather.feelsLikeText}",
+          "kind": "Token",
+          "descriptionZh": "天气图标、当日高低温度区间、体感温度",
+          "descriptionEn": "Weather icon, daily temperature range, and feels-like text"
+        },
+        {
+          "name": "${$weather.humidity} / ${$weather.wind} / ${$weather.precipProb} / ${$weather.uv}",
+          "kind": "Token",
+          "descriptionZh": "湿度、风速、降水概率、紫外线指数",
+          "descriptionEn": "Humidity, wind speed, precipitation probability, and UV index"
+        },
+        {
+          "name": "$item.weekday / $item.icon / $item.low / $item.high",
+          "kind": "Collection",
+          "descriptionZh": "forecast 集合中的未来 7 天逐日预报字段",
+          "descriptionEn": "7-day forecast item fields in collections.forecast"
+        }
+      ],
+      "compactContractMarkdown": "- Prefer built-in `\"sources\": [{ \"type\": \"weather\", \"city\": \"${$settings.city}\", \"targetCollection\": \"forecast\", \"intervalMs\": 900000 }]` over external weather URLs (zero API key, cached, global).\n- Declare `\"collections\": { \"forecast\": { \"maxItems\": 7 } }` when rendering multi-day forecasts.\n- Exact `$weather.*` tokens: `${$weather.city}`, `${$weather.temp}`, `${$weather.tempText}`, `${$weather.feelsLikeText}`, `${$weather.high}`, `${$weather.low}`, `${$weather.rangeText}`, `${$weather.condition}`, `${$weather.icon}`, `${$weather.humidity}`, `${$weather.wind}`, `${$weather.precipProb}`, `${$weather.uv}`, `${$weather.sunrise}`, `${$weather.sunset}`, `${$weather.updatedAt}`.\n- Each item in `forecast` exposes: `${$item.weekday}`, `${$item.shortDate}`, `${$item.icon}`, `${$item.condition}`, `${$item.low}`, `${$item.high}`, `${$item.range}`, `${$item.precip}`.",
+      "goldenSnippetJson": "{\n  \"settings\": [\n    {\n      \"key\": \"city\",\n      \"type\": \"text\",\n      \"label\": \"城市\",\n      \"default\": \"北京\"\n    }\n  ],\n  \"sources\": [\n    {\n      \"type\": \"weather\",\n      \"city\": \"${$settings.city}\",\n      \"targetCollection\": \"forecast\"\n    }\n  ],\n  \"collections\": {\n    \"forecast\": {\n      \"maxItems\": 7\n    }\n  },\n  \"root\": \"weather_card\",\n  \"elements\": {\n    \"weather_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"weather_headline\",\n        \"weather_details\"\n      ]\n    },\n    \"weather_headline\": {\n      \"type\": \"Text\",\n      \"text\": \"${$weather.icon} ${$weather.city} · ${$weather.tempText}\",\n      \"style\": \"title\"\n    },\n    \"weather_details\": {\n      \"type\": \"Text\",\n      \"text\": \"${$weather.condition}  ${$weather.rangeText} · 湿度 ${$weather.humidity}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    }\n  }\n}"
+    },
+    {
+      "id": "system-metrics",
+      "emoji": "📊",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "硬件监控",
+      "titleEn": "Hardware Monitor",
+      "summaryZh": "实时采集 CPU、内存、显卡显存、磁盘、网速、电池与高占用进程。",
+      "summaryEn": "Low-overhead telemetry for CPU, RAM, GPU/VRAM, Disk, Network speed, Battery, and Top Processes.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "StatCard"
+      ],
+      "triggerSourceOrActionTypes": [
+        "systemMetrics"
+      ],
+      "triggerTokenPrefixes": [
+        "$sys."
+      ],
+      "triggerKeywords": [
+        "遥测",
+        "硬件",
+        "系统监控",
+        "cpu",
+        "内存",
+        "ram",
+        "显卡",
+        "gpu",
+        "显存",
+        "vram",
+        "网速",
+        "磁盘",
+        "硬盘",
+        "电池",
+        "电量",
+        "进程",
+        "开机时间",
+        "hardware",
+        "system monitor",
+        "memory",
+        "disk",
+        "network speed",
+        "battery",
+        "process"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"systemMetrics\", \"intervalMs\": 2000 }",
+          "kind": "Source",
+          "descriptionZh": "在 sources 中启用硬件采样（隐藏或折叠时自动暂停）",
+          "descriptionEn": "Subscribes to live hardware telemetry"
+        },
+        {
+          "name": "${$sys.cpu.percent} / ${$sys.memory.percent} / ${$sys.memory.summaryText}",
+          "kind": "Token",
+          "descriptionZh": "CPU 使用率、内存使用率、已用容量摘要",
+          "descriptionEn": "CPU %, RAM %, and formatted memory summary"
+        },
+        {
+          "name": "${$sys.gpu.name} / ${$sys.gpu.percent} / ${$sys.gpu.vramSummary}",
+          "kind": "Token",
+          "descriptionZh": "显卡名称、核心占用率、显存用量",
+          "descriptionEn": "GPU name, core utilization %, and VRAM summary"
+        },
+        {
+          "name": "${$sys.net.downText} / ${$sys.net.upText} / ${$sys.net.summaryText}",
+          "kind": "Token",
+          "descriptionZh": "实时下载网速、上传网速、合并网速文本",
+          "descriptionEn": "Live download/upload network speed"
+        },
+        {
+          "name": "${$sys.disk.percent} / ${$sys.disk.freeGb} / ${$sys.battery.statusText} / ${$sys.uptime.text}",
+          "kind": "Token",
+          "descriptionZh": "系统盘占用、剩余容量、电源状态与开机时长",
+          "descriptionEn": "Primary disk %, free GB, battery status, and uptime"
+        },
+        {
+          "name": "StatCard / ${$sys.topProcesses}",
+          "kind": "Component",
+          "descriptionZh": "带趋势线的硬件指标卡，以及可直接绑定 BarList / List 的高占用进程虚拟集合",
+          "descriptionEn": "Built-in KPI card with sparkline plus virtual top-process collection for BarList / List"
+        }
+      ],
+      "compactContractMarkdown": "- MUST declare `\"sources\": [{ \"type\": \"systemMetrics\", \"intervalMs\": 2000 }]` whenever using `$sys.*` or `StatCard`.\n- Exact `$sys.*` tokens: `${$sys.cpu.percent}`, `${$sys.memory.percent}`, `${$sys.memory.usedGb}`, `${$sys.memory.totalGb}`, `${$sys.memory.summaryText}`, `${$sys.memory.compactText}`, `${$sys.gpu.name}`, `${$sys.gpu.percent}`, `${$sys.gpu.vramPercent}`, `${$sys.gpu.vramSummary}`, `${$sys.disk.name}`, `${$sys.disk.percent}`, `${$sys.disk.freeGb}`, `${$sys.disk.summary}`, `${$sys.net.downText}`, `${$sys.net.upText}`, `${$sys.net.summaryText}`, `${$sys.battery.percent}`, `${$sys.battery.statusText}`, `${$sys.uptime.text}`.\n- Orthogonal hardware visualization:\n  - `{ \"type\": \"StatCard\", \"title\": \"CPU\", \"value\": \"${$sys.cpu.percent}\", \"unit\": \"%\", \"progress\": \"${$sys.cpu.percent}\", \"sparkline\": \"cpu\", \"color\": \"accent\" }` (`sparkline`: `\"cpu\"` | `\"memory\"` | `\"gpu\"` | `\"net\"`).\n  - Virtual top-process collection `${$sys.topProcesses}`: bind directly to `BarList` or `List` (`\"items\": \"${$sys.topProcesses}\"`); each item exposes `name`, `pid`, `memoryMb`, `memoryText`, `cpuPercent`, `cpuText`, `percent`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"systemMetrics\",\n      \"intervalMs\": 2000\n    }\n  ],\n  \"root\": \"metrics_root\",\n  \"elements\": {\n    \"metrics_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"kpi_grid\",\n        \"gpu_card\"\n      ]\n    },\n    \"kpi_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"cpu_stat\",\n        \"ram_stat\"\n      ]\n    },\n    \"cpu_stat\": {\n      \"type\": \"StatCard\",\n      \"title\": \"CPU\",\n      \"value\": \"${$sys.cpu.percent}\",\n      \"unit\": \"%\",\n      \"progress\": \"${$sys.cpu.percent}\",\n      \"sparkline\": \"cpu\",\n      \"color\": \"accent\"\n    },\n    \"ram_stat\": {\n      \"type\": \"StatCard\",\n      \"title\": \"RAM\",\n      \"value\": \"${$sys.memory.percent}\",\n      \"unit\": \"%\",\n      \"subtitle\": \"${$sys.memory.compactText}\",\n      \"progress\": \"${$sys.memory.percent}\",\n      \"sparkline\": \"memory\",\n      \"color\": \"cyan\"\n    },\n    \"gpu_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"gpu_row\"\n      ]\n    },\n    \"gpu_row\": {\n      \"type\": \"ProgressRow\",\n      \"title\": \"${$sys.gpu.name}\",\n      \"subtitle\": \"${$sys.gpu.vramSummary}\",\n      \"value\": \"${$sys.gpu.percent}%\",\n      \"progress\": \"${$sys.gpu.percent}\"\n    }\n  }\n}"
+    },
+    {
+      "id": "storage-drives",
+      "emoji": "💾",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "磁盘空间",
+      "titleEn": "Storage Drives",
+      "summaryZh": "列出本机各磁盘分区的盘符、卷标、使用率与剩余空间。",
+      "summaryEn": "Lists all mounted local drives with volume label, used percentage, and free/total GB.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "storageDrives"
+      ],
+      "triggerTokenPrefixes": [
+        "$drives."
+      ],
+      "triggerKeywords": [
+        "磁盘分区",
+        "多盘符",
+        "c盘",
+        "d盘",
+        "硬盘空间",
+        "存储空间",
+        "容量监控",
+        "剩余空间",
+        "drives",
+        "partitions",
+        "disk space",
+        "storage volumes"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"storageDrives\", \"targetCollection\": \"drives\" }",
+          "kind": "Source",
+          "descriptionZh": "定期扫描本机磁盘分区并写入 drives 集合",
+          "descriptionEn": "Polls mounted local volumes into targetCollection"
+        },
+        {
+          "name": "${$drives.count} / ${$drives.summary} / ${$drives.primaryPercent}",
+          "kind": "Token",
+          "descriptionZh": "分区总数、多盘符占用摘要、系统盘使用率",
+          "descriptionEn": "Mounted drive count, summary string, and primary drive %"
+        },
+        {
+          "name": "$item.name / $item.label / $item.percent / $item.freeGb / $item.summary",
+          "kind": "Collection",
+          "descriptionZh": "drives 集合中每个分区的盘符、卷标、百分比与容量摘要",
+          "descriptionEn": "Per-drive fields in collections.drives"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"storageDrives\", \"targetCollection\": \"drives\", \"intervalMs\": 15000 }]` and `\"collections\": { \"drives\": { \"maxItems\": 16 } }`.\n- Summary tokens: `${$drives.count}`, `${$drives.summary}`, `${$drives.primaryPercent}`, `${$drives.primaryFreeGb}`, `${$drives.primaryTotalGb}`.\n- Each record in `collections.drives` exposes: `${$item.name}` (`\"C:\"`), `${$item.label}`, `${$item.title}` (`\"C: (System)\"`), `${$item.format}` (`\"NTFS\"`), `${$item.percent}` (`0`..`100`), `${$item.usedGb}`, `${$item.freeGb}`, `${$item.totalGb}`, `${$item.summary}` (`\"128.4 / 512.0 GB\"`).\n- Pair directly with `BarList` (`\"collection\": \"drives\", \"titleField\": \"title\", \"valueField\": \"percent\", \"subtitleField\": \"summary\", \"unit\": \"%\"`) for a clean multi-drive capacity view.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"storageDrives\",\n      \"targetCollection\": \"drives\",\n      \"intervalMs\": 15000\n    }\n  ],\n  \"collections\": {\n    \"drives\": {\n      \"maxItems\": 16\n    }\n  },\n  \"root\": \"drives_card\",\n  \"elements\": {\n    \"drives_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"drives_bars\"\n      ]\n    },\n    \"drives_bars\": {\n      \"type\": \"BarList\",\n      \"collection\": \"drives\",\n      \"titleField\": \"title\",\n      \"valueField\": \"percent\",\n      \"subtitleField\": \"summary\",\n      \"unit\": \"%\",\n      \"color\": \"accent\"\n    }\n  }\n}"
+    },
+    {
+      "id": "world-clock",
+      "emoji": "🌍",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "世界时钟",
+      "titleEn": "World Clock",
+      "summaryZh": "提供秒级 UTC/Unix 时钟、带推演偏移的多时区函数 `tz(zoneId, format, offsetHours)`、`tzDiffLabel()`、`tzWorkState()` 与 `tzCity()`。",
+      "summaryEn": "Provides 1-second UTC/Unix clock tokens plus timezone helpers: `tz(zoneId, format, offsetHours)`, `tzDiffLabel()`, `tzWorkState()`, and `tzCity()`.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "clock"
+      ],
+      "triggerTokenPrefixes": [
+        "$clock.",
+        "tz(",
+        "tzDiffLabel(",
+        "tzWorkState(",
+        "tzCity("
+      ],
+      "triggerKeywords": [
+        "全球",
+        "世界时钟",
+        "多时区",
+        "时区",
+        "伦敦时间",
+        "纽约时间",
+        "东京时间",
+        "美股时间",
+        "utc",
+        "unix时间戳",
+        "world clock",
+        "timezone",
+        "est",
+        "pst",
+        "gmt",
+        "时差",
+        "夏令时",
+        "dst",
+        "meeting time",
+        "scrubber"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"clock\", \"intervalMs\": 1000 }",
+          "kind": "Source",
+          "descriptionZh": "启用实时时钟刷新（支持秒级或分钟级）",
+          "descriptionEn": "Enables live clock tick updates"
+        },
+        {
+          "name": "${tz('America/New_York', 'HH:mm')} / ${tz('Europe/London', 'HH:mm:ss')}",
+          "kind": "Function",
+          "descriptionZh": "按 IANA 时区或固定偏移（如 UTC+9）格式化时间",
+          "descriptionEn": "Formats current time in any IANA timezone or UTC offset"
+        },
+        {
+          "name": "${tz('Europe/London', 'HH:mm', 6)}",
+          "kind": "Function",
+          "descriptionZh": "推演偏移重载：第三个参数把当前时刻前推 N 小时（支持 0.5 步进），配合滑块 state.scrubHours 预览会议时间，DST 自动换算",
+          "descriptionEn": "Offset overload shifts now by N hours (0.5 steps supported) for meeting scrubbers; DST stays accurate"
+        },
+        {
+          "name": "${tzDiffLabel('Europe/London', 0)}",
+          "kind": "Function",
+          "descriptionZh": "本地化相对时差与跨日标签，如「慢 7h · 同日」/「behind 7h · yesterday」，13 语自动本地化",
+          "descriptionEn": "Localized diff + cross-day label such as \"behind 7h · yesterday\" across 13 locales"
+        },
+        {
+          "name": "${tzWorkState('Asia/Tokyo', '09-18', 0)}",
+          "kind": "Function",
+          "descriptionZh": "按工作窗口返回 work / edge / sleep 状态码，驱动 🟢🟡🌙 状态灯（窗口边界与清晨/傍晚缓冲联动）",
+          "descriptionEn": "Returns work / edge / sleep for the zone's wall clock given a work window, powering status lights"
+        },
+        {
+          "name": "${tzCity('Asia/Shanghai')}",
+          "kind": "Function",
+          "descriptionZh": "24 个内置商务城市的本地惯例显示名（13 语），用于设置选项与卡片标题",
+          "descriptionEn": "Localized display names for 24 built-in business cities across 13 locales"
+        },
+        {
+          "name": "${$clock.fullTime} / ${$clock.utcTime} / ${$clock.localOffset} / ${$clock.unixSeconds}",
+          "kind": "Token",
+          "descriptionZh": "本地时间、UTC 时间、时区偏移与 Unix 秒级时间戳",
+          "descriptionEn": "Local time, UTC time, UTC offset, and Unix seconds"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"clock\", \"intervalMs\": 1000 }]` when displaying live clocks or multi-timezone panels.\n- Built-in expression function `tz('<zoneId>', '<format>')` and `tz('<zoneId>', '<format>', <offsetHours>)`:\n  - Supported `<zoneId>`: IANA IDs (`\"Asia/Shanghai\"`, `\"Asia/Tokyo\"`, `\"Europe/London\"`, `\"Europe/Berlin\"`, `\"America/New_York\"`, `\"America/Los_Angeles\"`, `\"Australia/Sydney\"`, `\"Asia/Singapore\"`), `\"UTC\"`, `\"local\"`, or fixed offsets (`\"UTC+8\"`, `\"UTC-5\"`).\n  - Supported `<format>`: standard .NET time patterns (`\"HH:mm\"`, `\"HH:mm:ss\"`, `\"MM-dd HH:mm\"`, `\"ddd HH:mm\"`, `\"zzz\"` for UTC offsets).\n  - Optional `<offsetHours>` (default 0, supports halves like 2.5) shifts the reference instant forward — pair with a scrubber Slider bound to `state.scrubHours`.\n- Semantic helpers (all DST-correct via `TimeZoneInfo`, zero reflection):\n  - `tzDiffLabel('<zoneId>', <offsetHours>?)` → localized relative-diff + cross-day label (`\"慢 7h · 同日\"` / `\"behind 7h · yesterday\"`).\n  - `tzWorkState('<zoneId>', '<workWindow>', <offsetHours>?)` → `\"work\"` / `\"edge\"` (07:00–start, end–22:00) / `\"sleep\"` (22:00–07:00).\n  - `tzCity('<zoneId>')` → localized display name of 24 built-in business cities (13 locales).\n- Exact `$clock.*` tokens: `${$clock.fullTime}`, `${$clock.seconds}`, `${$clock.utcTime}`, `${$clock.utcFullTime}`, `${$clock.utcDate}`, `${$clock.localOffset}`, `${$clock.unixSeconds}`, `${$clock.iso}`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"clock\",\n      \"intervalMs\": 1000\n    }\n  ],\n  \"root\": \"clock_grid\",\n  \"elements\": {\n    \"clock_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"beijing_card\",\n        \"newyork_card\",\n        \"london_card\",\n        \"tokyo_card\"\n      ]\n    },\n    \"beijing_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"beijing_label\",\n        \"beijing_time\"\n      ]\n    },\n    \"beijing_label\": {\n      \"type\": \"Text\",\n      \"text\": \"北京 (UTC+8)\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"beijing_time\": {\n      \"type\": \"Text\",\n      \"text\": \"${tz('Asia/Shanghai', 'HH:mm:ss')}\",\n      \"style\": \"title\"\n    },\n    \"newyork_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"newyork_label\",\n        \"newyork_time\"\n      ]\n    },\n    \"newyork_label\": {\n      \"type\": \"Text\",\n      \"text\": \"纽约 (EST/EDT)\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"newyork_time\": {\n      \"type\": \"Text\",\n      \"text\": \"${tz('America/New_York', 'HH:mm:ss')}\",\n      \"style\": \"title\"\n    },\n    \"london_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"london_label\",\n        \"london_time\"\n      ]\n    },\n    \"london_label\": {\n      \"type\": \"Text\",\n      \"text\": \"伦敦 (GMT/BST)\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"london_time\": {\n      \"type\": \"Text\",\n      \"text\": \"${tz('Europe/London', 'HH:mm:ss')}\",\n      \"style\": \"title\"\n    },\n    \"tokyo_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"tokyo_label\",\n        \"tokyo_time\"\n      ]\n    },\n    \"tokyo_label\": {\n      \"type\": \"Text\",\n      \"text\": \"东京 (JST)\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"tokyo_time\": {\n      \"type\": \"Text\",\n      \"text\": \"${tz('Asia/Tokyo', 'HH:mm:ss', 6)} · ${tzDiffLabel('Asia/Tokyo', 6)} · ${tzWorkState('Asia/Tokyo', '09-18', 6)}\",\n      \"style\": \"title\"\n    }\n  }\n}"
+    },
+    {
+      "id": "ai-monitor",
+      "emoji": "🤖",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "AI 用量监控",
+      "titleEn": "AI Quota Monitor",
+      "summaryZh": "统计本机 Claude Code / Codex Token 消耗，并查询主流模型平台账户余额。",
+      "summaryEn": "Aggregates local Claude Code / Codex token logs and queries cloud provider balances.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "aiMonitor",
+        "ai.refresh",
+        "ai.selectProvider"
+      ],
+      "triggerTokenPrefixes": [
+        "$ai."
+      ],
+      "triggerKeywords": [
+        "配额",
+        "额度",
+        "余额",
+        "token消耗",
+        "账单",
+        "开销",
+        "用量",
+        "claude额度",
+        "codex用量",
+        "deepseek余额",
+        "openrouter余额",
+        "quota",
+        "token usage",
+        "billing",
+        "wallet"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"aiMonitor\", \"intervalMs\": 60000 }",
+          "kind": "Source",
+          "descriptionZh": "启用本地日志统计与服务商配额查询",
+          "descriptionEn": "Enables local token log parser and balance polling"
+        },
+        {
+          "name": "${$ai.todayTokens} / ${$ai.todayCost} / ${$ai.monthTokens} / ${$ai.monthCost}",
+          "kind": "Token",
+          "descriptionZh": "今日与本月累计 Token 用量及估算开销",
+          "descriptionEn": "Daily and monthly token counts and estimated cost"
+        },
+        {
+          "name": "${$ai.focus.name} / ${$ai.focus.value} / ${$ai.focus.subtext}",
+          "kind": "Token",
+          "descriptionZh": "当前焦点服务商名称、余额数值与状态说明",
+          "descriptionEn": "Focused provider name, balance value, and subtitle"
+        },
+        {
+          "name": "${$ai.providers} / ${$ai.daily28} / ${$ai.dailyTrend} / __ai_credentials",
+          "kind": "Collection",
+          "descriptionZh": "多平台配额对账单、28日活跃健康度胶囊条、14日趋势虚拟集合与内置加密凭据配置浮层",
+          "descriptionEn": "Virtual provider ledger, 28-day activity capsules, 14-day trend collections, plus built-in DPAPI credential flyout"
+        }
+      ],
+      "compactContractMarkdown": "- For monitoring Claude Code, Codex, Gemini CLI, GLM, MiniMax, DeepSeek, SiliconFlow, Kimi, OpenRouter, or OneAPI usage/balance, MUST declare `\"sources\": [{ \"type\": \"aiMonitor\", \"intervalMs\": 60000 }]`.\n- Exact `$ai.*` tokens: `${$ai.todayTokens}`, `${$ai.todayCost}`, `${$ai.monthTokens}`, `${$ai.monthCost}`, `${$ai.cacheHitPercent}`, `${$ai.hasLocalCliData}`, `${$ai.hasTodayActivity}`, `${$ai.activeDays28}`, `${$ai.daily28Summary}`, `${$ai.activeCount}`, `${$ai.attentionCount}`, `${$ai.errorCount}`, `${$ai.statusTone}`, `${$ai.walletCurrency}`, `${$ai.walletTargetBalance}`, `${$ai.walletTargetSummary}`, `${$ai.focus.name}`, `${$ai.focus.value}`, `${$ai.focus.subtext}`, `${$ai.focus.progress}`, `${$ai.focus.tone}`, `${$ai.focus.isWindowQuota}`, `${$ai.capsuleTitle}`, `${$ai.capsuleSummary}`, `${$ai.capsuleBadge}`.\n- Orthogonal virtual collections: bind `ProgressBar` (`\"variant\": \"segmented\"`) to `\"items\": \"$ai.daily28\"` (`tone`, `summary`, `tooltip`), `List` (`\"variant\": \"divided\"`) or `BarList` to `\"items\": \"${$ai.providers}\"` (`id`, `title`, `name`, `shortName`, `monogram`, `color`, `badge`, `badgeText`, `ledgerSummary`, `metaLine`, `value`, `percent`, `valueText`, `subtitle`, `tone`, `statusIcon`, `hasError`, `hasDetail`, `hasSecondaryBar`, `detailLabel`, `detailSubtext`, `detailValue`, `detailPercent`, `detailTone`, `isSelected`), and `Chart` to `\"collection\": \"${$ai.dailyTrend}\"` (`date`, `dateLabel`, `title`, `tokens`, `tokensK`, `tokensFormatted`, `cost`, `value`).\n- Actions & DPAPI Credential Setup: `{ \"type\": \"ai.refresh\" }`, `{ \"type\": \"ai.selectProvider\", \"value\": \"deepseek\" }`, and `IconButton` with `\"popover\": \"__ai_credentials\"`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"aiMonitor\",\n      \"intervalMs\": 60000\n    }\n  ],\n  \"root\": \"ai_monitor_root\",\n  \"elements\": {\n    \"ai_monitor_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"focus_card\",\n        \"tokens_stat\",\n        \"providers_bars\"\n      ]\n    },\n    \"focus_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"focus_progress_row\"\n      ]\n    },\n    \"focus_progress_row\": {\n      \"type\": \"ProgressRow\",\n      \"title\": \"${$ai.focus.name}\",\n      \"subtitle\": \"${$ai.focus.subtext}\",\n      \"value\": \"${$ai.focus.value}\",\n      \"progress\": \"${$ai.focus.progress}\"\n    },\n    \"tokens_stat\": {\n      \"type\": \"StatCard\",\n      \"title\": \"Tokens\",\n      \"value\": \"${$ai.todayTokens}\",\n      \"subtitle\": \"${$ai.todayCost}\"\n    },\n    \"providers_bars\": {\n      \"type\": \"BarList\",\n      \"items\": \"${$ai.providers}\",\n      \"titleField\": \"name\",\n      \"valueField\": \"percent\",\n      \"subtitleField\": \"value\",\n      \"unit\": \"%\"\n    }\n  }\n}"
+    },
+    {
+      "id": "calendar",
+      "emoji": "🗓️",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "日历与节气",
+      "titleEn": "Lunar & Calendar",
+      "summaryZh": "提供公历日期、农历干支纪年、二十四节气与法定传统节日。",
+      "summaryEn": "Built-in Gregorian date, Chinese Lunar Ganzhi, solar terms, and festival tokens.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "calendar"
+      ],
+      "triggerTokenPrefixes": [
+        "$calendar."
+      ],
+      "triggerKeywords": [
+        "公历",
+        "历法",
+        "农历",
+        "阴历",
+        "节气",
+        "节日",
+        "干支",
+        "黄历",
+        "几月几号",
+        "星期几",
+        "lunar",
+        "festival",
+        "holiday",
+        "solar term"
+      ],
+      "members": [
+        {
+          "name": "${$calendar.date} / ${$calendar.monthTitle} / ${$calendar.weekday}",
+          "kind": "Token",
+          "descriptionZh": "当日日期 (yyyy-MM-dd)、年月标题、星期名称",
+          "descriptionEn": "Current ISO date, month header, and weekday"
+        },
+        {
+          "name": "${$calendar.lunar} / ${$calendar.lunarTitle} / ${$calendar.festival}",
+          "kind": "Token",
+          "descriptionZh": "农历月日、干支纪年、当日节气或节日",
+          "descriptionEn": "Lunar day, Ganzhi year/month, and festival/solar-term"
+        },
+        {
+          "name": "${$calendar.subtitle} / ${$calendar.weekOfYear}",
+          "kind": "Token",
+          "descriptionZh": "智能副标题（优先显示节日，否则显示农历）与周次",
+          "descriptionEn": "Smart subtitle (festival or lunar) and ISO week number"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"calendar\", \"intervalMs\": 60000 }]` when displaying live date/lunar/festival information.\n- Exact `$calendar.*` tokens: `${$calendar.date}` (`yyyy-MM-dd`), `${$calendar.year}`, `${$calendar.month}`, `${$calendar.day}`, `${$calendar.weekday}`, `${$calendar.weekdayShort}`, `${$calendar.monthTitle}`, `${$calendar.lunar}`, `${$calendar.lunarTitle}`, `${$calendar.festival}`, `${$calendar.subtitle}`, `${$calendar.weekOfYear}`, `${$calendar.daysInMonth}`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"calendar\",\n      \"intervalMs\": 60000\n    }\n  ],\n  \"root\": \"calendar_header\",\n  \"elements\": {\n    \"calendar_header\": {\n      \"type\": \"Stack\",\n      \"spacing\": 2,\n      \"children\": [\n        \"gregorian_text\",\n        \"lunar_text\"\n      ]\n    },\n    \"gregorian_text\": {\n      \"type\": \"Text\",\n      \"text\": \"${$calendar.monthTitle} · ${$calendar.weekday}\",\n      \"style\": \"subtitle\"\n    },\n    \"lunar_text\": {\n      \"type\": \"Text\",\n      \"text\": \"${$calendar.lunarTitle} ${$calendar.festival}\",\n      \"style\": \"caption\",\n      \"color\": \"accent\"\n    }\n  }\n}"
+    },
+    {
+      "id": "countdown",
+      "emoji": "🎂",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "纪念日与倒数日",
+      "titleEn": "Countdowns",
+      "summaryZh": "支持公历与农历生日、纪念日循环倒数，到期自动发送系统通知。",
+      "summaryEn": "Solar & Lunar recurring birthday/anniversary countdown engine with Windows Toast reminders.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "countdown",
+        "countdown.upsert",
+        "countdown.pin",
+        "countdown.delete"
+      ],
+      "triggerTokenPrefixes": [
+        "$countdown."
+      ],
+      "triggerKeywords": [
+        "生日",
+        "纪念日",
+        "倒数日",
+        "倒计时",
+        "周年",
+        "发薪日",
+        "过年",
+        "春节",
+        "距离",
+        "天数",
+        "birthday",
+        "anniversary",
+        "countdown",
+        "payday",
+        "days until"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"countdown\", \"intervalMs\": 60000 }",
+          "kind": "Source",
+          "descriptionZh": "启用公农历循环倒数计算与每日到期提醒",
+          "descriptionEn": "Enables recurring countdown calculation and daily reminders"
+        },
+        {
+          "name": "${$countdown.items} / ${$countdown.progressBars} / countdown.upsert",
+          "kind": "Collection",
+          "descriptionZh": "公农历倒数事项与时间进度虚拟集合，以及声明式新增编辑动作",
+          "descriptionEn": "Virtual countdown & time-progress collections plus declarative add/edit action"
+        },
+        {
+          "name": "${$countdown.hero.title} / ${$countdown.hero.days} / ${$countdown.hero.subtitle}",
+          "kind": "Token",
+          "descriptionZh": "置顶事件标题、剩余天数、目标日期说明",
+          "descriptionEn": "Pinned event title, remaining days, and date subtitle"
+        },
+        {
+          "name": "${$countdown.work.*} / ${$countdown.holiday.*}",
+          "kind": "Token",
+          "descriptionZh": "今日工时进度（BeforeWork/Working/AfterWork）与下一中国法定节假日倒数（内置 2025-2027 放假调休表）",
+          "descriptionEn": "Work-hour progress (BeforeWork/Working/AfterWork) and next China statutory holiday countdown (built-in 2025-2027 schedule)"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"countdown\", \"intervalMs\": 60000 }]` and `\"collections\": { \"events\": { \"maxItems\": 100 } }`.\n- Orthogonal virtual collections: bind `List` to `\"items\": \"${$countdown.items}\"` (`id`, `title`, `emoji`, `days`, `statusWord`, `subtitle`, `badge`, `tone`, `pinned`) and `BarList` to `\"items\": \"${$countdown.progressBars}\"` (`title`, `percent`, `summary`).\n- Actions: `{ \"type\": \"countdown.upsert\", \"title\": \"${state.title}\", \"item\": { \"date\": \"${state.date}\", \"calendar\": \"solar\", \"repeat\": \"yearly\" } }`, `countdown.pin`, `countdown.delete`.\n- Exact `$countdown.*` tokens: `${$countdown.hero.title}`, `${$countdown.hero.days}`, `${$countdown.hero.subtitle}`, `${$countdown.hero.badge}`, `${$countdown.hero.progress}`, `${$countdown.work.percent}`, `${$countdown.work.summary}`, `${$countdown.holiday.title}`, `${$countdown.holiday.days}`, `${$countdown.capsuleTitle}`, `${$countdown.capsuleSummary}`, `${$countdown.capsuleBadge}`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"countdown\",\n      \"intervalMs\": 60000\n    }\n  ],\n  \"collections\": {\n    \"events\": {\n      \"maxItems\": 100\n    }\n  },\n  \"root\": \"countdown_root\",\n  \"elements\": {\n    \"countdown_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"hero_card\",\n        \"events_list\"\n      ]\n    },\n    \"hero_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"accent\",\n      \"children\": [\n        \"hero_title\",\n        \"hero_subtitle\"\n      ]\n    },\n    \"hero_title\": {\n      \"type\": \"Text\",\n      \"text\": \"${$countdown.hero.title} · ${$countdown.hero.days}d\",\n      \"style\": \"title\"\n    },\n    \"hero_subtitle\": {\n      \"type\": \"Text\",\n      \"text\": \"${$countdown.hero.subtitle}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"events_list\": {\n      \"type\": \"List\",\n      \"items\": \"${$countdown.items}\",\n      \"itemTemplate\": \"event_row\"\n    },\n    \"event_row\": {\n      \"type\": \"KeyValueRow\",\n      \"label\": \"${$item.emoji} ${$item.title}\",\n      \"value\": \"${$item.days}d\"\n    }\n  }\n}"
+    },
+    {
+      "id": "pomodoro",
+      "emoji": "🍅",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "番茄专注与久坐守护",
+      "titleEn": "Pomodoro & Sedentary Guard",
+      "summaryZh": "无漂移专注计时状态机，双模支持 🍅 番茄专注与 🪑 久坐护眼守护（键鼠空闲自动重置、到点微动作提醒与推迟）。",
+      "summaryEn": "Drift-free Focus / Break timer plus a sedentary guardian mode with keyboard/mouse idle auto-reset and rotating micro-break reminders.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "pomodoro",
+        "pomodoro.toggle",
+        "pomodoro.reset",
+        "pomodoro.skip",
+        "pomodoro.sedentaryConfirm",
+        "pomodoro.sedentarySnooze"
+      ],
+      "triggerTokenPrefixes": [
+        "$pomodoro."
+      ],
+      "triggerKeywords": [
+        "番茄钟",
+        "专注",
+        "计时器",
+        "工作法",
+        "休息提醒",
+        "久坐",
+        "护眼",
+        "站立",
+        "起身",
+        "sedentary",
+        "pomodoro",
+        "focus timer",
+        "posture",
+        "stand up"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"pomodoro\", \"intervalMs\": 1000 }",
+          "kind": "Source",
+          "descriptionZh": "启用番茄计时状态机秒级同步",
+          "descriptionEn": "Enables 1-second Pomodoro timer sync"
+        },
+        {
+          "name": "RadialGauge + ${$pomodoro.remainingText} / ${$pomodoro.progressPercent}",
+          "kind": "Component",
+          "descriptionZh": "使用半圆或全圆原生仪表盘自由组合番茄钟与久坐守护界面",
+          "descriptionEn": "Compose custom focus & sedentary guardian dials with RadialGauge and $pomodoro.* tokens"
+        },
+        {
+          "name": "pomodoro.toggle / pomodoro.reset / pomodoro.skip / pomodoro.extend",
+          "kind": "Action",
+          "descriptionZh": "启动或暂停、重置阶段、跳过阶段、延长时长",
+          "descriptionEn": "Start/pause, reset, skip phase, or extend session"
+        },
+        {
+          "name": "pomodoro.sedentaryConfirm / pomodoro.sedentarySnooze",
+          "kind": "Action",
+          "descriptionZh": "确认已起身放松并重新计时、或将久坐提醒推迟 15 分钟",
+          "descriptionEn": "Confirm you stood up and restart the round, or snooze the sedentary reminder by 15 minutes"
+        },
+        {
+          "name": "${$pomodoro.mode} / ${$pomodoro.satMinutes} / ${$pomodoro.microAction} / ${$pomodoro.healthSummary}",
+          "kind": "Token",
+          "descriptionZh": "当前节律模式、连续伏案分钟数、轮换微动作指引与今日健康统计",
+          "descriptionEn": "Active rhythm mode, continuous sitting minutes, rotating micro-break tip, and today's health summary"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"pomodoro\", \"intervalMs\": 1000 }]`.\n- Compose focus or sedentary guardian layouts orthogonally with `RadialGauge` / `RingGauge` / `ProgressBar` bound to `${$pomodoro.remainingText}`, `${$pomodoro.phaseLabel}`, `${$pomodoro.isRunning}`, `${$pomodoro.progressPercent}`, `${$pomodoro.completedToday}` and actions `pomodoro.toggle`, `pomodoro.reset`, `pomodoro.skip`, `pomodoro.extend`.\n- Dual rhythm (v5): set `\"rhythmMode\": \"sedentary\"` (settings key) plus optional `sedentaryIntervalMin` (40/50/60/90) and `idleAutoResetMin` (0/5/10). Sedentary tokens: `${$pomodoro.mode}`, `${$pomodoro.isAway}`, `${$pomodoro.isDue}`, `${$pomodoro.satMinutes}`, `${$pomodoro.microAction}`, `${$pomodoro.healthSummary}`; actions `pomodoro.sedentaryConfirm`, `pomodoro.sedentarySnooze`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"pomodoro\",\n      \"intervalMs\": 1000\n    }\n  ],\n  \"root\": \"pomodoro_card\",\n  \"elements\": {\n    \"pomodoro_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"pomodoro_gauge\",\n        \"pomodoro_toggle_btn\"\n      ]\n    },\n    \"pomodoro_gauge\": {\n      \"type\": \"RadialGauge\",\n      \"value\": \"${$pomodoro.progressPercent}\",\n      \"max\": 100,\n      \"title\": \"${$pomodoro.remainingText}\",\n      \"subtitle\": \"${$pomodoro.phaseLabel}\",\n      \"size\": 148,\n      \"color\": \"accent\"\n    },\n    \"pomodoro_toggle_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"${$pomodoro.primaryActionText}\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"pomodoro.toggle\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "device-state",
+      "emoji": "🎛️",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "设备与媒体状态",
+      "titleEn": "Device & Media State",
+      "summaryZh": "读取系统音量、亮度、Wi-Fi/蓝牙、正在播放曲目封面及常亮状态。",
+      "summaryEn": "Reads live volume, brightness, Wi-Fi/Bluetooth, SMTC media track/cover, and Keep-Awake state.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "deviceState"
+      ],
+      "triggerTokenPrefixes": [
+        "$device."
+      ],
+      "triggerKeywords": [
+        "音量",
+        "静音",
+        "亮度",
+        "音频设备",
+        "wifi",
+        "无线网",
+        "蓝牙",
+        "常亮",
+        "防休眠",
+        "防锁屏",
+        "回收站",
+        "正在播放",
+        "专辑封面",
+        "控制中心",
+        "volume",
+        "brightness",
+        "bluetooth",
+        "keep awake",
+        "recycle bin",
+        "media",
+        "control center"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"deviceState\", \"intervalMs\": 3000 }",
+          "kind": "Source",
+          "descriptionZh": "订阅本机设备与全局媒体播放状态",
+          "descriptionEn": "Subscribes to live device & SMTC media state"
+        },
+        {
+          "name": "${$device.volume} / ${$device.muted} / ${$device.audioDeviceName}",
+          "kind": "Token",
+          "descriptionZh": "主音量百分比 (0-100)、静音状态、当前音频输出设备",
+          "descriptionEn": "Master volume 0-100, mute flag, and audio output device"
+        },
+        {
+          "name": "${$device.brightness} / ${$device.brightnessText}",
+          "kind": "Token",
+          "descriptionZh": "屏幕亮度百分比 (0-100) 与状态文案",
+          "descriptionEn": "Display brightness 0-100 and status text"
+        },
+        {
+          "name": "${$device.wifiEnabled} / ${$device.bluetoothEnabled} / ${$device.keepAwake}",
+          "kind": "Token",
+          "descriptionZh": "Wi-Fi、蓝牙与防休眠屏幕常亮的开关状态",
+          "descriptionEn": "Wi-Fi, Bluetooth, and Keep-Awake toggle states"
+        },
+        {
+          "name": "${$device.mediaTitle} / ${$device.mediaArtist} / ${$device.mediaToggleIcon} / ${$device.mediaCover}",
+          "kind": "Token",
+          "descriptionZh": "当前播放曲目、歌手、动态播放/暂停图标及封面图路径",
+          "descriptionEn": "SMTC media title, artist, play/pause glyph, and cover path"
+        }
+      ],
+      "compactContractMarkdown": "- MUST declare `\"sources\": [{ \"type\": \"deviceState\", \"intervalMs\": 3000 }]` whenever reading `$device.*` tokens.\n- Exact `$device.*` tokens:\n  - Audio & Display: `${$device.volume}` (`0`..`100`), `${$device.volumeText}`, `${$device.muted}`, `${$device.audioDeviceName}`, `${$device.brightness}` (`0`..`100`), `${$device.brightnessText}`.\n  - Radios & Power: `${$device.wifiEnabled}`, `${$device.wifiStatus}`, `${$device.bluetoothEnabled}`, `${$device.bluetoothStatus}`, `${$device.keepAwake}`, `${$device.keepAwakeStatus}`, `${$device.darkTheme}`, `${$device.themeStatus}`, `${$device.recycleBinCount}`, `${$device.recycleBinStatus}`.\n  - Global Media (SMTC): `${$device.mediaPlaying}`, `${$device.mediaStatus}`, `${$device.mediaToggleIcon}` (dynamically resolves to the pause icon when playing and play icon when paused — bind directly to `IconButton.icon`!), `${$device.mediaCover}` (bind to `Image.src`), `${$device.mediaTitle}`, `${$device.mediaArtist}`, `${$device.mediaSummary}`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"deviceState\",\n      \"intervalMs\": 3000\n    }\n  ],\n  \"root\": \"media_card\",\n  \"elements\": {\n    \"media_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"media_row\"\n      ]\n    },\n    \"media_row\": {\n      \"type\": \"Grid\",\n      \"columns\": \"Auto,*,Auto,Auto,Auto\",\n      \"spacing\": 8,\n      \"children\": [\n        \"media_cover\",\n        \"media_meta\",\n        \"prev_track_btn\",\n        \"play_pause_btn\",\n        \"next_track_btn\"\n      ]\n    },\n    \"media_cover\": {\n      \"type\": \"Image\",\n      \"column\": 0,\n      \"src\": \"${$device.mediaCover}\",\n      \"width\": 36,\n      \"height\": 36,\n      \"cornerRadius\": 6,\n      \"when\": \"${$device.mediaCover != ''}\"\n    },\n    \"media_meta\": {\n      \"type\": \"Stack\",\n      \"column\": 1,\n      \"spacing\": 2,\n      \"children\": [\n        \"media_title\",\n        \"media_artist\"\n      ]\n    },\n    \"media_title\": {\n      \"type\": \"Text\",\n      \"text\": \"${$device.mediaTitle}\",\n      \"style\": \"bodyStrong\",\n      \"maxLines\": 1\n    },\n    \"media_artist\": {\n      \"type\": \"Text\",\n      \"text\": \"${$device.mediaArtist != '' ? $device.mediaArtist : $device.mediaStatus}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\",\n      \"maxLines\": 1\n    },\n    \"prev_track_btn\": {\n      \"type\": \"IconButton\",\n      \"column\": 2,\n      \"icon\": \"skip-previous\",\n      \"size\": 28,\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"media.previous\"\n      }\n    },\n    \"play_pause_btn\": {\n      \"type\": \"IconButton\",\n      \"column\": 3,\n      \"icon\": \"${$device.mediaToggleIcon}\",\n      \"size\": 28,\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"media.playPause\"\n      }\n    },\n    \"next_track_btn\": {\n      \"type\": \"IconButton\",\n      \"column\": 4,\n      \"icon\": \"skip-next\",\n      \"size\": 28,\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"media.next\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "http-and-rss-feeds",
+      "emoji": "🌐",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "网络接口与 RSS",
+      "titleEn": "HTTP JSON & RSS",
+      "summaryZh": "拉取远程 JSON 接口或 RSS/Atom 订阅流，内置离线缓存与鉴权请求头。",
+      "summaryEn": "Fetches REST JSON & RSS/Atom feeds with disk caching and optional auth headers.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "httpJson",
+        "rss",
+        "source.refresh",
+        "refreshSource"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "远程",
+        "热榜",
+        "热搜",
+        "新闻",
+        "资讯",
+        "订阅",
+        "rss",
+        "接口",
+        "api",
+        "行情",
+        "汇率",
+        "币价",
+        "知乎",
+        "少数派",
+        "it之家",
+        "ithome",
+        "sspai",
+        "v2ex",
+        "hacker news",
+        "hnrss",
+        "github",
+        "open-meteo",
+        "coingecko",
+        "exchange rate",
+        "currency",
+        "fx",
+        "crypto",
+        "news",
+        "feed",
+        "trending",
+        "price"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"rss\", \"url\": \"https://...\", \"targetCollection\": \"items\" }",
+          "kind": "Source",
+          "descriptionZh": "解析 RSS / Atom 订阅并自动提取 title, summary, link, pubDate",
+          "descriptionEn": "Parses RSS/Atom feeds into title, summary, link, pubDate"
+        },
+        {
+          "name": "{ \"type\": \"httpJson\", \"url\": \"...\", \"itemsPath\": \"$.data\" }",
+          "kind": "Source",
+          "descriptionZh": "请求 JSON 接口，通过 stateMap 提取单值或 itemsPath 映射列表",
+          "descriptionEn": "Fetches JSON APIs with scalar stateMap or array itemsPath/fieldMap"
+        },
+        {
+          "name": "{ \"type\": \"source.refresh\", \"targetId\": \"feed\" }",
+          "kind": "Action",
+          "descriptionZh": "立即手动刷新指定或全部数据源（支持 targetId / sourceId）",
+          "descriptionEn": "Immediately refreshes a specific or all data sources (supports targetId / sourceId)"
+        }
+      ],
+      "compactContractMarkdown": "- `rss` source auto-populates `targetCollection` (default `\"items\"`) with `${$item.title}`, `${$item.summary}`, `${$item.link}` (`${$item.url}`), `${$item.pubDate}`.\n- `httpJson` source maps scalars via `\"stateMap\": { \"price\": \"$.bitcoin.usd\" }` and arrays via `\"targetCollection\": \"items\", \"itemsPath\": \"$.stories\", \"fieldMap\": { \"title\": \"title\", \"url\": \"url\" }`. Optional `\"headers\": { \"Authorization\": \"Bearer ${$secrets.apiKey}\" }`. Minimum `intervalMs` is `15000`.\n- **Curated Keyless Public API & RSS Endpoints (Single Source of Truth — Prefer Over Unverified URLs)**:\n  - CN Tech/News RSS (`type: \"rss\"`): SSPai (少数派) `\"https://sspai.com/feed\"`, ITHome (IT之家) `\"https://www.ithome.com/rss/\"`, GCores (机核) `\"https://www.gcores.com/rss\"`, Ruanyifeng Weekly (阮一峰周刊) `\"https://www.ruanyifeng.com/blog/atom.xml\"`.\n  - CN Live JSON (`type: \"httpJson\"`): V2EX Hot `\"https://www.v2ex.com/api/topics/hot.json\"` (`itemsPath: \"$\"`, `fieldMap: { \"title\": \"title\", \"url\": \"url\", \"replies\": \"replies\", \"node\": \"node.title\" }`); Zhihu Daily `\"https://news-at.zhihu.com/api/4/news/latest\"` (`itemsPath: \"$.stories\"`, `fieldMap: { \"title\": \"title\", \"url\": \"url\", \"hint\": \"hint\" }`).\n  - Global Tech & Dev Feeds: Hacker News Algolia Front Page `\"https://hn.algolia.com/api/v1/search?tags=front_page\"` (`itemsPath: \"$.hits\"`, `fieldMap: { \"title\": \"title\", \"url\": \"url\", \"points\": \"points\", \"comments\": \"num_comments\", \"author\": \"author\" }`); HN RSS `\"https://hnrss.org/frontpage\"`; GitHub Releases `\"https://api.github.com/repos/<owner>/<repo>/releases/latest\"` (`stateMap: { \"tag\": \"$.tag_name\", \"publishedAt\": \"$.published_at\", \"releaseUrl\": \"$.html_url\" }`).\n  - Global Weather, FX & Crypto JSON (`type: \"httpJson\"`): Open-Meteo `\"https://api.open-meteo.com/v1/forecast?latitude=39.90&longitude=116.40&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=auto\"` (`stateMap: { \"temp\": \"$.current.temperature_2m\", \"humidity\": \"$.current.relative_humidity_2m\", \"wind\": \"$.current.wind_speed_10m\" }`; or prefer built-in `\"type\": \"weather\"` source); FX Rates (`open.er-api.com`) `\"https://open.er-api.com/v6/latest/USD\"` (`stateMap: { \"cny\": \"$.rates.CNY\", \"eur\": \"$.rates.EUR\", \"jpy\": \"$.rates.JPY\", \"gbp\": \"$.rates.GBP\" }`); CoinGecko Crypto `\"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana&vs_currencies=usd,cny&include_24hr_change=true\"` (`stateMap: { \"btcUsd\": \"$.bitcoin.usd\", \"btcChange\": \"$.bitcoin.usd_24h_change\", \"ethUsd\": \"$.ethereum.usd\" }`).\n- Runtime auto-sets `state.sourceStatus` (`\"ok\"`|`\"loading\"`|`\"error\"`), `state.sourceError`, `state.sourceUpdatedAt`. Trigger manual refresh via `{ \"type\": \"source.refresh\", \"targetId\": \"<sourceId>\" }` (alias `\"sourceId\"`; omit ID to refresh all sources) on an inline filter/status row (do NOT build a duplicate top widget title bar).",
+      "goldenSnippetJson": "{\n  \"collections\": {\n    \"items\": {\n      \"maxItems\": 20\n    }\n  },\n  \"sources\": [\n    {\n      \"id\": \"zhihu\",\n      \"type\": \"httpJson\",\n      \"url\": \"https://news-at.zhihu.com/api/4/news/latest\",\n      \"intervalMs\": 600000,\n      \"targetCollection\": \"items\",\n      \"itemsPath\": \"$.stories\",\n      \"fieldMap\": {\n        \"title\": \"title\",\n        \"url\": \"url\",\n        \"sub\": \"hint\"\n      }\n    }\n  ],\n  \"root\": \"feed_list\",\n  \"elements\": {\n    \"feed_list\": {\n      \"type\": \"List\",\n      \"items\": \"items\",\n      \"itemTemplate\": \"feed_item_btn\"\n    },\n    \"feed_item_btn\": {\n      \"type\": \"Button\",\n      \"variant\": \"subtle\",\n      \"text\": \"${$item.rank}. ${$item.title}\",\n      \"onClick\": {\n        \"type\": \"url.open\",\n        \"url\": \"${$item.url}\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "visual-containers",
+      "emoji": "🗂️",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "grid",
+      "titleZh": "分页、图片与仪表",
+      "titleEn": "Tabs, Image & Gauges",
+      "summaryZh": "提供多页签容器 `Tabs`、圆角图片 `Image`、环形仪表 `RingGauge` 与条形图 `BarList`。",
+      "summaryEn": "Provides stateful `Tabs`, rounded `Image`, `RingGauge`, and proportional `BarList` charts.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "Tabs",
+        "Image",
+        "RingGauge",
+        "RadialGauge",
+        "BarList"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "标签页",
+        "分页",
+        "多面板",
+        "切换面板",
+        "图片",
+        "封面",
+        "图标",
+        "仪表盘",
+        "圆环图",
+        "环形进度",
+        "条形图",
+        "柱状图",
+        "占比",
+        "排行图",
+        "tabs",
+        "image",
+        "ringgauge",
+        "radialgauge",
+        "gauge",
+        "barlist",
+        "bar chart"
+      ],
+      "members": [
+        {
+          "name": "Tabs",
+          "kind": "Component",
+          "descriptionZh": "`bind: \"state.tab\"`, 按选中页签展示对应 `children`，避免单页过高",
+          "descriptionEn": "Segmented tab container rendering only the active tab"
+        },
+        {
+          "name": "Image",
+          "kind": "Component",
+          "descriptionZh": "`src` 支持本地文件、`${$device.mediaCover}` 或 `https://`，可设圆角与裁剪",
+          "descriptionEn": "Renders local attachments, album art, or HTTPS images"
+        },
+        {
+          "name": "RingGauge / BarList",
+          "kind": "Component",
+          "descriptionZh": "带中心大字数值的环形仪表，以及绑定集合的横向占比排行条",
+          "descriptionEn": "Circular KPI gauge and ranked horizontal proportion bars"
+        }
+      ],
+      "compactContractMarkdown": "- Use `Tabs` whenever a widget combines 3+ functional panels so initial height stays compact and scannable: declare `\"main_tabs\": { \"type\": \"Tabs\", \"bind\": \"state.activeTab\", \"children\": [\"tab_sys\", \"tab_media\"] }` in root `\"elements\"`, with each tab panel as a flat element like `\"tab_sys\": { \"type\": \"Stack\", \"title\": \"系统\", \"value\": \"sys\", \"icon\": \"line-chart\", \"children\": [\"...\"] }` and `\"tab_media\": { \"type\": \"Stack\", \"title\": \"媒体\", \"value\": \"media\", \"icon\": \"music\", \"children\": [\"...\"] }` (declare `\"activeTab\": \"sys\"` in root `\"state\"`).\n- `Image`: `{ \"type\": \"Image\", \"src\": \"${$device.mediaCover}\", \"width\": 44, \"height\": 44, \"stretch\": \"uniformToFill\", \"cornerRadius\": 8 }` (`stretch`: `\"uniform\"` | `\"uniformToFill\"` | `\"fill\"`).\n- `RingGauge` & `RadialGauge`: `RingGauge` (`progress`, `max`, `title`, `subtitle`, `unit`, `size`, `color`) or `RadialGauge` (`bind`/`progress`/`value`, `min`, `max`, `startAngle`, `sweepAngle`, `showTicks` + `tickStep`, `unit`, `animateChange`, `isInteractive` + `onChange` for drag-to-set).\n- `BarList`: `{ \"type\": \"BarList\", \"items\": \"items\", \"titleField\": \"title\", \"valueField\": \"value\", \"subtitleField\": \"sub\", \"unit\": \"%\", \"maxItems\": 6, \"color\": \"cyan\" }`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"tab\": \"gauge\"\n  },\n  \"sources\": [\n    {\n      \"type\": \"systemMetrics\",\n      \"intervalMs\": 2000\n    }\n  ],\n  \"root\": \"metrics_tabs\",\n  \"elements\": {\n    \"metrics_tabs\": {\n      \"type\": \"Tabs\",\n      \"bind\": \"state.tab\",\n      \"children\": [\n        \"tab_gauge\",\n        \"tab_proc\"\n      ]\n    },\n    \"tab_gauge\": {\n      \"type\": \"Stack\",\n      \"title\": \"核心负载\",\n      \"value\": \"gauge\",\n      \"icon\": \"line-chart\",\n      \"children\": [\n        \"gauge_grid\"\n      ]\n    },\n    \"gauge_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"cpu_gauge\",\n        \"ram_gauge\"\n      ]\n    },\n    \"cpu_gauge\": {\n      \"type\": \"RingGauge\",\n      \"progress\": \"${$sys.cpu.percent}\",\n      \"title\": \"CPU\",\n      \"unit\": \"%\",\n      \"color\": \"accent\"\n    },\n    \"ram_gauge\": {\n      \"type\": \"RingGauge\",\n      \"progress\": \"${$sys.memory.percent}\",\n      \"title\": \"RAM\",\n      \"subtitle\": \"${$sys.memory.compactText}\",\n      \"unit\": \"%\",\n      \"color\": \"cyan\"\n    },\n    \"tab_proc\": {\n      \"type\": \"Stack\",\n      \"title\": \"高占进程\",\n      \"value\": \"proc\",\n      \"icon\": \"list\",\n      \"children\": [\n        \"proc_bars\"\n      ]\n    },\n    \"proc_bars\": {\n      \"type\": \"BarList\",\n      \"items\": \"${$sys.topProcesses}\",\n      \"titleField\": \"name\",\n      \"valueField\": \"memoryMb\",\n      \"subtitleField\": \"memoryText\",\n      \"maxItems\": 5,\n      \"color\": \"cyan\"\n    }\n  }\n}"
+    },
+    {
+      "id": "calendar-grid",
+      "emoji": "📅",
+      "glyph": "",
+      "category": "Component",
+      "titleZh": "月历网格",
+      "titleEn": "Month Calendar Grid",
+      "summaryZh": "交互式月视图日历，自带月份切换、农历节日副标与日程标记点。",
+      "summaryEn": "Interactive 7x6 month matrix with lunar subtitles, date selection, and event dots.",
+      "requiredCapabilityIds": [
+        "calendar"
+      ],
+      "triggerNodeTypes": [
+        "CalendarGrid"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "日历",
+        "桌面日历",
+        "月历",
+        "月视图",
+        "日程表",
+        "排班",
+        "calendar",
+        "month grid",
+        "schedule"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"CalendarGrid\", \"bind\": \"state.selectedDate\" }",
+          "kind": "Component",
+          "descriptionZh": "点击日期自动更新绑定的 state 字段 (yyyy-MM-dd)",
+          "descriptionEn": "Interactive month grid updating bound state key on click"
+        },
+        {
+          "name": "collection / dateField",
+          "kind": "Property",
+          "descriptionZh": "关联数据集合，有记录的日期底部自动显示圆点",
+          "descriptionEn": "Highlights days that have matching records in the collection"
+        }
+      ],
+      "compactContractMarkdown": "- Do NOT construct a 42-cell calendar manually from raw `Grid`/`Stack` nodes; always use `{ \"type\": \"CalendarGrid\", \"bind\": \"state.selectedDate\", \"collection\": \"events\", \"dateField\": \"date\" }`.\n- Clicking a day updates `state.selectedDate` (`\"yyyy-MM-dd\"`), and `CalendarGrid` includes built-in month navigation and Lunar/Festival subtitles.\n- Pair `CalendarGrid` with a filtered `List` (`\"items\": \"events\", \"filter\": \"${state.selectedDate == '' || $item.date == state.selectedDate}\"`) and an inline `Input` row below for a complete schedule widget.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"selectedDate\": \"\",\n    \"draft\": \"\"\n  },\n  \"collections\": {\n    \"events\": {\n      \"maxItems\": 200\n    }\n  },\n  \"sources\": [\n    {\n      \"type\": \"calendar\",\n      \"intervalMs\": 60000\n    }\n  ],\n  \"root\": \"calendar_layout\",\n  \"elements\": {\n    \"calendar_layout\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"month_grid\",\n        \"event_list\"\n      ]\n    },\n    \"month_grid\": {\n      \"type\": \"CalendarGrid\",\n      \"bind\": \"state.selectedDate\",\n      \"collection\": \"events\",\n      \"dateField\": \"date\"\n    },\n    \"event_list\": {\n      \"type\": \"List\",\n      \"items\": \"events\",\n      \"filter\": \"${state.selectedDate == '' || $item.date == state.selectedDate}\",\n      \"emptyState\": {\n        \"icon\": \"calendar\",\n        \"title\": \"当日暂无日程\",\n        \"subtitle\": \"点击上方日期可切换查看\"\n      },\n      \"itemTemplate\": \"event_row\"\n    },\n    \"event_row\": {\n      \"type\": \"Text\",\n      \"text\": \"• ${$item.title} (${$item.date})\"\n    }\n  }\n}"
+    },
+    {
+      "id": "drop-zone",
+      "emoji": "📥",
+      "glyph": "",
+      "category": "Component",
+      "titleZh": "文件拖放区",
+      "titleEn": "File Drop Zone",
+      "summaryZh": "支持桌面单/多文件拖入或点击选文件/选文件夹，支持声明式 `$drop.*` 或 `logic.js` `ctx.event.files` 批量处理。",
+      "summaryEn": "Single/multi-file drop & file/folder picker surface populating `$drop.*` and `ctx.event.files`.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "DropZone"
+      ],
+      "triggerSourceOrActionTypes": [
+        "file.pick"
+      ],
+      "triggerTokenPrefixes": [
+        "$drop."
+      ],
+      "triggerKeywords": [
+        "拖拽",
+        "拖入",
+        "批量拖入",
+        "上传",
+        "选择文件",
+        "选择文件夹",
+        "文件篮",
+        "格式转换",
+        "图片压缩",
+        "dropzone",
+        "drag and drop",
+        "file picker",
+        "folder picker",
+        "converter"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"DropZone\", \"title\": \"拖入文件\", \"format\": \".png,.jpg\", \"onDrop\": [...] }",
+          "kind": "Component",
+          "descriptionZh": "支持单文件或多文件批量拖入；配合 `script.run` 可在 `ctx.event.files` 一次拿到全部文件数组",
+          "descriptionEn": "File drop & browse surface; passes full `ctx.event.files` batch to `script.run`"
+        },
+        {
+          "name": "${$drop.name} / ${$drop.path} / ${$drop.ext} / ${$drop.sizeText} / ${$drop.sizeBytes} / ${$drop.count} / ${$drop.text}",
+          "kind": "Token",
+          "descriptionZh": "文件名、完整路径、扩展名、格式化大小、字节数、批次文件数与前 8KB 文本内容",
+          "descriptionEn": "File name, full path, extension, formatted size, byte count, batch count, and first 8KB text"
+        },
+        {
+          "name": "{ \"type\": \"file.pick\", \"mode\": \"file|folder\", \"multiple\": true, \"accept\": \".mp4,.mov\" }",
+          "kind": "Action",
+          "descriptionZh": "弹出原生文件（单选/多选）或文件夹选择器，支持 `then` 或 `onComplete(ctx, res)`",
+          "descriptionEn": "Opens native single/multi-file or folder picker and chains `then` or `onComplete(ctx, res)`"
+        }
+      ],
+      "compactContractMarkdown": "- Render `{ \"type\": \"DropZone\", \"icon\": \"download\", \"title\": \"拖入文件或点击选择\", \"subtitle\": \"支持批量拖入\", \"format\": \".png,.jpg\", \"onDrop\": [ ...actions... ] }` for file queues, converters, or shelf workflows.\n- Declarative `onDrop` actions read `${$drop.name}`, `${$drop.path}`, `${$drop.ext}`, `${$drop.sizeText}`, `${$drop.sizeBytes}`, `${$drop.count}`, `${$drop.text}`; when `onDrop` invokes `script.run`, `logic.js` receives the entire dropped batch in one call via `ctx.event.files` (`[{ name, path, ext, sizeBytes, sizeText, modifiedIso }]`).\n- Action `file.pick` supports `\"mode\": \"file\"` (`\"multiple\": true`, `\"accept\": \".mp4,.mkv\"`) or `\"mode\": \"folder\"`, chaining `\"then\"` or `\"onComplete\": \"onPicked\"`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"targetFormat\": \"png\"\n  },\n  \"collections\": {\n    \"history\": {\n      \"maxItems\": 30\n    }\n  },\n  \"root\": \"image_drop_zone\",\n  \"elements\": {\n    \"image_drop_zone\": {\n      \"type\": \"DropZone\",\n      \"icon\": \"gallery\",\n      \"title\": \"拖入图片或点击选择文件\",\n      \"subtitle\": \"本地转换为目标格式，源文件保持不变\",\n      \"onDrop\": [\n        {\n          \"type\": \"file.transform\",\n          \"path\": \"${$drop.path}\",\n          \"format\": \"${state.targetFormat}\",\n          \"then\": [\n            {\n              \"type\": \"collection.prepend\",\n              \"collection\": \"history\",\n              \"item\": {\n                \"name\": \"${$transform.outputName}\",\n                \"path\": \"${$transform.outputPath}\",\n                \"size\": \"${$transform.sizeText}\"\n              }\n            }\n          ]\n        }\n      ]\n    }\n  }\n}"
+    },
+    {
+      "id": "control-tile",
+      "emoji": "🎚️",
+      "glyph": "",
+      "category": "Component",
+      "titleZh": "快捷控制磁贴",
+      "titleEn": "Quick Control Tile",
+      "summaryZh": "Windows 11 控制中心风格开关磁贴，支持图标、状态副标与高亮激活态。",
+      "summaryEn": "Windows 11 Quick Settings tile with icon, title, live subtitle, and active accent fill.",
+      "requiredCapabilityIds": [
+        "device-state",
+        "system-control"
+      ],
+      "triggerNodeTypes": [
+        "ControlTile"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "磁贴",
+        "控制中心",
+        "快捷开关",
+        "开关面板",
+        "wifi开关",
+        "蓝牙开关",
+        "control tile",
+        "quick settings",
+        "control center"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"ControlTile\", \"title\": \"Wi-Fi\", \"value\": \"${$device.wifiEnabled}\" }",
+          "kind": "Component",
+          "descriptionZh": "当 value 为 true 时高亮主题色，点击执行 onClick",
+          "descriptionEn": "Displays active accent fill when value is true; dispatches onClick"
+        }
+      ],
+      "compactContractMarkdown": "- `{ \"type\": \"ControlTile\", \"icon\": \"wifi\", \"title\": \"Wi-Fi\", \"subtitle\": \"${$device.wifiStatus}\", \"value\": \"${$device.wifiEnabled}\", \"onClick\": { \"type\": \"system.control\", \"targetId\": \"radio.wifiToggle\" } }`.\n- Place multiple `ControlTile` items inside `{ \"type\": \"Grid\", \"columns\": \"*,*\", \"spacing\": 8 }` — `Grid` automatically flows 4 or 6 tiles across multiple rows even when `rows`/`row` are omitted.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"deviceState\",\n      \"intervalMs\": 3000\n    }\n  ],\n  \"root\": \"control_grid\",\n  \"elements\": {\n    \"control_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"wifi_tile\",\n        \"bluetooth_tile\",\n        \"keep_awake_tile\",\n        \"recycle_bin_tile\"\n      ]\n    },\n    \"wifi_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"wifi\",\n      \"title\": \"Wi-Fi\",\n      \"subtitle\": \"${$device.wifiStatus}\",\n      \"value\": \"${$device.wifiEnabled}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"radio.wifiToggle\"\n      }\n    },\n    \"bluetooth_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"bluetooth\",\n      \"title\": \"蓝牙\",\n      \"subtitle\": \"${$device.bluetoothStatus}\",\n      \"value\": \"${$device.bluetoothEnabled}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"radio.bluetoothToggle\"\n      }\n    },\n    \"keep_awake_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"sun\",\n      \"title\": \"屏幕常亮\",\n      \"subtitle\": \"${$device.keepAwakeStatus}\",\n      \"value\": \"${$device.keepAwake}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"power.keepAwakeToggle\"\n      }\n    },\n    \"recycle_bin_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"delete\",\n      \"title\": \"回收站\",\n      \"subtitle\": \"${$device.recycleBinStatus}\",\n      \"value\": \"${$device.recycleBinCount != '0'}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"recycleBin.empty\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "micro-charts",
+      "emoji": "📈",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "dial",
+      "titleZh": "趋势线与热力图",
+      "titleEn": "Sparkline & Heatmap",
+      "summaryZh": "提供平滑面积折线图、打卡热力矩阵与语义配色进度条。",
+      "summaryEn": "Vector area sparklines, daily activity heatmaps, and progress indicators.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "Sparkline",
+        "HeatmapGrid",
+        "ProgressBar",
+        "ProgressRing",
+        "ProgressRow"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "折线图",
+        "图表",
+        "趋势",
+        "曲线",
+        "热力图",
+        "打卡",
+        "习惯",
+        "连续",
+        "进度条",
+        "sparkline",
+        "heatmap",
+        "habit",
+        "chart",
+        "streak",
+        "progress"
+      ],
+      "members": [
+        {
+          "name": "Sparkline",
+          "kind": "Component",
+          "descriptionZh": "绑定 `collection` 与 `valueField` 绘制平滑趋势折线图",
+          "descriptionEn": "Smooth vector trend line & area bound to a collection"
+        },
+        {
+          "name": "HeatmapGrid",
+          "kind": "Component",
+          "descriptionZh": "按日期聚合最近 `days` 天记录并渲染打卡热力图",
+          "descriptionEn": "Aggregates daily records into an intensity heatmap"
+        },
+        {
+          "name": "ProgressBar / ProgressRing / ProgressRow",
+          "kind": "Component",
+          "descriptionZh": "线性进度条、环形进度指示器与复合进度行",
+          "descriptionEn": "Theme-aware linear and radial progress indicators"
+        }
+      ],
+      "compactContractMarkdown": "- `Sparkline`: `{ \"type\": \"Sparkline\", \"title\": \"趋势\", \"collection\": \"logs\", \"valueField\": \"amount\", \"unit\": \"ml\", \"height\": 40, \"color\": \"accent\", \"showArea\": true, \"showLatest\": true }`.\n- `HeatmapGrid`: `{ \"type\": \"HeatmapGrid\", \"collection\": \"logs\", \"valueField\": \"score\", \"days\": 28, \"color\": \"success\" }`.\n- `ProgressBar` / `ProgressRing`: `{ \"type\": \"ProgressBar\", \"variant\": \"segmented\", \"height\": 14, \"progress\": \"${state.current}\", \"max\": 100, \"color\": \"emerald\" }` (`variant: \"segmented\"` renders modern status-board vertical rounded capsule ticks; omit `variant` for linear bar). Pair with `Badge` (`\"variant\": \"pill\"`, `\"icon\": \"check\"`) and `List` (`\"variant\": \"divided\"`) for clean status boards. Always use semantic colors (`accent`, `success`, `emerald`, `cyan`, `violet`, `warning`, `danger`).",
+      "goldenSnippetJson": "{\n  \"collections\": {\n    \"checkins\": {\n      \"maxItems\": 120\n    }\n  },\n  \"root\": \"checkin_heatmap\",\n  \"elements\": {\n    \"checkin_heatmap\": {\n      \"type\": \"HeatmapGrid\",\n      \"title\": \"近 28 天记录热力分布\",\n      \"collection\": \"checkins\",\n      \"valueField\": \"score\",\n      \"days\": 28,\n      \"color\": \"success\"\n    }\n  }\n}"
+    },
+    {
+      "id": "forms-inputs",
+      "emoji": "⌨️",
+      "glyph": "",
+      "category": "Component",
+      "titleZh": "表单与交互控件",
+      "titleEn": "Inputs & Controls",
+      "summaryZh": "提供输入框、下拉选择、分段切换、复选框、开关与双向实时滑块。",
+      "summaryEn": "Text inputs, selects, segmented pills, checkboxes, toggles, and two-way sliders.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "Input",
+        "TextArea",
+        "Select",
+        "Segmented",
+        "CheckBox",
+        "Toggle",
+        "Slider",
+        "NumberBox",
+        "IconButton"
+      ],
+      "triggerSourceOrActionTypes": [
+        "state.set",
+        "state.toggle",
+        "state.increment"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "输入",
+        "表单",
+        "下拉",
+        "选择",
+        "复选",
+        "滑块",
+        "计数器",
+        "按钮",
+        "备注",
+        "input",
+        "form",
+        "select",
+        "slider",
+        "stepper",
+        "counter"
+      ],
+      "members": [
+        {
+          "name": "Input / TextArea",
+          "kind": "Component",
+          "descriptionZh": "绑定 `bind: \"state.draft\"`，回车触发 `onSubmit`",
+          "descriptionEn": "Two-way state-bound text input dispatching `onSubmit`"
+        },
+        {
+          "name": "Select / Segmented",
+          "kind": "Component",
+          "descriptionZh": "下拉框或分段标签，绑定 `bind` 与 `options`",
+          "descriptionEn": "Dropdown or segmented pill selector"
+        },
+        {
+          "name": "Slider / Toggle / NumberBox",
+          "kind": "Component",
+          "descriptionZh": "变更时即时派发 `onChange`（通过 `${$value}` 读取新值）",
+          "descriptionEn": "Dispatches `onChange` immediately with `${$value}`"
+        }
+      ],
+      "compactContractMarkdown": "- Declare every bound `state.<key>` in root `\"state\"`.\n- `Input`: `{ \"type\": \"Input\", \"bind\": \"state.draft\", \"placeholder\": \"输入内容…\", \"onSubmit\": { ... } }`. Pair in `Grid` (`columns: \"*,Auto\"`) with `IconButton` (`icon: \"add\"`, `variant: \"accent\"`).\n- `Select` / `Segmented`: `{ \"type\": \"Segmented\", \"bind\": \"state.tab\", \"options\": [{ \"value\": \"all\", \"label\": \"全部\" }, { \"value\": \"open\", \"label\": \"未完成\" }] }`.\n- `Slider` (two modes):\n  1. Persisted state: `{ \"type\": \"Slider\", \"title\": \"目标阈值\", \"bind\": \"state.goal\", \"min\": 0, \"max\": 100, \"step\": 5, \"unit\": \"%\" }`.\n  2. Live two-way hardware control (NO extra submit button): `{ \"type\": \"Slider\", \"title\": \"主音量\", \"value\": \"${$device.volume}\", \"min\": 0, \"max\": 100, \"step\": 2, \"unit\": \"%\", \"onChange\": { \"type\": \"system.control\", \"targetId\": \"volume.set\", \"value\": \"${$value}\" } }`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"draft\": \"\"\n  },\n  \"collections\": {\n    \"items\": {\n      \"maxItems\": 100\n    }\n  },\n  \"root\": \"quick_add_row\",\n  \"elements\": {\n    \"quick_add_row\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,Auto\",\n      \"spacing\": 6,\n      \"children\": [\n        \"draft_input\",\n        \"add_item_btn\"\n      ]\n    },\n    \"draft_input\": {\n      \"type\": \"Input\",\n      \"column\": 0,\n      \"bind\": \"state.draft\",\n      \"placeholder\": \"输入新条目…\"\n    },\n    \"add_item_btn\": {\n      \"type\": \"IconButton\",\n      \"column\": 1,\n      \"icon\": \"add\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"collection.prepend\",\n        \"guard\": \"${state.draft != ''}\",\n        \"collection\": \"items\",\n        \"item\": {\n          \"title\": \"${state.draft}\"\n        },\n        \"then\": [\n          {\n            \"type\": \"state.set\",\n            \"key\": \"draft\",\n            \"value\": \"\"\n          }\n        ]\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "collections-lists",
+      "emoji": "📋",
+      "glyph": "",
+      "category": "Component",
+      "titleZh": "数据列表",
+      "titleEn": "Data Lists",
+      "summaryZh": "本地持久化记录列表，支持条件筛选、行悬停按钮与导出 Markdown。",
+      "summaryEn": "Persisted record collections with filtering, row hover actions, and Markdown export.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "List",
+        "FileChip",
+        "EmptyState"
+      ],
+      "triggerSourceOrActionTypes": [
+        "collection.prepend",
+        "collection.append",
+        "collection.update",
+        "collection.remove",
+        "collection.clear",
+        "collection.exportMarkdown"
+      ],
+      "triggerTokenPrefixes": [
+        "collections.",
+        "$item."
+      ],
+      "triggerKeywords": [
+        "持久化",
+        "集合",
+        "列表",
+        "清单",
+        "待办",
+        "任务",
+        "筛选",
+        "分类",
+        "记录",
+        "书签",
+        "速记",
+        "导出",
+        "list",
+        "todo",
+        "checklist",
+        "filter",
+        "collection",
+        "bookmark"
+      ],
+      "members": [
+        {
+          "name": "collections: { \"items\": { \"maxItems\": 200 } }",
+          "kind": "Schema",
+          "descriptionZh": "在根节点声明持久化数据集合与上限",
+          "descriptionEn": "Declares persistent collection schema in manifest root"
+        },
+        {
+          "name": "${$item.id} / ${$item.rank} / ${$item.timeText} / ${$item.dateText}",
+          "kind": "Token",
+          "descriptionZh": "列表项内置唯一 ID、序号与创建时间",
+          "descriptionEn": "Built-in item ID, 1-based rank, and timestamp tokens"
+        },
+        {
+          "name": "collection.prepend / collection.update / collection.remove / collection.clear",
+          "kind": "Action",
+          "descriptionZh": "新增、更新、删除单条记录或清空集合",
+          "descriptionEn": "Collection add, update, remove, and clear actions"
+        }
+      ],
+      "compactContractMarkdown": "- Always declare root `\"collections\": { \"items\": { \"maxItems\": 200, \"sort\": \"newestFirst\" } }`.\n- `List`: `{ \"type\": \"List\", \"items\": \"items\", \"filter\": \"${state.tab == 'all' || $item.done != true}\", \"emptyState\": { \"icon\": \"check\", \"title\": \"暂无记录\" }, \"itemTemplate\": \"item_row\", \"hoverActions\": [\"item_delete_btn\"] }` where `\"item_row\"` and `\"item_delete_btn\": { \"type\": \"IconButton\", \"icon\": \"delete\", \"size\": 24, \"variant\": \"danger\", \"onClick\": { \"type\": \"collection.remove\", \"collection\": \"items\", \"targetId\": \"${$item.id}\" } }` are flat elements in root `\"elements\"`.\n- Item tokens: `${$item.id}`, `${$item.rank}`, `${$item.index}`, `${$item.timeText}`, `${$item.dateText}`, `${$item.isToday}`. Summary tokens: `${collections.items.count}`, `${collections.items.todayCount}`, `${collections.items.latest.<field>}`.\n- Drag-Reorder & Double-Click Inline Edit on `List`: set `\"allowReorder\": true` (optional `\"onReorder\"`) so users can drag-sort items natively, and set `\"inlineEditField\": \"text\"` (optional `\"onInlineCommit\"`) so double-clicking a row edits that field inline.",
+      "goldenSnippetJson": "{\n  \"collections\": {\n    \"items\": {\n      \"maxItems\": 200\n    }\n  },\n  \"root\": \"task_list\",\n  \"elements\": {\n    \"task_list\": {\n      \"type\": \"List\",\n      \"items\": \"items\",\n      \"itemTemplate\": \"task_checkbox\"\n    },\n    \"task_checkbox\": {\n      \"type\": \"CheckBox\",\n      \"value\": \"${$item.done}\",\n      \"text\": \"${$item.title}\",\n      \"strikethrough\": true,\n      \"onToggle\": {\n        \"type\": \"collection.update\",\n        \"collection\": \"items\",\n        \"targetId\": \"${$item.id}\",\n        \"item\": {\n          \"done\": \"${$item.done != true}\"\n        }\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "display-and-audio",
+      "emoji": "🔆",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "音量、亮度与媒体",
+      "titleEn": "Volume, Brightness & Media",
+      "summaryZh": "双向滑块实时调节系统音量与屏幕亮度（支持笔记本与外接显示器），并控制媒体播放与输出设备。",
+      "summaryEn": "Two-way live sliders for master volume and display brightness, plus media transport and audio output switching.",
+      "requiredCapabilityIds": [
+        "device-state"
+      ],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "system.control"
+      ],
+      "triggerTokenPrefixes": [
+        "$device.brightness",
+        "$device.media",
+        "$device.audioDevice"
+      ],
+      "triggerKeywords": [
+        "亮度",
+        "屏幕亮度",
+        "调亮度",
+        "音量滑块",
+        "输出设备",
+        "耳机切换",
+        "扬声器",
+        "音乐控制",
+        "切歌",
+        "专辑封面",
+        "brightness",
+        "audio output",
+        "speaker",
+        "media player"
+      ],
+      "members": [
+        {
+          "name": "brightness.set / brightness.step",
+          "kind": "Command",
+          "descriptionZh": "配合 `${$value}` 实时调节屏幕亮度百分比 (0-100)",
+          "descriptionEn": "Sets display brightness (0-100) via LCD/DDC-CI using `${$value}`"
+        },
+        {
+          "name": "volume.set / volume.muteToggle / audio.output",
+          "kind": "Command",
+          "descriptionZh": "实时调节主音量 (0-100)、切换静音或打开输出设备面板",
+          "descriptionEn": "Adjusts master volume, toggles mute, or opens audio output selector"
+        },
+        {
+          "name": "media.playPause / media.previous / media.next",
+          "kind": "Command",
+          "descriptionZh": "控制媒体播放；播放/暂停图标绑定 `${$device.mediaToggleIcon}`",
+          "descriptionEn": "Controls active SMTC media session; bind icon to `${$device.mediaToggleIcon}`"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"deviceState\", \"intervalMs\": 3000 }]`.\n- **Two-Way Live Sliders (Zero Dummy State & Zero Redundant Buttons)**:\n  - Volume: `{ \"type\": \"Slider\", \"title\": \"音量\", \"value\": \"${$device.volume}\", \"min\": 0, \"max\": 100, \"step\": 2, \"unit\": \"%\", \"onChange\": { \"type\": \"system.control\", \"targetId\": \"volume.set\", \"value\": \"${$value}\" } }`.\n  - Brightness: `{ \"type\": \"Slider\", \"title\": \"亮度\", \"value\": \"${$device.brightness}\", \"min\": 0, \"max\": 100, \"step\": 5, \"unit\": \"%\", \"onChange\": { \"type\": \"system.control\", \"targetId\": \"brightness.set\", \"value\": \"${$value}\" } }`.\n- Audio device label & quick switcher: display `${$device.audioDeviceName}` and invoke `{ \"type\": \"system.control\", \"targetId\": \"audio.output\" }`.\n- Media transport icons (always use canonical semantic icon names, NEVER raw PUA hex or BMP symbols): Previous `\"skip-previous\"`, Play/Pause `\"${$device.mediaToggleIcon}\"`, Next `\"skip-next\"`, Album cover `\"${$device.mediaCover}\"`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"deviceState\",\n      \"intervalMs\": 3000\n    }\n  ],\n  \"root\": \"audio_display_card\",\n  \"elements\": {\n    \"audio_display_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"volume_slider\",\n        \"brightness_slider\",\n        \"audio_output_row\"\n      ]\n    },\n    \"volume_slider\": {\n      \"type\": \"Slider\",\n      \"title\": \"系统音量\",\n      \"value\": \"${$device.volume}\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 2,\n      \"unit\": \"%\",\n      \"onChange\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"volume.set\",\n        \"value\": \"${$value}\"\n      }\n    },\n    \"brightness_slider\": {\n      \"type\": \"Slider\",\n      \"title\": \"屏幕亮度\",\n      \"value\": \"${$device.brightness}\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 5,\n      \"unit\": \"%\",\n      \"onChange\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"brightness.set\",\n        \"value\": \"${$value}\"\n      }\n    },\n    \"audio_output_row\": {\n      \"type\": \"KeyValueRow\",\n      \"label\": \"音频输出\",\n      \"value\": \"${$device.audioDeviceName}\"\n    }\n  }\n}"
+    },
+    {
+      "id": "clipboard-workspace",
+      "emoji": "📋",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "剪贴板与文本转换",
+      "titleEn": "Clipboard & Text Transform",
+      "summaryZh": "识别剪贴板内容类型（JWT、JSON、Unicode 转义、时间戳等），并提供 25 种本地纯内存编码、格式化与哈希算子。",
+      "summaryEn": "Inspects live clipboard text (JWT, JSON, Unicode escapes, timestamps) and runs 25 local in-memory formatting, encoding, timestamp, and hash operations.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "clipboard",
+        "text.transform",
+        "clipboard.copy",
+        "clipboard.captureImage"
+      ],
+      "triggerTokenPrefixes": [
+        "$clipboard."
+      ],
+      "triggerKeywords": [
+        "剪贴板",
+        "截图粘贴",
+        "粘贴图片",
+        "文本转换",
+        "json美化",
+        "json压缩",
+        "url编码",
+        "url解码",
+        "时间戳转换",
+        "uuid生成",
+        "字数统计",
+        "大小写转换",
+        "编码解码",
+        "开发者工具",
+        "jwt解码",
+        "unicode转中文",
+        "瑞士军刀",
+        "clipboard",
+        "paste image",
+        "clipboard image",
+        "text transform",
+        "urlencode",
+        "base64",
+        "uuid",
+        "timestamp",
+        "jwt",
+        "jwt decode",
+        "unicode escape",
+        "word count"
+      ],
+      "members": [
+        {
+          "name": "sources: [{ \"type\": \"clipboard\", \"intervalMs\": 2000 }]",
+          "kind": "Source",
+          "descriptionZh": "订阅剪贴板纯文本与图片可用态（`${$clipboard.hasImage}`）快照",
+          "descriptionEn": "Subscribes to system clipboard plain-text and bitmap availability (`${$clipboard.hasImage}`)"
+        },
+        {
+          "name": "${$clipboard.preview} / ${$clipboard.kindLabel} / ${$clipboard.length} / ${$clipboard.lines} / ${$clipboard.hasImage}",
+          "kind": "Token",
+          "descriptionZh": "单行预览、类型标签、字符数、行数与剪贴板含图片布尔标识",
+          "descriptionEn": "Single-line preview, content type label, char length, line count, and clipboard bitmap flag"
+        },
+        {
+          "name": "{ \"type\": \"clipboard.captureImage\", \"key\": \"lastShot\", \"onComplete\": \"onShotSaved\" }",
+          "kind": "Action",
+          "descriptionZh": "一键捕获剪贴板位图（兼容系统截图/微信/QQ DIB）保存为本地 PNG 并返回路径（需本地文件权限）",
+          "descriptionEn": "Captures clipboard bitmap/DIB to a local PNG file and returns `{ path, name, width, height, sizeBytes }` (`LocalFileAccess`)"
+        },
+        {
+          "name": "{ \"type\": \"text.transform\", \"format\": \"jsonPretty\", \"key\": \"output\", \"mode\": \"copy\" }",
+          "kind": "Action",
+          "descriptionZh": "转换文本并写入 `state.<key>`；`mode: \"copy\"` 可同步复制结果",
+          "descriptionEn": "Transforms text in-memory into `state.<key>` with optional clipboard copy"
+        },
+        {
+          "name": "jsonPretty / jsonMinify / urlEncode / base64Encode / timestampToDate / uuid / sha256",
+          "kind": "Enum",
+          "descriptionZh": "内置 25 种免联网文本转换算子（含对应解码、大小写、字数统计与 MD5）",
+          "descriptionEn": "25 built-in deterministic text transform formats"
+        },
+        {
+          "name": "jwtDecode / unicodeEscape / unicodeUnescape / jsonEscape / jsonUnescape / uuidNoDash / jsonPretty4 / dateToTimestampMs",
+          "kind": "Enum",
+          "descriptionZh": "JWT 离线解码（含 exp/nbf 过期诊断与 `${$transform.jwtState}`）、中文 Unicode 转义往返、JSON 字符串转义与无横线 UUID",
+          "descriptionEn": "Offline JWT decode with exp/nbf diagnostics (`${$transform.jwtState}`), CJK Unicode escape round-trips, JSON string escapes, and no-dash UUIDs"
+        },
+        {
+          "name": "${jwtdecode($clipboard.text)} / ${unicodeunescape(state.draft)} / ${uuid('upper')}",
+          "kind": "Function",
+          "descriptionZh": "以上算子亦可直接在字符串插值表达式中调用（零联网、零反射）；失败时返回空字符串",
+          "descriptionEn": "The same operators are callable inline inside string interpolation expressions (offline, zero-reflection); failures return an empty string"
+        }
+      ],
+      "compactContractMarkdown": "- Optional `\"sources\": [{ \"type\": \"clipboard\", \"intervalMs\": 2000 }]` exposes `${$clipboard.text}`, `${$clipboard.preview}`, `${$clipboard.length}`, `${$clipboard.lines}`, `${$clipboard.kind}` (`\"json\"`|`\"jwt\"`|`\"unicodeEscape\"`|`\"url\"`|`\"urlEncoded\"`|`\"base64\"`|`\"timestamp\"`|`\"hexColor\"`|`\"number\"`|`\"text\"`|`\"image\"`|`\"empty\"`), `${$clipboard.kindLabel}`, `${$clipboard.hasText}`, `${$clipboard.hasImage}`.\n- Action `clipboard.captureImage`: `{ \"type\": \"clipboard.captureImage\", \"path\": \"${$settings.saveDir}\", \"key\": \"lastImagePath\", \"onComplete\": \"onImageCaptured\" }` saves the current clipboard bitmap/screenshot as PNG (`path` defaults to widget `files/` when omitted) and passes `res.data = { path, name, width, height, sizeBytes, sizeText }` to `onComplete` (`LocalFileAccess`).\n- Action `text.transform`:\n  `{ \"type\": \"text.transform\", \"format\": \"jsonPretty\", \"text\": \"${state.rawText}\", \"key\": \"resultText\", \"mode\": \"copy\" }`\n  - If `\"text\"` is omitted and `clipboard` source is active, transforms current clipboard text directly.\n  - Writes output to `state.<key>` (plus `state.transformOutput` and `${$transform.resultText}`); `\"mode\": \"copy\"` also copies the result to the system clipboard.\n  - Supported `format` operations: `\"jsonPretty\"`, `\"jsonPretty4\"`, `\"jsonMinify\"`, `\"jsonEscape\"`, `\"jsonUnescape\"`, `\"urlEncode\"`, `\"urlDecode\"`, `\"base64Encode\"`, `\"base64Decode\"`, `\"jwtDecode\"`, `\"unicodeEscape\"`, `\"unicodeUnescape\"`, `\"timestampToDate\"`, `\"dateToTimestamp\"`, `\"dateToTimestampMs\"`, `\"uuid\"`, `\"uuidNoDash\"` (plus case variants `\"uuidUpper\"` / `\"uuidNoDashUpper\"`), `\"upper\"`, `\"lower\"`, `\"trim\"`, `\"wordCount\"`, `\"sha256\"`, `\"md5\"`.\n  - `jwtDecode` is offline Base64Url decode only (signature is NOT verified); it prepends an exp/nbf status line and sets `${$transform.jwtState}` to `\"valid\"`, `\"expired\"`, `\"noexp\"`, or `\"invalid\"` after the action.\n  - Every operator above is also callable directly inside expressions: `${jwtdecode($clipboard.text)}`, `${unicodeunescape('\\u4e2d\\u6587')}`, `${uuid()}`, `${timestamptodate(1700000000)}`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"input\": \"\",\n    \"output\": \"\"\n  },\n  \"sources\": [\n    {\n      \"type\": \"clipboard\",\n      \"intervalMs\": 2000\n    }\n  ],\n  \"root\": \"clipboard_root\",\n  \"elements\": {\n    \"clipboard_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"clipboard_card\",\n        \"raw_input\",\n        \"transform_actions_grid\",\n        \"output_text\"\n      ]\n    },\n    \"clipboard_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"clipboard_summary_row\",\n        \"clipboard_preview_text\"\n      ]\n    },\n    \"clipboard_summary_row\": {\n      \"type\": \"KeyValueRow\",\n      \"label\": \"当前剪贴板 (${$clipboard.kindLabel})\",\n      \"value\": \"${$clipboard.length} 字符\"\n    },\n    \"clipboard_preview_text\": {\n      \"type\": \"Text\",\n      \"text\": \"${$clipboard.preview}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\",\n      \"maxLines\": 2\n    },\n    \"raw_input\": {\n      \"type\": \"TextArea\",\n      \"bind\": \"state.input\",\n      \"placeholder\": \"输入待处理文本（留空则直接处理剪贴板内容）…\"\n    },\n    \"transform_actions_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*,*\",\n      \"spacing\": 6,\n      \"children\": [\n        \"json_pretty_btn\",\n        \"base64_encode_btn\",\n        \"timestamp_btn\"\n      ]\n    },\n    \"json_pretty_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"JSON 格式化\",\n      \"onClick\": {\n        \"type\": \"text.transform\",\n        \"format\": \"jsonPretty\",\n        \"text\": \"${state.input != '' ? state.input : $clipboard.text}\",\n        \"key\": \"output\",\n        \"mode\": \"copy\"\n      }\n    },\n    \"base64_encode_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Base64 编码\",\n      \"onClick\": {\n        \"type\": \"text.transform\",\n        \"format\": \"base64Encode\",\n        \"text\": \"${state.input != '' ? state.input : $clipboard.text}\",\n        \"key\": \"output\",\n        \"mode\": \"copy\"\n      }\n    },\n    \"timestamp_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"时间戳转换\",\n      \"onClick\": {\n        \"type\": \"text.transform\",\n        \"format\": \"timestampToDate\",\n        \"text\": \"${state.input != '' ? state.input : $clipboard.text}\",\n        \"key\": \"output\",\n        \"mode\": \"copy\"\n      }\n    },\n    \"output_text\": {\n      \"type\": \"Text\",\n      \"text\": \"${state.output}\",\n      \"style\": \"mono\",\n      \"maxLines\": 6,\n      \"when\": \"${state.output != ''}\"\n    }\n  }\n}"
+    },
+    {
+      "id": "quick-launcher",
+      "emoji": "🚀",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "快捷启动器",
+      "titleEn": "Quick Launcher",
+      "summaryZh": "一键打开常用系统文件夹（下载、桌面、文档）、开发笔记工具协议（VS Code、Obsidian、截图）及本地路径。",
+      "summaryEn": "Opens standard user folders, whitelisted app URI protocols, and local files/folders safely.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "launcher.open"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "启动器",
+        "快捷启动",
+        "工作台",
+        "打开文件夹",
+        "下载目录",
+        "桌面目录",
+        "打开vscode",
+        "obsidian",
+        "截图",
+        "计算器",
+        "导航面板",
+        "launcher",
+        "quick launch",
+        "open folder",
+        "shortcut"
+      ],
+      "members": [
+        {
+          "name": "downloads / desktop / documents / pictures / userprofile",
+          "kind": "Folder",
+          "descriptionZh": "通过 `targetId` 打开常用系统用户目录",
+          "descriptionEn": "Opens standard user folders via `targetId`"
+        },
+        {
+          "name": "vscode:// / cursor:// / obsidian:// / ms-screenclip: / ms-calculator:",
+          "kind": "URI",
+          "descriptionZh": "调起受信任桌面应用、屏幕截图或系统小工具协议",
+          "descriptionEn": "Invokes whitelisted app and Windows utility URI schemes"
+        },
+        {
+          "name": "{ \"type\": \"launcher.open\", \"path\": \"D:/Projects\" }",
+          "kind": "Action",
+          "descriptionZh": "打开本地文件夹或文件（社区导入包首次运行带授权确认）",
+          "descriptionEn": "Opens an existing local folder or file with consent protection"
+        }
+      ],
+      "compactContractMarkdown": "- Use `{ \"type\": \"launcher.open\", \"targetId\": \"<target>\" }` (or `\"path\"` / `\"url\"`) for quick-launch docks and workspace hubs:\n  - Known folders: `\"downloads\"`, `\"desktop\"`, `\"documents\"`, `\"pictures\"`, `\"music\"`, `\"videos\"`, `\"userprofile\"`.\n  - Built-in Windows utilities: `\"ms-screenclip:\"` (screen snip), `\"ms-calculator:\"`, `\"ms-clock:\"`, `\"ms-paint:\"`, `\"ms-todo:\"`.\n  - Developer & knowledge URIs: `\"vscode://file/...\"`, `\"cursor://...\"`, `\"obsidian://open\"`, `\"notion://...\"`, `\"https://...\"`.\n  - Local paths: existing file or folder path (never executes arbitrary shell/cmd scripts).",
+      "goldenSnippetJson": "{\n  \"root\": \"launcher_grid\",\n  \"elements\": {\n    \"launcher_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"downloads_btn\",\n        \"documents_btn\",\n        \"screenshot_btn\",\n        \"calculator_btn\"\n      ]\n    },\n    \"downloads_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"下载目录\",\n      \"icon\": \"download\",\n      \"onClick\": {\n        \"type\": \"launcher.open\",\n        \"targetId\": \"downloads\"\n      }\n    },\n    \"documents_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"文档目录\",\n      \"icon\": \"file\",\n      \"onClick\": {\n        \"type\": \"launcher.open\",\n        \"targetId\": \"documents\"\n      }\n    },\n    \"screenshot_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"屏幕截图\",\n      \"icon\": \"camera\",\n      \"onClick\": {\n        \"type\": \"launcher.open\",\n        \"targetId\": \"ms-screenclip:\"\n      }\n    },\n    \"calculator_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"计算器\",\n      \"icon\": \"calculator\",\n      \"onClick\": {\n        \"type\": \"launcher.open\",\n        \"targetId\": \"ms-calculator:\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "file-transform",
+      "emoji": "🔄",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "文件格式转换",
+      "titleEn": "File Converter",
+      "summaryZh": "本机离线转换图片格式与尺寸（PNG/JPG/BMP/TIFF/ICO）、互转 CSV 与 JSON、计算文件哈希校验值。",
+      "summaryEn": "Offline local image converter (PNG/JPG/BMP/TIFF/ICO + resize) and CSV/JSON/Markdown/SHA256 file processor.",
+      "requiredCapabilityIds": [
+        "drop-zone"
+      ],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "file.transform",
+        "file.pick"
+      ],
+      "triggerTokenPrefixes": [
+        "$transform."
+      ],
+      "triggerKeywords": [
+        "转换",
+        "格式转换",
+        "转png",
+        "转jpg",
+        "转ico",
+        "图标生成",
+        "图片压缩",
+        "缩放",
+        "csv转json",
+        "json转csv",
+        "json格式化",
+        "哈希",
+        "校验",
+        "sha256",
+        "md5",
+        "base64",
+        "convert",
+        "image format",
+        "resize",
+        "hash",
+        "checksum"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"file.transform\", \"path\": \"${$drop.path}\", \"format\": \"png\" }",
+          "kind": "Action",
+          "descriptionZh": "转换文件生成新副本，原文件保持不变，可在 `then` 中接续处理",
+          "descriptionEn": "Non-destructively converts input file and populates `$transform.*`"
+        },
+        {
+          "name": "png / jpg / bmp / tiff / ico / csvToJson / jsonToCsv / mdToHtml / sha256",
+          "kind": "Enum",
+          "descriptionZh": "支持主流图片格式缩放互转、结构化数据转换与哈希校验",
+          "descriptionEn": "Supported image, structured data, and checksum formats"
+        },
+        {
+          "name": "${$transform.outputPath} / ${$transform.outputName} / ${$transform.sizeText} / ${$transform.resultText}",
+          "kind": "Token",
+          "descriptionZh": "输出路径、新文件名、文件大小与转换结果或哈希值",
+          "descriptionEn": "Output path, file name, formatted size, and result/hash text"
+        }
+      ],
+      "compactContractMarkdown": "- Pair `DropZone` with `{ \"type\": \"file.transform\", \"path\": \"${$drop.path}\", \"format\": \"${state.format}\", \"value\": \"${state.maxWidth}\", \"then\": [ ... ] }`.\n- Supported `format` values ONLY:\n  - Images (WinRT WIC native): `\"png\"`, `\"jpg\"`, `\"bmp\"`, `\"tiff\"`, `\"ico\"` (optional `\"value\"` max width px e.g. `\"1024\"`). Note: `\"webp\"` output is NOT supported because Windows WIC has no built-in WebP encoder.\n  - Data/Checksum: `\"csvToJson\"`, `\"jsonToCsv\"`, `\"jsonPretty\"`, `\"jsonMinify\"`, `\"mdToHtml\"`, `\"mdToTxt\"`, `\"base64Encode\"`, `\"base64Decode\"`, `\"sha256\"`, `\"md5\"`.\n  - Video/Audio/Office/PDF transcoding is NOT supported in the sandbox.\n- Inside `\"then\"`, read `${$transform.outputName}`, `${$transform.outputPath}`, `${$transform.sizeText}`, `${$transform.resultText}`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"format\": \"png\"\n  },\n  \"collections\": {\n    \"outputs\": {\n      \"maxItems\": 30\n    }\n  },\n  \"root\": \"converter_root\",\n  \"elements\": {\n    \"converter_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"format_selector\",\n        \"image_drop_zone\",\n        \"outputs_list\"\n      ]\n    },\n    \"format_selector\": {\n      \"type\": \"Segmented\",\n      \"bind\": \"state.format\",\n      \"options\": [\n        {\n          \"value\": \"png\",\n          \"label\": \"PNG\"\n        },\n        {\n          \"value\": \"jpg\",\n          \"label\": \"JPG\"\n        },\n        {\n          \"value\": \"bmp\",\n          \"label\": \"BMP\"\n        },\n        {\n          \"value\": \"ico\",\n          \"label\": \"ICO\"\n        }\n      ]\n    },\n    \"image_drop_zone\": {\n      \"type\": \"DropZone\",\n      \"icon\": \"gallery\",\n      \"title\": \"拖入图片或点击选择\",\n      \"subtitle\": \"自动转为 ${state.format} 并保存在原目录\",\n      \"onDrop\": [\n        {\n          \"type\": \"file.transform\",\n          \"path\": \"${$drop.path}\",\n          \"format\": \"${state.format}\",\n          \"then\": [\n            {\n              \"type\": \"collection.prepend\",\n              \"collection\": \"outputs\",\n              \"item\": {\n                \"name\": \"${$transform.outputName}\",\n                \"path\": \"${$transform.outputPath}\"\n              }\n            }\n          ]\n        }\n      ]\n    },\n    \"outputs_list\": {\n      \"type\": \"List\",\n      \"items\": \"outputs\",\n      \"itemTemplate\": \"output_chip\"\n    },\n    \"output_chip\": {\n      \"type\": \"FileChip\",\n      \"fileName\": \"${$item.name}\",\n      \"filePath\": \"${$item.path}\"\n    }\n  }\n}"
+    },
+    {
+      "id": "system-control",
+      "emoji": "⚙️",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "系统开关与设置",
+      "titleEn": "System Toggles & Settings",
+      "summaryZh": "切换 Wi-Fi、蓝牙、屏幕常亮防休眠，执行锁屏、清空回收站或直达 Windows 系统设置页。",
+      "summaryEn": "Toggles Wi-Fi, Bluetooth, Keep-Awake, locks workstation, empties Recycle Bin, or opens Windows Settings pages.",
+      "requiredCapabilityIds": [
+        "device-state"
+      ],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "system.control",
+        "system.openSetting"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "开关wifi",
+        "开关蓝牙",
+        "调音量",
+        "静音",
+        "调亮度",
+        "锁屏",
+        "清空回收站",
+        "防休眠",
+        "屏幕常亮",
+        "切歌",
+        "播放暂停",
+        "系统设置",
+        "任务管理器",
+        "control center",
+        "toggle wifi",
+        "toggle bluetooth",
+        "lock screen",
+        "empty recycle bin",
+        "keep awake"
+      ],
+      "members": [
+        {
+          "name": "radio.wifiToggle / radio.bluetoothToggle",
+          "kind": "Command",
+          "descriptionZh": "切换 Wi-Fi 或蓝牙开关；受限设备自动跳转对应系统设置页",
+          "descriptionEn": "Toggles Wi-Fi or Bluetooth radio with ms-settings fallback"
+        },
+        {
+          "name": "power.keepAwakeToggle / power.lock / recycleBin.empty",
+          "kind": "Command",
+          "descriptionZh": "切换屏幕常亮、锁定电脑或清空系统回收站",
+          "descriptionEn": "Toggles Keep-Awake, locks PC, or empties Recycle Bin"
+        },
+        {
+          "name": "{ \"type\": \"system.openSetting\", \"targetId\": \"display\" }",
+          "kind": "Action",
+          "descriptionZh": "跳转系统设置：`wifi`, `bluetooth`, `sound`, `display`, `nightlight`, `power`, `storage`, `windowsupdate`, `taskmgr`",
+          "descriptionEn": "Opens whitelisted Windows Settings page or Task Manager"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `\"sources\": [{ \"type\": \"deviceState\", \"intervalMs\": 3000 }]` so UI reflects live hardware state.\n- `system.control` (`\"targetId\"` commands):\n  - Audio & Display: `\"volume.set\"` (`\"value\": \"${$value}\"`), `\"volume.step\"` (`\"value\": \"10\"` or `\"-10\"`), `\"volume.muteToggle\"`, `\"audio.output\"`, `\"brightness.set\"` (`\"value\": \"${$value}\"`), `\"brightness.step\"`.\n  - Radios: `\"radio.wifiToggle\"`, `\"radio.bluetoothToggle\"` (auto-falls back to `ms-settings:` if restricted).\n  - Media: `\"media.playPause\"`, `\"media.next\"`, `\"media.previous\"`.\n  - Power & Desktop: `\"power.keepAwakeToggle\"`, `\"power.lock\"`, `\"recycleBin.empty\"`.\n- `system.openSetting` (`\"targetId\"`): `\"wifi\"`, `\"network\"`, `\"bluetooth\"`, `\"hotspot\"`, `\"sound\"`, `\"volume\"`, `\"display\"`, `\"nightlight\"`, `\"power\"`, `\"battery\"`, `\"storage\"`, `\"clipboard\"`, `\"notifications\"`, `\"personalization\"`, `\"colors\"`, `\"apps\"`, `\"windowsupdate\"`, `\"taskmgr\"`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"deviceState\",\n      \"intervalMs\": 3000\n    }\n  ],\n  \"root\": \"control_root\",\n  \"elements\": {\n    \"control_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"toggles_grid\",\n        \"volume_slider\"\n      ]\n    },\n    \"toggles_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"wifi_tile\",\n        \"keep_awake_tile\"\n      ]\n    },\n    \"wifi_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"wifi\",\n      \"title\": \"Wi-Fi\",\n      \"subtitle\": \"${$device.wifiStatus}\",\n      \"value\": \"${$device.wifiEnabled}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"radio.wifiToggle\"\n      }\n    },\n    \"keep_awake_tile\": {\n      \"type\": \"ControlTile\",\n      \"icon\": \"sun\",\n      \"title\": \"屏幕常亮\",\n      \"subtitle\": \"${$device.keepAwakeStatus}\",\n      \"value\": \"${$device.keepAwake}\",\n      \"onClick\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"power.keepAwakeToggle\"\n      }\n    },\n    \"volume_slider\": {\n      \"type\": \"Slider\",\n      \"title\": \"系统音量\",\n      \"value\": \"${$device.volume}\",\n      \"min\": 0,\n      \"max\": 100,\n      \"step\": 2,\n      \"unit\": \"%\",\n      \"onChange\": {\n        \"type\": \"system.control\",\n        \"targetId\": \"volume.set\",\n        \"value\": \"${$value}\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "ai-run",
+      "emoji": "✨",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "AI 文本处理",
+      "titleEn": "In-Widget AI Task",
+      "summaryZh": "在格子内调用 AI 完成摘要提炼、待办拆解、翻译或润色，并将结果自动写入状态或列表。",
+      "summaryEn": "Runs structured AI prompts inside the widget and maps JSON fields into state or collections.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "ai.run"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "智能提炼",
+        "总结",
+        "摘要",
+        "拆解",
+        "翻译",
+        "润色",
+        "分类",
+        "会议纪要",
+        "周报",
+        "ai处理",
+        "summarize",
+        "translate",
+        "extract",
+        "polish",
+        "ai.run"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"ai.run\", \"prompt\": \"...\", \"collection\": \"items\", \"fieldMap\": {...} }",
+          "kind": "Action",
+          "descriptionZh": "执行单并发 AI 任务，自动更新 `state.aiStatus` 并在失败时保留输入内容",
+          "descriptionEn": "Runs single-flight structured AI task with status tracking and input preservation"
+        },
+        {
+          "name": "${state.aiStatus} / ${state.aiError} / ${state.aiUpdatedAt}",
+          "kind": "Token",
+          "descriptionZh": "运行状态 (`idle` | `running` | `error`)、错误提示与最近完成时间",
+          "descriptionEn": "Execution status, error message, and last completion time"
+        }
+      ],
+      "compactContractMarkdown": "- `{ \"type\": \"ai.run\", \"guard\": \"${state.draft != ''}\", \"prompt\": \"拆解以下待办事项：\\n${state.draft}\", \"stateMap\": { \"summary\": \"summary\" }, \"collection\": \"items\", \"mode\": \"prepend\", \"itemsPath\": \"items\", \"fieldMap\": { \"title\": \"title\" }, \"then\": [{ \"type\": \"state.set\", \"key\": \"draft\", \"value\": \"\" }] }`.\n- Auto-manages `state.aiStatus` (`\"idle\"`|`\"running\"`|`\"error\"`), `state.aiError`, `state.aiUpdatedAt`. Clear `draft` inside `\"then\"` so failed requests preserve user input.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"draft\": \"\"\n  },\n  \"collections\": {\n    \"tasks\": {\n      \"maxItems\": 100\n    }\n  },\n  \"root\": \"extract_tasks_btn\",\n  \"elements\": {\n    \"extract_tasks_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"拆解待办事项\",\n      \"icon\": \"sparkles\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"ai.run\",\n        \"guard\": \"${state.draft != ''}\",\n        \"prompt\": \"将以下内容拆解为可执行待办事项(items: title)：\\n${state.draft}\",\n        \"collection\": \"tasks\",\n        \"itemsPath\": \"items\",\n        \"fieldMap\": {\n          \"title\": \"title\"\n        },\n        \"then\": [\n          {\n            \"type\": \"state.set\",\n            \"key\": \"draft\",\n            \"value\": \"\"\n          }\n        ]\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "notifications-reminders",
+      "emoji": "🔔",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "通知与轻提示",
+      "titleEn": "Notifications & Toasts",
+      "summaryZh": "发送 Windows 11 系统右下角弹窗提醒，或在当前格子内展示轻量操作反馈提示。",
+      "summaryEn": "Sends Windows 11 Action Center toast notifications or subtle in-widget feedback banners.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "reminder.notify",
+        "toast.show"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "提醒",
+        "弹窗",
+        "系统通知",
+        "喝水提醒",
+        "久坐提醒",
+        "闹钟",
+        "notification",
+        "reminder",
+        "toast",
+        "alert"
+      ],
+      "members": [
+        {
+          "name": "{ \"type\": \"reminder.notify\", \"text\": \"标题\", \"message\": \"内容\" }",
+          "kind": "Action",
+          "descriptionZh": "发送原生 Windows 系统通知弹窗",
+          "descriptionEn": "Sends a native Windows 11 Action Center notification"
+        },
+        {
+          "name": "{ \"type\": \"toast.show\", \"message\": \"已保存\" }",
+          "kind": "Action",
+          "descriptionZh": "在当前格子内显示非打扰轻提示条",
+          "descriptionEn": "Shows a lightweight in-widget feedback banner"
+        }
+      ],
+      "compactContractMarkdown": "- Use `{ \"type\": \"reminder.notify\", \"text\": \"标题\", \"message\": \"提醒内容\" }` to send a Windows 11 system notification.\n- Use `{ \"type\": \"toast.show\", \"message\": \"已保存\" }` for subtle in-widget confirmation banners.",
+      "goldenSnippetJson": "{\n  \"root\": \"test_reminder_btn\",\n  \"elements\": {\n    \"test_reminder_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"发送测试提醒\",\n      \"icon\": \"bell\",\n      \"onClick\": {\n        \"type\": \"reminder.notify\",\n        \"text\": \"定时提醒\",\n        \"message\": \"预设提醒时间已到。\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "script-sandbox",
+      "emoji": "⚡",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "私有计算脚本沙箱",
+      "titleEn": "Private Sandboxed Script",
+      "summaryZh": "在离线 QuickJS 沙箱中运行私有 ES2023 脚本（logic.js），实现自定义算法、复杂状态机与 API 数据清洗。",
+      "summaryEn": "Runs an isolated offline ES2023 module (logic.js) in QuickJS for custom algorithms, state machines, and API payload parsing.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "script",
+        "script.run",
+        "job.cancel"
+      ],
+      "triggerTokenPrefixes": [
+        "$computed."
+      ],
+      "triggerKeywords": [
+        "脚本",
+        "计算",
+        "算法",
+        "状态机",
+        "曲线",
+        "复杂逻辑",
+        "解析json",
+        "正则",
+        "异步任务",
+        "取消任务",
+        "游戏",
+        "小游戏",
+        "棋盘",
+        "计分",
+        "script",
+        "logic.js",
+        "computed",
+        "algorithm",
+        "state machine",
+        "regex",
+        "game",
+        "job.cancel"
+      ],
+      "members": [
+        {
+          "name": "script: { \"entry\": \"logic.js\", \"tickIntervalMs\": 0 }",
+          "kind": "Manifest",
+          "descriptionZh": "声明启用私有 QuickJS 计算脚本模块及可选定时节拍（>= 1000ms，窗口隐藏自动休眠）",
+          "descriptionEn": "Declares the isolated QuickJS ES2023 script entry and optional tick interval (>= 1000ms, auto-hibernates when hidden)"
+        },
+        {
+          "name": "{ \"type\": \"script.run\", \"fn\": \"step\", \"arg\": \"1\", \"args\": { ... } }",
+          "kind": "Action",
+          "descriptionZh": "调用 logic.js 导出的同步纯计算函数，支持结构化 `ctx.args`、`ctx.event` 与 `ctx.dispatch`",
+          "descriptionEn": "Invokes an exported synchronous function in logic.js with `ctx.args`, `ctx.event`, and `ctx.dispatch`"
+        },
+        {
+          "name": "ctx.state (structured JSON) & ${$computed.<key>}",
+          "kind": "Token",
+          "descriptionZh": "`ctx.state` 原生支持结构化 JSON（布尔/数值/字符串/数组/对象）直接持久化落盘；`${$computed.<key>}` 存瞬态派生视图",
+          "descriptionEn": "`ctx.state` natively persists structured JSON (`boolean`, `number`, `string`, `array`, `object`); `${$computed.<key>}` holds ephemeral projections"
+        },
+        {
+          "name": "onInit(ctx) | onSourceData(ctx, id, raw) | onTick(ctx, nowMs) | onComplete(ctx, res) | onProgress(ctx, p)",
+          "kind": "Hook",
+          "descriptionZh": "生命周期与统一异步作业回调（支持 `job.cancel` 随时取消后台任务）",
+          "descriptionEn": "Lifecycle hooks and unified async job progress/result callbacks with `job.cancel`"
+        }
+      ],
+      "compactContractMarkdown": "- Optional sidecar `logic.js` runs inside an offline QuickJS ES2023 sandbox (no network/DOM/filesystem, <= 50 ms CPU, <= 4 MB RAM, zero idle memory).\n- Declare `\"script\": { \"entry\": \"logic.js\", \"tickIntervalMs\": 0 }` in `manifest.json` (`tickIntervalMs` is `0` or `1000..3600000`, auto-paused when widget is hidden).\n- `ctx` provides:\n  - `ctx.state`: structured JSON map (`boolean`, `number`, `string`, `array`, `object`) persisted natively in `store.json` without `JSON.stringify`! Mutate arrays/objects directly (e.g. `ctx.state.jobs.push(...)`) and bind via `${state.jobs.length}`, `${state.jobs[0].name}`, or `\"items\": \"${state.jobs}\"` on `List`/`Table`/`Chart`/`BarList`.\n  - `ctx.collections` (persisted record arrays), `ctx.settings` (read-only), `ctx.computed` (ephemeral scalar/array map read via `${$computed.<key>}`), `ctx.locale`, `ctx.nowIso`, and `ctx.t(key, ...args)`.\n  - `ctx.env.sys`: live host telemetry (`cpuPercent`, `memoryPercent`, `memoryUsedGb`, `memoryTotalGb`, `memorySummary`, `gpuPercent`, `gpuName`, `gpuVramSummary`, `diskPercent`, `diskSummary`, `netDown`, `netUp`, `batteryPercent`, `batteryStatus`, `uptime`).\n  - `ctx.env.device`: live host device state (`volume`, `isMuted`, `audioDeviceName`, `brightness`, `wifiEnabled`, `wifiStatus`, `bluetoothEnabled`, `bluetoothStatus`, `networkConnected`, `keepAwake`, `batteryPercent`, `isCharging`). **Note**: `ctx.sources` does NOT exist — always read telemetry from `ctx.env.sys` / `ctx.env.device`.\n- Always export `onInit(ctx)` to populate initial `ctx.computed.*` values so cold start never shows blank placeholders; optionally export `onSourceData(ctx, sourceId, rawText)` and `onTick(ctx, nowUnixMs)`.\n- Structured `args`, UI `ctx.event`, & Async Job Dispatch: pass `\"args\": { \"row\": 1 }` on `script.run` -> `ctx.args`; UI & drop handlers populate `ctx.event` (`{ id, x, y, value, fromIndex, toIndex, files: [{ name, path, ext, sizeBytes, sizeText, modifiedIso }] }`); call `ctx.dispatch(actionOrArray)` (up to 16 actions) to queue host actions. Async actions (`command.run`, `http.request`, `ai.run`, `file.pick`, `file.listDir`, `file.manage`, `file.transform`, `clipboard.captureImage`) invoke `onComplete` (or `onCommandResult` / `onHttpResponse`) with unified `res = { id, jobKey, type, ok, status, text, data, error, timedOut, cancelled, durationMs, meta }`; cancel running jobs via `{ \"type\": \"job.cancel\", \"jobKey\": \"<keyOr*>\" }`.",
+      "goldenSnippetJson": "{\n  \"script\": {\n    \"entry\": \"logic.js\",\n    \"tickIntervalMs\": 0\n  },\n  \"capsule\": {\n    \"title\": \"Focus Score\",\n    \"summary\": \"${$computed.summary}\",\n    \"badge\": \"${$computed.score}\",\n    \"primaryAction\": {\n      \"icon\": \"add\",\n      \"tooltip\": \"Log session\",\n      \"onClick\": {\n        \"type\": \"script.run\",\n        \"fn\": \"recordSession\",\n        \"arg\": \"25\"\n      }\n    }\n  },\n  \"root\": \"focus_summary\",\n  \"elements\": {\n    \"focus_summary\": {\n      \"type\": \"Text\",\n      \"text\": \"${$computed.summary}\"\n    }\n  }\n}"
+    },
+    {
+      "id": "secret-vault",
+      "emoji": "🔐",
+      "glyph": "",
+      "category": "ConfigAndSecurity",
+      "titleZh": "API 密钥凭据",
+      "titleEn": "Encrypted API Secrets",
+      "summaryZh": "使用系统级加密安全保存个人 API Key 或 Token，导出分享 `.dbxwidget` 时自动剥离不外泄。",
+      "summaryEn": "Stores API keys encrypted via Windows DPAPI; automatically excluded when exporting `.dbxwidget` packages.",
+      "requiredCapabilityIds": [
+        "http-and-rss-feeds"
+      ],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "secret"
+      ],
+      "triggerTokenPrefixes": [
+        "$secrets."
+      ],
+      "triggerKeywords": [
+        "密钥",
+        "token",
+        "apikey",
+        "api key",
+        "bearer",
+        "authorization",
+        "鉴权",
+        "认证",
+        "私密",
+        "硅基流动",
+        "siliconflow",
+        "github",
+        "notion",
+        "homeassistant",
+        "聚合网关",
+        "secret"
+      ],
+      "members": [
+        {
+          "name": "settings: [{ \"key\": \"apiKey\", \"type\": \"secret\", \"label\": \"API Key\" }]",
+          "kind": "Setting",
+          "descriptionZh": "声明加密凭据项；未填写时自动展示配置引导",
+          "descriptionEn": "Declares a DPAPI-encrypted secret setting with setup prompt"
+        },
+        {
+          "name": "headers: { \"Authorization\": \"Bearer ${$secrets.apiKey}\" }",
+          "kind": "Header",
+          "descriptionZh": "在同源 `httpJson` 请求头中安全注入密钥",
+          "descriptionEn": "Injects secret into same-origin `httpJson` request headers"
+        }
+      ],
+      "compactContractMarkdown": "- NEVER hardcode API keys or tokens in `manifest.json`; declare `\"settings\": [{ \"key\": \"apiKey\", \"type\": \"secret\", \"label\": \"API Key\" }]`.\n- Reference in `httpJson` via `\"headers\": { \"Authorization\": \"Bearer ${$secrets.apiKey}\" }`.\n- Stored encrypted via Windows DPAPI outside `manifest.json`/`store.json` (never included in `.dbxwidget` exports).",
+      "goldenSnippetJson": "{\n  \"settings\": [\n    {\n      \"key\": \"apiKey\",\n      \"type\": \"secret\",\n      \"label\": \"SiliconFlow API Key\"\n    }\n  ],\n  \"sources\": [\n    {\n      \"id\": \"balance\",\n      \"type\": \"httpJson\",\n      \"url\": \"https://api.siliconflow.cn/v1/user/info\",\n      \"headers\": {\n        \"Authorization\": \"Bearer ${$secrets.apiKey}\"\n      },\n      \"intervalMs\": 300000,\n      \"stateMap\": {\n        \"balance\": \"$.data.totalBalance\",\n        \"name\": \"$.data.name\"\n      }\n    }\n  ],\n  \"root\": \"balance_card\",\n  \"elements\": {\n    \"balance_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"balance_text\"\n      ]\n    },\n    \"balance_text\": {\n      \"type\": \"Text\",\n      \"text\": \"账户可用余额：¥ ${state.balance ?? '--'}\",\n      \"style\": \"title\"\n    }\n  }\n}"
+    },
+    {
+      "id": "widget-settings",
+      "emoji": "🛠️",
+      "glyph": "",
+      "category": "ConfigAndSecurity",
+      "titleZh": "右键设置项",
+      "titleEn": "Widget Settings",
+      "summaryZh": "为格子添加右键「组件设置」面板，让用户无需改代码即可修改城市、刷新频率或显示偏好。",
+      "summaryEn": "Adds user-configurable choice, toggle, text, and numeric options to the widget context menu.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "ModuleStack"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [
+        "$settings.",
+        "settings."
+      ],
+      "triggerKeywords": [
+        "设置项",
+        "配置项",
+        "右键设置",
+        "自定义城市",
+        "切换源",
+        "目标",
+        "阈值",
+        "时区",
+        "汇率",
+        "单位",
+        "模块排序",
+        "显示模块",
+        "settings",
+        "preferences",
+        "configurable",
+        "goal",
+        "threshold",
+        "timezone",
+        "currency",
+        "unit",
+        "moduleList",
+        "ModuleStack"
+      ],
+      "members": [
+        {
+          "name": "{ \"key\": \"city\", \"type\": \"text\", \"label\": \"城市\", \"default\": \"北京\" }",
+          "kind": "Setting",
+          "descriptionZh": "支持 `choice`、`toggle`、`text`、`number`、`file`、`folder`、`moduleList`、`secret` 八种原生设置类型",
+          "descriptionEn": "Supports choice, toggle, text, number, file, folder, moduleList, and secret setting types"
+        },
+        {
+          "name": "${$settings.city}",
+          "kind": "Token",
+          "descriptionZh": "在视图或数据源中动态读取用户当前设置值",
+          "descriptionEn": "Reads the user's configured setting value in views or sources"
+        }
+      ],
+      "compactContractMarkdown": "- Proactively declare low-frequency preferences in root `\"settings\"` instead of cluttering the widget canvas:\n  - `\"choice\"`: `{ \"key\": \"presetFeed\", \"type\": \"choice\", \"label\": \"Content Feed\", \"default\": \"hn\", \"options\": [{ \"value\": \"hn\", \"label\": \"Hacker News\" }] }`\n  - `\"toggle\"`: `{ \"key\": \"showSummary\", \"type\": \"toggle\", \"label\": \"Show Summary\", \"default\": true }`\n  - `\"number\"`: `{ \"key\": \"dailyGoal\", \"type\": \"number\", \"label\": \"Daily Goal\", \"default\": 2000 }`\n  - `\"text\"`: `{ \"key\": \"city\", \"type\": \"text\", \"label\": \"City\", \"default\": \"Shanghai\" }`\n  - `\"file\"` / `\"folder\"`: `{ \"key\": \"ffmpegPath\", \"type\": \"file\", \"label\": \"FFmpeg Executable\", \"accept\": \".exe\", \"default\": \"ffmpeg\" }`, `{ \"key\": \"outputDir\", \"type\": \"folder\", \"label\": \"Output Directory\", \"default\": \"\" }` (renders native Browse File / Browse Folder picker button automatically!)\n  - `\"secret\"`: `{ \"key\": \"apiKey\", \"type\": \"secret\", \"label\": \"API Key\", \"default\": \"\" }` (stored in DPAPI vault, read via `${$secrets.apiKey}`)\n  - `\"moduleList\"`: `{ \"key\": \"modules\", \"type\": \"moduleList\", \"label\": \"Visible Sections\", \"default\": \"hero:1,history:1\", \"options\": [{ \"value\": \"hero\", \"label\": \"Overview\" }, { \"value\": \"history\", \"label\": \"History\" }] }` paired with `{ \"type\": \"ModuleStack\", \"bind\": \"settings.modules\", \"children\": [\"hero\", \"history\"] }` where `\"hero\"` and `\"history\"` are flat element keys in root `\"elements\"` (each key automatically acts as its module ID; set `\"compactPair\": true` on adjacent narrow children to pair them in 2 columns)!\n- Every setting declared in `\"settings\"` MUST be referenced via `${$settings.<key>}`, `settings.<key>`, or `${$secrets.<key>}` (or `ctx.settings` in `logic.js`).",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"todayCount\": 1200\n  },\n  \"settings\": [\n    {\n      \"key\": \"modules\",\n      \"type\": \"moduleList\",\n      \"label\": \"显示模块与排序\",\n      \"default\": \"overview:1,chart:1\",\n      \"options\": [\n        {\n          \"value\": \"overview\",\n          \"label\": \"今日概览\"\n        },\n        {\n          \"value\": \"chart\",\n          \"label\": \"趋势卡片\"\n        }\n      ]\n    },\n    {\n      \"key\": \"dailyGoal\",\n      \"type\": \"number\",\n      \"label\": \"每日目标\",\n      \"default\": 2000\n    },\n    {\n      \"key\": \"compactMode\",\n      \"type\": \"toggle\",\n      \"label\": \"紧凑模式\",\n      \"default\": false\n    }\n  ],\n  \"root\": \"settings_root\",\n  \"elements\": {\n    \"settings_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"children\": [\n        \"modules_stack\"\n      ]\n    },\n    \"modules_stack\": {\n      \"type\": \"ModuleStack\",\n      \"bind\": \"settings.modules\",\n      \"spacing\": 8,\n      \"children\": [\n        \"overview\",\n        \"chart\"\n      ]\n    },\n    \"overview\": {\n      \"type\": \"StatCard\",\n      \"title\": \"今日累计\",\n      \"value\": \"${state.todayCount}\",\n      \"progress\": \"${state.todayCount * 100 / $settings.dailyGoal}\"\n    },\n    \"chart\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"when\": \"${$settings.compactMode != true}\",\n      \"children\": [\n        \"chart_caption\"\n      ]\n    },\n    \"chart_caption\": {\n      \"type\": \"Text\",\n      \"text\": \"趋势详情\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    }\n  }\n}"
+    },
+    {
+      "id": "music-now-playing",
+      "emoji": "🎵",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "正在播放媒体",
+      "titleEn": "Now Playing Media",
+      "summaryZh": "只读同步系统 SMTC 当前播放曲目、歌手、专辑封面、播放进度百分比与状态。",
+      "summaryEn": "Read-only Windows SMTC media session snapshot with track, artist, cover art, progress, and playback status.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "music"
+      ],
+      "triggerTokenPrefixes": [
+        "$music."
+      ],
+      "triggerKeywords": [
+        "音乐",
+        "正在播放",
+        "歌曲",
+        "歌词",
+        "专辑封面",
+        "曲目",
+        "播放器",
+        "music",
+        "now playing",
+        "track",
+        "song",
+        "spotify",
+        "media session",
+        "album"
+      ],
+      "members": [
+        {
+          "name": "${$music.title} / ${$music.artist} / ${$music.album}",
+          "kind": "Token",
+          "descriptionZh": "当前播放曲目标题、艺术家与专辑名称（未播放时为空字符串）",
+          "descriptionEn": "Active track title, artist, and album name (empty when idle)"
+        },
+        {
+          "name": "${$music.isPlaying} / ${$music.hasSession} / ${$music.status}",
+          "kind": "Token",
+          "descriptionZh": "布尔播放态、会话存在态与状态字符串（`playing` / `paused` / `idle`）",
+          "descriptionEn": "Boolean playback flag, session availability, and status (`playing` / `paused` / `idle`)"
+        },
+        {
+          "name": "${$music.positionText} / ${$music.durationText} / ${$music.progressPercent} / ${$music.positionSeconds} / ${$music.durationSeconds}",
+          "kind": "Token",
+          "descriptionZh": "格式化播放进度（`mm:ss`）、总时长、0-100 进度百分比及秒数",
+          "descriptionEn": "Formatted position (`mm:ss`), duration (`mm:ss`), 0-100 progress percentage, and raw seconds"
+        },
+        {
+          "name": "${$music.coverPath} / ${$music.sourceApp}",
+          "kind": "Token",
+          "descriptionZh": "本地缓存专辑封面图片路径（可直接绑定 `Image.src`）与来源播放器标识",
+          "descriptionEn": "Cached local album cover path (bindable to `Image.src`) and source player identifier"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `{ \"type\": \"music\", \"intervalMs\": 1000 }` in `\"sources\"`.\n- Read-only tokens: `${$music.hasSession}`, `${$music.isPlaying}`, `${$music.status}` (`playing`|`paused`|`idle`), `${$music.title}`, `${$music.artist}`, `${$music.album}`, `${$music.sourceApp}`, `${$music.coverPath}`, `${$music.positionText}`, `${$music.durationText}`, `${$music.positionSeconds}`, `${$music.durationSeconds}`, `${$music.progressPercent}`.\n- Pair with `system.control` (`media.previous` | `media.playPause` | `media.next`) for playback controls; in `logic.js` read `ctx.env.music`.",
+      "goldenSnippetJson": "{\n  \"sources\": [\n    {\n      \"type\": \"music\",\n      \"intervalMs\": 1000\n    }\n  ],\n  \"root\": \"now_playing_card\",\n  \"elements\": {\n    \"now_playing_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"track_title\",\n        \"track_meta\",\n        \"track_progress\"\n      ]\n    },\n    \"track_title\": {\n      \"type\": \"Text\",\n      \"text\": \"${$music.title ?? 'Idle'}\",\n      \"style\": \"subtitle\",\n      \"maxLines\": 1\n    },\n    \"track_meta\": {\n      \"type\": \"Text\",\n      \"text\": \"${$music.artist} · ${$music.positionText} / ${$music.durationText}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    },\n    \"track_progress\": {\n      \"type\": \"ProgressBar\",\n      \"progress\": \"${$music.progressPercent}\",\n      \"max\": 100,\n      \"color\": \"accent\"\n    }\n  }\n}"
+    },
+    {
+      "id": "todo-progress-summary",
+      "emoji": "✅",
+      "glyph": "",
+      "category": "DataSource",
+      "titleZh": "待办事项快照",
+      "titleEn": "Todo Progress Snapshot",
+      "summaryZh": "只读同步 DeskBox 原生待办组件的任务统计、完成率、逾期数与脱敏待办列表。",
+      "summaryEn": "Read-only privacy-safe snapshot of DeskBox native Todo counts, completion rate, overdue count, and active task items.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "todo"
+      ],
+      "triggerTokenPrefixes": [
+        "$todo."
+      ],
+      "triggerKeywords": [
+        "待办汇总",
+        "原生待办",
+        "任务完成率",
+        "逾期任务",
+        "今日待办",
+        "todo snapshot",
+        "native todo",
+        "task summary",
+        "overdue tasks",
+        "completion rate"
+      ],
+      "members": [
+        {
+          "name": "${$todo.pendingCount} / ${$todo.completedCount} / ${$todo.totalCount}",
+          "kind": "Token",
+          "descriptionZh": "未完成待办数、已完成数与总任务数（自动排除回收站项与私密备注）",
+          "descriptionEn": "Pending, completed, and total task counts (excludes deleted items and private notes)"
+        },
+        {
+          "name": "${$todo.todayPendingCount} / ${$todo.overdueCount} / ${$todo.importantPendingCount}",
+          "kind": "Token",
+          "descriptionZh": "今日到期未完成数、已逾期数与星标重要未完成数",
+          "descriptionEn": "Due-today pending count, overdue count, and starred important pending count"
+        },
+        {
+          "name": "${$todo.completionPercent} / ${$todo.nextTaskTitle} / ${$todo.nextTaskDueText}",
+          "kind": "Token",
+          "descriptionZh": "0-100 完成率百分比、下一条优先任务标题与截止日期文本",
+          "descriptionEn": "0-100 completion percentage, highest-priority pending task title, and due date text"
+        },
+        {
+          "name": "collections.todos (${$item.title}, ${$item.dueDate}, ${$item.isOverdue})",
+          "kind": "Collection",
+          "descriptionZh": "只读同步至 `todos` 集合的精简任务项（含 `title`、`done`、`important`、`dueDate`、`priority`、`listName`）",
+          "descriptionEn": "Privacy-safe task rows projected into `todos` collection (`title`, `done`, `important`, `dueDate`, `priority`, `listName`)"
+        }
+      ],
+      "compactContractMarkdown": "- Declare `{ \"type\": \"todo\", \"targetCollection\": \"todos\", \"maxItems\": 20, \"intervalMs\": 30000 }` (`maxItems` up to `200`) in `\"sources\"` and `\"todos\": { \"maxItems\": 200 }` in `\"collections\"`.\n- Read-only tokens: `${$todo.pendingCount}`, `${$todo.completedCount}`, `${$todo.totalCount}`, `${$todo.todayPendingCount}`, `${$todo.todayCompletedCount}`, `${$todo.overdueCount}`, `${$todo.importantPendingCount}`, `${$todo.completionPercent}`, `${$todo.nextTaskTitle}`, `${$todo.nextTaskDueText}`, `${$todo.summary}`. Item fields in `todos`: `id`, `title`, `done`, `important`, `priority` (`high|medium|normal`), `dueDate`, `dueIso` (`YYYY-MM-DD`), `dueText`, `widgetId`, `listName`, `isOverdue`, `stepsSummary`.\n- Bi-directional host write actions: `{ \"type\": \"todo.add\", \"title\": \"${state.draft}\", \"dueIso\": \"YYYY-MM-DD\", \"priority\": \"normal|medium|high\" }`, `{ \"type\": \"todo.update\", \"id\": \"${$item.id}\", \"title\": \"...\", \"dueIso\": \"YYYY-MM-DD|today|tomorrow|+1d|clear\", \"priority\": \"normal|medium|high\" }`, `{ \"type\": \"todo.rolloverOverdue\", \"dueIso\": \"today|tomorrow|YYYY-MM-DD\" }`, `{ \"type\": \"todo.toggle\", \"id\": \"${$item.id}\" }`, `{ \"type\": \"todo.remove\", \"id\": \"${$item.id}\" }`, `{ \"type\": \"todo.cyclePriority\", \"id\": \"${$item.id}\" }`, `{ \"type\": \"todo.clearCompleted\", \"dueIso\": \"YYYY-MM-DD\" }`.\n- Privacy boundary: private notes and file attachments are never exposed. In `logic.js` read `ctx.env.todo`.",
+      "goldenSnippetJson": "{\n  \"collections\": {\n    \"todos\": {\n      \"maxItems\": 12\n    }\n  },\n  \"sources\": [\n    {\n      \"type\": \"todo\",\n      \"targetCollection\": \"todos\",\n      \"maxItems\": 12,\n      \"intervalMs\": 30000\n    }\n  ],\n  \"root\": \"todo_root\",\n  \"elements\": {\n    \"todo_root\": {\n      \"type\": \"Stack\",\n      \"spacing\": 8,\n      \"children\": [\n        \"todo_summary_stat\",\n        \"todo_list\"\n      ]\n    },\n    \"todo_summary_stat\": {\n      \"type\": \"StatCard\",\n      \"title\": \"${$todo.summary}\",\n      \"value\": \"${$todo.completionPercent}%\",\n      \"progress\": \"${$todo.completionPercent}\"\n    },\n    \"todo_list\": {\n      \"type\": \"List\",\n      \"items\": \"todos\",\n      \"titleField\": \"title\",\n      \"subtitleField\": \"dueDate\",\n      \"itemTemplate\": \"todo_item_row\"\n    },\n    \"todo_item_row\": {\n      \"type\": \"Grid\",\n      \"columns\": \"1*,Auto\",\n      \"spacing\": 8,\n      \"children\": [\n        \"todo_item_title\",\n        \"todo_item_due\"\n      ]\n    },\n    \"todo_item_title\": {\n      \"type\": \"Text\",\n      \"column\": 0,\n      \"text\": \"${$item.title}\",\n      \"style\": \"body\",\n      \"maxLines\": 1\n    },\n    \"todo_item_due\": {\n      \"type\": \"Text\",\n      \"column\": 1,\n      \"text\": \"${$item.dueDate}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    }\n  }\n}"
+    },
+    {
+      "id": "vector-canvas",
+      "emoji": "🎨",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "canvas",
+      "titleZh": "矢量画布与几何图形",
+      "titleEn": "Vector Canvas & Shapes",
+      "summaryZh": "纯原生 2D 矢量绘制画布，支持静态或脚本动态驱动矩形、圆、折线、多边形、SVG Path 与交互点击命中。",
+      "summaryEn": "Pure native 2D vector drawing surface supporting static or script-computed shapes, SVG paths, rotation, and hit-test clicks.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "Canvas"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "画布",
+        "矢量",
+        "表盘",
+        "指针",
+        "棋盘",
+        "游戏",
+        "几何",
+        "绘制",
+        "雷达图",
+        "仪表盘",
+        "canvas",
+        "svg",
+        "vector",
+        "analog clock",
+        "gauge",
+        "board",
+        "game",
+        "draw",
+        "path",
+        "polygon"
+      ],
+      "members": [
+        {
+          "name": "Canvas (viewBox, elements, elementsSource, onItemClick)",
+          "kind": "Component",
+          "descriptionZh": "支持 `viewBox` 坐标系、静态 `elements` 数组或绑定 `${$computed.shapes}` 动态图形数组",
+          "descriptionEn": "Supports `viewBox` coordinate scaling, static `elements`, or dynamic `${$computed.shapes}` JSON array"
+        },
+        {
+          "name": "kind: rect | circle | ellipse | line | polyline | polygon | path | text",
+          "kind": "Property",
+          "descriptionZh": "支持 `fill`、`stroke`、`strokeWidth`、`opacity`、`rotation`、SVG `d` 路径与文本对齐",
+          "descriptionEn": "Supports `fill`, `stroke`, `strokeWidth`, `opacity`, `rotation`, SVG `d` path commands, and text alignment"
+        }
+      ],
+      "compactContractMarkdown": "- Render custom clocks, gauges, mini-games, radar/spider charts, or interactive scrubbers natively with `\"type\": \"Canvas\"` (`width`, `height`, `viewBox`: `\"0 0 200 200\"`).\n- Bind static `\"elements\": [...]` OR dynamic `\"elementsSource\": \"${$computed.shapes}\"` (in `logic.js`, assign `ctx.computed.shapes = [{ id: 'cell-0', kind: 'rect', x: 10, y: 10, width: 40, height: 40, rx: 6, fill: '#3B82F6' }, ...]`).\n- Supported shape `kind`s (all shapes also support `linearGradient`, `radialGradient`, `strokeCap`: `flat|round|square`):\n  - `rect`: `x`, `y`, `width`, `height`, `rx`, `ry`, `fill`, `stroke`, `strokeWidth`, `rotation`\n  - `circle`: `cx`, `cy`, `r`, `fill`, `stroke`, `strokeWidth`\n  - `ellipse`: `cx`, `cy`, `rx`, `ry`, `fill`, `stroke`, `strokeWidth`\n  - `arc`: `cx`, `cy`, `r`, `startAngle`, `sweepAngle`, `fill`, `stroke`, `strokeWidth`, `strokeCap`\n  - `line`: `x1`, `y1`, `x2`, `y2`, `stroke`, `strokeWidth`, `rotation`, `cx`, `cy`\n  - `polyline` / `polygon`: `points` (`\"10,90 50,40 90,65\"`), `fill`, `stroke`, `strokeWidth`\n  - `path`: `d` (SVG path commands `M/L/H/V/C/Q/Z`), `fill`, `stroke`, `strokeWidth`\n  - `text`: `x`, `y`, `text`, `fontSize`, `fontWeight`, `fill`, `textAnchor` (`start|middle|end`)\n- Interactive hit-testing & continuous pointer gestures: set `\"id\"` on clickable shapes with `\"onItemClick\"` (`{ id, x, y }`), or wire `\"onPointerDown\"` / `\"onPointerMove\"` / `\"onPointerUp\"` receiving `{ x, y, normX, normY, isPressed }` in `ctx.event` / `${$event.normX}`!\n- Dedup KPIs: When drawing a central hero number/percentage inside a `Canvas` donut/ring, do NOT repeat the exact same primary value or percentage as adjacent `Text`/`Badge` nodes in the enclosing `Card` header.",
+      "goldenSnippetJson": "{\n  \"root\": \"canvas_root\",\n  \"elements\": {\n    \"canvas_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"children\": [\n        \"gauge_canvas\"\n      ]\n    },\n    \"gauge_canvas\": {\n      \"type\": \"Canvas\",\n      \"height\": 160,\n      \"viewBox\": \"0 0 200 160\",\n      \"elements\": [\n        {\n          \"id\": \"ring\",\n          \"kind\": \"circle\",\n          \"cx\": 100,\n          \"cy\": 80,\n          \"r\": 60,\n          \"stroke\": \"#38BDF8\",\n          \"strokeWidth\": 6,\n          \"fill\": \"transparent\"\n        },\n        {\n          \"id\": \"needle\",\n          \"kind\": \"line\",\n          \"x1\": 100,\n          \"y1\": 80,\n          \"x2\": 100,\n          \"y2\": 32,\n          \"stroke\": \"#F59E0B\",\n          \"strokeWidth\": 3,\n          \"rotation\": 45,\n          \"cx\": 100,\n          \"cy\": 80\n        },\n        {\n          \"kind\": \"text\",\n          \"x\": 100,\n          \"y\": 115,\n          \"text\": \"75%\",\n          \"fontSize\": 16,\n          \"fontWeight\": \"bold\",\n          \"fill\": \"#38BDF8\",\n          \"textAnchor\": \"middle\"\n        }\n      ]\n    }\n  }\n}"
+    },
+    {
+      "id": "data-charts-and-tables",
+      "emoji": "📊",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "chart",
+      "titleZh": "多维图表与数据表格",
+      "titleEn": "Multi-Series Charts & Data Tables",
+      "summaryZh": "提供多列可排序数据表格、环形占比图与多序列折线/柱状/面积图，满足仪表盘分析需求。",
+      "summaryEn": "Multi-column sortable data tables, donut charts, and multi-series line, bar, and area charts.",
+      "requiredCapabilityIds": [
+        "collections-lists"
+      ],
+      "triggerNodeTypes": [
+        "Table",
+        "DonutChart",
+        "Chart"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "表格",
+        "多列",
+        "排序",
+        "饼图",
+        "环形图",
+        "柱状图",
+        "折线图",
+        "面积图",
+        "多序列",
+        "报表",
+        "看板",
+        "仪表盘",
+        "股票",
+        "行情",
+        "table",
+        "columns",
+        "sort",
+        "donut",
+        "pie chart",
+        "bar chart",
+        "line chart",
+        "area chart",
+        "dashboard",
+        "stock",
+        "ticker",
+        "series"
+      ],
+      "members": [
+        {
+          "name": "Table (collection, columns, sortable, striped, onRowClick)",
+          "kind": "Component",
+          "descriptionZh": "原生多列表格，支持点击表头排序、斑马纹与行点击事件（上下文含 `$item.*`）",
+          "descriptionEn": "Multi-column native table with header click sorting, striped rows, and `onRowClick` (`$item.*`)"
+        },
+        {
+          "name": "DonutChart (collection, titleField, valueField, centerTitle, centerValue)",
+          "kind": "Component",
+          "descriptionZh": "环形比例图，支持中心指标文字、自定义分段颜色字段 `colorField` 与图例展示",
+          "descriptionEn": "Proportional donut ring chart with center KPI callout, optional `colorField`, and legend"
+        },
+        {
+          "name": "Chart (chartKind: line|bar|area, collection, xField, series)",
+          "kind": "Component",
+          "descriptionZh": "多序列坐标系图表，支持折线、柱状与面积模式以及网格线与图例",
+          "descriptionEn": "Multi-series Cartesian chart supporting `line`, `bar`, and `area` modes with gridlines and legend"
+        }
+      ],
+      "compactContractMarkdown": "- `Table`: `{ \"type\": \"Table\", \"collection\": \"rows\", \"sortable\": true, \"striped\": true, \"columns\": [{ \"key\": \"name\", \"header\": \"Asset\", \"width\": \"1.5*\" }, { \"key\": \"price\", \"header\": \"Price\", \"width\": \"1*\", \"align\": \"right\" }], \"onRowClick\": [{ \"type\": \"state.set\", \"key\": \"selected\", \"value\": \"${$item.name}\" }] }`.\n- `DonutChart`: `{ \"type\": \"DonutChart\", \"collection\": \"slices\", \"titleField\": \"label\", \"valueField\": \"amount\", \"colorField\": \"color\", \"centerTitle\": \"Total\", \"centerValue\": \"${state.total}\", \"size\": 132, \"showLegend\": true }`.\n- `Chart`: `{ \"type\": \"Chart\", \"chartKind\": \"bar\", \"collection\": \"metrics\", \"xField\": \"day\", \"height\": 150, \"showLegend\": true, \"showGrid\": true, \"series\": [{ \"field\": \"income\", \"label\": \"In\", \"color\": \"#10B981\" }, { \"field\": \"cost\", \"label\": \"Out\", \"color\": \"#F43F5E\" }] }` (`chartKind`: `\"line\"` | `\"bar\"` | `\"area\"`).",
+      "goldenSnippetJson": "{\n  \"collections\": {\n    \"metrics\": {\n      \"maxItems\": 30\n    }\n  },\n  \"root\": \"analytics_root\",\n  \"elements\": {\n    \"analytics_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"spacing\": 10,\n      \"children\": [\n        \"metrics_chart\",\n        \"metrics_table\"\n      ]\n    },\n    \"metrics_chart\": {\n      \"type\": \"Chart\",\n      \"chartKind\": \"line\",\n      \"collection\": \"metrics\",\n      \"xField\": \"day\",\n      \"height\": 130,\n      \"series\": [\n        {\n          \"field\": \"actual\",\n          \"label\": \"Actual\",\n          \"color\": \"#3B82F6\"\n        },\n        {\n          \"field\": \"target\",\n          \"label\": \"Target\",\n          \"color\": \"#10B981\"\n        }\n      ]\n    },\n    \"metrics_table\": {\n      \"type\": \"Table\",\n      \"collection\": \"metrics\",\n      \"columns\": [\n        {\n          \"key\": \"day\",\n          \"header\": \"Day\",\n          \"width\": \"1*\"\n        },\n        {\n          \"key\": \"actual\",\n          \"header\": \"Actual\",\n          \"width\": \"1*\",\n          \"align\": \"right\"\n        }\n      ]\n    }\n  }\n}"
+    },
+    {
+      "id": "popover-and-markdown",
+      "emoji": "💬",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "richtext",
+      "titleZh": "轻量浮层与 Markdown 富文本",
+      "titleEn": "Popover Overlays & Markdown View",
+      "summaryZh": "支持按钮弹出的原生毛玻璃气泡子面板与支持任务勾选的 GFM Markdown 富文本渲染。",
+      "summaryEn": "Acrylic anchored popover overlays and native GitHub-Flavored Markdown rendering with interactive task lists.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "Popover",
+        "Markdown"
+      ],
+      "triggerSourceOrActionTypes": [
+        "popover.open",
+        "popover.close",
+        "popover.toggle"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "弹窗",
+        "浮层",
+        "气泡",
+        "详情面板",
+        "富文本",
+        "笔记",
+        "文档",
+        "代码块",
+        "popover",
+        "flyout",
+        "overlay",
+        "dialog",
+        "markdown",
+        "rich text",
+        "checklist",
+        "notes"
+      ],
+      "members": [
+        {
+          "name": "popovers / Button.popover / popover.open|close|toggle",
+          "kind": "Action",
+          "descriptionZh": "在顶层 `popovers` 定义命名浮层视图，通过 `Button.popover`、`Popover` 节点或 `popover.*` 动作触发",
+          "descriptionEn": "Declare named overlays in root `popovers` and trigger via `Button.popover`, `Popover`, or `popover.*` actions"
+        },
+        {
+          "name": "Markdown (text, bind, onChange)",
+          "kind": "Component",
+          "descriptionZh": "原生渲染标题、列表、代码块、引用、表格，并在绑定 `bind` 时支持点击切换 `- [x]` 任务项",
+          "descriptionEn": "Renders headings, lists, code blocks, quotes, tables, and interactive `- [x]` task toggles when `bind` is set"
+        }
+      ],
+      "compactContractMarkdown": "- Root `popovers`: declare secondary forms, detail drawers, or pickers without crowding the main widget:\n  `\"popovers\": { \"addForm\": { \"width\": 300, \"height\": 220, \"placement\": \"bottom\", \"root\": \"add_form_body\" } }` with `\"add_form_body\": { \"type\": \"Stack\", \"padding\": \"12\", \"children\": [\"...\"] }` defined in root `\"elements\"`.\n- Open/close via `Button` (`{ \"type\": \"Button\", \"text\": \"New\", \"popover\": \"addForm\" }`), `Popover` trigger node (`\"popoverId\": \"addForm\"`), or actions `{ \"type\": \"popover.open|close|toggle\", \"popoverId\": \"addForm\" }`.\n- `Markdown`: `{ \"type\": \"Markdown\", \"bind\": \"state.notesMd\" }` (or read-only `\"text\": \"${state.doc}\"`). Clicking a `- [ ]` / `- [x]` task item automatically updates the bound Markdown string and fires optional `onChange`!",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"notes\": \"### Quick Notes\\n- [x] Ship native widgets\\n- [ ] Review metrics\"\n  },\n  \"popovers\": {\n    \"editNotes\": {\n      \"width\": 300,\n      \"height\": 220,\n      \"placement\": \"bottom\",\n      \"root\": \"edit_notes_body\"\n    }\n  },\n  \"root\": \"notes_root\",\n  \"elements\": {\n    \"notes_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"spacing\": 8,\n      \"children\": [\n        \"edit_notes_btn\",\n        \"notes_markdown\"\n      ]\n    },\n    \"edit_notes_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Edit Markdown\",\n      \"icon\": \"edit\",\n      \"popover\": \"editNotes\"\n    },\n    \"notes_markdown\": {\n      \"type\": \"Markdown\",\n      \"bind\": \"state.notes\"\n    },\n    \"edit_notes_body\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12\",\n      \"spacing\": 8,\n      \"children\": [\n        \"notes_editor\",\n        \"close_editor_btn\"\n      ]\n    },\n    \"notes_editor\": {\n      \"type\": \"TextArea\",\n      \"bind\": \"state.notes\",\n      \"minHeight\": 130\n    },\n    \"close_editor_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Done\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"popover.close\",\n        \"popoverId\": \"editNotes\"\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "advanced-inputs-and-styling",
+      "emoji": "🎛️",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "toolbar",
+      "titleZh": "高级表单控件与语义视觉微调",
+      "titleEn": "Advanced Inputs & Semantic Styling",
+      "summaryZh": "提供日期时间选择、自动补全、原生取色器、单选组、星级评分，以及遵循宿主圆角与亮暗对比度的语义点缀色与尺寸微调。",
+      "summaryEn": "Date/time pickers, auto-suggest input, color picker, radio groups, star ratings, and host-harmonized semantic accents and sizing.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "DatePicker",
+        "TimePicker",
+        "AutoSuggestInput",
+        "ColorPicker",
+        "RadioGroup",
+        "Rating",
+        "RawStyling"
+      ],
+      "triggerSourceOrActionTypes": [],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "日期选择",
+        "时间选择",
+        "取色器",
+        "颜色选择",
+        "自动补全",
+        "评分",
+        "星级",
+        "单选",
+        "渐变",
+        "自定义背景",
+        "主题色",
+        "datepicker",
+        "timepicker",
+        "colorpicker",
+        "autosuggest",
+        "rating",
+        "radio",
+        "gradient",
+        "background",
+        "borderColor"
+      ],
+      "members": [
+        {
+          "name": "DatePicker / TimePicker / AutoSuggestInput / ColorPicker / RadioGroup / Rating",
+          "kind": "Component",
+          "descriptionZh": "双向绑定 `bind` 并通过 `onChange`（`${$value}`）即时响应选择的原生高级输入控件",
+          "descriptionEn": "Two-way `bind` + live `onChange` (`${$value}`) native WinUI 3 input controls"
+        },
+        {
+          "name": "background / linearGradient / textColor / borderColor / borderWidth / cornerRadius",
+          "kind": "Property",
+          "descriptionZh": "容器毛玻璃底板与圆角由宿主统一接管；支持语义色调、高饱和点缀色、尺寸间距、透明度与阴影微调",
+          "descriptionEn": "Host unifies container glass surfaces and corner radii; supports semantic tones, chromatic accents, sizing, opacity, and elevation"
+        }
+      ],
+      "compactContractMarkdown": "- Advanced Native Inputs (all support `bind` + live `onChange` with `${$value}`):\n  - `DatePicker`: `bind` (`\"YYYY-MM-DD\"`), `title`, `placeholder`\n  - `TimePicker`: `bind` (`\"HH:mm\"`), `title`\n  - `AutoSuggestInput`: `bind`, `placeholder`, `suggestions`: `[\"BTC\", \"ETH\"]` or `suggestionsSource`: `\"${$computed.hints}\"`, `onSubmit`, `onChange`\n  - `ColorPicker`: `bind` (`\"#3B82F6\"`), `presets`: `[\"#3B82F6\", \"#10B981\", \"#F59E0B\"]`\n  - `RadioGroup`: `bind`, `orientation` (`horizontal|vertical`), `options`: `[{ \"value\": \"a\", \"label\": \"Option A\" }]`\n  - `Rating`: `bind` (`1`..`5`), `max`, `allowHalfStar`\n- Host-Unified Surface, Typography & Accent Discipline:\n  - Layout containers (`Stack`, `Grid`, `Card`, `Scroll`, `Tabs`) ALWAYS inherit the host Mica/Acrylic backdrop glass and unified corner radius — use `Card.tone` (`default|subtle|accent|success|warning|danger`) instead of opaque `background`, `linearGradient`, `radialGradient`, or custom `cornerRadius`.\n  - Use semantic `Text.style` (`caption` 10.5 | `body` 11.5 | `bodyStrong` | `subtitle` 12.5 | `title` | `hero` 21 | `mono`) and semantic `color` tokens (`default`, `secondary`, `accent`, `emerald`, `cyan`, `violet`, `warning`, `danger`); avoid hardcoded neutral `#FFFFFF`/`#E2E8F0`/`#111827` text colors. Chromatic hex colors/gradients are preserved with Light/Dark contrast safety on accents, gauges, charts, borders, and `Canvas` shapes.\n  - Supported sizing & depth properties: `borderColor`, `borderWidth`, `margin`, `minWidth`, `maxWidth`, `maxHeight`, `fontWeight`, `fontFamily` (`mono`), `opacity`, `shadow` (`none|sm|md`, alias `elevation`), and `aspectRatio` (0.05..20 when NO explicit `height` is set).",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"dueDate\": \"2026-12-31\",\n    \"accentHex\": \"#38BDF8\",\n    \"priority\": 3\n  },\n  \"root\": \"controls_root\",\n  \"elements\": {\n    \"controls_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"spacing\": 8,\n      \"children\": [\n        \"surface_card\",\n        \"target_date_picker\",\n        \"accent_color_picker\",\n        \"priority_rating\"\n      ]\n    },\n    \"surface_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"borderColor\": \"${state.accentHex}\",\n      \"borderWidth\": 1,\n      \"children\": [\n        \"surface_label\"\n      ]\n    },\n    \"surface_label\": {\n      \"type\": \"Text\",\n      \"text\": \"Host-Unified Card Surface\",\n      \"style\": \"bodyStrong\"\n    },\n    \"target_date_picker\": {\n      \"type\": \"DatePicker\",\n      \"title\": \"Target Date\",\n      \"bind\": \"state.dueDate\"\n    },\n    \"accent_color_picker\": {\n      \"type\": \"ColorPicker\",\n      \"title\": \"Accent\",\n      \"bind\": \"state.accentHex\",\n      \"presets\": [\n        \"#38BDF8\",\n        \"#10B981\",\n        \"#F59E0B\"\n      ]\n    },\n    \"priority_rating\": {\n      \"type\": \"Rating\",\n      \"title\": \"Priority\",\n      \"bind\": \"state.priority\",\n      \"max\": 5\n    }\n  }\n}"
+    },
+    {
+      "id": "interactive-http",
+      "emoji": "🌐",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "交互式 HTTP 请求与 Webhook",
+      "titleEn": "Interactive HTTP & Webhooks",
+      "summaryZh": "支持 GET/POST/PUT/PATCH/DELETE 交互请求、加密密钥请求头、局域网接口访问与脚本响应回调。",
+      "summaryEn": "Interactive GET/POST/PUT/PATCH/DELETE requests, DPAPI secret headers, LAN endpoints, and script callbacks.",
+      "requiredCapabilityIds": [
+        "secret-vault"
+      ],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "http.request"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "发送请求",
+        "调用接口",
+        "提交接口",
+        "局域网接口",
+        "本地服务",
+        "触发器",
+        "webhook",
+        "http.request",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "rest api",
+        "home assistant",
+        "localhost"
+      ],
+      "members": [
+        {
+          "name": "http.request (id, jobKey, method, url, headers, body, stateMap, collection, onComplete)",
+          "kind": "Action",
+          "descriptionZh": "发起交互式 HTTP 请求，自动维护 `state.httpStatus`（`loading|ok|error`）与 `state.httpError`",
+          "descriptionEn": "Sends an interactive HTTP request and updates `state.httpStatus` (`loading|ok|error`) and `state.httpError`"
+        },
+        {
+          "name": "export function onHttpResponse(ctx, res)",
+          "kind": "Callback",
+          "descriptionZh": "回调统一结构 `{ id, jobKey, type, ok, status, text, data, error, timedOut, cancelled, durationMs, meta }`",
+          "descriptionEn": "Callback receiving unified `{ id, jobKey, type, ok, status, text, data, error, timedOut, cancelled, durationMs, meta }`"
+        }
+      ],
+      "compactContractMarkdown": "- Trigger REST APIs or Webhooks on click/submit via `http.request`:\n  `{ \"type\": \"http.request\", \"id\": \"triggerBuild\", \"method\": \"POST\", \"url\": \"https://api.example.com/hooks\", \"headers\": { \"Authorization\": \"Bearer ${$secrets.apiToken}\" }, \"body\": { \"text\": \"${state.draft}\" }, \"stateMap\": { \"lastId\": \"data.id\" }, \"onComplete\": \"onHttpResponse\" }`\n- Polling floor for `httpJson` / `rss` is `15000` ms (`15s`). `https://` requires `PublicNetwork` permission; `http://` / `localhost` / LAN IPs require `LocalNetwork` permission (locally created widgets enable permissions automatically; users can toggle permissions anytime in Widget Settings).\n- Keyless interactive query/test endpoints: Hacker News Algolia live search `\"https://hn.algolia.com/api/v1/search?query=${state.keyword}\"` (`collection: \"results\"`, `itemsPath: \"hits\"`), Open-Meteo city geocoding `\"https://geocoding-api.open-meteo.com/v1/search?name=${state.city}&count=5\"`, `open.er-api.com` base currency lookup `\"https://open.er-api.com/v6/latest/${$settings.baseCurrency}\"`, and `\"https://httpbin.org/post\"` echo test (for read-only background feeds such as V2EX, SSPai, ITHome RSS, HN frontpage, or Open-Meteo forecast, prefer declarative `sources` in `@http-and-rss-feeds`).\n- If `logic.js` exports `onComplete` (or `export function onHttpResponse(ctx, res)`), it receives unified `res = { id, jobKey, type: 'http.request', ok, status, text, data, error, timedOut, cancelled, durationMs, meta: { url, method } }` and can update `ctx.state`, `ctx.computed`, or `ctx.dispatch(...)`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"msg\": \"\",\n    \"lastResult\": \"--\"\n  },\n  \"settings\": [\n    {\n      \"key\": \"webhookToken\",\n      \"type\": \"secret\",\n      \"label\": \"Webhook Token\",\n      \"default\": \"\"\n    }\n  ],\n  \"root\": \"webhook_root\",\n  \"elements\": {\n    \"webhook_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"spacing\": 8,\n      \"children\": [\n        \"payload_input\",\n        \"send_webhook_btn\",\n        \"echo_result_text\"\n      ]\n    },\n    \"payload_input\": {\n      \"type\": \"Input\",\n      \"placeholder\": \"Payload message...\",\n      \"bind\": \"state.msg\"\n    },\n    \"send_webhook_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Send Webhook\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"http.request\",\n        \"method\": \"POST\",\n        \"url\": \"https://httpbin.org/post\",\n        \"headers\": {\n          \"Authorization\": \"Bearer ${$secrets.webhookToken}\"\n        },\n        \"body\": {\n          \"message\": \"${state.msg}\"\n        },\n        \"stateMap\": {\n          \"lastResult\": \"json.message\"\n        }\n      }\n    },\n    \"echo_result_text\": {\n      \"type\": \"Text\",\n      \"text\": \"Echo: ${state.lastResult}\",\n      \"style\": \"caption\",\n      \"color\": \"secondary\"\n    }\n  }\n}"
+    },
+    {
+      "id": "local-files-and-commands",
+      "emoji": "🖥️",
+      "glyph": "",
+      "category": "Action",
+      "titleZh": "本地文件读写与命令行集成",
+      "titleEn": "Local Files & CLI Commands",
+      "summaryZh": "受格子级权限保护的本地文件读写、目录扫描、安全移动/重命名/移入回收站，以及支持长耗时进度回调与取消的本地 CLI 命令执行。",
+      "summaryEn": "Permission-gated local file watching/writing, directory listing, Recycle-Bin-safe file management, and streaming CLI execution with progress & cancellation.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [],
+      "triggerSourceOrActionTypes": [
+        "fileText",
+        "localFolder",
+        "file.writeText",
+        "file.listDir",
+        "file.manage",
+        "command",
+        "command.run",
+        "job.cancel"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "本地文件",
+        "读写文件",
+        "扫描目录",
+        "相册目录",
+        "媒体文件夹",
+        "照片文件夹",
+        "文件夹整理",
+        "批量重命名",
+        "移动文件",
+        "移入回收站",
+        "监听文件",
+        "日志文件",
+        "命令行",
+        "终端",
+        "脚本执行",
+        "进程",
+        "视频压缩",
+        "转码",
+        "ffmpeg",
+        "fileText",
+        "localFolder",
+        "file.writeText",
+        "file.listDir",
+        "file.manage",
+        "command.run",
+        "job.cancel",
+        "cli",
+        "powershell",
+        "git status",
+        "docker",
+        "obsidian file"
+      ],
+      "members": [
+        {
+          "name": "source: fileText / actions: file.writeText | file.listDir | file.manage",
+          "kind": "Action",
+          "descriptionZh": "监听/写入本地文件、扫描目录文件列表，或执行复制/移动/重命名/移入系统回收站（严禁静默永久删除，需本地文件权限）",
+          "descriptionEn": "Watch/write UTF-8 files, scan directories (`file.listDir`), or copy/move/rename/recycle files via OS Recycle Bin (`LocalFileAccess`)"
+        },
+        {
+          "name": "source: command / actions: command.run (longRunning, onProgress, onComplete) | job.cancel",
+          "kind": "Action",
+          "descriptionZh": "直装版无弹窗运行 CLI 工具，支持 `longRunning: true` 闲置看门狗、`onProgress` 实时流式进度与 `job.cancel` 终止进程树（需命令执行权限）",
+          "descriptionEn": "Runs local CLI processes with optional `longRunning: true` idle-stall watchdog, `4Hz` `onProgress` streaming, unified `res` callback, and `job.cancel` (`CommandExecution`)"
+        }
+      ],
+      "compactContractMarkdown": "- Local File I/O & Directory Operations (`LocalFileAccess` permission):\n  - Watch/Write UTF-8 file: `{ \"id\": \"noteFile\", \"type\": \"fileText\", \"path\": \"${$settings.filePath}\", \"stateKey\": \"fileBody\", \"intervalMs\": 5000 }` and `{ \"type\": \"file.writeText\", \"path\": \"${$settings.filePath}\", \"text\": \"${state.fileBody}\", \"append\": false }`.\n  - Declarative folder source (ideal for photo/video galleries, media walls, and watched folders): `{ \"id\": \"albumDir\", \"type\": \"localFolder\", \"path\": \"${$settings.folderPath}\", \"targetCollection\": \"slides\", \"extensions\": [\"image/*\", \"video/*\"], \"sort\": \"modifiedDesc\", \"recursive\": false, \"maxItems\": 100 }` (`sort` accepts `modifiedDesc`|`modifiedAsc`|`nameAsc`|`nameDesc`|`sizeDesc`|`sizeAsc`, including expressions; `path` accepts full paths, `~/...`, `%USERPROFILE%\\\\...`, or known folders `Downloads`, `Desktop`, `Documents`, `Pictures`, `Music`, `Videos`; auto-watches directory changes and populates `slides` with `{ id, title, name, path, ext, kind (\"image\"|\"video\"|\"audio\"|\"file\"), isVideo, isImage, sizeBytes, sizeText, modifiedIso }`). Multi-line `text` media/path settings also auto-expand folder lines in `ctx.settings`.\n  - Imperative directory scan: `{ \"type\": \"file.listDir\", \"path\": \"${$settings.watchDir}\", \"pattern\": \"*.mp4;*.mov\", \"recursive\": false, \"maxItems\": 200, \"targetCollection\": \"files\", \"onComplete\": \"onDirListed\" }` (`res.data` is `[{ name, path, ext, sizeBytes, sizeText, modifiedIso, isDirectory }]`).\n  - Manage files safely: `{ \"type\": \"file.manage\", \"op\": \"copy|move|rename|recycle\", \"path\": \"${$item.path}\", \"destination\": \"...\", \"onComplete\": \"onFileManaged\" }` (`recycle` moves to Windows Recycle Bin; permanent deletion is strictly forbidden).\n- Local CLI Command & Async Job Bus (`CommandExecution` permission, Direct distribution):\n  - Polling source: `{ \"id\": \"gitProbe\", \"type\": \"command\", \"executable\": \"git\", \"arguments\": [\"status\", \"--short\"], \"workingDirectory\": \"${$settings.repoDir}\", \"stateKey\": \"gitOut\", \"intervalMs\": 15000 }`.\n  - Interactive / Long-running CLI job: `{ \"type\": \"command.run\", \"id\": \"encode\", \"jobKey\": \"ffmpeg-1\", \"executable\": \"${$settings.ffmpegPath}\", \"arguments\": [\"-y\", \"-i\", \"...\", \"-progress\", \"pipe:1\", \"...\"], \"longRunning\": true, \"onProgress\": \"onEncodeProgress\", \"onComplete\": \"onEncodeDone\" }`.\n  - Default short timeout is `30000` ms (`30s`); setting `\"longRunning\": true` (or `\"timeoutMs\": 0`) removes the fixed wall-clock cap and uses a **3-minute (`180s`) output-silence watchdog** while keeping jobs alive even when collapsed to a desktop capsule!\n  - `onProgress(ctx, p)` receives `{ id, jobKey, type: 'command.run', line, text, stream, elapsedMs }` (throttled `4Hz`); `onComplete(ctx, res)` (or `onCommandResult(ctx, res)`) receives unified `{ id, jobKey, type: 'command.run', ok, status, text, data: { exitCode, stdout, stderr }, error, timedOut, cancelled, durationMs, meta }`. Cancel anytime via `{ \"type\": \"job.cancel\", \"jobKey\": \"ffmpeg-1\" }` (or `\"*\"` to cancel all).",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"noteContent\": \"# Scratchpad\"\n  },\n  \"settings\": [\n    {\n      \"key\": \"notePath\",\n      \"type\": \"text\",\n      \"label\": \"Markdown File Path\",\n      \"default\": \"%USERPROFILE%\\\\Documents\\\\deskbox-note.md\"\n    }\n  ],\n  \"sources\": [\n    {\n      \"id\": \"localNote\",\n      \"type\": \"fileText\",\n      \"path\": \"${$settings.notePath}\",\n      \"stateKey\": \"noteContent\",\n      \"intervalMs\": 5000\n    }\n  ],\n  \"root\": \"note_sync_root\",\n  \"elements\": {\n    \"note_sync_root\": {\n      \"type\": \"Stack\",\n      \"padding\": \"12,10,12,12\",\n      \"spacing\": 8,\n      \"children\": [\n        \"note_editor\",\n        \"save_note_btn\"\n      ]\n    },\n    \"note_editor\": {\n      \"type\": \"TextArea\",\n      \"bind\": \"state.noteContent\",\n      \"minHeight\": 100\n    },\n    \"save_note_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Save to File\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"file.writeText\",\n        \"path\": \"${$settings.notePath}\",\n        \"text\": \"${state.noteContent}\",\n        \"append\": false\n      }\n    }\n  }\n}"
+    },
+    {
+      "id": "rich-controls-and-shells",
+      "emoji": "💎",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "immersive",
+      "titleZh": "全出血舞台与进阶原生组件",
+      "titleEn": "Full-Bleed Stage & Rich Native Controls",
+      "summaryZh": "支持由宿主统一接管标题栏/圆角/材质的全出血舞台布局，以及叠层 ZStack、瀑布网格 ItemsGrid、FlipView、SplitView、SplitButton、右键菜单、InfoBar、TeachingTip、RichText、CodeBlock 与 RadialGauge。",
+      "summaryEn": "Host-managed chrome & full-bleed stage layouts plus ZStack, ItemsGrid, SelectorBar, FlipView, SplitView, SplitButton, ContextMenu, InfoBar, TeachingTip, RichText, CodeBlock, and RadialGauge.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "ZStack",
+        "ItemsGrid",
+        "SelectorBar",
+        "FlipView",
+        "SplitView",
+        "SplitButton",
+        "DropDownButton",
+        "InfoBadge",
+        "InfoBar",
+        "TeachingTip",
+        "RichText",
+        "CodeBlock",
+        "RadialGauge"
+      ],
+      "triggerSourceOrActionTypes": [
+        "tip.open",
+        "tip.close",
+        "tip.toggle"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "无边框",
+        "沉浸式",
+        "全出血",
+        "相框",
+        "黑胶",
+        "叠层",
+        "照片墙",
+        "轮播",
+        "侧边栏",
+        "双栏",
+        "下拉菜单",
+        "右键菜单",
+        "状态横幅",
+        "引导气泡",
+        "富文本",
+        "代码块",
+        "半圆仪表",
+        "径向渐变",
+        "immersive",
+        "borderless",
+        "zstack",
+        "itemsgrid",
+        "selectorbar",
+        "flipview",
+        "carousel",
+        "splitview",
+        "splitbutton",
+        "dropdownbutton",
+        "contextmenu",
+        "infobar",
+        "infobadge",
+        "teachingtip",
+        "richtext",
+        "codeblock",
+        "radialgauge",
+        "radialGradient"
+      ],
+      "members": [
+        {
+          "name": "chrome: \"standard\" | \"immersive\" & radialGradient",
+          "kind": "Manifest",
+          "descriptionZh": "窗口标题栏与拖拽由宿主按用户外观配置统一接管（无需声明 chrome），支持 padding:\"0\" 全出血舞台与径向渐变背景",
+          "descriptionEn": "Host unifies title-bar chrome and dragging via user settings (omit chrome); supports padding:\"0\" full-bleed stages and radial gradients"
+        },
+        {
+          "name": "ZStack / ItemsGrid / SelectorBar / FlipView / SplitView",
+          "kind": "Component",
+          "descriptionZh": "自由叠层定位、自适应多列网格、Fluent 指示条页签、轮播画廊与侧栏双窗格容器",
+          "descriptionEn": "Overlay stack, uniform grid repeater, Fluent selector bar, swipe carousel, and master-detail split pane"
+        },
+        {
+          "name": "SplitButton / DropDownButton / menuItems (ContextMenu)",
+          "kind": "Component",
+          "descriptionZh": "主副一体菜单按钮、下拉动作菜单，以及任意节点可挂载的原生右键菜单",
+          "descriptionEn": "Primary + flyout split button, dropdown menu button, and universal right-click MenuFlyout"
+        },
+        {
+          "name": "InfoBadge / InfoBar / TeachingTip / RichText / CodeBlock / RadialGauge",
+          "kind": "Component",
+          "descriptionZh": "角标气泡、语义提示横幅、锚点气泡说明、多色混排富文本、一键复制代码框与可交互弧形仪表",
+          "descriptionEn": "Notification badge, inline alert bar, anchored callout tip, multi-span rich text, copyable code block, and arc gauge"
+        }
+      ],
+      "compactContractMarkdown": "- Host-Managed Window Chrome & Full-Bleed Stage: DeskBox unifies title-bar mode (Standard / Compact / Overlay), corner radius, material, and dragging via user settings — NEVER emit a root `\"chrome\"` key or custom drag bar! Use `\"padding\": \"0\"` on a root `ZStack` or `Grid` (`\"rows\": \"*,Auto\"`) for full-bleed album art, photo/video walls, clocks, or ambient HUDs, and never stack fixed-height children in a root vertical `Stack` exceeding `defaultSize.height`.\n- `radialGradient` on Canvas vector shapes (`fill`): `{ \"centerX\": 0.5, \"centerY\": 0.3, \"radiusX\": 0.7, \"radiusY\": 0.7, \"stops\": [{ \"offset\": 0, \"color\": \"#38BDF8\" }, { \"offset\": 1, \"color\": \"#0F172A\" }] }` (layout containers inherit DeskBox's host glass backdrop instead of opaque gradients).\n- Layout & Navigation:\n  - `ZStack`: overlays `children` in z-order (use `horizontalAlignment`/`verticalAlignment`/`margin` on children).\n  - `ItemsGrid`: `{ \"type\": \"ItemsGrid\", \"items\": \"photos\", \"minItemWidth\": 96, \"spacing\": 8, \"itemTemplate\": \"photo_tile\" }` (referencing element `\"photo_tile\"` in root `\"elements\"`). `minItemWidth` (alias `minColumnWidth`, default 108, clamped 36..420) is the responsive column floor; `columnsCount` (alias `columns`, clamped 1..16) pins a fixed column count instead. Without `items`/`collection` the `children` are laid out directly.\n  - `SelectorBar`: `{ \"type\": \"SelectorBar\", \"bind\": \"state.section\", \"options\": [{ \"value\": \"all\", \"label\": \"All\", \"icon\": \"grid\" }] }` (or `children` panels).\n  - `FlipView`: `{ \"type\": \"FlipView\", \"items\": \"slides\", \"bind\": \"state.slideIndex\", \"height\": 180, \"itemTemplate\": \"slide_card\" }` (referencing element `\"slide_card\"` in root `\"elements\"`, or static `children` IDs).\n  - `SplitView`: `{ \"type\": \"SplitView\", \"bind\": \"state.paneOpen\", \"paneWidth\": 140, \"displayMode\": \"compactInline\", \"pane\": \"nav_pane\", \"children\": [\"main_content\"] }` (referencing flat element IDs in root `\"elements\"`). With 2+ `children` IDs and no explicit `pane`, `children[0]` becomes the pane and the remaining children the content; an explicit `\"pane\": \"<paneId>\"` element reference always wins and leaves ALL `children` in the content. `displayMode`: `compactInline` (default) | `inline` | `overlay` | `compactOverlay`; also `panePlacement` (`left|right`), `compactPaneWidth`, `isOpen`, `defaultExpanded`.\n- Menus, Feedback, Typography & Gauge:\n  - `SplitButton` / `DropDownButton`: `{ \"type\": \"SplitButton\", \"text\": \"Run\", \"variant\": \"accent\", \"onClick\": { ... }, \"menuItems\": [{ \"text\": \"Fast Mode\", \"icon\": \"sparkles\", \"onClick\": { ... } }, { \"separator\": true }] }`. On any NON-button node, `\"menuItems\": [...]` — or the canonical `\"contextMenu\": [...]` — attaches a native right-click MenuFlyout (`contextMenu` wins when both are present; entries take `label`/`text`, `icon`, `value`, `onClick`, `when`, `separator: true`, and nested `children` for submenus). `SplitButton`/`DropDownButton` reserve `menuItems` for their own flyout, so use `contextMenu` on those two for right-click.\n  - `InfoBadge`: `{ \"type\": \"InfoBadge\", \"value\": \"${state.unread}\", \"tone\": \"accent\" }` (dot mode when `value` omitted).\n  - `InfoBar`: `{ \"type\": \"InfoBar\", \"severity\": \"informational|success|warning|error\", \"title\": \"Ready\", \"subtitle\": \"...\", \"isClosable\": true }`.\n  - `TeachingTip`: `{ \"type\": \"TeachingTip\", \"id\": \"helpTip\", \"target\": \"runBtn\", \"title\": \"Tip\", \"subtitle\": \"...\" }` controlled via `tip.open|close|toggle` (`targetId`: `\"helpTip\"`).\n  - `RichText`: `{ \"type\": \"RichText\", \"spans\": [{ \"text\": \"$128\", \"fontSize\": 24, \"fontWeight\": \"bold\", \"color\": \"accent\" }, { \"text\": \" / mo\", \"color\": \"secondary\" }] }`. A span with `\"href\": \"https://...\"` renders as a clickable link dispatched as the `url.open` action (http/https only, gated by the `PublicNetwork` permission); a span `\"onClick\": { ... }` runs custom actions instead. Spans also accept `underline`, `italic`, `strikethrough`, `monospace`, `fontFamily`.\n  - `CodeBlock`: `{ \"type\": \"CodeBlock\", \"bind\": \"state.log\", \"language\": \"bash\", \"copyable\": true, \"wrapText\": false, \"autoScrollTail\": true, \"maxHeight\": 180 }`. The body comes from `bind` while the bound value is non-empty, otherwise from `text` (aliases `code`/`markdown`); `autoScrollTail` (alias `followTail`, default false) re-pins the scroll view to the newest line on every change, `copyable` (alias `showCopyButton`, default true) toggles the copy button, and `wrapText: false` enables horizontal scrolling.\n  - `RadialGauge`: `{ \"type\": \"RadialGauge\", \"bind\": \"state.level\", \"min\": 0, \"max\": 100, \"startAngle\": -140, \"sweepAngle\": 280, \"showTicks\": true, \"tickStep\": 10, \"unit\": \"%\", \"animateChange\": true, \"isInteractive\": true, \"onChange\": { \"type\": \"state.set\", \"key\": \"state.level\", \"value\": \"${$value}\" } }`. The dial value resolves from `bind` first, then `progress`, then `value` (all interpolated, so `\"bind\": \"state.speed\"` alone is enough — no `value` required). Also `title`, `subtitle`, `text` (center label override), `size` (56..260), `thickness`, `color`, `warningThreshold`/`dangerThreshold`, `linearGradient`, and `style: \"full\"` for a closed ring. `tickStep` is a step in VALUE units and only draws when `showTicks: true` (`min:0, max:100, tickStep:10` gives 10 intervals); without `tickStep` the dial uses 12 intervals. `animateChange: true` is a 150ms opacity change-highlight pulse on the center value when it changes — it is NOT a numeric tween. `isInteractive: true` makes the dial pointer-draggable (requires `bind` or `onChange`): dragging writes the bound state live and fires `onChange` with `${$value}` on release.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"speed\": 68\n  },\n  \"root\": \"stage_overlay\",\n  \"elements\": {\n    \"stage_overlay\": {\n      \"type\": \"ZStack\",\n      \"padding\": \"0\",\n      \"children\": [\n        \"stage_body\"\n      ]\n    },\n    \"stage_body\": {\n      \"type\": \"Stack\",\n      \"padding\": \"14\",\n      \"spacing\": 8,\n      \"children\": [\n        \"boost_gauge\",\n        \"powercfg_code\"\n      ]\n    },\n    \"boost_gauge\": {\n      \"type\": \"RadialGauge\",\n      \"bind\": \"state.speed\",\n      \"min\": 0,\n      \"max\": 100,\n      \"unit\": \"%\",\n      \"title\": \"Boost\",\n      \"showTicks\": true,\n      \"tickStep\": 10,\n      \"animateChange\": true,\n      \"isInteractive\": true,\n      \"size\": 96,\n      \"color\": \"cyan\"\n    },\n    \"powercfg_code\": {\n      \"type\": \"CodeBlock\",\n      \"text\": \"powercfg /list\",\n      \"language\": \"pwsh\",\n      \"copyable\": true\n    }\n  }\n}"
+    },
+    {
+      "id": "native-media-and-audio",
+      "emoji": "🎧",
+      "glyph": "",
+      "category": "Component",
+      "compositionGroup": "multimedia",
+      "titleZh": "原生音视频播放与环境白噪音",
+      "titleEn": "Native Media Player & Multi-Track Audio",
+      "summaryZh": "纯原生 WinRT 音视频播放器 MediaPlayer，以及内置白噪音/粉红噪音/雨声无缝混音与清脆提示音效动作。",
+      "summaryEn": "Pure native WinRT MediaPlayerElement plus multi-track ambient soundscapes (white/pink/brown/rain) and synthesized UI audio cues.",
+      "requiredCapabilityIds": [],
+      "triggerNodeTypes": [
+        "MediaPlayer"
+      ],
+      "triggerSourceOrActionTypes": [
+        "audio.cue",
+        "audio.play",
+        "audio.pause",
+        "audio.stop",
+        "audio.setVolume",
+        "audio.stopAll"
+      ],
+      "triggerTokenPrefixes": [],
+      "triggerKeywords": [
+        "视频播放",
+        "视频预览",
+        "播放器",
+        "音频播放",
+        "白噪音",
+        "粉红噪音",
+        "棕噪音",
+        "雨声",
+        "混音台",
+        "助眠",
+        "提示音",
+        "音效",
+        "节拍器",
+        "mediaplayer",
+        "video player",
+        "audio",
+        "white noise",
+        "ambient sound",
+        "rain sound",
+        "soundboard",
+        "sound effect",
+        "chime"
+      ],
+      "members": [
+        {
+          "name": "MediaPlayer (src, poster, autoPlay, loop, muted, volume, showTransport)",
+          "kind": "Component",
+          "descriptionZh": "硬件解码渲染本地视频/音频或 HTTPS 流媒体，窗口隐藏时自动暂停解码省电",
+          "descriptionEn": "Hardware-decoded native video/audio player that auto-suspends when widget is hidden"
+        },
+        {
+          "name": "audio.cue (cue: complete | tick | pop | soft | alert | bell)",
+          "kind": "Action",
+          "descriptionZh": "零外部文件依赖播放内置内存合成清脆提示音",
+          "descriptionEn": "Plays zero-asset in-memory synthesized UI/timer cues"
+        },
+        {
+          "name": "audio.play / pause / stop / setVolume / stopAll (noise:white|pink|brown|rain)",
+          "kind": "Action",
+          "descriptionZh": "按命名音轨（trackId）独立播放或叠加混音环境声与音频文件，实时无极调音",
+          "descriptionEn": "Multi-track playback and live volume mixing for ambient `noise:*` loops or local/HTTPS audio"
+        }
+      ],
+      "compactContractMarkdown": "- `MediaPlayer` node: `{ \"type\": \"MediaPlayer\", \"src\": \"${state.videoPath}\", \"poster\": \"${state.thumbPath}\", \"height\": 180, \"cornerRadius\": 10, \"autoPlay\": false, \"loop\": true, \"muted\": false, \"volume\": \"${state.vol}\", \"showTransport\": true, \"stretch\": \"uniform\" }`.\n- Multi-track native audio actions (no UI node required; auto-disposed when widget closes):\n  - Instant UI/Timer Cue: `{ \"type\": \"audio.cue\", \"cue\": \"complete\" }` (`complete` | `tick` | `pop` | `soft` | `alert` | `bell`, optional `volume`: `0`..`100`).\n  - Ambient Noise Loop / File Stream: `{ \"type\": \"audio.play\", \"trackId\": \"rain\", \"src\": \"noise:rain\", \"loop\": true, \"volume\": \"${state.rainVol}\" }` (built-in zero-file generators: `\"noise:white\"`, `\"noise:pink\"`, `\"noise:brown\"`, `\"noise:rain\"`, plus local file paths or `https://` audio URLs).\n  - Live Mixer Controls: `{ \"type\": \"audio.setVolume\", \"trackId\": \"rain\", \"value\": \"${$value}\" }` (pair directly with `Slider.onChange`!), `{ \"type\": \"audio.pause\", \"trackId\": \"rain\" }`, `{ \"type\": \"audio.stop\", \"trackId\": \"rain\" }`, `{ \"type\": \"audio.stopAll\" }`.",
+      "goldenSnippetJson": "{\n  \"state\": {\n    \"rainVol\": 65,\n    \"brownVol\": 40\n  },\n  \"root\": \"soundscape_card\",\n  \"elements\": {\n    \"soundscape_card\": {\n      \"type\": \"Card\",\n      \"tone\": \"subtle\",\n      \"children\": [\n        \"rain_volume_slider\",\n        \"playback_actions_grid\"\n      ]\n    },\n    \"rain_volume_slider\": {\n      \"type\": \"Slider\",\n      \"title\": \"Rain\",\n      \"bind\": \"state.rainVol\",\n      \"min\": 0,\n      \"max\": 100,\n      \"unit\": \"%\",\n      \"onChange\": {\n        \"type\": \"audio.setVolume\",\n        \"trackId\": \"rain\",\n        \"value\": \"${$value}\"\n      }\n    },\n    \"playback_actions_grid\": {\n      \"type\": \"Grid\",\n      \"columns\": \"*,*\",\n      \"spacing\": 8,\n      \"children\": [\n        \"play_rain_btn\",\n        \"stop_all_btn\"\n      ]\n    },\n    \"play_rain_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Play Rain\",\n      \"variant\": \"accent\",\n      \"onClick\": {\n        \"type\": \"audio.play\",\n        \"trackId\": \"rain\",\n        \"src\": \"noise:rain\",\n        \"loop\": true,\n        \"volume\": \"${state.rainVol}\"\n      }\n    },\n    \"stop_all_btn\": {\n      \"type\": \"Button\",\n      \"text\": \"Stop All\",\n      \"onClick\": {\n        \"type\": \"audio.stopAll\"\n      }\n    }\n  }\n}"
+    }
+  ]
+}

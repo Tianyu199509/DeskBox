@@ -229,7 +229,7 @@ public sealed class BackupRuntimeTests
         public bool RefreshOptions() { Refreshes++; Refresh?.Invoke(); return RefreshChanged; }
         public Task PrepareManualBackupAsync(CancellationToken token) { Preparations++; return Prepare(token); }
         public Task<LocalBackupResult> CreateSnapshotAsync(bool force, CancellationToken token) { LocalCalls++; return LocalWork(force, token); }
-        public Task<string> ExportAsync(string path, CancellationToken token) => Task.FromResult(path);
+        public Task<string> ExportAsync(string path, CancellationToken token, bool includeClipboard = false) => Task.FromResult(path);
         public Task<CloudBackupRunResult> UploadAsync(bool scheduled, CancellationToken token) { CloudCalls++; return CloudWork(scheduled, token); }
     }
 }

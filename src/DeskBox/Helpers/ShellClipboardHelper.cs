@@ -90,6 +90,23 @@ public static class ShellClipboardHelper
         }
     }
 
+    public static bool TryClearClipboard()
+    {
+        if (!TryOpenClipboard())
+        {
+            return false;
+        }
+
+        try
+        {
+            return ClipboardNativeMethods.EmptyClipboard();
+        }
+        finally
+        {
+            ClipboardNativeMethods.CloseClipboard();
+        }
+    }
+
     public static bool HasFileDropList()
     {
         return ClipboardNativeMethods.IsClipboardFormatAvailable(CfHdrop);
@@ -114,11 +131,7 @@ public static class ShellClipboardHelper
                 return false;
             }
 
-            uint count = ClipboardNativeMethods.DragQueryFile(
-                dropHandle,
-                DragQueryFileCount,
-                null,
-                0);
+            uint count = ClipboardNativeMethods.QueryDroppedFileCount(dropHandle);
             if (count == 0 || count > int.MaxValue)
             {
                 return false;
@@ -127,23 +140,7 @@ public static class ShellClipboardHelper
             var result = new List<string>((int)count);
             for (uint index = 0; index < count; index++)
             {
-                uint length = ClipboardNativeMethods.DragQueryFile(dropHandle, index, null, 0);
-                if (length == 0 || length >= int.MaxValue)
-                {
-                    continue;
-                }
-
-                var buffer = new StringBuilder(checked((int)length + 1));
-                if (ClipboardNativeMethods.DragQueryFile(
-                        dropHandle,
-                        index,
-                        buffer,
-                        (uint)buffer.Capacity) == 0)
-                {
-                    continue;
-                }
-
-                string path = buffer.ToString();
+                string? path = ClipboardNativeMethods.TryQueryDroppedFilePath(dropHandle, index);
                 if (!string.IsNullOrWhiteSpace(path))
                 {
                     result.Add(path);
@@ -196,11 +193,12 @@ public static class ShellClipboardHelper
                 return false;
             }
 
-            long size = ClipboardNativeMethods.GlobalSize(idListHandle).ToInt64();
-            if (size < sizeof(uint) + (2 * sizeof(uint)) || size > int.MaxValue)
+            nuint rawSize = ClipboardNativeMethods.GlobalSize(idListHandle);
+            if (rawSize < sizeof(uint) + (2 * sizeof(uint)) || rawSize > int.MaxValue)
             {
                 return false;
             }
+            long size = (long)rawSize;
 
             IntPtr pointer = ClipboardNativeMethods.GlobalLock(idListHandle);
             if (pointer == IntPtr.Zero)
@@ -276,10 +274,14 @@ public static class ShellClipboardHelper
                         displayName = parsingName;
                     }
 
+                    string fileSysPath = ReadShellIdListName(absolutePidl, SigdnFileSysPath);
                     items.Add(new ShellNamespaceClipboardItem(
                         parsingName,
                         displayName,
-                        ReadShellIdListName(absolutePidl, SigdnFileSysPath)));
+                        fileSysPath,
+                        string.IsNullOrWhiteSpace(fileSysPath)
+                            ? ShellLinkVtableInterop.CopyValidatedPidlBytes(absolutePidl)
+                            : null));
                 }
                 finally
                 {
@@ -327,7 +329,8 @@ public static class ShellClipboardHelper
     public sealed record ShellNamespaceClipboardItem(
         string ParsingName,
         string DisplayName,
-        string FileSystemPath);
+        string FileSystemPath,
+        byte[]? RawPidl = null);
 
     private static IntPtr CreateDropFilesHandle(IReadOnlyList<string> paths)
     {
@@ -383,7 +386,8 @@ public static class ShellClipboardHelper
         }
 
         IntPtr effectHandle = ClipboardNativeMethods.GetClipboardData(PreferredDropEffectFormat);
-        if (effectHandle == IntPtr.Zero)
+        if (effectHandle == IntPtr.Zero ||
+            ClipboardNativeMethods.GlobalSize(effectHandle) < sizeof(uint))
         {
             return null;
         }

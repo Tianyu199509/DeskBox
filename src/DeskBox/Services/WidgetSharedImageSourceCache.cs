@@ -35,10 +35,63 @@ internal static class WidgetSharedImageSourceCache
         public List<Action>? PendingSuccessCallbacks { get; set; }
     }
 
-    private static readonly Dictionary<string, Entry> s_entries = [];
+    private static readonly Dictionary<string, Entry> s_entries =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly Dictionary<string, (long Length, DateTime LastWriteUtc)> s_failedStamps =
-        [];
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public static void Clear()
+    {
+        s_entries.Clear();
+        s_failedStamps.Clear();
+    }
+
+    public static void EvictExcept(string? activePath1, string? activePath2 = null)
+    {
+        if (s_entries.Count == 0 && s_failedStamps.Count == 0)
+        {
+            return;
+        }
+
+        List<string>? staleKeys = null;
+        foreach (string key in s_entries.Keys)
+        {
+            if (!PathsEqual(key, activePath1) && !PathsEqual(key, activePath2))
+            {
+                (staleKeys ??= []).Add(key);
+            }
+        }
+
+        if (staleKeys is not null)
+        {
+            foreach (string key in staleKeys)
+            {
+                s_entries.Remove(key);
+            }
+        }
+
+        staleKeys = null;
+        foreach (string key in s_failedStamps.Keys)
+        {
+            if (!PathsEqual(key, activePath1) && !PathsEqual(key, activePath2))
+            {
+                (staleKeys ??= []).Add(key);
+            }
+        }
+
+        if (staleKeys is not null)
+        {
+            foreach (string key in staleKeys)
+            {
+                s_failedStamps.Remove(key);
+            }
+        }
+    }
+
+    private static bool PathsEqual(string left, string? right) =>
+        !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     public static ImageSource? TryGet(
         string? filePath,
@@ -55,6 +108,8 @@ internal static class WidgetSharedImageSourceCache
         {
             if (!File.Exists(filePath))
             {
+                s_entries.Remove(filePath);
+                s_failedStamps.Remove(filePath);
                 return null;
             }
 

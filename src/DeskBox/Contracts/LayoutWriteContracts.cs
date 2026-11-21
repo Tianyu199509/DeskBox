@@ -44,7 +44,8 @@ public sealed record GroupNavigationDefaultsChange(
 public sealed record LayoutPreferencesChange(
     string? NewPlacementTarget = null,
     string? DefaultBoundScreenId = null,
-    string? DisconnectBehavior = null);
+    string? DisconnectBehavior = null,
+    string? DisplayScalingMode = null);
 
 /// <summary>The capsule-override reset scopes the settings page offers.</summary>
 public enum CapsuleOverrideResetScope

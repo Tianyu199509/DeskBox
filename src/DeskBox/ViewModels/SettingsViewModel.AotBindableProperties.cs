@@ -1,4 +1,4 @@
-﻿#if DESKBOX_NATIVE_AOT
+#if DESKBOX_NATIVE_AOT
 namespace DeskBox.ViewModels;
 
 [WinRT.GeneratedBindableCustomProperty([
@@ -9,9 +9,6 @@ namespace DeskBox.ViewModels;
     nameof(AutoStartStatusText),
     nameof(AutoStartStatusVisibility),
     nameof(AutoStartSystemSettingsVisibility),
-    nameof(AutoStartModeVisibility),
-    nameof(SelectedAutoStartMode),
-    nameof(AvailableAutoStartModeOptions),
     nameof(SilentStartup),
     nameof(ShowReleaseNotesAfterUpdate),
     nameof(AvailableLanguageOptions),
@@ -34,12 +31,16 @@ namespace DeskBox.ViewModels;
     nameof(UpdateDetailText),
     nameof(UpdateFallbackActionText),
     nameof(UpdateFallbackVisibility),
+    nameof(UpdateMandatoryBadgeText),
+    nameof(UpdateMandatoryBadgeVisibility),
     nameof(UpdateProgressIsIndeterminate),
     nameof(UpdateProgressText),
     nameof(UpdateProgressTextVisibility),
     nameof(UpdateProgressValue),
     nameof(UpdateProgressVisibility),
     nameof(UpdateStatusText),
+    nameof(UpdateSummaryText),
+    nameof(UpdateSummaryVisibility),
     nameof(ViewReleaseNotesButtonText),
 ], [])]
 public partial class SettingsViewModel

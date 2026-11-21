@@ -220,7 +220,7 @@ internal static class ShellOpenWithInterop
 
     private const uint OaifAllowRegistration = 0x00000001;
     private const uint OaifExec = 0x00000004;
-    private const int HResultErrorCancelled = unchecked((int)0x800704C5);
+    private const int HResultErrorCancelled = unchecked((int)0x800704C7);
 
     /// <summary>
     /// Shows the system Open With dialog (SHOpenWithDialog — the documented

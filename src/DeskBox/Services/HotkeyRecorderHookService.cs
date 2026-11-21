@@ -1,48 +1,78 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using DeskBox.Models;
 using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
 /// <summary>
-/// Low-level keyboard hook used by the hotkey recorder dialog. While active it
-/// reports every real key event on the UI dispatcher and swallows the input so
-/// the OS cannot steal chords like Win+V or Alt+Space mid-recording — the same
-/// approach PowerToys uses for its shortcut editor. Tab passes through so the
-/// dialog remains keyboard-navigable, and Space/Enter pass through while a
-/// preset button owns focus so presets stay operable from the keyboard.
+/// Low-level keyboard hook used by the hotkey recorder dialog. While active and
+/// while the host settings window owns foreground focus, it reports physical key
+/// transitions on the UI dispatcher and swallows the input so the OS cannot
+/// steal chords like Win+V or Alt+Space mid-recording — the same approach
+/// PowerToys uses for its shortcut editor. Bare Tab passes through so the
+/// dialog remains keyboard-navigable, and bare Space/Enter pass through while a
+/// dialog button owns focus so buttons stay operable from the keyboard without
+/// breaking Alt+Space / Win+Space / Ctrl+Space chord capture.
 /// Lifecycle mirrors <see cref="ReservedHotkeyHookService"/>: the hook lives on
 /// a dedicated message-pump thread.
 /// </summary>
 internal sealed class HotkeyRecorderHookService : IDisposable
 {
-    internal readonly record struct RecordedKeyEvent(uint VirtualKey, bool IsKeyDown);
+    internal readonly record struct RecordedKeyEvent(
+        uint VirtualKey,
+        bool IsKeyDown,
+        bool IsFocusLostReset = false);
+
+    internal readonly record struct HookEvaluationResult(
+        bool Swallow,
+        bool InjectShellMask,
+        RecordedKeyEvent? DispatchedEvent);
+
+    internal static readonly IntPtr InjectedEventTag = new(0x44425243);
 
     private const int ErrorInvalidState = 87;
     private const int ErrorTimeout = 1460;
     private const int StartupTimeoutMilliseconds = 1500;
     private const int StopTimeoutMilliseconds = 500;
     private const int ForcedStopTimeoutMilliseconds = 150;
+    private const ushort InternalMaskVirtualKey = 0xE8;
+    private const uint LowerIlInjectedFlag = 0x02;
     private const uint VirtualKeyTab = 0x09;
     private const uint VirtualKeyReturn = 0x0D;
+    private const uint VirtualKeyMenu = 0x12;
     private const uint VirtualKeySpace = 0x20;
+    private const uint VirtualKeyLeftWin = 0x5B;
+    private const uint VirtualKeyRightWin = 0x5C;
+    private const uint VirtualKeyLeftMenu = 0xA4;
+    private const uint VirtualKeyRightMenu = 0xA5;
 
     private readonly object _sync = new();
-    private readonly Microsoft.UI.Dispatching.DispatcherQueue _uiDispatcherQueue;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _uiDispatcherQueue;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueHandler _drainPendingEventsHandler;
     private readonly Win32Helper.LowLevelKeyboardProc _keyboardHookProc;
+    private readonly ConcurrentQueue<RecordedKeyEvent> _pendingEvents = new();
+    // Accessed exclusively on the dedicated hook thread (or deterministic test harness).
+    private readonly HashSet<uint> _swallowedDownKeys = [];
+    private bool _shellMaskSentForStroke;
     private Thread? _thread;
     private uint _threadId;
     private IntPtr _hookHandle;
+    private IntPtr _targetWindowHandle;
     private int _startupError;
+    private int _drainScheduled;
     private long _lifecycleGeneration;
     private volatile bool _passthroughRequested;
+    private volatile bool _isHostWindowActive = true;
     private bool _disposed;
 
     public HotkeyRecorderHookService(
-        Microsoft.UI.Dispatching.DispatcherQueue uiDispatcherQueue)
+        Microsoft.UI.Dispatching.DispatcherQueue? uiDispatcherQueue)
     {
         _uiDispatcherQueue = uiDispatcherQueue;
+        _drainPendingEventsHandler = DrainPendingEvents;
         _keyboardHookProc = KeyboardHookProc;
     }
 
@@ -61,8 +91,29 @@ internal sealed class HotkeyRecorderHookService : IDisposable
     }
 
     /// <summary>
-    /// When a preset button owns focus, Space and Enter must reach it instead
-    /// of being recorded, so the preset list stays keyboard-operable.
+    /// Host window handle that owns the recorder dialog. When non-zero, the
+    /// hook passes input through untouched whenever foreground focus belongs to
+    /// another window so external apps are never keyboard-locked.
+    /// </summary>
+    public IntPtr TargetWindowHandle
+    {
+        get => Volatile.Read(ref _targetWindowHandle);
+        set => Volatile.Write(ref _targetWindowHandle, value);
+    }
+
+    /// <summary>
+    /// Mirrors the host window's XAML activation state so mouse-driven focus
+    /// loss suspends capture immediately alongside the Win32 foreground check.
+    /// </summary>
+    public bool IsHostWindowActive
+    {
+        get => _isHostWindowActive;
+        set => _isHostWindowActive = value;
+    }
+
+    /// <summary>
+    /// When a dialog button owns focus, bare Space and Enter must reach it
+    /// instead of being recorded, so controls stay keyboard-operable.
     /// </summary>
     public bool PassthroughRequested
     {
@@ -92,6 +143,7 @@ internal sealed class HotkeyRecorderHookService : IDisposable
             }
 
             _startupError = 0;
+            ClearPendingEvents();
             generation = ++_lifecycleGeneration;
             thread = new Thread(() => HookThreadMain(ready, generation))
             {
@@ -139,6 +191,7 @@ internal sealed class HotkeyRecorderHookService : IDisposable
 
         if (thread is null)
         {
+            ClearPendingEvents();
             return;
         }
 
@@ -156,28 +209,10 @@ internal sealed class HotkeyRecorderHookService : IDisposable
 
         if (thread != Thread.CurrentThread && !thread.Join(StopTimeoutMilliseconds))
         {
-            IntPtr hookHandle;
-            lock (_sync)
+            IntPtr hookHandle = Interlocked.Exchange(ref _hookHandle, IntPtr.Zero);
+            if (hookHandle != IntPtr.Zero && !Win32Helper.UnhookWindowsHookEx(hookHandle))
             {
-                hookHandle = _hookHandle;
-            }
-
-            if (hookHandle != IntPtr.Zero)
-            {
-                if (Win32Helper.UnhookWindowsHookEx(hookHandle))
-                {
-                    lock (_sync)
-                    {
-                        if (_hookHandle == hookHandle)
-                        {
-                            _hookHandle = IntPtr.Zero;
-                        }
-                    }
-                }
-                else
-                {
-                    RecordLastWin32Error();
-                }
+                RecordLastWin32Error();
             }
 
             if (threadId != 0)
@@ -195,13 +230,14 @@ internal sealed class HotkeyRecorderHookService : IDisposable
             thread.Join(ForcedStopTimeoutMilliseconds);
         }
 
+        ClearPendingEvents();
         lock (_sync)
         {
             if (ReferenceEquals(_thread, thread) && !thread.IsAlive)
             {
                 _thread = null;
                 _threadId = 0;
-                _hookHandle = IntPtr.Zero;
+                Volatile.Write(ref _hookHandle, IntPtr.Zero);
             }
         }
     }
@@ -235,6 +271,19 @@ internal sealed class HotkeyRecorderHookService : IDisposable
                 }
             }
 
+            // Windows silently drops WH_KEYBOARD_LL hooks that miss
+            // LowLevelHooksTimeout under CPU contention; match
+            // ReservedHotkeyHookService's elevated pump priority.
+            try
+            {
+                Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+            }
+            catch
+            {
+            }
+
+            _swallowedDownKeys.Clear();
+            _shellMaskSentForStroke = false;
             uint threadId = Win32Helper.GetCurrentThreadId();
             Win32Helper.PeekMessage(
                 out _,
@@ -249,7 +298,7 @@ internal sealed class HotkeyRecorderHookService : IDisposable
                 Win32Helper.GetModuleHandle(null),
                 0);
             int startupError = installedHook == IntPtr.Zero
-                ? Marshal.GetLastWin32Error()
+                ? Marshal.GetLastPInvokeError()
                 : 0;
 
             bool startupWasCancelled;
@@ -259,13 +308,14 @@ internal sealed class HotkeyRecorderHookService : IDisposable
                 if (!startupWasCancelled)
                 {
                     _threadId = threadId;
-                    _hookHandle = installedHook;
+                    Volatile.Write(ref _hookHandle, installedHook);
+                    installedHook = IntPtr.Zero;
                     _startupError = startupError;
                 }
             }
 
             ready.TrySetResult(true);
-            if (installedHook == IntPtr.Zero || startupWasCancelled)
+            if (startupWasCancelled || Volatile.Read(ref _hookHandle) == IntPtr.Zero)
             {
                 return;
             }
@@ -291,18 +341,26 @@ internal sealed class HotkeyRecorderHookService : IDisposable
         }
         finally
         {
-            if (installedHook != IntPtr.Zero)
+            IntPtr hookToUnhook = installedHook != IntPtr.Zero
+                ? installedHook
+                : (ReferenceEquals(_thread, Thread.CurrentThread)
+                    ? Interlocked.Exchange(ref _hookHandle, IntPtr.Zero)
+                    : IntPtr.Zero);
+            if (hookToUnhook != IntPtr.Zero)
             {
-                Win32Helper.UnhookWindowsHookEx(installedHook);
+                Win32Helper.UnhookWindowsHookEx(hookToUnhook);
             }
 
+            GC.KeepAlive(_keyboardHookProc);
+            _swallowedDownKeys.Clear();
+            _shellMaskSentForStroke = false;
             lock (_sync)
             {
                 if (ReferenceEquals(_thread, Thread.CurrentThread))
                 {
                     _thread = null;
                     _threadId = 0;
-                    _hookHandle = IntPtr.Zero;
+                    Volatile.Write(ref _hookHandle, IntPtr.Zero);
                 }
             }
 
@@ -310,47 +368,270 @@ internal sealed class HotkeyRecorderHookService : IDisposable
         }
     }
 
-    private IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    private unsafe IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        IntPtr hookHandle;
-        lock (_sync)
+        IntPtr hookHandle = Volatile.Read(ref _hookHandle);
+        try
         {
-            hookHandle = _hookHandle;
-        }
+            if (nCode < 0 ||
+                lParam == IntPtr.Zero ||
+                (wParam != Win32Helper.WM_KEYDOWN &&
+                 wParam != Win32Helper.WM_SYSKEYDOWN &&
+                 wParam != Win32Helper.WM_KEYUP &&
+                 wParam != Win32Helper.WM_SYSKEYUP))
+            {
+                return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+            }
 
+            ref readonly Win32Helper.KBDLLHOOKSTRUCT data =
+                ref *(Win32Helper.KBDLLHOOKSTRUCT*)lParam;
+
+            bool isInjected = (data.flags & (Win32Helper.LLKHF_INJECTED | LowerIlInjectedFlag)) != 0 ||
+                              data.dwExtraInfo == InjectedEventTag;
+            bool isTargetForeground = !isInjected && _isHostWindowActive && IsTargetWindowForeground();
+            bool hasUnmaskedShellModifierDown = isTargetForeground && HasUnmaskedShellModifierPhysicallyDown();
+
+            HookEvaluationResult evaluation = ProcessHookKeyEvent(
+                nCode,
+                wParam,
+                data.vkCode,
+                data.flags,
+                data.dwExtraInfo,
+                isTargetForeground,
+                hasUnmaskedShellModifierDown);
+
+            if (evaluation.InjectShellMask)
+            {
+                _ = Win32Helper.TrySendTaggedKeyPress(
+                    InternalMaskVirtualKey,
+                    InjectedEventTag,
+                    out _);
+            }
+
+            if (evaluation.DispatchedEvent is { } captured)
+            {
+                EnqueueKeyEvent(captured);
+            }
+
+            return evaluation.Swallow
+                ? (IntPtr)1
+                : Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+        catch
+        {
+            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+    }
+
+    internal HookEvaluationResult ProcessHookKeyEvent(
+        int nCode,
+        IntPtr wParam,
+        uint vkCode,
+        uint flags,
+        IntPtr extraInfo,
+        bool isTargetForeground,
+        bool hasUnmaskedShellModifierDown)
+    {
         bool isKeyDown = wParam == Win32Helper.WM_KEYDOWN ||
                          wParam == Win32Helper.WM_SYSKEYDOWN;
         bool isKeyUp = wParam == Win32Helper.WM_KEYUP ||
                        wParam == Win32Helper.WM_SYSKEYUP;
         if (nCode < 0 || (!isKeyDown && !isKeyUp))
         {
-            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+            return default;
         }
 
-        Win32Helper.KBDLLHOOKSTRUCT data =
-            Marshal.PtrToStructure<Win32Helper.KBDLLHOOKSTRUCT>(lParam);
-        if ((data.flags & Win32Helper.LLKHF_INJECTED) != 0)
+        if ((flags & (Win32Helper.LLKHF_INJECTED | LowerIlInjectedFlag)) != 0 ||
+            extraInfo == InjectedEventTag)
         {
-            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+            return default;
         }
 
-        // Tab keeps dialog navigation working; Space/Enter reach a focused
-        // preset button instead of being recorded as a chord.
-        if (data.vkCode == VirtualKeyTab ||
-            (_passthroughRequested &&
-             data.vkCode is VirtualKeyReturn or VirtualKeySpace))
+        // Never swallow keystrokes destined for other windows when the host
+        // settings window is deactivated or no longer owns foreground focus.
+        if (!isTargetForeground)
         {
-            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+            if (_swallowedDownKeys.Count > 0)
+            {
+                _swallowedDownKeys.Clear();
+                _shellMaskSentForStroke = false;
+                return new HookEvaluationResult(
+                    Swallow: false,
+                    InjectShellMask: false,
+                    DispatchedEvent: new RecordedKeyEvent(0, IsKeyDown: false, IsFocusLostReset: true));
+            }
+
+            return default;
         }
 
-        var captured = new RecordedKeyEvent(data.vkCode, isKeyDown);
-        _uiDispatcherQueue.TryEnqueue(() => KeyCaptured?.Invoke(captured));
-        return (IntPtr)1;
+        // Never swallow a key-up for a key whose key-down occurred before the
+        // hook was installed or was passed through to the dialog.
+        if (isKeyUp && !_swallowedDownKeys.Contains(vkCode))
+        {
+            if (_swallowedDownKeys.Count == 0)
+            {
+                _shellMaskSentForStroke = false;
+            }
+
+            return default;
+        }
+
+        bool hasSwallowedModifiers = HasSwallowedModifiers();
+
+        // Bare Tab keeps dialog navigation working; bare Space/Enter reach a
+        // focused dialog button instead of being recorded, while modifier+Space,
+        // modifier+Enter, and modifier+Tab are always captured as chords.
+        // Only apply on key-down: any key-up reaching this point had its
+        // key-down swallowed and must also be swallowed + removed cleanly even
+        // if the modifier key was released first.
+        if (isKeyDown &&
+            !hasSwallowedModifiers &&
+            !hasUnmaskedShellModifierDown &&
+            (vkCode == VirtualKeyTab ||
+             (_passthroughRequested &&
+              vkCode is VirtualKeyReturn or VirtualKeySpace)))
+        {
+            return default;
+        }
+
+        if (isKeyDown)
+        {
+            bool injectShellMask = false;
+            if (!_shellMaskSentForStroke &&
+                (IsShellMenuModifierKey(vkCode) ||
+                 hasUnmaskedShellModifierDown ||
+                 HasSwallowedShellMenuModifiers()))
+            {
+                _shellMaskSentForStroke = true;
+                injectShellMask = true;
+            }
+
+            bool isFirstKeyDown = _swallowedDownKeys.Add(vkCode);
+            return new HookEvaluationResult(
+                Swallow: true,
+                InjectShellMask: injectShellMask,
+                DispatchedEvent: isFirstKeyDown
+                    ? new RecordedKeyEvent(vkCode, IsKeyDown: true)
+                    : null);
+        }
+
+        _swallowedDownKeys.Remove(vkCode);
+        if (_swallowedDownKeys.Count == 0)
+        {
+            _shellMaskSentForStroke = false;
+        }
+
+        return new HookEvaluationResult(
+            Swallow: true,
+            InjectShellMask: false,
+            DispatchedEvent: new RecordedKeyEvent(vkCode, IsKeyDown: false));
+    }
+
+    private void EnqueueKeyEvent(RecordedKeyEvent captured)
+    {
+        if (_uiDispatcherQueue is null)
+        {
+            return;
+        }
+
+        _pendingEvents.Enqueue(captured);
+        if (Interlocked.Exchange(ref _drainScheduled, 1) == 0 &&
+            !_uiDispatcherQueue.TryEnqueue(_drainPendingEventsHandler))
+        {
+            Interlocked.Exchange(ref _drainScheduled, 0);
+        }
+    }
+
+    private void DrainPendingEvents()
+    {
+        Interlocked.Exchange(ref _drainScheduled, 0);
+        while (_pendingEvents.TryDequeue(out RecordedKeyEvent captured))
+        {
+            KeyCaptured?.Invoke(captured);
+        }
+    }
+
+    private void ClearPendingEvents()
+    {
+        while (_pendingEvents.TryDequeue(out _))
+        {
+        }
+
+        Interlocked.Exchange(ref _drainScheduled, 0);
+    }
+
+    private bool IsTargetWindowForeground()
+    {
+        IntPtr targetHwnd = Volatile.Read(ref _targetWindowHandle);
+        if (targetHwnd == IntPtr.Zero)
+        {
+            return true;
+        }
+
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        return foreground == targetHwnd ||
+               Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOTOWNER) == targetHwnd;
+    }
+
+    private bool HasUnmaskedShellModifierPhysicallyDown()
+    {
+        return IsUnmaskedPhysicalDown(VirtualKeyLeftWin) ||
+               IsUnmaskedPhysicalDown(VirtualKeyRightWin) ||
+               IsUnmaskedPhysicalDown(VirtualKeyLeftMenu) ||
+               IsUnmaskedPhysicalDown(VirtualKeyRightMenu) ||
+               IsUnmaskedPhysicalDown(VirtualKeyMenu);
+    }
+
+    private bool IsUnmaskedPhysicalDown(uint vkCode)
+    {
+        return !_swallowedDownKeys.Contains(vkCode) &&
+               Win32Helper.IsKeyDown((int)vkCode);
+    }
+
+    private bool HasSwallowedModifiers()
+    {
+        foreach (uint vkCode in _swallowedDownKeys)
+        {
+            if (HotkeyRecordingSession.TryGetModifierFlag(vkCode, out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool HasSwallowedShellMenuModifiers()
+    {
+        foreach (uint vkCode in _swallowedDownKeys)
+        {
+            if (IsShellMenuModifierKey(vkCode))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsShellMenuModifierKey(uint vkCode)
+    {
+        return vkCode is
+            VirtualKeyLeftWin or
+            VirtualKeyRightWin or
+            VirtualKeyMenu or
+            VirtualKeyLeftMenu or
+            VirtualKeyRightMenu;
     }
 
     private void RecordLastWin32Error()
     {
-        int errorCode = Marshal.GetLastWin32Error();
+        int errorCode = Marshal.GetLastPInvokeError();
         lock (_sync)
         {
             if (_startupError == 0)

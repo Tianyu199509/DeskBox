@@ -1,6 +1,7 @@
 namespace DeskBox;
 
 using DeskBox.Contracts;
+using DeskBox.Models;
 using DeskBox.Services;
 
 /// <summary>
@@ -15,6 +16,7 @@ public partial class App
 {
     private SettingsIpcServer? _settingsIpcServer;
     private SettingsIpcMethodRouter? _settingsIpcRouter;
+    private DeskBoxAgentBridgeServer? _agentBridgeServer;
 
     private void StartSettingsIpcServer()
     {
@@ -35,10 +37,12 @@ public partial class App
                 // after this router construction — so the constructor
                 // snapshot was null and every search-hotkey command
                 // silently no-opped.
-                searchHotkeyProvider: () => _searchHotkeyService),
+                searchHotkeyProvider: () => _searchHotkeyService,
+                clipboardHotkeyProvider: () => _clipboardHotkeyService),
             new InProcessSettingsDataActions(
                 QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
-                LocalizationService),
+                LocalizationService,
+                clipboardServiceProvider: () => _clipboardHistoryService),
             new InProcessSettingsRestoreActions(
                 DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
                 AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
@@ -54,9 +58,7 @@ public partial class App
                 applyTodoEnabled: enabled =>
                     (_todoSettings ?? throw new InvalidOperationException(
                         "Todo settings are not initialized.")).SetEnabledAsync(enabled),
-                applySearchEnabled: enabled =>
-                    (_searchSettings ?? throw new InvalidOperationException(
-                        "Search settings are not initialized.")).SetEnabledAsync(enabled, reveal: enabled)),
+                openCustomWidgetStudio: (widgetId, initialIdea) => ShowCustomWidgetStudio(widgetId, initialIdea)),
             new InProcessSettingsAppActions(this, LocalizationService),
             pushEvent: (method, payload) =>
                 _settingsIpcServer?.SendEventAsync(method, payload) ?? Task.CompletedTask,
@@ -65,6 +67,7 @@ public partial class App
             backupSettings: _backupSettings,
             appUpdate: AppUpdateService,
             everythingClient: _everythingSearchService,
+            everythingClientProvider: EnsureEverythingSearchServiceForIpc,
             // Batch R11: the coordinator flips its spawn-vs-show decision
             // the moment the host announces its exit, not when the process
             // handle finally reports death (~2s later, mid-flush). The
@@ -74,6 +77,7 @@ public partial class App
             {
                 if (uint.TryParse(payload, out uint senderPid))
                 {
+                    _settingsIpcServer?.SuppressEventsForExitingClient();
                     MarkSettingsHostExiting(senderPid);
                 }
             },
@@ -86,7 +90,8 @@ public partial class App
             // the dying one saying goodbye) may use the pipe. Deep review
             // R13 adds the spawn-time stamp so a recycled pid from an
             // unrelated process cannot pass the number check.
-            expectedClientIdentityProvider: () => SettingsHostPipeClientIdentity);
+            expectedClientIdentityProvider: () => SettingsHostPipeClientIdentity,
+            onClientDisconnected: router.CancelAllActiveMigrationsOnDisconnect);
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;
@@ -100,15 +105,157 @@ public partial class App
         GlobalHotkeyService?.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
+        StartupService.StateChanged += OnSettingsIpcAutoStartStateChanged;
         CloudBackupService.BackupRunCompleted += OnSettingsIpcBackupRunCompleted;
         AppUpdateService.CheckCompleted += OnSettingsIpcUpdateCheckCompleted;
         AppUpdateService.DownloadProgressChanged += OnSettingsIpcUpdateDownloadProgress;
         AppUpdateService.DownloadCompleted += OnSettingsIpcUpdateDownloadCompleted;
+
+        if (_agentBridgeServer is null)
+        {
+            _agentBridgeServer = new DeskBoxAgentBridgeServer(
+                DeskBoxDataPathService.Current.AgentBridgePipeName,
+                () => WidgetManager,
+                includeManifest => BuildStudioContextResponseJsonAsync(includeManifest),
+                () =>
+                {
+                    AppSettings? s = SettingsService?.Settings;
+                    double rawW = s?.DefaultWidgetWidth ?? SettingsService.DefaultWidgetWidth;
+                    double rawH = s?.DefaultWidgetHeight ?? SettingsService.DefaultWidgetHeight;
+                    return (
+                        Math.Clamp((int)Math.Round(double.IsFinite(rawW) && rawW > 0 ? rawW : SettingsService.DefaultWidgetWidth), 180, 1200),
+                        Math.Clamp((int)Math.Round(double.IsFinite(rawH) && rawH > 0 ? rawH : SettingsService.DefaultWidgetHeight), 80, 1200));
+                },
+                async (requestedWidgetId, capsuleMode, timeout) =>
+                {
+                    if (!IsStudioHostRunning)
+                    {
+                        return null;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(requestedWidgetId))
+                    {
+                        string? studioTargetId = TryGetStudioTargetWidgetIdForAgentUpsert();
+                        string? resolvedDesktopId = (await DeskBox.Platform.UiDispatch.RunAsync(
+                            () => Task.FromResult(WidgetManager?.ResolveCustomWidgetConfig(requestedWidgetId)?.Id)))
+                            ?? requestedWidgetId;
+                        if (!string.Equals(studioTargetId, resolvedDesktopId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return null;
+                        }
+                    }
+
+                    return await TryCaptureRemoteStudioPreviewAsync(capsuleMode, timeout);
+                },
+                request => ShowAgentCommitApprovalAsync(request));
+            _agentBridgeServer.Start();
+            _ = SyncAgentWorkspaceDocsOnStartupAsync();
+        }
+
         Log("[SettingsIpc] Server started");
+        StartStudioIpcServer();
+    }
+
+    private async Task<bool> ShowAgentCommitApprovalAsync(
+        Services.AgentCommitApprovalRequest request)
+    {
+        // Fail closed: no UI dispatcher / no window => the commit is denied.
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (UiDispatcherQueue?.TryEnqueue(() =>
+            {
+                try
+                {
+                    string reasons =
+                        (request.OverwritesExisting
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonOverwrite")
+                            : string.Empty) +
+                        (request.ClearsExistingData
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonDataLoss")
+                            : string.Empty) +
+                        (request.DeclaresPrivilegedCapabilities
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonPrivileged")
+                            : string.Empty);
+                    var window = new Helpers.AgentCommitApprovalWindow(LocalizationService, request.WidgetId, reasons);
+                    window.Activate();
+                    _ = window.Result.ContinueWith(
+                        result => completion.TrySetResult(result.Result),
+                        TaskScheduler.Default);
+                }
+                catch
+                {
+                    completion.TrySetResult(false);
+                }
+            }) != true)
+        {
+            return false;
+        }
+
+        return await completion.Task.ConfigureAwait(false);
+    }
+
+    private async Task SyncAgentWorkspaceDocsOnStartupAsync()
+    {
+        try
+        {
+            await CustomWidgetTemplates.EnsureAiAgentWorkspaceDocsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsIpc] EnsureAiAgentWorkspaceDocsAsync failed: {ex.Message}");
+        }
+        finally
+        {
+            if (!IsStudioHostRunning)
+            {
+                CustomWidgetCapabilityRegistry.ReleaseIdleCache();
+            }
+        }
+    }
+
+    private bool HasConnectedSettingsIpcClient =>
+        _settingsIpcServer is { HasConnectedClient: true };
+
+    private void ShutdownSettingsIpcServer()
+    {
+        ShutdownStudioIpcServer();
+        if (_agentBridgeServer is { } agentBridge)
+        {
+            _agentBridgeServer = null;
+            _ = agentBridge.DisposeAsync().AsTask();
+        }
+
+        if (_settingsIpcServer is null)
+        {
+            return;
+        }
+
+        SettingsService.LocalPersistCompleted -= OnSettingsIpcLocalPersistCompleted;
+        SettingsService.LayoutPersistCompleted -= OnSettingsIpcLayoutPersistCompleted;
+        GlobalHotkeyService?.RegistrationChanged -= OnSettingsIpcHotkeyRegistrationChanged;
+        DisplayTopologyChanged -= OnSettingsIpcDisplayTopologyChanged;
+        ScreenHomeChanged -= OnSettingsIpcScreenHomeChanged;
+        StartupService.StateChanged -= OnSettingsIpcAutoStartStateChanged;
+        CloudBackupService.BackupRunCompleted -= OnSettingsIpcBackupRunCompleted;
+        if (_appUpdateService is { } appUpdate)
+        {
+            appUpdate.CheckCompleted -= OnSettingsIpcUpdateCheckCompleted;
+            appUpdate.DownloadProgressChanged -= OnSettingsIpcUpdateDownloadProgress;
+            appUpdate.DownloadCompleted -= OnSettingsIpcUpdateDownloadCompleted;
+        }
+
+        SettingsIpcServer server = _settingsIpcServer;
+        _settingsIpcServer = null;
+        _settingsIpcRouter = null;
+        _ = server.DisposeAsync().AsTask();
     }
 
     private void OnSettingsIpcLayoutPersistCompleted()
     {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         // The authoritative layout slice changed on disk: push it so the
         // host's mirror (group list, displays, capsule counts) stays live.
         _ = PushSettingsIpcEventAsync(
@@ -118,30 +265,103 @@ public partial class App
 
     private void OnSettingsIpcLocalPersistCompleted(long mainCommitId)
     {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         long? hostCommitId = _settingsIpcRouter?.LastAppliedHostCommitId;
         _ = PushSettingsIpcEventAsync(
             SettingsIpcMethods.SettingsReloaded,
             SettingsIpcReloadPayload.Compose(mainCommitId, hostCommitId));
     }
 
+    private bool _isReconcilingHotkeyYields;
+
     private void OnSettingsIpcHotkeyRegistrationChanged()
     {
+        ReconcileHotkeyPriorityYields();
+
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HotkeyRegistrationChanged, null);
+    }
+
+    private void ReconcileHotkeyPriorityYields()
+    {
+        if (_isReconcilingHotkeyYields || IsShuttingDown)
+        {
+            return;
+        }
+
+        _isReconcilingHotkeyYields = true;
+        try
+        {
+            if (GlobalHotkeyService is { IsRegistered: true } main)
+            {
+                GlobalHotkeyActivation mainAct = main.CurrentActivation;
+                if (_searchHotkeyService is { IsRegistered: true } search &&
+                    GlobalHotkeyService.DoActivationsConflict(mainAct, search.CurrentActivation))
+                {
+                    search.RefreshRegistration();
+                }
+
+                if (_clipboardHotkeyService is { IsRegistered: true } clip &&
+                    GlobalHotkeyService.DoActivationsConflict(mainAct, clip.CurrentActivation))
+                {
+                    clip.RefreshRegistration();
+                }
+            }
+
+            if (_searchHotkeyService is { IsRegistered: true } activeSearch &&
+                _clipboardHotkeyService is { IsRegistered: true } activeClip &&
+                GlobalHotkeyService.DoActivationsConflict(activeSearch.CurrentActivation, activeClip.CurrentActivation))
+            {
+                activeClip.RefreshRegistration();
+            }
+        }
+        finally
+        {
+            _isReconcilingHotkeyYields = false;
+        }
     }
 
     private void OnSettingsIpcDisplayTopologyChanged()
     {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppDisplayTopologyChanged, null);
     }
 
     private void OnSettingsIpcScreenHomeChanged()
     {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppScreenHomeChanged, null);
+    }
+
+    private void OnSettingsIpcAutoStartStateChanged()
+    {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppAutoStartStateChanged, null);
     }
 
     private void OnSettingsIpcBackupRunCompleted(CloudBackupRunCompletedInfo info)
     {
-        if (info.Endpoint is not { } endpoint)
+        if (!HasConnectedSettingsIpcClient || info.Endpoint is not { } endpoint)
         {
             return;
         }
@@ -175,7 +395,38 @@ public partial class App
 
     private void PushEncodedEventAsync<T>(string method, T payload, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
     {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
         _ = PushSettingsIpcEventAsync(method, SettingsIpcPayload.Encode(payload, typeInfo));
+    }
+
+    private async Task SyncManagedStorageHostEntriesAfterMigrationAsync(string oldRootPath, string newRootPath)
+    {
+        try
+        {
+            await ManagedStorageDesktopShortcutService.SyncAsync(oldRootPath);
+        }
+        catch (Exception ex)
+        {
+            Log($"[ManagedStorageMigration] Desktop shortcut sync deferred: {ex.Message}");
+        }
+
+        try
+        {
+            var oldPinState = await DeskBox.Helpers.ExplorerQuickAccessHelper.GetQuickAccessPinStateAsync(oldRootPath);
+            if (oldPinState.State == DeskBox.Helpers.QuickAccessPinState.Pinned)
+            {
+                await DeskBox.Helpers.ExplorerQuickAccessHelper.TryUnpinFolderFromQuickAccessAsync(oldRootPath);
+                await DeskBox.Helpers.ExplorerQuickAccessHelper.TryPinFolderToQuickAccessAsync(newRootPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[ManagedStorageMigration] Quick Access pin migration deferred: {ex.Message}");
+        }
     }
 
     private async Task PushSettingsIpcEventAsync(string method, string? payload)

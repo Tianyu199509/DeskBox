@@ -1,12 +1,8 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeskBox", "src\DeskBox\DeskBox.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
-	ProjectSection(ProjectDependencies) = postProject
-		{5F11E064-D145-414C-9F7D-7F86F206B170} = {5F11E064-D145-414C-9F7D-7F86F206B170}
-	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeskBox.Updater", "src\DeskBox.Updater\DeskBox.Updater.csproj", "{5F11E064-D145-414C-9F7D-7F86F206B170}"
 EndProject
@@ -38,14 +34,17 @@ Global
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|x64.Build.0 = Release|x64
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|ARM64.ActiveCfg = Release|ARM64
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|ARM64.Build.0 = Release|ARM64
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.Build.0 = Debug|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|ARM64.ActiveCfg = Debug|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|ARM64.Build.0 = Debug|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|x64.ActiveCfg = Release|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|x64.Build.0 = Release|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|ARM64.ActiveCfg = Release|Any CPU
-		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|ARM64.Build.0 = Release|Any CPU
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.ActiveCfg = Debug|x64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.Build.0 = Debug|x64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|ARM64.Build.0 = Debug|ARM64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|x64.ActiveCfg = Release|x64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|x64.Build.0 = Release|x64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|ARM64.ActiveCfg = Release|ARM64
+		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Release|ARM64.Build.0 = Release|ARM64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE} = {9B4FA3FD-08FD-4A97-8340-0416A90A4C3C}

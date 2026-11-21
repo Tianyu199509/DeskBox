@@ -30,6 +30,23 @@ public static class MusicDisplayModes
 }
 
 /// <summary>
+/// Canonical music audio-spectrum visual style values. <c>"Auto"</c> selects
+/// the signature placement/style per layout; <c>"Off"</c> disables spectrum
+/// capture and rendering completely.
+/// </summary>
+public static class MusicSpectrumStyles
+{
+    public const string Auto = "Auto";
+    public const string Off = "Off";
+    public const string SymmetricWave = "SymmetricWave";
+    public const string WaveformScrub = "WaveformScrub";
+    public const string PeakHoldBars = "PeakHoldBars";
+    public const string AuroraSilk = "AuroraSilk";
+    public const string MatrixLed = "MatrixLed";
+    public const string VinylRadialHalo = "VinylRadialHalo";
+}
+
+/// <summary>
 /// Immutable read snapshot of the music presentation preferences, mirroring
 /// the Quick Capture editor's read-port shape. The music settings editor
 /// binds its XAML surface to a projection of this snapshot; external refresh
@@ -40,7 +57,11 @@ public sealed record MusicPresentationSettings(
     bool UseArtworkBackdrop,
     bool EnableCoverHoverMotion,
     string DisplayMode,
-    bool HideTimelineWhenUnavailable);
+    bool HideTimelineWhenUnavailable,
+    bool ShowLyrics = true,
+    bool ShowCapsuleLyrics = true,
+    string LocalLyricsFolder = "",
+    string SpectrumStyle = MusicSpectrumStyles.Auto);
 
 /// <summary>
 /// Immutable read snapshot of the weather presentation preferences, mirroring
@@ -98,6 +119,14 @@ public interface IFeatureWidgetsSettings
     /// one debounced save, exactly like the other music presentation setters.
     /// </summary>
     bool SetMusicHideTimelineWhenUnavailable(bool value);
+
+    bool SetMusicShowLyrics(bool value);
+
+    bool SetMusicShowCapsuleLyrics(bool value);
+
+    bool SetMusicLocalLyricsFolder(string? folderPath);
+
+    bool SetMusicSpectrumStyle(string? style);
 
     /// <summary>
     /// Writes the fresh-install music presentation defaults. Used by the

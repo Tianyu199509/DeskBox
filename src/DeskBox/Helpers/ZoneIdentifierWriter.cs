@@ -13,6 +13,7 @@ internal static class ZoneIdentifierWriter
 {
     internal const int InternetZone = 3;
     internal const string VirtualDropSource = "deskbox://drag-drop/virtual";
+    private static readonly System.Text.UTF8Encoding s_utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
     /// Writes a Zone.Identifier alternate stream with the internet zone and,
@@ -36,7 +37,7 @@ internal static class ZoneIdentifierWriter
                 FileShare.None);
             using var writer = new StreamWriter(
                 stream,
-                System.Text.Encoding.UTF8,
+                s_utf8NoBom,
                 bufferSize: 128,
                 leaveOpen: true);
             writer.NewLine = "\r\n";
@@ -44,7 +45,14 @@ internal static class ZoneIdentifierWriter
             writer.WriteLine($"ZoneId={InternetZone}");
             if (!string.IsNullOrWhiteSpace(source))
             {
-                writer.WriteLine($"HostUrl={source}");
+                string sanitizedSource = source
+                    .Replace("\r", string.Empty, StringComparison.Ordinal)
+                    .Replace("\n", string.Empty, StringComparison.Ordinal)
+                    .Trim();
+                if (!string.IsNullOrEmpty(sanitizedSource))
+                {
+                    writer.WriteLine($"HostUrl={sanitizedSource}");
+                }
             }
 
             return true;

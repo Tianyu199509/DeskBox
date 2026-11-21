@@ -20,13 +20,14 @@ internal static class WidgetSettingsMenuHelper
     /// </summary>
     public static string? GetSettingsSectionTag(WidgetKind kind) => kind switch
     {
-        WidgetKind.File => "FileDisplaySettings",
+        WidgetKind.File => "AppearanceDetail",
         WidgetKind.QuickCapture => "QuickCaptureSettings",
         WidgetKind.Todo => "TodoSettings",
         WidgetKind.Music => "MusicSettings",
         WidgetKind.Weather => "WeatherSettings",
         WidgetKind.Glance => "GlanceSettings",
-        WidgetKind.Search => "SearchSettings",
+        WidgetKind.Custom => "CustomWidgetSettings",
+        WidgetKind.Clipboard => "ClipboardSettings",
         _ => null
     };
 
@@ -42,7 +43,8 @@ internal static class WidgetSettingsMenuHelper
         WidgetKind.Music => "Widget.Settings.Music",
         WidgetKind.Weather => "Widget.Settings.Weather",
         WidgetKind.Glance => "Widget.Settings.Glance",
-        WidgetKind.Search => "Widget.Settings.Search",
+        WidgetKind.Custom => "Widget.Settings.CustomWidget",
+        WidgetKind.Clipboard => "Widget.Settings.Clipboard",
         _ => "Common.Configure"
     };
 
@@ -75,7 +77,10 @@ internal static class WidgetSettingsMenuHelper
                 }
                 else
                 {
-                    App.Current.ShowSettings(sectionTag);
+                    string targetSection = kind == WidgetKind.Custom && !string.IsNullOrWhiteSpace(widgetId)
+                        ? $"CustomWidgetSettings:select:{widgetId}"
+                        : sectionTag;
+                    App.Current.ShowSettings(targetSection);
                 }
             }
         };

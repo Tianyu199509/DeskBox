@@ -26,10 +26,23 @@ internal sealed record CloudBackupOptions(
     /// whose domain pick happens in the restore dialog) are endpoint-level
     /// operations that must work before the user chooses what to back up.
     /// </summary>
-    internal bool HasEndpoint =>
-        Provider != CloudBackupSettingsPolicy.ProviderNone &&
+    internal bool HasWebDavServerUrl =>
         Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? uri) &&
         (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+
+    internal bool HasEndpoint =>
+        Provider != CloudBackupSettingsPolicy.ProviderNone &&
+        HasWebDavServerUrl;
+
+    /// <summary>
+    /// Resolves the effective WebDAV provider for user-initiated connection,
+    /// credential, manual upload, and snapshot-restore operations when a valid
+    /// server URL is entered before enabling scheduled cloud backup.
+    /// </summary>
+    internal CloudBackupOptions WithEffectiveConnectionProvider() =>
+        Provider == CloudBackupSettingsPolicy.ProviderNone && HasWebDavServerUrl
+            ? this with { Provider = CloudBackupSettingsPolicy.ProviderWebDav }
+            : this;
 
     /// <summary>
     /// Endpoint reachable AND at least one backup domain on — the bar for
@@ -91,6 +104,11 @@ internal static class CloudBackupSettingsPolicy
             scope |= CloudBackupDomain.WidgetStyle;
         }
 
+        if (slice.CloudBackupCustomWidgetsEnabled)
+        {
+            scope |= CloudBackupDomain.CustomWidgets;
+        }
+
         return new CloudBackupOptions(
             Provider: slice.CloudBackupProvider?.Trim().ToLowerInvariant() is { Length: > 0 } provider
                 ? provider
@@ -116,31 +134,42 @@ internal static class CloudBackupSettingsPolicy
     /// </summary>
     internal static string CredentialKey(CloudBackupOptions options)
     {
+        string rawKey;
         if (Uri.TryCreate(options.ServerUrl, UriKind.Absolute, out Uri? uri))
         {
             string origin = uri.IsDefaultPort
                 ? $"{uri.Scheme}://{uri.Host}"
                 : $"{uri.Scheme}://{uri.Host}:{uri.Port}";
             string basePath = uri.AbsolutePath.TrimEnd('/');
-            return $"{options.Provider}:{options.Username}@{origin.ToLowerInvariant()}{basePath}";
+            rawKey = $"{options.Provider}:{options.Username}@{origin.ToLowerInvariant()}{basePath}";
+        }
+        else
+        {
+            rawKey = $"{options.Provider}:{options.Username}@invalid";
         }
 
-        return $"{options.Provider}:{options.Username}@invalid";
+        if (rawKey.Length <= 240)
+        {
+            return rawKey;
+        }
+
+        string hash = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(rawKey)))[..16];
+        return $"{rawKey[..200]}#{hash}";
     }
 
     private static string NormalizeRemotePath(string? remotePath)
     {
-        string trimmed = remotePath?.Trim().Trim('/') ?? string.Empty;
-        if (trimmed.Length == 0)
+        string normalized = (remotePath ?? string.Empty).Replace('\\', '/').Trim();
+        string[] segments = normalized.Split(
+            '/',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0 || segments.Any(segment => segment is "." or ".."))
         {
             return "DeskBox/backups";
         }
 
-        // The path is joined verbatim into request URIs — a ".." segment
-        // would escape the configured folder on the user's own server.
-        return trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Any(segment => segment is ".." or ".")
-            ? "DeskBox/backups"
-            : trimmed;
+        return string.Join('/', segments);
     }
 }

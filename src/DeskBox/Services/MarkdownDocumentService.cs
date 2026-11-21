@@ -176,6 +176,9 @@ public sealed partial class MarkdownDocumentService
         {
             switch (current)
             {
+                case TaskList task:
+                    builder.Append(task.Checked ? "\u2611 " : "\u2610 ");
+                    break;
                 case LiteralInline literal:
                     builder.Append(literal.Content.AsSpan());
                     break;

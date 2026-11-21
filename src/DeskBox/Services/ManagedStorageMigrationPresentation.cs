@@ -7,9 +7,18 @@ internal static class ManagedStorageMigrationPresentation
     {
         if (progress.Phase is ManagedStorageMigrationPhase.Preparing or ManagedStorageMigrationPhase.Committing)
             return null;
+        if (progress.Phase is ManagedStorageMigrationPhase.Moving or ManagedStorageMigrationPhase.CleaningOrigin)
+            return progress.TotalItems > 0 ? Math.Clamp(progress.CompletedItems * 100d / progress.TotalItems, 0, 100) : null;
         if (progress.TotalBytes > 0)
             return Math.Clamp(progress.BytesProcessed * 100d / progress.TotalBytes, 0, 100);
         return progress.TotalItems > 0 ? Math.Clamp(progress.CompletedItems * 100d / progress.TotalItems, 0, 100) : null;
+    }
+
+    internal static string FormatTransferRate(double bytesPerSecond)
+    {
+        if (!double.IsFinite(bytesPerSecond) || bytesPerSecond < 1024d)
+            return string.Empty;
+        return FileMetaService.FormatSize((long)Math.Round(bytesPerSecond)) + "/s";
     }
 
     internal static bool NeedsNewLocation(StorageMigrationProblem problem) => problem is
@@ -44,5 +53,12 @@ internal static class ManagedStorageMigrationPresentation
             FileService.FileTransferItemErrorKind.NotFound => StorageMigrationProblem.VolumeUnavailable,
             _ => StorageMigrationProblem.Unknown
         };
+    }
+
+    internal static string? ExtractBlockingPath(Exception exception)
+    {
+        if (exception is StorageMigrationException { BlockingPath: { Length: > 0 } direct })
+            return direct;
+        return exception.InnerException is { } inner ? ExtractBlockingPath(inner) : null;
     }
 }

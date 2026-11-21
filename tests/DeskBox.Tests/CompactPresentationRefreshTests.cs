@@ -41,6 +41,7 @@ public sealed class CompactPresentationRefreshTests
     [InlineData(nameof(MusicWidgetViewModel.Title))]
     [InlineData(nameof(MusicWidgetViewModel.IsPlaying))]
     [InlineData(nameof(MusicWidgetViewModel.SeekValue))]
+    [InlineData(nameof(MusicWidgetViewModel.CurrentLyricLine))]
     public void MusicCompactPresentation_RefreshesForDisplayedMusicProperties(
         string propertyName)
     {

@@ -1,6 +1,8 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -13,7 +15,9 @@ public readonly record struct WidgetCompactAnimationFrameSummary(
     double ElapsedMilliseconds,
     int BoundsUpdateCount = 0,
     double MaximumBoundsUpdateIntervalMilliseconds = 0,
-    double MaximumSubmissionWorkMilliseconds = 0)
+    double MaximumSubmissionWorkMilliseconds = 0,
+    double FirstFrameIntervalMilliseconds = 0,
+    int MaximumFrameIntervalIndex = 0)
 {
     public double FrameBudgetMilliseconds => 1000d / Math.Max(1, RefreshRateHz);
 }
@@ -24,9 +28,13 @@ public readonly record struct WidgetCompactAnimationFrameSummary(
 /// </summary>
 public sealed class WidgetCompactAnimationFrameTracker
 {
+    private const int MaxRecordedTickSamples = 32;
     private readonly long _startedTimestamp;
+    private readonly double[] _tickSamplesMs = new double[MaxRecordedTickSamples];
     private long _lastFrameTimestamp;
+    private double _firstFrameIntervalMilliseconds;
     private double _maximumFrameIntervalMilliseconds;
+    private int _maximumFrameIntervalIndex;
     private int _frameCount;
     private int _estimatedDroppedFrames;
     private long _lastBoundsUpdateTimestamp;
@@ -59,8 +67,20 @@ public sealed class WidgetCompactAnimationFrameTracker
 
         double intervalMs = Stopwatch.GetElapsedTime(_lastFrameTimestamp, timestamp).TotalMilliseconds;
         _lastFrameTimestamp = timestamp;
-        _frameCount++;
-        _maximumFrameIntervalMilliseconds = Math.Max(_maximumFrameIntervalMilliseconds, intervalMs);
+        int tickIndex = ++_frameCount;
+        if (tickIndex == 1)
+        {
+            _firstFrameIntervalMilliseconds = intervalMs;
+        }
+        if (tickIndex <= MaxRecordedTickSamples)
+        {
+            _tickSamplesMs[tickIndex - 1] = intervalMs;
+        }
+        if (intervalMs > _maximumFrameIntervalMilliseconds)
+        {
+            _maximumFrameIntervalMilliseconds = intervalMs;
+            _maximumFrameIntervalIndex = tickIndex;
+        }
 
         double frameBudgetMs = double.IsFinite(frameBudgetMilliseconds) && frameBudgetMilliseconds > 0
             ? frameBudgetMilliseconds
@@ -91,6 +111,30 @@ public sealed class WidgetCompactAnimationFrameTracker
         }
     }
 
+    public string FormatTickIntervals()
+    {
+        int count = Math.Min(_frameCount, MaxRecordedTickSamples);
+        if (count <= 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(count * 6);
+        for (int i = 0; i < count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(',');
+            }
+            builder.Append(_tickSamplesMs[i].ToString("F1", CultureInfo.InvariantCulture));
+        }
+        if (_frameCount > MaxRecordedTickSamples)
+        {
+            builder.Append(",...");
+        }
+        return builder.ToString();
+    }
+
     public WidgetCompactAnimationFrameSummary Complete(long timestamp)
     {
         long completedTimestamp = Math.Max(timestamp, _startedTimestamp);
@@ -102,6 +146,8 @@ public sealed class WidgetCompactAnimationFrameTracker
             Stopwatch.GetElapsedTime(_startedTimestamp, completedTimestamp).TotalMilliseconds,
             _boundsUpdateCount,
             _maximumBoundsUpdateIntervalMilliseconds,
-            _maximumSubmissionWorkMilliseconds);
+            _maximumSubmissionWorkMilliseconds,
+            _firstFrameIntervalMilliseconds,
+            _maximumFrameIntervalIndex);
     }
 }

@@ -70,7 +70,6 @@ public sealed class StartupResilienceContractTests
         Assert.Contains("\"initial-file-widget-setup\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"onboarding\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"theme-refresh\"", launch, StringComparison.Ordinal);
-        Assert.Contains("\"quick-capture-clipboard\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"desktop-auto-organization-watcher\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"display-area-watcher\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"apply-pending-restore\"", launch, StringComparison.Ordinal);
@@ -112,8 +111,8 @@ public sealed class StartupResilienceContractTests
         string tray = Read("src/DeskBox/App.Tray.cs");
         Assert.Contains("private bool IsTraySurfaceUsable()", tray, StringComparison.Ordinal);
         Assert.Contains("IsCreated: true", tray, StringComparison.Ordinal);
-        Assert.Contains("trayIcon.TrayIcon.WindowHandle != IntPtr.Zero", tray, StringComparison.Ordinal);
-        Assert.Contains("WindowNative.GetWindowHandle(_trayWindow) != IntPtr.Zero", tray, StringComparison.Ordinal);
+        Assert.Contains("trayHost.WindowHandle != IntPtr.Zero", tray, StringComparison.Ordinal);
+        Assert.Contains("Win32Helper.IsWindow(trayHost.WindowHandle)", tray, StringComparison.Ordinal);
         Assert.Contains("MarkStartupLifelineEstablished();", tray, StringComparison.Ordinal);
 
         // Widgets are legitimately hidden (quick-reveal, tray toggle), so the
@@ -181,7 +180,7 @@ public sealed class StartupResilienceContractTests
             tray,
             "private void CreateTrayIcon()",
             "/// <summary>Attempts per tray creation pass");
-        Assert.DoesNotContain("ForceCreate", createTrayIcon, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryCreateIcon", createTrayIcon, StringComparison.Ordinal);
         Assert.Contains("StartTrayIconCreationWithRetry();", createTrayIcon, StringComparison.Ordinal);
 
         string retry = Slice(
@@ -189,12 +188,20 @@ public sealed class StartupResilienceContractTests
             "private Task<bool> StartTrayIconCreationWithRetry",
             "private bool IsTraySurfaceUsable()");
 
-        // The retry must be bounded: an unbounded loop would keep the startup
-        // gate waiting forever when the shell never comes up.
+        // The retry must be bounded with progressive backoff: fast checks right
+        // after logon (200ms -> 400ms -> 800ms -> 1500ms -> 2000ms) while still
+        // covering the early-logon window without waiting forever.
         Assert.Contains("TrayCreationMaxAttempts", retry, StringComparison.Ordinal);
-        Assert.Contains("await Task.Delay(TrayCreationRetryDelay);", retry, StringComparison.Ordinal);
+        Assert.Contains("await Task.Delay(GetTrayCreationRetryDelay(attempt));", retry, StringComparison.Ordinal);
         Assert.Contains("MarkStartupLifelineEstablished();", retry, StringComparison.Ordinal);
-        Assert.Contains("_trayIcon.ForceCreate(enablesEfficiencyMode: false);", retry, StringComparison.Ordinal);
+        Assert.Contains("_trayHost.TryCreateIcon()", retry, StringComparison.Ordinal);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(200), App.GetTrayCreationRetryDelay(1));
+        Assert.Equal(TimeSpan.FromMilliseconds(400), App.GetTrayCreationRetryDelay(2));
+        Assert.Equal(TimeSpan.FromMilliseconds(800), App.GetTrayCreationRetryDelay(3));
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), App.GetTrayCreationRetryDelay(4));
+        Assert.Equal(TimeSpan.FromMilliseconds(2000), App.GetTrayCreationRetryDelay(5));
+        Assert.Equal(TimeSpan.FromMilliseconds(2000), App.GetTrayCreationRetryDelay(18));
     }
 
     [Fact]

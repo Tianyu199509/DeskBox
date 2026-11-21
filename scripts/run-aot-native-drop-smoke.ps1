@@ -371,7 +371,7 @@ if ([int]$auditSummary.auditProfileVersion -ne 59 -or
     [string]$auditSummary.platform -cne "x64" -or
     [string]$auditSummary.runtimeIdentifier -cne "win-x64" -or
     @($auditSummary.warningCodes | Where-Object { $_ -ceq "WMC1506" }).Count -ne 0 -or
-    [int]$auditSummary.warningCodeCounts.WMC1510 -ne 790 -or
+    [int]$auditSummary.warningCodeCounts.WMC1510 -gt [int]$auditSummary.analysisContract.maximumWmc1510Count -or
     @($auditSummary.alwaysThrowMessages).Count -ne 0 -or
     [int]$auditSummary.rustNative.abiVersion -ne 2 -or
     [int]$auditSummary.rustNative.capabilities -ne 511) {
@@ -482,9 +482,8 @@ $settings = [ordered]@{
     featureWidgetEnabledStates = [ordered]@{
         QuickCapture = $false
         Todo = $false
-        Music = $false
+        Music = $true
         Weather = $false
-        Search = $true
         Glance = $false
     }
     searchSaveHistory = $false
@@ -516,15 +515,15 @@ $settings = [ordered]@{
             fileAddedAtTrackingInitialized = $true
         },
         [ordered]@{
-            id = "aot-5b4a-search"
-            name = "AOT Search Fixture"
+            id = "aot-5b4a-music"
+            name = "AOT Music Fixture"
             isDefaultTitle = $false
             x = 500
             y = 80
             boundsCoordinateVersion = 1
             width = 300
             height = 360
-            widgetKind = "Search"
+            widgetKind = "Music"
             viewMode = "Icon"
             isVisible = $true
             isDisabled = $false

@@ -155,6 +155,8 @@ public sealed class WidgetVisualInteractionPolicyTests
         WidgetCompactTransitionVisualProfile profile =
             WidgetCompactTransitionVisualProfile.Resolve("Smooth", 220, true);
 
+        Assert.Equal(0, profile.GetCompactSurfaceOpacity(collapsing: false, progress: 0.25));
+
         for (int step = 0; step <= 100; step++)
         {
             Assert.Equal(
@@ -163,6 +165,34 @@ public sealed class WidgetVisualInteractionPolicyTests
                     collapsing: false,
                     progress: step / 100d));
         }
+    }
+
+    [Fact]
+    public void CompactProfile_MicroScaleAndAsymmetricDurationFollowBrimDeckChoreography()
+    {
+        WidgetCompactTransitionVisualProfile profile =
+            WidgetCompactTransitionVisualProfile.Resolve("Smooth", 220, true);
+
+        Assert.Equal(0.96, profile.GetLiveContentScale(collapsing: false, progress: 0), 3);
+        Assert.Equal(1.0, profile.GetLiveContentScale(collapsing: false, progress: 1), 3);
+        Assert.Equal(1.0, profile.GetLiveContentScale(collapsing: true, progress: 0), 3);
+        Assert.Equal(0.96, profile.GetLiveContentScale(collapsing: true, progress: 1), 3);
+
+        Assert.Equal(1.0, profile.GetCompactContentScale(collapsing: false, progress: 0), 3);
+        Assert.Equal(0.96, profile.GetCompactContentScale(collapsing: false, progress: 1), 3);
+        Assert.Equal(0.96, profile.GetCompactContentScale(collapsing: true, progress: 0), 3);
+        Assert.Equal(1.0, profile.GetCompactContentScale(collapsing: true, progress: 1), 3);
+
+        int expandDuration = profile.ResolveEffectiveDurationMilliseconds(collapsing: false, remainingShare: 1.0);
+        int collapseDuration = profile.ResolveEffectiveDurationMilliseconds(collapsing: true, remainingShare: 1.0);
+        int redirectedDuration = profile.ResolveEffectiveDurationMilliseconds(collapsing: false, remainingShare: 0.2);
+
+        Assert.Equal(220, expandDuration);
+        Assert.True(collapseDuration < expandDuration);
+        Assert.Equal((int)Math.Round(220 * 0.40), redirectedDuration);
+
+        Assert.Equal(0, profile.EaseSurfaceProgress(collapsing: true, progress: 0.08, redirectedMidFlight: false));
+        Assert.True(profile.EaseSurfaceProgress(collapsing: true, progress: 0.08, redirectedMidFlight: true) > 0);
     }
 
     [Fact]
@@ -195,5 +225,35 @@ public sealed class WidgetVisualInteractionPolicyTests
                 live > 0.01 && compactText > 0.01,
                 $"Live and compact text overlap at step {step}.");
         }
+    }
+
+    [Fact]
+    public void ActiveUndoFeedback_IsNotClobberedByPassiveInfoOrSuccessToasts()
+    {
+        var activeUndo = new WidgetFeedbackRequest(
+            "Deleted note",
+            WidgetFeedbackSeverity.Info,
+            "quick-delete",
+            "Undo",
+            () => Task.CompletedTask);
+        var passiveCopy = new WidgetFeedbackRequest(
+            "Copied",
+            WidgetFeedbackSeverity.Success,
+            "quick-copied");
+        var newerUndo = new WidgetFeedbackRequest(
+            "Deleted another note",
+            WidgetFeedbackSeverity.Info,
+            "quick-delete-2",
+            "Undo",
+            () => Task.CompletedTask);
+        var errorAlert = new WidgetFeedbackRequest(
+            "Save failed",
+            WidgetFeedbackSeverity.Error,
+            "quick-save-error");
+
+        Assert.True(WidgetFeedbackPolicy.ShouldPreserveActiveAction(activeUndo, passiveCopy));
+        Assert.False(WidgetFeedbackPolicy.ShouldPreserveActiveAction(activeUndo, newerUndo));
+        Assert.False(WidgetFeedbackPolicy.ShouldPreserveActiveAction(activeUndo, errorAlert));
+        Assert.False(WidgetFeedbackPolicy.ShouldPreserveActiveAction(null, passiveCopy));
     }
 }

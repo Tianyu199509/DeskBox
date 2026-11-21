@@ -15,6 +15,9 @@ public sealed class RestoreMachineLocalPathRebaseTests
         @"C:\Users\alice\AppData\Local\Packages\Corp.DeskBox_abc\LocalCache\DeskBox\data",
         @"C:\Users\alice")]
     [InlineData(@"D:\profiles\alice\AppData\Local\DeskBox\data", @"D:\profiles\alice")]
+    [InlineData(
+        @"C:\Users\host\AppData\Local\Temp\sandbox\Users\alice\AppData\Local\DeskBox\data",
+        @"C:\Users\host\AppData\Local\Temp\sandbox\Users\alice")]
     public void TryDeriveSourceProfileRoot_ExtractsTheProfileAboveTheAppDataSegment(
         string sourceDataPath,
         string expected)
@@ -201,5 +204,23 @@ public sealed class RestoreMachineLocalPathRebaseTests
 
         Assert.Equal(1, result.SettingsPathsRebased);
         Assert.Equal(@"C:\Users\bob\DeskBox", settings.DefaultManagedStorageRootPath);
+    }
+
+    [Fact]
+    public void Rebase_MovesMusicLocalLyricsFolderUnderSourceProfile()
+    {
+        var settings = new AppSettings();
+        settings.Music.MusicLocalLyricsFolder = @"C:\Users\alice\Music\Lyrics";
+
+        RestorePathRebaseResult result = RestoreMachineLocalPathRebase.Rebase(
+            settings,
+            AliceDataPath,
+            BobProfile);
+
+        Assert.True(result.Performed);
+        Assert.True(result.Changed);
+        Assert.Equal(1, result.SettingsPathsRebased);
+        Assert.Equal(@"C:\Users\bob\Music\Lyrics", settings.Music.MusicLocalLyricsFolder);
+        Assert.Equal(@"C:\Users\bob\Music\Lyrics", settings.MusicLocalLyricsFolder);
     }
 }

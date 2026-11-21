@@ -11,6 +11,7 @@ namespace DeskBox.Services;
 internal sealed class PasswordVaultCredentialStore : ICredentialStore
 {
     private const string Resource = "DeskBox/CloudBackup";
+    private const int HrElementNotFound = unchecked((int)0x80070490);
 
     public Task<string?> GetSecretAsync(string key, CancellationToken cancellationToken = default)
     {
@@ -20,9 +21,17 @@ internal sealed class PasswordVaultCredentialStore : ICredentialStore
             credential.RetrievePassword();
             return Task.FromResult<string?>(credential.Password);
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException ||
-                                     ex is System.IO.FileNotFoundException)
+        catch (System.IO.FileNotFoundException)
         {
+            return Task.FromResult<string?>(null);
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            if (ex.HResult != HrElementNotFound)
+            {
+                App.Log($"[CloudBackup] PasswordVault retrieve failed (hr=0x{ex.HResult:X8}): {ex.Message}");
+            }
+
             // PasswordVault.Retrieve throws (not null) when the key is absent.
             return Task.FromResult<string?>(null);
         }
@@ -42,10 +51,15 @@ internal sealed class PasswordVaultCredentialStore : ICredentialStore
         {
             new PasswordVault().Remove(new PasswordCredential(Resource, key, string.Empty));
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException ||
-                                     ex is System.IO.FileNotFoundException)
+        catch (System.IO.FileNotFoundException)
         {
-            // Removing an absent key is a no-op.
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            if (ex.HResult != HrElementNotFound)
+            {
+                App.Log($"[CloudBackup] PasswordVault remove failed (hr=0x{ex.HResult:X8}): {ex.Message}");
+            }
         }
 
         return Task.CompletedTask;
@@ -63,9 +77,17 @@ internal sealed class PasswordVaultCredentialStore : ICredentialStore
                 .ToList();
             return Task.FromResult(keys);
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException ||
-                                     ex is System.IO.FileNotFoundException)
+        catch (System.IO.FileNotFoundException)
         {
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            if (ex.HResult != HrElementNotFound)
+            {
+                App.Log($"[CloudBackup] PasswordVault list failed (hr=0x{ex.HResult:X8}): {ex.Message}");
+            }
+
             // An empty vault throws on RetrieveAll.
             return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
         }

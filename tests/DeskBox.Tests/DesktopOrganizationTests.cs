@@ -10,10 +10,22 @@ public sealed class DesktopOrganizationTests : IDisposable
 
     [Theory]
     [InlineData("report.pdf", DesktopOrganizationCategoryIds.Documents, DesktopOrganizationSubtypeIds.Pdf)]
+    [InlineData("invoice.ofd", DesktopOrganizationCategoryIds.Documents, DesktopOrganizationSubtypeIds.Pdf)]
+    [InlineData("draft.wps", DesktopOrganizationCategoryIds.Documents, DesktopOrganizationSubtypeIds.Word)]
+    [InlineData("config.json", DesktopOrganizationCategoryIds.Documents, DesktopOrganizationSubtypeIds.Text)]
+    [InlineData("ebook.epub", DesktopOrganizationCategoryIds.Documents, null)]
+    [InlineData("1.5.2虚拟视频优化.rp", DesktopOrganizationCategoryIds.Design, null)]
+    [InlineData("roadmap.xmind", DesktopOrganizationCategoryIds.Design, null)]
+    [InlineData("ui.fig", DesktopOrganizationCategoryIds.Design, null)]
+    [InlineData("poster.psd", DesktopOrganizationCategoryIds.Design, null)]
     [InlineData("photo.webp", DesktopOrganizationCategoryIds.Images, null)]
     [InlineData("movie.mp4", DesktopOrganizationCategoryIds.Media, DesktopOrganizationSubtypeIds.Video)]
     [InlineData("music.flac", DesktopOrganizationCategoryIds.Media, DesktopOrganizationSubtypeIds.Audio)]
     [InlineData("app.lnk", DesktopOrganizationCategoryIds.Shortcuts, null)]
+    [InlineData("AutoClaw.exe", DesktopOrganizationCategoryIds.Shortcuts, null)]
+    [InlineData("CPU-Z_2.09_Portable.exe", DesktopOrganizationCategoryIds.Shortcuts, null)]
+    [InlineData("WeChatSetup.exe", DesktopOrganizationCategoryIds.Packages, null)]
+    [InlineData("python-3.12.6-amd64.exe", DesktopOrganizationCategoryIds.Packages, null)]
     [InlineData("setup.msix", DesktopOrganizationCategoryIds.Packages, null)]
     [InlineData("unknown.xyz", DesktopOrganizationCategoryIds.Other, null)]
     public void Classifier_UsesStableTypeIds(
@@ -34,6 +46,18 @@ public sealed class DesktopOrganizationTests : IDisposable
             ".pdf",
             DesktopOrganizationClassifier.GetCategoryExtensions(
                 DesktopOrganizationCategoryIds.Documents));
+        Assert.Contains(
+            ".epub",
+            DesktopOrganizationClassifier.GetCategoryExtensions(
+                DesktopOrganizationCategoryIds.Documents));
+        Assert.Contains(
+            ".rp",
+            DesktopOrganizationClassifier.GetCategoryExtensions(
+                DesktopOrganizationCategoryIds.Design));
+        Assert.Contains(
+            ".psd",
+            DesktopOrganizationClassifier.GetCategoryExtensions(
+                DesktopOrganizationCategoryIds.Design));
         Assert.Contains(
             ".docx",
             DesktopOrganizationClassifier.GetSubtypeExtensions(
@@ -256,7 +280,7 @@ public sealed class DesktopOrganizationTests : IDisposable
     }
 
     [Fact]
-    public void Planner_ReusesRuleTargetAndLimitsNewWidgetsToFour()
+    public void Planner_ReusesRuleTargetAndLimitsNewWidgetsToCap()
     {
         Directory.CreateDirectory(_root);
         var existing = CreateWidget("Renamed", Path.Combine(_root, "existing"));
@@ -273,6 +297,7 @@ public sealed class DesktopOrganizationTests : IDisposable
         foreach (string category in new[]
                  {
                      DesktopOrganizationCategoryIds.Shortcuts,
+                     DesktopOrganizationCategoryIds.Design,
                      DesktopOrganizationCategoryIds.Images,
                      DesktopOrganizationCategoryIds.Media,
                      DesktopOrganizationCategoryIds.Packages,
@@ -300,8 +325,51 @@ public sealed class DesktopOrganizationTests : IDisposable
             !target.CreatesWidget &&
             target.TargetWidgetId == existing.Id &&
             target.Items.Count == 2);
-        Assert.True(plan.NewWidgetCount <= DesktopOrganizationPlanner.MaxNewWidgetCount);
+        Assert.Equal(DesktopOrganizationPlanner.MaxNewWidgetCount, plan.NewWidgetCount);
         Assert.Equal(items.Count, plan.EligibleItemCount);
+    }
+
+    [Fact]
+    public void Planner_KeepsSingleItemConcreteCategoriesSeparateWithinWidgetCap()
+    {
+        Directory.CreateDirectory(_root);
+        var classifier = new DesktopOrganizationClassifier();
+        DesktopOrganizationFileSnapshot ClassifySnapshot(string name)
+        {
+            var classified = classifier.Classify(name);
+            return Snapshot(name, classified.CategoryId, classified.SubtypeId);
+        }
+
+        var items = new List<DesktopOrganizationFileSnapshot>
+        {
+            ClassifySnapshot("Antigravity Tools.lnk"),
+            ClassifySnapshot("AutoClaw.exe"),
+            ClassifySnapshot("1.5.2虚拟视频优化.rp"),
+            ClassifySnapshot("1.5.4.rp"),
+            ClassifySnapshot("朱-注销冷静.rp"),
+            ClassifySnapshot("虚拟视频评分.rp"),
+            ClassifySnapshot("166200.jpg"),
+            ClassifySnapshot("当前报告.txt")
+        };
+        var scan = new DesktopOrganizationScanResult
+        {
+            DesktopPath = _root,
+            Items = items
+        };
+
+        DesktopOrganizationPlan plan = new DesktopOrganizationPlanner(new DesktopOrganizationRuleResolver())
+            .CreatePlan(scan, Path.Combine(_root, "storage"), [], []);
+
+        Assert.Equal(
+            [
+                DesktopOrganizationCategoryIds.Shortcuts,
+                DesktopOrganizationCategoryIds.Documents,
+                DesktopOrganizationCategoryIds.Design,
+                DesktopOrganizationCategoryIds.Images
+            ],
+            plan.Targets.Select(target => target.CategoryId).ToArray());
+        Assert.DoesNotContain(plan.Targets, target => target.CategoryId == DesktopOrganizationCategoryIds.Other);
+        Assert.Equal(8, plan.EligibleItemCount);
     }
 
     [Fact]
@@ -561,16 +629,19 @@ public sealed class DesktopOrganizationTests : IDisposable
     }
 
     [Fact]
-    public async Task Transaction_PersistsAllSourceCategoriesForMergedTarget()
+    public async Task Transaction_NewTargetPersistsOnlyPrimaryCategoryAndNeverAutoBindsOther()
     {
         string desktop = Directory.CreateDirectory(Path.Combine(_root, "merged-desktop")).FullName;
         string storage = Directory.CreateDirectory(Path.Combine(_root, "merged-storage")).FullName;
         string documentPath = Path.Combine(desktop, "report.pdf");
         string imagePath = Path.Combine(desktop, "photo.webp");
+        string designPath = Path.Combine(desktop, "proto.rp");
         File.WriteAllText(documentPath, "x");
         File.WriteAllText(imagePath, "x");
+        File.WriteAllText(designPath, "x");
         var documentInfo = new FileInfo(documentPath);
         var imageInfo = new FileInfo(imagePath);
+        var designInfo = new FileInfo(designPath);
 
         var plan = new DesktopOrganizationPlan
         {
@@ -578,6 +649,18 @@ public sealed class DesktopOrganizationTests : IDisposable
             StorageRootPath = storage,
             Targets =
             [
+                new DesktopOrganizationTargetPlan
+                {
+                    TargetWidgetId = "design-target",
+                    CategoryId = DesktopOrganizationCategoryIds.Design,
+                    SuggestedDisplayName = "Design",
+                    TargetDirectoryPath = Path.Combine(storage, "Design"),
+                    CreatesWidget = true,
+                    Items =
+                    [
+                        Snapshot("proto.rp", DesktopOrganizationCategoryIds.Design, null, designPath, designInfo.Length, designInfo.LastWriteTimeUtc)
+                    ]
+                },
                 new DesktopOrganizationTargetPlan
                 {
                     TargetWidgetId = "merged-target",
@@ -599,9 +682,8 @@ public sealed class DesktopOrganizationTests : IDisposable
         await transaction.ExecuteAsync(plan);
 
         DesktopOrganizationRule rule = Assert.Single(settings.Settings.DesktopOrganizationRules);
-        Assert.Equal(
-            [DesktopOrganizationCategoryIds.Documents, DesktopOrganizationCategoryIds.Images],
-            rule.CategoryIds);
+        Assert.Equal("design-target", rule.TargetWidgetId);
+        Assert.Equal([DesktopOrganizationCategoryIds.Design], rule.CategoryIds);
     }
 
     [Fact]
@@ -1094,6 +1176,266 @@ public sealed class DesktopOrganizationTests : IDisposable
             File.Exists(Path.Combine(desktopPath, "first (2).txt")),
             "the retry must never duplicate the restored item");
         Assert.Single(Directory.GetFiles(desktopPath, "first*.txt"));
+    }
+
+    [Fact]
+    public async Task Undo_PersistsRestoredFlagsToHistoryStoreAcrossReload()
+    {
+        string root = Directory.CreateDirectory(Path.Combine(_root, "undo-persist")).FullName;
+        string desktopPath = Directory.CreateDirectory(Path.Combine(root, "desktop")).FullName;
+        string widgetPath = Directory.CreateDirectory(Path.Combine(root, "widget")).FullName;
+        string settingsDir = Path.Combine(root, "settings");
+        string movedFile = Path.Combine(widgetPath, "note.txt");
+        File.WriteAllText(movedFile, "hello");
+
+        var settings = new SettingsService(settingsDir);
+        await settings.LoadAsync();
+        var entry = new OrganizationHistoryEntry
+        {
+            Id = "persist-undo-entry",
+            ActionType = OrganizationActionType.MoveBackToDesktop,
+            CanUndo = true,
+            Items =
+            [
+                new OrganizationHistoryItem
+                {
+                    Name = "note.txt",
+                    SourcePath = Path.Combine(desktopPath, "note.txt"),
+                    DestinationPath = movedFile,
+                    DestinationIdentity = FileService.CaptureUndoReceiptIdentity(movedFile)
+                }
+            ]
+        };
+        settings.OrganizationHistory.Entries.Add(entry);
+        await settings.OrganizationHistory.SaveCheckedAsync();
+
+        var organizer = TestOrganizerServices.Create(settings, new FileService(), () => desktopPath);
+        await organizer.UndoAsync(entry.Id);
+
+        var reloaded = new SettingsService(settingsDir);
+        await reloaded.LoadAsync();
+        OrganizationHistoryEntry reloadedEntry = Assert.Single(reloaded.OrganizationHistory.Entries);
+        Assert.True(reloadedEntry.IsUndone);
+        OrganizationHistoryItem reloadedItem = Assert.Single(reloadedEntry.Items);
+        Assert.True(reloadedItem.IsRestored);
+        Assert.Equal(Path.Combine(desktopPath, "note.txt"), reloadedItem.RestoredPath);
+    }
+
+    [Fact]
+    public async Task RecoverPendingAsync_RestoresShortcutInterruptedDuringAtomicRebase()
+    {
+        string desktop = Directory.CreateDirectory(Path.Combine(_root, "lnk-recovery-desktop")).FullName;
+        string target = Directory.CreateDirectory(Path.Combine(_root, "lnk-recovery-target")).FullName;
+        string sourcePath = Path.Combine(desktop, "App.lnk");
+        string destinationPath = Path.Combine(target, "App.lnk");
+        string orphanTempPath = destinationPath + ".orphan.deskbox-tmp";
+
+        byte[] initialBytes = new byte[96];
+        BitConverter.GetBytes(0x0000004Cu).CopyTo(initialBytes, 0);
+        File.WriteAllBytes(destinationPath, initialBytes);
+
+        var settings = new SettingsService(Path.Combine(_root, "lnk-recovery-settings"));
+        WidgetConfig temporaryWidget = CreateWidget("Shortcuts", target);
+        temporaryWidget.Id = "temp-shortcuts";
+        settings.Settings.Widgets.Add(temporaryWidget);
+
+        var item = new DesktopOrganizationRecoveryItem
+        {
+            SourcePath = sourcePath,
+            DestinationPath = destinationPath,
+            TargetWidgetId = "temp-shortcuts",
+            Completed = true,
+            ShortcutRebaseInProgress = true,
+            Size = initialBytes.Length,
+            LastWriteTimeUtc = File.GetLastWriteTimeUtc(destinationPath)
+        };
+        DesktopOrganizationTransaction.RecordDestinationIdentity(item, destinationPath);
+
+        // Simulate atomic File.Replace completing right before a crash: the .lnk
+        // now has a new file index, updated length, and updated timestamp, plus
+        // an orphaned .deskbox-tmp sibling.
+        string replacementTemp = destinationPath + ".commit.deskbox-tmp";
+        byte[] rebasedBytes = new byte[128];
+        BitConverter.GetBytes(0x0000004Cu).CopyTo(rebasedBytes, 0);
+        File.WriteAllBytes(replacementTemp, rebasedBytes);
+        File.Replace(replacementTemp, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+        File.SetLastWriteTimeUtc(destinationPath, item.LastWriteTimeUtc!.Value.AddMinutes(5));
+        File.WriteAllBytes(orphanTempPath, [1, 2, 3]);
+
+        var store = new DesktopOrganizationRecoveryStore(Path.Combine(_root, "lnk-recovery.json"));
+        await store.SaveAsync(new DesktopOrganizationRecoveryJournal
+        {
+            TransactionId = "lnk-tx",
+            CreatedWidgetIds = ["temp-shortcuts"],
+            Items = [item]
+        });
+
+        int restored = await new DesktopOrganizationTransaction(settings, new FileService(), store)
+            .RecoverPendingAsync();
+
+        Assert.Equal(1, restored);
+        Assert.True(File.Exists(sourcePath));
+        Assert.False(File.Exists(destinationPath));
+        Assert.False(File.Exists(orphanTempPath));
+        Assert.False(store.HasPendingJournal);
+        Assert.DoesNotContain(settings.Settings.Widgets, widget => widget.Id == "temp-shortcuts");
+    }
+
+    [Fact]
+    public async Task Transaction_SkipsAutoRuleBindingForCustomBoxesAndDuplicateEnabledCategoryRules()
+    {
+        string desktop = Directory.CreateDirectory(Path.Combine(_root, "desktop-rules")).FullName;
+        string storage = Directory.CreateDirectory(Path.Combine(_root, "storage-rules")).FullName;
+        string existingDocWidgetPath = Directory.CreateDirectory(Path.Combine(storage, "ExistingDocs")).FullName;
+        string customFile = Path.Combine(desktop, "one.pdf");
+        string regularImg = Path.Combine(desktop, "two.png");
+        File.WriteAllText(customFile, "one");
+        File.WriteAllText(regularImg, "two");
+
+        var settings = new SettingsService(Path.Combine(_root, "settings-rules"));
+        WidgetConfig existingDocsWidget = CreateWidget("Existing Docs", existingDocWidgetPath);
+        settings.Settings.Widgets.Add(existingDocsWidget);
+        settings.Settings.DesktopOrganizationRules.Add(new DesktopOrganizationRule
+        {
+            CategoryIds = [DesktopOrganizationCategoryIds.Images],
+            TargetWidgetId = existingDocsWidget.Id,
+            IsEnabled = true
+        });
+
+        var plan = new DesktopOrganizationPlan
+        {
+            DesktopPath = desktop,
+            StorageRootPath = storage,
+            Targets =
+            [
+                new DesktopOrganizationTargetPlan
+                {
+                    SourceBucketId = "custom-renamed",
+                    CategoryId = DesktopOrganizationCategoryIds.Documents,
+                    TargetWidgetId = "custom-renamed",
+                    SuggestedDisplayName = "My Custom Box",
+                    TargetDirectoryPath = Path.Combine(storage, "My Custom Box"),
+                    CreatesWidget = true,
+                    AutoBindCategoryRule = false,
+                    Items = [Snapshot("one.pdf", DesktopOrganizationCategoryIds.Documents, DesktopOrganizationSubtypeIds.Pdf, customFile, 3)]
+                },
+                new DesktopOrganizationTargetPlan
+                {
+                    SourceBucketId = "images",
+                    CategoryId = DesktopOrganizationCategoryIds.Images,
+                    TargetWidgetId = "images-new",
+                    SuggestedDisplayName = "Images",
+                    TargetDirectoryPath = Path.Combine(storage, "Images"),
+                    CreatesWidget = true,
+                    AutoBindCategoryRule = true,
+                    Items = [Snapshot("two.png", DesktopOrganizationCategoryIds.Images, null, regularImg, 3)]
+                }
+            ]
+        };
+
+        var transaction = new DesktopOrganizationTransaction(settings, new FileService());
+        await transaction.ExecuteAsync(plan);
+
+        Assert.DoesNotContain(settings.Settings.DesktopOrganizationRules,
+            r => r.CategoryIds.Contains(DesktopOrganizationCategoryIds.Documents, StringComparer.Ordinal));
+        DesktopOrganizationRule imgRule = Assert.Single(settings.Settings.DesktopOrganizationRules,
+            r => r.CategoryIds.Contains(DesktopOrganizationCategoryIds.Images, StringComparer.Ordinal));
+        Assert.Equal(existingDocsWidget.Id, imgRule.TargetWidgetId);
+    }
+
+    [Fact]
+    public async Task Scanner_CanceledTokenThrowsOperationCanceledExceptionDuringScan()
+    {
+        string desktop = Directory.CreateDirectory(Path.Combine(_root, "desktop-cancel")).FullName;
+        string folder = Directory.CreateDirectory(Path.Combine(desktop, "nested")).FullName;
+        File.WriteAllText(Path.Combine(folder, "child.txt"), "hello");
+
+        var scanner = new DesktopOrganizationScanner(
+            new DesktopOrganizationClassifier(),
+            () => desktop,
+            () => string.Empty);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => scanner.ScanAsync(cancellationToken: cts.Token));
+    }
+
+    [Fact]
+    public void Planner_EnforcesCombinedQuickBatchLimitAcrossPersonalAndPublicWhileHonoringOptIns()
+    {
+        string storage = Path.Combine(_root, "storage-batch");
+        var allItems = new List<DesktopOrganizationFileSnapshot>();
+        string? optedInExtraPath = null;
+
+        for (int i = 0; i < DesktopOrganizationScanner.QuickBatchItemLimit; i++)
+        {
+            bool isPublic = i >= 120;
+            allItems.Add(Snapshot(
+                $"item-{i:D3}.txt",
+                DesktopOrganizationCategoryIds.Documents,
+                DesktopOrganizationSubtypeIds.Text,
+                Path.Combine(_root, isPublic ? "pub" : "per", $"item-{i:D3}.txt")) with
+            {
+                SourceScope = isPublic ? DesktopOrganizationSourceScope.Public : DesktopOrganizationSourceScope.Personal
+            });
+        }
+
+        optedInExtraPath = Path.Combine(_root, "pub", "opted-in-extra.txt");
+        allItems.Add(Snapshot(
+            "opted-in-extra.txt",
+            DesktopOrganizationCategoryIds.Documents,
+            DesktopOrganizationSubtypeIds.Text,
+            optedInExtraPath) with
+        {
+            SourceScope = DesktopOrganizationSourceScope.Public
+        });
+
+        string regularOverflowPath = Path.Combine(_root, "pub", "overflow.txt");
+        allItems.Add(Snapshot(
+            "overflow.txt",
+            DesktopOrganizationCategoryIds.Documents,
+            DesktopOrganizationSubtypeIds.Text,
+            regularOverflowPath) with
+        {
+            SourceScope = DesktopOrganizationSourceScope.Public
+        });
+
+        var scan = new DesktopOrganizationScanResult
+        {
+            DesktopPath = Path.Combine(_root, "per"),
+            PublicDesktopPath = Path.Combine(_root, "pub"),
+            Items = allItems
+        };
+
+        var plan = new DesktopOrganizationPlanner(new DesktopOrganizationRuleResolver()).CreatePlan(
+            scan,
+            storage,
+            [],
+            [],
+            _ => "Documents",
+            includePersonalDesktop: true,
+            includePublicDesktop: true,
+            optedInSourcePaths: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { optedInExtraPath });
+
+        var organizedPaths = plan.Targets.SelectMany(t => t.Items).Select(i => i.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(optedInExtraPath, organizedPaths);
+        Assert.DoesNotContain(regularOverflowPath, organizedPaths);
+        Assert.Contains(plan.ExcludedItems, i =>
+            string.Equals(i.SourcePath, regularOverflowPath, StringComparison.OrdinalIgnoreCase) &&
+            i.ExclusionReason == DesktopOrganizationExclusionReason.BatchLimit);
+    }
+
+    [Theory]
+    [InlineData("CON", "_CON")]
+    [InlineData("aux.txt", "_aux.txt")]
+    [InlineData("nul", "_nul")]
+    [InlineData("a/b:c*?", "a_b_c__")]
+    [InlineData("...", DesktopOrganizationCategoryIds.Other)]
+    public void Planner_SanitizeFolderNameHandlesReservedDeviceNamesSlashesAndDots(string raw, string expected)
+    {
+        Assert.Equal(expected, DesktopOrganizationPlanner.SanitizeFolderName(raw));
     }
 
     private DesktopOrganizationFileSnapshot Snapshot(

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.CustomWidgetSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+        <InfoBar
+            x:Name="StudioStatusInfoBar"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <StackPanel x:Name="StudioViewPanel" Spacing="6">
+            <StackPanel Margin="4,4,4,2" Spacing="2">
+                <TextBlock
+                    x:Name="MyWidgetsSectionHeaderText"
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    AutomationProperties.HeadingLevel="Level2" />
+            </StackPanel>
+
+            <toolkit:SettingsCard
+                x:Name="EmptyMyWidgetsCard"
+                HorizontalContentAlignment="Right"
+                Visibility="Collapsed"
+                svc:Localized.DescriptionKey="CustomWidget.Native.MyWidgets.Empty.Description"
+                svc:Localized.HeaderKey="CustomWidget.Native.MyWidgets.Empty.Header">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE71D;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <Button
+                    Click="OpenStudioButton_Click"
+                    Style="{StaticResource AccentActionButtonStyle}"
+                    svc:Localized.Key="CustomWidget.Settings.OpenStudio" />
+            </toolkit:SettingsCard>
+
+            <StackPanel
+                x:Name="MyWidgetsListPanel"
+                Spacing="4" />
+        </StackPanel>
+
+        <!-- Drill-in Subview for Per-Widget Native Settings -->
+        <StackPanel
+            x:Name="DetailViewPanel"
+            Spacing="4"
+            Visibility="Collapsed" />
+    </StackPanel>
+</UserControl>

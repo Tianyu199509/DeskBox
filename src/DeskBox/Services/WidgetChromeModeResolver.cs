@@ -11,7 +11,10 @@ public sealed class WidgetChromeModeResolver
         _settingsService = settingsService;
     }
 
-    public WidgetChromeMode Resolve(WidgetConfig config, WidgetContentDescriptor descriptor)
+    public WidgetChromeMode Resolve(
+        WidgetConfig config,
+        WidgetContentDescriptor descriptor,
+        WidgetChromeCategory? categoryOverride = null)
     {
         var overrideMode = WidgetChromeModeNames.GetOverrideMode(config);
         if (overrideMode != WidgetChromeMode.System)
@@ -20,10 +23,16 @@ public sealed class WidgetChromeModeResolver
         }
 
         var settings = _settingsService.Settings;
-        var globalValue = descriptor.ChromeCategory == WidgetChromeCategory.Display
+        WidgetChromeCategory effectiveCategory = categoryOverride ?? descriptor.ChromeCategory;
+        var globalValue = effectiveCategory == WidgetChromeCategory.Display
             ? settings.DisplayWidgetChromeMode
             : settings.InteractiveWidgetChromeMode;
-        var globalMode = WidgetChromeModeNames.NormalizeMode(globalValue, descriptor.DefaultChromeMode);
+        WidgetChromeMode defaultChromeMode = categoryOverride.HasValue
+            ? (effectiveCategory == WidgetChromeCategory.Display
+                ? WidgetChromeMode.Overlay
+                : WidgetChromeMode.Standard)
+            : descriptor.DefaultChromeMode;
+        var globalMode = WidgetChromeModeNames.NormalizeMode(globalValue, defaultChromeMode);
         return CoerceAllowedMode(globalMode, descriptor);
     }
 

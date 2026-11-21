@@ -169,6 +169,38 @@ public sealed class StaOperationWatchdogTests
     }
 
     [Fact]
+    public async Task RunAsync_ReusesWarmIdleStaWorker_AndSpawnsFreshWorkerAfterKeepAliveExpires()
+    {
+        var runner = new BoundedStaOperationRunner(
+            maxConcurrency: 1,
+            maxQueued: 2,
+            queueTimeout: TimeSpan.FromSeconds(5),
+            threadName: "test warm STA",
+            idleKeepAlive: TimeSpan.FromMilliseconds(180));
+
+        StaOperationResult<(int ThreadId, ApartmentState Apartment)> first = await runner.RunAsync(
+            () => (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()),
+            CancellationToken.None);
+        StaOperationResult<(int ThreadId, ApartmentState Apartment)> second = await runner.RunAsync(
+            () => (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()),
+            CancellationToken.None);
+
+        Assert.True(first.Started);
+        Assert.True(second.Started);
+        Assert.Equal(ApartmentState.STA, first.Value.Apartment);
+        Assert.Equal(ApartmentState.STA, second.Value.Apartment);
+        Assert.Equal(first.Value.ThreadId, second.Value.ThreadId);
+
+        await Task.Delay(280);
+
+        StaOperationResult<(int ThreadId, ApartmentState Apartment)> afterExpiry = await runner.RunAsync(
+            () => (Environment.CurrentManagedThreadId, Thread.CurrentThread.GetApartmentState()),
+            CancellationToken.None);
+        Assert.True(afterExpiry.Started);
+        Assert.Equal(ApartmentState.STA, afterExpiry.Value.Apartment);
+    }
+
+    [Fact]
     public async Task RunAsync_Watchdog_AbandonsSilentOperation_RebuildsWorker_AndCountsAbandonment()
     {
         var runner = new BoundedStaOperationRunner(

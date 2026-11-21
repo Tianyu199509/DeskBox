@@ -1,10 +1,5 @@
 using System.Collections.Concurrent;
 using DeskBox.Platform;
-#if !DESKBOX_NATIVE_AOT
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-using System.Text;
-#endif
 
 namespace DeskBox.Helpers;
 
@@ -14,9 +9,6 @@ namespace DeskBox.Helpers;
 /// </summary>
 public static class ShortcutHelper
 {
-#if !DESKBOX_NATIVE_AOT
-    private const int MAX_PATH = 260;
-#endif
     private const int MaxStoredMetadataCacheEntries = 512;
     private const long FailedMetadataRetryDelayMilliseconds = 2_000;
     private static readonly ConcurrentDictionary<string, StoredShortcutCacheEntry>
@@ -44,8 +36,11 @@ public static class ShortcutHelper
     private sealed record StoredShortcutCacheEntry(
         long Length,
         long LastWriteTimeUtcTicks,
+        bool MetadataLoaded,
         ShortcutInfo? Metadata,
-        long ReadAtTickCount);
+        long ReadAtTickCount,
+        bool EffectiveTargetEvaluated = false,
+        string? EffectiveTargetPath = null);
 
     public static bool IsShortcutPath(string? path)
     {
@@ -70,6 +65,57 @@ public static class ShortcutHelper
                Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static readonly byte[] s_shellLinkClsidBytes =
+        new Guid("00021401-0000-0000-C000-000000000046").ToByteArray();
+
+    /// <summary>
+    /// Reads the <c>[MS-SHLLINK]</c> 24-byte header to check whether the
+    /// shortcut carries <c>SLDF_RUNAS_USER</c> (<c>0x00002000</c>) without
+    /// instantiating COM shell objects.
+    /// </summary>
+    internal static bool HasRunAsUserFlag(string? shortcutPath)
+    {
+        if (!IsShellLinkPath(shortcutPath) || !File.Exists(shortcutPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            Span<byte> header = stackalloc byte[24];
+            using var stream = new FileStream(
+                shortcutPath!,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            int totalRead = 0;
+            while (totalRead < header.Length)
+            {
+                int read = stream.Read(header[totalRead..]);
+                if (read <= 0)
+                {
+                    return false;
+                }
+
+                totalRead += read;
+            }
+
+            uint headerSize = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header[..4]);
+            if (headerSize != 0x0000004Cu ||
+                !header.Slice(4, 16).SequenceEqual(s_shellLinkClsidBytes))
+            {
+                return false;
+            }
+
+            uint linkFlags = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(20, 4));
+            return (linkFlags & 0x00002000u) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Resolve a .lnk shortcut file and return its target information.
     /// </summary>
@@ -77,8 +123,12 @@ public static class ShortcutHelper
     /// <returns>A <see cref="ShortcutInfo"/> with resolved data, or <c>null</c> on failure.</returns>
     public static ShortcutInfo? Resolve(string shortcutPath)
     {
-        if (!File.Exists(shortcutPath))
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            (!File.Exists(shortcutPath) &&
+             !File.Exists(StorageMigrationNativeMethods.Extended(shortcutPath))))
+        {
             return null;
+        }
 
         if (Path.GetExtension(shortcutPath).Equals(".url", StringComparison.OrdinalIgnoreCase))
         {
@@ -90,58 +140,17 @@ public static class ShortcutHelper
             return null;
         }
 
-#if DESKBOX_NATIVE_AOT
         ShortcutNativeCallResult native = ShortcutNativeBackend.ResolveNoUi(shortcutPath);
         if (!native.Success)
         {
             LogNativeFailure("resolve", shortcutPath, native);
         }
 
-        return native.Metadata;
-#else
-        if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
-        {
-            ShortcutNativeCallResult native = ShortcutNativeBackend.ResolveNoUi(shortcutPath);
-            if (!native.Success)
-            {
-                LogNativeFailure("resolve", shortcutPath, native);
-            }
-
-            return native.Metadata;
-        }
-
-        return ResolveWithCSharp(shortcutPath);
-#endif
+        return RecoverLongTargetMetadata(
+            shortcutPath,
+            native.Metadata,
+            native.SourceTruncatedFields);
     }
-
-#if !DESKBOX_NATIVE_AOT
-    internal static ShortcutInfo? ResolveWithCSharp(string shortcutPath, ushort timeoutMs = 0)
-    {
-        try
-        {
-            var link = (IShellLinkW)new ShellLink();
-            var file = (IPersistFile)link;
-
-            file.Load(shortcutPath, 0); // STGM_READ
-            try
-            {
-                uint resolveFlags = (uint)(SLR_FLAGS.SLR_NO_UI | SLR_FLAGS.SLR_NOSEARCH) |
-                    ((uint)timeoutMs << 16);
-                link.Resolve(IntPtr.Zero, (SLR_FLAGS)resolveFlags);
-            }
-            catch
-            {
-                // Keep reading the stored shortcut metadata even if the target is unavailable.
-            }
-
-            return ReadShellLinkMetadata(link);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-#endif
 
     /// <summary>
     /// Reads metadata already stored in a shortcut without asking Windows to
@@ -150,7 +159,9 @@ public static class ShortcutHelper
     /// </summary>
     public static ShortcutInfo? ReadStoredMetadata(string shortcutPath)
     {
-        if (string.IsNullOrWhiteSpace(shortcutPath) || !File.Exists(shortcutPath))
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            (!File.Exists(shortcutPath) &&
+             !File.Exists(StorageMigrationNativeMethods.Extended(shortcutPath))))
         {
             return null;
         }
@@ -158,14 +169,17 @@ public static class ShortcutHelper
         try
         {
             string normalizedPath = Path.GetFullPath(shortcutPath);
-            var fileInfo = new FileInfo(normalizedPath);
+            string extendedPath = StorageMigrationNativeMethods.Extended(normalizedPath);
+            var fileInfo = new FileInfo(
+                File.Exists(normalizedPath) ? normalizedPath : extendedPath);
             long length = fileInfo.Length;
             long lastWriteTimeUtcTicks = fileInfo.LastWriteTimeUtc.Ticks;
             if (s_storedMetadataCache.TryGetValue(
                     normalizedPath,
                     out StoredShortcutCacheEntry? cached) &&
                 cached.Length == length &&
-                cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks)
+                cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                cached.MetadataLoaded)
             {
                 if (cached.Metadata is null &&
                     IsRecentMetadataFailure(cached.ReadAtTickCount))
@@ -181,6 +195,7 @@ public static class ShortcutHelper
                 if (cached.Metadata is null)
                 {
                     RemoveStoredMetadataCacheEntry(normalizedPath);
+                    cached = null;
                 }
                 else
                 {
@@ -190,13 +205,23 @@ public static class ShortcutHelper
             }
 
             ShortcutInfo? metadata = ReadStoredMetadataUncached(normalizedPath);
+            bool preserveEffectiveEvaluated = cached is not null &&
+                cached.Length == length &&
+                cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                cached.EffectiveTargetEvaluated;
+            string? preservedEffectiveTarget = preserveEffectiveEvaluated
+                ? cached!.EffectiveTargetPath
+                : null;
             StoreStoredMetadataCacheEntry(
                 normalizedPath,
                 new StoredShortcutCacheEntry(
                     length,
                     lastWriteTimeUtcTicks,
+                    MetadataLoaded: true,
                     metadata,
-                    Environment.TickCount64));
+                    Environment.TickCount64,
+                    preserveEffectiveEvaluated,
+                    preservedEffectiveTarget));
             return metadata;
         }
         catch
@@ -272,6 +297,88 @@ public static class ShortcutHelper
         }
     }
 
+    private static string? TryRecoverLongTargetPath(
+        string shortcutPath,
+        string? candidateTarget,
+        uint truncatedFields = 0)
+    {
+        string expandedFromShort = string.Empty;
+        bool hasShortCompressedLongPath = !string.IsNullOrWhiteSpace(candidateTarget) &&
+            StorageMigrationNativeMethods.TryExpandShortPathExceedingMaxPath(
+                candidateTarget,
+                out expandedFromShort);
+
+        if (!hasShortCompressedLongPath &&
+            truncatedFields == 0 &&
+            !string.IsNullOrWhiteSpace(candidateTarget))
+        {
+            string expanded = Environment.ExpandEnvironmentVariables(candidateTarget);
+            if (expanded.Length < 258 ||
+                File.Exists(StorageMigrationNativeMethods.Extended(expanded)) ||
+                Directory.Exists(StorageMigrationNativeMethods.Extended(expanded)))
+            {
+                return candidateTarget;
+            }
+        }
+
+        if (ShellLinkVtableInterop.TryReadExpandedShortcutPaths(
+                shortcutPath,
+                out _,
+                out _,
+                out string? longTargetPath) &&
+            !string.IsNullOrWhiteSpace(longTargetPath))
+        {
+            if (StorageMigrationNativeMethods.TryExpandShortPathExceedingMaxPath(
+                    longTargetPath,
+                    out string expandedPidlLong))
+            {
+                longTargetPath = expandedPidlLong;
+            }
+
+            if (hasShortCompressedLongPath ||
+                string.IsNullOrWhiteSpace(candidateTarget) ||
+                longTargetPath.Length > candidateTarget.Length ||
+                File.Exists(StorageMigrationNativeMethods.Extended(longTargetPath)) ||
+                Directory.Exists(StorageMigrationNativeMethods.Extended(longTargetPath)))
+            {
+                return longTargetPath;
+            }
+        }
+
+        return hasShortCompressedLongPath ? expandedFromShort : candidateTarget;
+    }
+
+    private static ShortcutInfo? RecoverLongTargetMetadata(
+        string shortcutPath,
+        ShortcutInfo? metadata,
+        uint truncatedFields = 0)
+    {
+        string? recoveredTarget = TryRecoverLongTargetPath(
+            shortcutPath,
+            metadata?.TargetPath,
+            truncatedFields);
+        if (metadata is null)
+        {
+            if (string.IsNullOrWhiteSpace(recoveredTarget))
+            {
+                return null;
+            }
+
+            return new ShortcutInfo(
+                recoveredTarget,
+                string.Empty,
+                string.Empty,
+                Path.GetDirectoryName(recoveredTarget) ?? string.Empty,
+                string.Empty,
+                0);
+        }
+
+        return string.Equals(recoveredTarget, metadata.TargetPath, StringComparison.Ordinal) ||
+               string.IsNullOrWhiteSpace(recoveredTarget)
+            ? metadata
+            : metadata with { TargetPath = recoveredTarget };
+    }
+
     private static ShortcutInfo? ReadStoredMetadataUncached(string shortcutPath)
     {
         if (Path.GetExtension(shortcutPath).Equals(".url", StringComparison.OrdinalIgnoreCase))
@@ -284,78 +391,106 @@ public static class ShortcutHelper
             return null;
         }
 
-#if DESKBOX_NATIVE_AOT
         ShortcutNativeCallResult native = ShortcutNativeBackend.ReadStoredRaw(shortcutPath);
         if (!native.Success)
         {
             LogNativeFailure("stored read", shortcutPath, native);
         }
 
-        return native.Metadata;
-#else
-        if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
-        {
-            ShortcutNativeCallResult native = ShortcutNativeBackend.ReadStoredRaw(shortcutPath);
-            if (!native.Success)
-            {
-                LogNativeFailure("stored read", shortcutPath, native);
-            }
+        return RecoverLongTargetMetadata(
+            shortcutPath,
+            native.Metadata,
+            native.SourceTruncatedFields);
+    }
 
-            return native.Metadata;
+    /// <summary>
+    /// Reads a shortcut's effective target path without <c>SLGP_RAWPATH</c> and
+    /// without invoking modal UI or disk search, allowing Windows to apply
+    /// <c>KnownFolderDataBlock</c> (for example 32-bit <c>%ProgramFiles%</c>
+    /// shortcuts resolving to <c>ProgramFilesX86</c>) or PIDL targets.
+    /// </summary>
+    internal static string? TryReadEffectiveTargetPath(string shortcutPath)
+    {
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            !IsShellLinkPath(shortcutPath) ||
+            (!File.Exists(shortcutPath) &&
+             !File.Exists(StorageMigrationNativeMethods.Extended(shortcutPath))))
+        {
+            return null;
         }
 
-        return ReadStoredMetadataWithCSharpUncached(shortcutPath);
-#endif
+        try
+        {
+            string normalizedPath = Path.GetFullPath(shortcutPath);
+            string extendedPath = StorageMigrationNativeMethods.Extended(normalizedPath);
+            var fileInfo = new FileInfo(
+                File.Exists(normalizedPath) ? normalizedPath : extendedPath);
+            long length = fileInfo.Length;
+            long lastWriteTimeUtcTicks = fileInfo.LastWriteTimeUtc.Ticks;
+            if (s_storedMetadataCache.TryGetValue(
+                    normalizedPath,
+                    out StoredShortcutCacheEntry? cached) &&
+                cached.Length == length &&
+                cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                cached.EffectiveTargetEvaluated)
+            {
+                TouchStoredMetadataCacheEntry(normalizedPath);
+                return cached.EffectiveTargetPath;
+            }
+
+            string? resolved = TryReadEffectiveTargetPathUncached(normalizedPath);
+            bool preserveMetadata = cached is not null &&
+                cached.Length == length &&
+                cached.LastWriteTimeUtcTicks == lastWriteTimeUtcTicks &&
+                cached.MetadataLoaded;
+            StoreStoredMetadataCacheEntry(
+                normalizedPath,
+                new StoredShortcutCacheEntry(
+                    length,
+                    lastWriteTimeUtcTicks,
+                    MetadataLoaded: preserveMetadata,
+                    Metadata: preserveMetadata ? cached!.Metadata : null,
+                    ReadAtTickCount: preserveMetadata ? cached!.ReadAtTickCount : 0,
+                    EffectiveTargetEvaluated: true,
+                    EffectiveTargetPath: resolved));
+            return resolved;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
-#if !DESKBOX_NATIVE_AOT
-    internal static ShortcutInfo ReadStoredMetadataWithCSharpUncached(string shortcutPath)
+    private static string? TryReadEffectiveTargetPathUncached(string shortcutPath)
     {
-        var link = (IShellLinkW)new ShellLink();
-        var file = (IPersistFile)link;
-        file.Load(shortcutPath, 0); // STGM_READ
-        return ReadShellLinkMetadata(link);
+        try
+        {
+            ShortcutNativeCallResult native = ShortcutNativeBackend.ReadEffectiveDiagnostic(shortcutPath);
+            string? target = native.Success ? native.Metadata?.TargetPath : null;
+            return TryRecoverLongTargetPath(shortcutPath, target, native.SourceTruncatedFields);
+        }
+        catch
+        {
+            return null;
+        }
     }
-#endif
 
     private static void LogNativeFailure(
         string operation,
         string shortcutPath,
         ShortcutNativeCallResult result)
     {
-        App.Log(
+        string message =
             $"[ShortcutNative] Explicit Rust {operation} failed for '{shortcutPath}': " +
-            $"{result.Failure}; {result.Detail}");
+            $"{result.Failure}; {result.Detail}";
+        if (result.IsExpectedPidlOnlyOutcome)
+        {
+            App.LogVerbose(message);
+            return;
+        }
+
+        App.Log(message);
     }
-
-#if !DESKBOX_NATIVE_AOT
-    private static ShortcutInfo ReadShellLinkMetadata(IShellLinkW link)
-    {
-        var targetBuilder = new StringBuilder(MAX_PATH);
-        var findData = new WIN32_FIND_DATAW();
-        link.GetPath(targetBuilder, MAX_PATH, ref findData, SLGP_FLAGS.SLGP_RAWPATH);
-
-        var descriptionBuilder = new StringBuilder(MAX_PATH);
-        link.GetDescription(descriptionBuilder, MAX_PATH);
-
-        var argsBuilder = new StringBuilder(MAX_PATH);
-        link.GetArguments(argsBuilder, MAX_PATH);
-
-        var workDirBuilder = new StringBuilder(MAX_PATH);
-        link.GetWorkingDirectory(workDirBuilder, MAX_PATH);
-
-        var iconBuilder = new StringBuilder(MAX_PATH);
-        link.GetIconLocation(iconBuilder, MAX_PATH, out var iconIndex);
-
-        return new ShortcutInfo(
-            TargetPath: targetBuilder.ToString(),
-            Description: descriptionBuilder.ToString(),
-            Arguments: argsBuilder.ToString(),
-            WorkingDirectory: workDirBuilder.ToString(),
-            IconLocation: iconBuilder.ToString(),
-            IconIndex: iconIndex);
-    }
-#endif
 
     private static ShortcutInfo? ResolveInternetShortcut(string shortcutPath)
     {
@@ -400,7 +535,7 @@ public static class ShortcutHelper
                 }
                 else if (key.Equals("IconIndex", StringComparison.OrdinalIgnoreCase))
                 {
-                    _ = int.TryParse(value, out iconIndex);
+                    _ = int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out iconIndex);
                 }
             }
 
@@ -436,36 +571,12 @@ public static class ShortcutHelper
         using IDisposable foregroundMonitor = ShellUiForegroundMonitor.Start(ownerHwnd);
         try
         {
-#if DESKBOX_NATIVE_AOT
             ShortcutNativeUiResolveCallResult native =
                 ShortcutNativeBackend.ResolveWithUi(lnkPath, ownerHwnd);
             if (!native.Success)
             {
                 LogNativeUiResolveFailure(lnkPath, native);
             }
-#else
-            if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
-            {
-                ShortcutNativeUiResolveCallResult native =
-                    ShortcutNativeBackend.ResolveWithUi(lnkPath, ownerHwnd);
-                if (!native.Success)
-                {
-                    LogNativeUiResolveFailure(lnkPath, native);
-                }
-            }
-            else
-            {
-                var link = (IShellLinkW)new ShellLink();
-                var file = (IPersistFile)link;
-                file.Load(lnkPath, 0); // STGM_READ
-
-                link.Resolve(
-                    ownerHwnd,
-                    SLR_FLAGS.SLR_UPDATE |
-                    SLR_FLAGS.SLR_NOSEARCH |
-                    SLR_FLAGS.SLR_OFFER_DELETE_WITHOUT_FILE);
-            }
-#endif
         }
         catch (Exception ex)
         {
@@ -502,9 +613,11 @@ public static class ShortcutHelper
             throw new ArgumentException("Shortcut path must include a directory.", nameof(shortcutPath));
         }
 
-        Directory.CreateDirectory(shortcutDirectory);
+        string creatableDir = shortcutDirectory.Length >= 248
+            ? StorageMigrationNativeMethods.Extended(shortcutDirectory)
+            : shortcutDirectory;
+        Directory.CreateDirectory(creatableDir);
 
-#if DESKBOX_NATIVE_AOT
         var metadata = new ShortcutInfo(
             normalizedTargetPath,
             description,
@@ -520,33 +633,6 @@ public static class ShortcutHelper
             throw new InvalidOperationException(
                 $"Rust shortcut write failed: {native.Failure}; {native.Detail}");
         }
-#else
-        if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
-        {
-            var metadata = new ShortcutInfo(
-                normalizedTargetPath,
-                description,
-                string.Empty,
-                normalizedTargetPath,
-                string.Empty,
-                0);
-            ShortcutNativeWriteCallResult native =
-                ShortcutNativeBackend.WriteShortcut(normalizedShortcutPath, metadata);
-            if (!native.Success)
-            {
-                LogNativeWriteFailure("folder write", normalizedShortcutPath, native);
-                throw new InvalidOperationException(
-                    $"Rust shortcut write failed: {native.Failure}; {native.Detail}");
-            }
-        }
-        else
-        {
-            CreateOrUpdateFolderShortcutWithCSharp(
-                normalizedShortcutPath,
-                normalizedTargetPath,
-                description);
-        }
-#endif
 
         InvalidateStoredMetadataCache(normalizedShortcutPath);
     }
@@ -617,7 +703,6 @@ public static class ShortcutHelper
 
         Directory.CreateDirectory(shortcutDirectory);
 
-#if DESKBOX_NATIVE_AOT
         ShortcutNativeWriteCallResult native =
             ShortcutNativeBackend.WriteShellNamespaceShortcut(
                 normalizedShortcutPath,
@@ -629,78 +714,64 @@ public static class ShortcutHelper
             throw new InvalidOperationException(
                 $"Rust namespace shortcut write failed: {native.Failure}; {native.Detail}");
         }
-#else
-        if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
-        {
-            ShortcutNativeWriteCallResult native =
-                ShortcutNativeBackend.WriteShellNamespaceShortcut(
-                    normalizedShortcutPath,
-                    normalizedParsingName,
-                    description);
-            if (!native.Success)
-            {
-                LogNativeWriteFailure("namespace write", normalizedShortcutPath, native);
-                throw new InvalidOperationException(
-                    $"Rust namespace shortcut write failed: {native.Failure}; {native.Detail}");
-            }
-        }
-        else
-        {
-            CreateShellNamespaceShortcutWithCSharp(
-                normalizedShortcutPath,
-                normalizedParsingName,
-                description);
-        }
-#endif
 
         InvalidateStoredMetadataCache(normalizedShortcutPath);
     }
 
-#if !DESKBOX_NATIVE_AOT
-    internal static void CreateOrUpdateFolderShortcutWithCSharp(
-        string normalizedShortcutPath,
-        string normalizedTargetPath,
-        string description)
+    internal static bool TryCreateShortcutFromRawPidl(
+        string shortcutPath,
+        ReadOnlySpan<byte> rawPidlBytes,
+        string? description = null)
     {
-        var link = (IShellLinkW)new ShellLink();
-        var file = (IPersistFile)link;
-        link.SetPath(normalizedTargetPath);
-        link.SetWorkingDirectory(normalizedTargetPath);
-        link.SetDescription(description);
-        file.Save(normalizedShortcutPath, true);
-    }
-
-    internal static void CreateShellNamespaceShortcutWithCSharp(
-        string normalizedShortcutPath,
-        string parsingName,
-        string description)
-    {
-        IntPtr pidl = IntPtr.Zero;
-        int hresult = Shell32NativeMethods.SHParseDisplayName(
-            parsingName,
-            IntPtr.Zero,
-            out pidl,
-            0,
-            out _);
-        if (hresult < 0 || pidl == IntPtr.Zero)
+        if (!ShellLinkVtableInterop.TryCreateShortcutFromPidlBytes(
+                shortcutPath,
+                rawPidlBytes,
+                description))
         {
-            Marshal.ThrowExceptionForHR(hresult < 0 ? hresult : unchecked((int)0x80004005));
+            return false;
         }
 
-        try
-        {
-            var link = (IShellLinkW)new ShellLink();
-            var file = (IPersistFile)link;
-            link.SetIDList(pidl);
-            link.SetDescription(description);
-            file.Save(normalizedShortcutPath, true);
-        }
-        finally
-        {
-            Marshal.FreeCoTaskMem(pidl);
-        }
+        InvalidateStoredMetadataCache(shortcutPath);
+        return true;
     }
-#endif
+
+    /// <summary>
+    /// Rebases any moved <c>.lnk</c> files in <paramref name="movedPairs"/>
+    /// whose target, working directory, or icon location moved in the same
+    /// batch (or relied on a relative path from the shortcut's old folder).
+    /// Returns the destination paths of shortcuts rewritten on disk.
+    /// </summary>
+    internal static IReadOnlySet<string> RebaseMovedShortcuts(
+        IReadOnlyList<(string SourcePath, string DestinationPath)> movedPairs)
+    {
+        var rewrittenShortcuts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (movedPairs.Count == 0)
+        {
+            return rewrittenShortcuts;
+        }
+
+        foreach ((string sourcePath, string destinationPath) in movedPairs)
+        {
+            if (!IsShellLinkPath(destinationPath) || !File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            if (ShellLinkVtableInterop.TryRebaseShortcutPathsInPlace(
+                    destinationPath,
+                    sourcePath,
+                    movedPairs))
+            {
+                InvalidateStoredMetadataCache(sourcePath);
+                InvalidateStoredMetadataCache(destinationPath);
+                IconHelper.ClearIconCache(sourcePath);
+                IconHelper.ClearIconCache(destinationPath);
+                rewrittenShortcuts.Add(destinationPath);
+            }
+        }
+
+        return rewrittenShortcuts;
+    }
 
     internal static void InvalidateStoredMetadataCache(string shortcutPath)
     {
@@ -733,112 +804,6 @@ public static class ShortcutHelper
             $"{result.Failure}; {result.Detail}");
     }
 
-#if !DESKBOX_NATIVE_AOT
-    /// <summary>Shell Link CoClass (CLSID_ShellLink).</summary>
-    [ComImport]
-    [Guid("00021401-0000-0000-C000-000000000046")]
-    private class ShellLink { }
-
-    /// <summary>IShellLinkW COM interface.</summary>
-    [ComImport]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    [Guid("000214F9-0000-0000-C000-000000000046")]
-    private interface IShellLinkW
-    {
-        void GetPath(
-            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile,
-            int cch,
-            ref WIN32_FIND_DATAW pfd,
-            SLGP_FLAGS fFlags);
-
-        void GetIDList(out IntPtr ppidl);
-
-        void SetIDList(IntPtr pidl);
-
-        void GetDescription(
-            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName,
-            int cch);
-
-        void SetDescription(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszName);
-
-        void GetWorkingDirectory(
-            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir,
-            int cch);
-
-        void SetWorkingDirectory(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszDir);
-
-        void GetArguments(
-            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs,
-            int cch);
-
-        void SetArguments(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
-
-        void GetHotkey(out ushort pwHotkey);
-
-        void SetHotkey(ushort wHotkey);
-
-        void GetShowCmd(out int piShowCmd);
-
-        void SetShowCmd(int iShowCmd);
-
-        void GetIconLocation(
-            [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath,
-            int cch,
-            out int piIcon);
-
-        void SetIconLocation(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszIconPath,
-            int iIcon);
-
-        void SetRelativePath(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszPathRel,
-            uint dwReserved);
-
-        void Resolve(IntPtr hwnd, SLR_FLAGS fFlags);
-
-        void SetPath(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszFile);
-    }
-
-    [Flags]
-    private enum SLR_FLAGS : uint
-    {
-        SLR_NO_UI = 0x0001,
-        SLR_UPDATE = 0x0004,
-        SLR_NOSEARCH = 0x0010,
-        SLR_OFFER_DELETE_WITHOUT_FILE = 0x0200,
-    }
-
-    [Flags]
-    private enum SLGP_FLAGS : uint
-    {
-        SLGP_SHORTPATH = 0x0001,
-        SLGP_UNCPRIORITY = 0x0002,
-        SLGP_RAWPATH = 0x0004,
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WIN32_FIND_DATAW
-    {
-        public uint dwFileAttributes;
-        public FILETIME ftCreationTime;
-        public FILETIME ftLastAccessTime;
-        public FILETIME ftLastWriteTime;
-        public uint nFileSizeHigh;
-        public uint nFileSizeLow;
-        public uint dwReserved0;
-        public uint dwReserved1;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string cFileName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)]
-        public string cAlternateFileName;
-    }
-#endif
 }
 
 public enum BrokenShortcutResolution

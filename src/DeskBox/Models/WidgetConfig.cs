@@ -6,7 +6,7 @@ namespace DeskBox.Models;
 /// <summary>
 /// Represents the persisted configuration for a single desktop widget.
 /// </summary>
-public class WidgetConfig
+public sealed class WidgetConfig
 {
     public const int CurrentBoundsCoordinateVersion = 1;
 
@@ -55,6 +55,14 @@ public class WidgetConfig
     /// Null on legacy data: the profile entry then wins as before.
     /// </summary>
     public DateTimeOffset? LastUserPlacementUtc { get; set; }
+
+    /// <summary>
+    /// Active topology key when <see cref="LastUserPlacementUtc"/> was stamped.
+    /// Prevents a temporary room-making adjustment on a subset/fallback topology
+    /// from overwriting an already-authoritative placement in a fuller display set.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastUserPlacementTopologyKey { get; set; }
 
     /// <summary>Work area signature of the monitor where the widget was last positioned.</summary>
     public string? PositionMonitorKey { get; set; }
@@ -212,7 +220,7 @@ public sealed class WidgetCompactPlacement
 /// <summary>
 /// Persisted reference to a single item (file or shortcut) inside a widget.
 /// </summary>
-public class WidgetItemConfig
+public sealed class WidgetItemConfig
 {
     /// <summary>Absolute path to the file, folder, or shortcut.</summary>
     public string Path { get; set; } = string.Empty;
@@ -281,14 +289,20 @@ public enum WidgetKind
     /// <summary>Reserved for a future system monitor widget.</summary>
     SystemMonitor,
 
-    /// <summary>Global search widget that provides unified file and content search.</summary>
+    /// <summary>Legacy value kept only for migrating old settings files (Search is now standalone).</summary>
     Search,
 
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity,
 
     /// <summary>At-a-glance background, time and date widget.</summary>
-    Glance
+    Glance,
+
+    /// <summary>Declarative native WinUI 3 custom widget.</summary>
+    Custom,
+
+    /// <summary>First-party clipboard history and snippet shelf widget.</summary>
+    Clipboard
 }
 
 /// <summary>

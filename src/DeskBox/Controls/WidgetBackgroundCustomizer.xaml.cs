@@ -1,7 +1,8 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
@@ -51,6 +52,8 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
         DimSlider.ValueChanged += DimSlider_ValueChanged;
         BackgroundColorPicker.ColorChanged += BackgroundColorPicker_ColorChanged;
         ClearButton.Click += (_, _) => ResetToDefault();
+        CloseButton.Click += (_, _) => HostFlyout?.Hide();
+        GotFocus += (_, e) => FlyoutTextInputActivation.ActivateVisibleBridges("WidgetBackgroundCustomizer", e.OriginalSource);
         ChooseImageButton.Click += (_, _) =>
         {
             HostFlyout?.Hide();
@@ -62,6 +65,9 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
     {
         _config = config;
         LocalizationService localization = App.Current.LocalizationService;
+        string closeLabel = localization.T("Common.Close");
+        AutomationProperties.SetName(CloseButton, closeLabel);
+        ToolTipService.SetToolTip(CloseButton, closeLabel);
         TitleText.Text = localization.T("Widget.CustomBackground.Title");
         SubtitleText.Text = localization.T("Widget.CustomBackground.Subtitle");
         ChooseImageButton.Content = localization.T("Widget.CustomBackground.ChooseImage");
@@ -170,6 +176,9 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
         bool hasColor = !hasImage &&
             WidgetBackgroundCustomization.GetColorOverride(_config) is not null;
         LocalizationService localization = App.Current.LocalizationService;
+        string closeLabel = localization.T("Common.Close");
+        AutomationProperties.SetName(CloseButton, closeLabel);
+        ToolTipService.SetToolTip(CloseButton, closeLabel);
 
         PreviewImage.Source = hasImage
             ? WidgetBackgroundImageSourceFactory.TryCreate(imagePath)

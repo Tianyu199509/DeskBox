@@ -31,6 +31,7 @@ public sealed class DisplayTopologyGate
     // resolution share one geo token, and the grace must track them as two
     // units (a duplicate id can be removed and return independently).
     private readonly Dictionary<string, int> _graceActiveIds = new(StringComparer.OrdinalIgnoreCase);
+    private string? _completedGraceActiveSignature;
 
     public DisplayTopologyGate(Func<DateTimeOffset>? clock = null)
     {
@@ -81,9 +82,17 @@ public sealed class DisplayTopologyGate
         // total unit count, which is exactly the comparison wanted here.
         if (currentIds.Count >= activeIds.Count)
         {
+            _completedGraceActiveSignature = null;
             return;
         }
 
+        string activeSignature = BuildCanonicalSignature(activeIds);
+        if (string.Equals(activeSignature, _completedGraceActiveSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _completedGraceActiveSignature = null;
         _graceActiveIds.Clear();
         foreach (string id in activeIds)
         {
@@ -131,12 +140,14 @@ public sealed class DisplayTopologyGate
 
         if (allReturned)
         {
+            _completedGraceActiveSignature = null;
             Open(DisplayTopologyGateReason.RemovalGrace);
             return;
         }
 
         if (_clock() - _graceStartedAt >= RemovalGraceDuration)
         {
+            _completedGraceActiveSignature = BuildCanonicalSignature(_graceActiveIds);
             Open(DisplayTopologyGateReason.RemovalGrace);
         }
     }
@@ -144,7 +155,29 @@ public sealed class DisplayTopologyGate
     /// <summary>
     /// Ends the grace immediately (user reveal / drag / settings-page move).
     /// </summary>
-    public void EndGraceByUserAction() => Open(DisplayTopologyGateReason.RemovalGrace);
+    public void EndGraceByUserAction()
+    {
+        if (_graceStartedAt is not null)
+        {
+            _completedGraceActiveSignature = BuildCanonicalSignature(_graceActiveIds);
+        }
+
+        Open(DisplayTopologyGateReason.RemovalGrace);
+    }
+
+    public void ClearCompletedRemovalGrace() => _completedGraceActiveSignature = null;
+
+    private static string BuildCanonicalSignature(IEnumerable<string> ids) =>
+        string.Join(
+            "|",
+            ids.Select(id => (id ?? string.Empty).Trim().ToUpperInvariant())
+                .OrderBy(id => id, StringComparer.Ordinal));
+
+    private static string BuildCanonicalSignature(IReadOnlyDictionary<string, int> counts) =>
+        string.Join(
+            "|",
+            counts.SelectMany(pair => Enumerable.Repeat(pair.Key.Trim().ToUpperInvariant(), Math.Max(0, pair.Value)))
+                .OrderBy(id => id, StringComparer.Ordinal));
 
     private void EndGrace(string reason)
     {

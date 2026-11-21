@@ -40,6 +40,33 @@ public sealed class BackgroundUpdateCheckPolicyTests
             BackgroundUpdateCheckPolicy.FailureRetryInterval,
             BackgroundUpdateCheckPolicy.GetDelayUntilNextCheck(status: null));
     }
+
+    [Fact]
+    public void StartupDelay_HonorsRecentLastUpdateCheckAcrossRapidRestarts()
+    {
+        DateTimeOffset now = new(2026, 11, 4, 10, 0, 0, TimeSpan.Zero);
+        TimeSpan minDelay = TimeSpan.FromSeconds(12);
+
+        // Never checked before -> use minimum startup delay.
+        Assert.Equal(
+            minDelay,
+            BackgroundUpdateCheckPolicy.GetInitialStartupDelay(minDelay, lastCheckAt: null, now));
+
+        // Checked 5 minutes ago -> defer for the remaining 25 minutes of the 30-minute cooldown.
+        Assert.Equal(
+            TimeSpan.FromMinutes(25),
+            BackgroundUpdateCheckPolicy.GetInitialStartupDelay(minDelay, now.AddMinutes(-5), now));
+
+        // Checked 45 minutes ago -> cooldown elapsed, use minimum startup delay.
+        Assert.Equal(
+            minDelay,
+            BackgroundUpdateCheckPolicy.GetInitialStartupDelay(minDelay, now.AddMinutes(-45), now));
+
+        // Far-future clock-skewed stamp -> treated as absent rather than sleeping forever.
+        Assert.Equal(
+            minDelay,
+            BackgroundUpdateCheckPolicy.GetInitialStartupDelay(minDelay, now.AddHours(3), now));
+    }
 }
 
 /// <summary>

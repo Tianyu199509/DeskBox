@@ -1,40 +1,15 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
 
 internal enum ExplorerShellLaunchBackendMode
 {
-    CSharp,
     Rust
 }
 
 internal static class ExplorerShellLaunchBackendPolicy
 {
-    internal const string EnvironmentVariable = "DESKBOX_EXPLORER_SHELL_BACKEND";
-
-#if DESKBOX_NATIVE_AOT
-    internal static ExplorerShellLaunchBackendMode Current { get; } =
-        ExplorerShellLaunchBackendMode.Rust;
-#else
-    internal static ExplorerShellLaunchBackendMode Current { get; } = Resolve(
-        Environment.GetEnvironmentVariable(EnvironmentVariable),
-        RuntimeFeature.IsDynamicCodeSupported);
-
-    internal static ExplorerShellLaunchBackendMode Resolve(
-        string? configuredValue,
-        bool isDynamicCodeSupported)
-    {
-        if (!isDynamicCodeSupported)
-        {
-            return ExplorerShellLaunchBackendMode.Rust;
-        }
-
-        return string.Equals(configuredValue?.Trim(), "rust", StringComparison.OrdinalIgnoreCase)
-            ? ExplorerShellLaunchBackendMode.Rust
-            : ExplorerShellLaunchBackendMode.CSharp;
-    }
-#endif
+    internal static ExplorerShellLaunchBackendMode Current => ExplorerShellLaunchBackendMode.Rust;
 }
 
 internal enum ExplorerShellLaunchNativeCallFailure
@@ -86,9 +61,15 @@ internal sealed unsafe partial class ShortcutNativeModule
                 $"Native Explorer-shell capability 0x{ExplorerShellLaunchCapability:X} is unavailable; module mask is 0x{Capabilities:X}.");
         }
 
+        string normalizedWorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory)
+            ? string.Empty
+            : workingDirectory;
+        string normalizedVerb = string.IsNullOrWhiteSpace(verb)
+            ? string.Empty
+            : verb;
         if (!IsValidExplorerShellInput(path, allowEmpty: false) ||
-            !IsValidExplorerShellInput(workingDirectory, allowEmpty: true) ||
-            !IsValidExplorerShellInput(verb, allowEmpty: false))
+            !IsValidExplorerShellInput(normalizedWorkingDirectory, allowEmpty: true) ||
+            !IsValidExplorerShellInput(normalizedVerb, allowEmpty: true))
         {
             return ExplorerShellLaunchCallFailure(
                 ExplorerShellLaunchNativeCallFailure.InvalidInput,
@@ -106,8 +87,8 @@ internal sealed unsafe partial class ShortcutNativeModule
             (delegate* unmanaged[Cdecl]<NativeExplorerShellLaunchRequest*, NativeExplorerShellLaunchResult*, uint>)
             (void*)exportAddress;
         fixed (char* pathPointer = path)
-        fixed (char* workingDirectoryPointer = workingDirectory)
-        fixed (char* verbPointer = verb)
+        fixed (char* workingDirectoryPointer = normalizedWorkingDirectory)
+        fixed (char* verbPointer = normalizedVerb)
         {
             var request = new NativeExplorerShellLaunchRequest
             {
@@ -116,8 +97,8 @@ internal sealed unsafe partial class ShortcutNativeModule
                 Path = new NativeUtf16String(pathPointer, path.Length),
                 WorkingDirectory = new NativeUtf16String(
                     workingDirectoryPointer,
-                    workingDirectory.Length),
-                Verb = new NativeUtf16String(verbPointer, verb.Length)
+                    normalizedWorkingDirectory.Length),
+                Verb = new NativeUtf16String(verbPointer, normalizedVerb.Length)
             };
             var result = new NativeExplorerShellLaunchResult
             {

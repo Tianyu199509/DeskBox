@@ -11,4 +11,5 @@ public sealed partial record CapsuleOverrideSettingsItem(
     string WidgetId,
     string DisplayName,
     string Summary,
-    string Glyph);
+    string Glyph,
+    string ColorIconAssetName = "default");

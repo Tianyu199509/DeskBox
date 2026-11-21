@@ -1,6 +1,8 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Contracts;
+using DeskBox.Platform;
+using Windows.Graphics;
 
 namespace DeskBox.Services;
 
@@ -10,7 +12,9 @@ public sealed partial class WidgetManager
     private WidgetGroupDragCandidate[] _groupDragCandidates = [];
     private int _widgetWindowsMovedVersion;
     private int _groupDragCandidateBoundsVersion = -1;
-    private Windows.Graphics.RectInt32?[] _groupDragCandidateBounds = [];
+    private RectInt32?[] _groupDragCandidateBounds = [];
+    private RectInt32?[] _groupDragCandidateSurfaceBounds = [];
+    private double[] _groupDragCandidateDpiScales = [];
     private bool[] _groupDragCandidateBoundsFetched = [];
 
     /// <summary>
@@ -24,7 +28,7 @@ public sealed partial class WidgetManager
         _widgetWindowsMovedVersion++;
     }
 
-    private WidgetGroupDragCandidate? FindWidgetGroupDragCandidateAtPoint(
+    private WidgetGroupDragHit? FindWidgetGroupDragCandidateAtPoint(
         string sourceWidgetId,
         int screenX,
         int screenY)
@@ -32,7 +36,7 @@ public sealed partial class WidgetManager
         EnsureWidgetGroupDragCandidateCache(sourceWidgetId);
         RefreshWidgetGroupDragCandidateBoundsCacheIfStale();
 
-        WidgetGroupDragCandidate? best = null;
+        WidgetGroupDragHit? best = null;
         long bestArea = long.MaxValue;
         for (int index = 0; index < _groupDragCandidates.Length; index++)
         {
@@ -43,26 +47,58 @@ public sealed partial class WidgetManager
             }
 
             // This hit-test runs on every drag frame; each uncached fetch
-            // costs a visual-tree transform plus an AppWindow query per
+            // costs a visual-tree transform plus an AppWindow/DPI query per
             // candidate. Cache after the first fetch of the current
             // movement version.
-            Windows.Graphics.RectInt32? bounds = _groupDragCandidateBounds[index];
             if (!_groupDragCandidateBoundsFetched[index])
             {
-                bounds = candidate.Window.GetGroupMergeTitleScreenBounds();
-                _groupDragCandidateBounds[index] = bounds;
+                RectInt32? fetchedTitle = candidate.Window.GetGroupMergeTitleScreenBounds();
+                RectInt32? fetchedSurface = candidate.Window.GetGroupMergeSurfaceScreenBounds();
+                double scale = 1.0;
+                if (fetchedSurface is { } s)
+                {
+                    double queried = Win32Helper.GetDpiScaleForPoint(
+                        s.X + (s.Width / 2),
+                        s.Y + (s.Height / 2));
+                    if (double.IsFinite(queried) && queried > 0)
+                    {
+                        scale = queried;
+                    }
+                }
+
+                _groupDragCandidateBounds[index] = fetchedTitle;
+                _groupDragCandidateSurfaceBounds[index] = fetchedSurface;
+                _groupDragCandidateDpiScales[index] = scale;
                 _groupDragCandidateBoundsFetched[index] = true;
             }
 
-            if (!WidgetGroupDropHitTestPolicy.Contains(bounds, screenX, screenY))
+            RectInt32? surface = _groupDragCandidateSurfaceBounds[index];
+            double dpiScale = _groupDragCandidateDpiScales[index];
+            int minimumCenterSize = (int)Math.Round(
+                WidgetGroupDropHitTestPolicy.CenterZoneMinimumLogicalSize *
+                (dpiScale > 0 ? dpiScale : 1.0));
+            WidgetGroupDropZone zone = WidgetGroupDropHitTestPolicy.ResolveZone(
+                surface,
+                _groupDragCandidateBounds[index],
+                screenX,
+                screenY,
+                minimumCenterSize);
+            if (zone == WidgetGroupDropZone.None)
             {
                 continue;
             }
 
-            long area = (long)bounds!.Value.Width * bounds.Value.Height;
-            if (area < bestArea)
+            // The title fast lane beats a center hit; among equal zones the
+            // smallest surface wins so a widget resting on a larger one is
+            // still reachable.
+            RectInt32 areaBounds = surface ?? _groupDragCandidateBounds[index]!.Value;
+            long area = (long)areaBounds.Width * areaBounds.Height;
+            bool better = best is not { } current ||
+                (zone == WidgetGroupDropZone.Title && current.Zone != WidgetGroupDropZone.Title) ||
+                (zone == current.Zone && area < bestArea);
+            if (better)
             {
-                best = candidate;
+                best = new WidgetGroupDragHit(candidate, zone, surface, dpiScale);
                 bestArea = area;
             }
         }
@@ -78,7 +114,9 @@ public sealed partial class WidgetManager
             return;
         }
 
-        _groupDragCandidateBounds = new Windows.Graphics.RectInt32?[_groupDragCandidates.Length];
+        _groupDragCandidateBounds = new RectInt32?[_groupDragCandidates.Length];
+        _groupDragCandidateSurfaceBounds = new RectInt32?[_groupDragCandidates.Length];
+        _groupDragCandidateDpiScales = new double[_groupDragCandidates.Length];
         _groupDragCandidateBoundsFetched = new bool[_groupDragCandidates.Length];
         _groupDragCandidateBoundsVersion = _widgetWindowsMovedVersion;
     }
@@ -111,6 +149,11 @@ public sealed partial class WidgetManager
                 rulesByTargetId.TryGetValue(window.Config.Id, out WidgetGroupJoinTarget? rule) &&
                 rule is not null)
             {
+                if (rule.CanJoin)
+                {
+                    window.PrewarmGroupDropPreview();
+                }
+
                 candidates.Add(new WidgetGroupDragCandidate(window, rule));
             }
         }
@@ -124,6 +167,8 @@ public sealed partial class WidgetManager
         _groupDragCandidateSourceId = null;
         _groupDragCandidates = [];
         _groupDragCandidateBounds = [];
+        _groupDragCandidateSurfaceBounds = [];
+        _groupDragCandidateDpiScales = [];
         _groupDragCandidateBoundsFetched = [];
         _groupDragCandidateBoundsVersion = -1;
     }
@@ -131,4 +176,10 @@ public sealed partial class WidgetManager
     private readonly record struct WidgetGroupDragCandidate(
         IDesktopWidgetWindow Window,
         WidgetGroupJoinTarget Rule);
+
+    private readonly record struct WidgetGroupDragHit(
+        WidgetGroupDragCandidate Candidate,
+        WidgetGroupDropZone Zone,
+        RectInt32? SurfaceBounds,
+        double DpiScale);
 }

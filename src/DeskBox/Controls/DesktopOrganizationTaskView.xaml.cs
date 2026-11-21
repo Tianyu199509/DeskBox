@@ -1,19 +1,18 @@
+using System.IO;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DeskBox.Controls;
 
 public sealed partial class DesktopOrganizationTaskView : UserControl
 {
-    private DesktopOrganizationPlan? _plan;
-    private DesktopOrganizationPlan? _basePlan;
+    private readonly DesktopOrganizationPointerDragController _dragController = new();
+    private DesktopOrganizationWorkbenchSession? _session;
     private DesktopOrganizationPlan? _lastExecutionPlan;
-    private readonly HashSet<string> _excludedSourcePaths = new(StringComparer.OrdinalIgnoreCase);
     private bool _updatingSources;
-    private readonly HashSet<string> _optionalIncludedPaths =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DesktopOrganizationRetainedItem> _runtimeRetainedItems = [];
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _executionCts;
@@ -23,7 +22,6 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     private bool _closeAfterExecutionStops;
     private bool _hasCompletedExecution;
     private bool _isScanning;
-    private readonly HashSet<string> _newPaths = new(StringComparer.OrdinalIgnoreCase);
     private DesktopOrganizationCoordinator? _coordinator;
     private bool? _pendingRecovery;
 
@@ -31,9 +29,10 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     {
         InitializeComponent();
         ApplyStaticLocalization();
+        WirePointerDragController();
         Loaded += TaskView_Loaded;
         Unloaded += TaskView_Unloaded;
-        ActualThemeChanged += (_, _) => QueueAppearanceRefresh();
+        ActualThemeChanged += TaskView_ActualThemeChanged;
     }
 
     public event EventHandler? CloseRequested;
@@ -43,6 +42,18 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     public event EventHandler? OrganizationUndone;
 
     public bool IsExecutionRunning => _isExecuting;
+
+    private DesktopOrganizationWorkbenchSession Session =>
+        _session ??= new DesktopOrganizationWorkbenchSession(
+            (basePlan, optionalPaths) => Coordinator.CreatePreviewPlanWithOptionalItems(basePlan, optionalPaths),
+            () => Coordinator.GetActiveFileWidgetsById());
+
+    public bool HasActiveUserCustomizations =>
+        !_hasCompletedExecution &&
+        !_isScanning &&
+        !_isExecuting &&
+        _session?.EffectivePlan is not null &&
+        _session.HasActiveUserCustomizations;
 
     public void BeginScan()
     {
@@ -54,8 +65,29 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     public void CancelPendingWork()
     {
+        _dragController.CancelActiveDrag();
         _scanCts?.Cancel();
         _executionCts?.Cancel();
+    }
+
+    internal bool TryCancelActiveInteraction()
+    {
+        if (_dragController.CancelActiveDrag())
+        {
+            return true;
+        }
+
+        if (_session?.ClearTileSelection() == true)
+        {
+            foreach (var card in _targetCards)
+            {
+                card.RefreshSelectionVisuals();
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public void CancelExecutionAndCloseWhenSafe()
@@ -76,28 +108,28 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     private async Task ScanAsync(bool preserveSelection = false)
     {
+        _dragController.CancelActiveDrag();
         _scanCts?.Cancel();
         _scanCts?.Dispose();
         var cts = new CancellationTokenSource();
         _scanCts = cts;
         int generation = ++_scanGeneration;
 
-        var previous = preserveSelection && !_hasCompletedExecution ? _basePlan : null;
-        bool includePersonal = _plan?.IncludePersonalDesktop ?? true;
-        bool includePublic = _plan?.IncludePublicDesktop ?? false;
-        double scrollOffset = previous is not null ? PreviewScrollViewer.VerticalOffset : 0;
-        if (previous is null) ResetPreviewState();
+        bool shouldPreserve = preserveSelection && !_hasCompletedExecution && Session.BasePlan is not null;
+        bool includePersonal = Session.EffectivePlan?.IncludePersonalDesktop ?? true;
+        bool includePublic = Session.EffectivePlan?.IncludePublicDesktop ?? false;
+        double scrollOffset = shouldPreserve ? PreviewScrollViewer.VerticalOffset : 0;
+        if (!shouldPreserve) ResetPreviewState();
         _isScanning = true;
         SourceSelectionHost.IsEnabled = false;
         PreviewContent.IsEnabled = false;
-        PreviewSections.IsEnabled = false;
-        RetainedSelectionToolbar.IsEnabled = false;
         MoreButton.IsEnabled = false;
         PreviewContent.Opacity = 0.24;
         ScanBusyPanel.Visibility = Visibility.Visible;
         RefreshButton.IsEnabled = false;
         ExecuteButton.IsEnabled = false;
         UndoButton.IsEnabled = false;
+        CompletedUndoButton.IsEnabled = false;
         ChangePathButton.IsEnabled = false;
 
         try
@@ -105,26 +137,31 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             var coordinator = Coordinator;
             DesktopOrganizationPlan scanned = await coordinator.BuildPlanAsync(false, cts.Token);
             if (cts.IsCancellationRequested || generation != _scanGeneration) return;
-            DesktopOrganizationPreviewReconciliation? changes = previous is null ? null :
-                DesktopOrganizationPreviewReconciliation.Calculate(previous.SourceItems, scanned.SourceItems,
-                    _excludedSourcePaths, _optionalIncludedPaths, _newPaths);
-            DesktopOrganizationPlan plan = coordinator.CreatePreviewPlanWithOptionalItems(scanned,
-                changes?.OptionalPaths ?? _optionalIncludedPaths, includePersonal,
-                includePublic && !scanned.PublicDesktopUnavailable);
-            if (changes is not null)
+
+            bool effectiveIncludePublic = includePublic && !scanned.PublicDesktopUnavailable;
+            if (includePersonal != scanned.IncludePersonalDesktop ||
+                effectiveIncludePublic != scanned.IncludePublicDesktop)
             {
-                _excludedSourcePaths.Clear();
-                _excludedSourcePaths.UnionWith(changes.ExcludedPaths);
-                _optionalIncludedPaths.Clear();
-                _optionalIncludedPaths.UnionWith(changes.OptionalPaths);
-                _newPaths.Clear();
-                _newPaths.UnionWith(changes.NewPaths);
-                ShowSelectionFeedback(Format("DesktopOrganization.Layout.RefreshChanges", changes.AddedCount,
-                    changes.RemovedCount), showPendingLink: false);
+                scanned = coordinator.CreatePreviewPlanWithOptionalItems(
+                    scanned,
+                    Array.Empty<string>(),
+                    includePersonal,
+                    effectiveIncludePublic);
             }
-            _basePlan = scanned;
-            _plan = plan;
-            RenderPlan(plan);
+
+            if (shouldPreserve)
+            {
+                DesktopOrganizationPreviewReconciliation changes = Session.ApplyRescanPlan(scanned);
+                ShowSelectionFeedback(
+                    Format("DesktopOrganization.Layout.RefreshChanges", changes.AddedCount, changes.RemovedCount),
+                    showPendingLink: false);
+            }
+            else
+            {
+                Session.SetInitialPlan(scanned);
+            }
+
+            RenderSessionPlan();
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (generation == _scanGeneration && IsLoaded)
@@ -140,6 +177,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             {
                 _lastHistoryId = pendingUndo.Id;
                 UndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
+                CompletedUndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
                 UndoButton.Visibility = Visibility.Visible;
                 ResultInfo.Severity = InfoBarSeverity.Warning;
                 ResultInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
@@ -156,7 +194,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             if (generation != _scanGeneration) return;
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Layout.ScanFailed");
-            ResultInfo.Message = T(previous is null ? "DesktopOrganization.Result.FailedBody" : "DesktopOrganization.Layout.ScanPreserved");
+            ResultInfo.Message = T(!shouldPreserve ? "DesktopOrganization.Result.FailedBody" : "DesktopOrganization.Layout.ScanPreserved");
             ResultInfo.IsOpen = true;
         }
         finally
@@ -166,51 +204,43 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
                 _isScanning = false;
                 PreviewContent.Opacity = 1;
                 PreviewContent.IsEnabled = true;
-                PreviewSections.IsEnabled = true;
-                RetainedSelectionToolbar.IsEnabled = true;
                 MoreButton.IsEnabled = true;
                 ScanBusyPanel.Visibility = Visibility.Collapsed;
                 RefreshButton.IsEnabled = true;
                 ChangePathButton.IsEnabled = true;
                 SourceSelectionHost.IsEnabled = true;
                 UndoButton.IsEnabled = true;
-                UpdateSummary(_plan);
+                CompletedUndoButton.IsEnabled = true;
+                UpdateSummary();
             }
         }
     }
 
     private void ResetPreviewState()
     {
-        _plan = _basePlan = _lastExecutionPlan = null;
+        _dragController.CancelActiveDrag();
+        _session?.SetInitialPlan(null);
+        _lastExecutionPlan = null;
+        _pendingEmptyCustomBoxRenameId = null;
         ReleasePreviewCards();
         ReleaseRetainedCards();
         ReleaseCompletedCards();
-        _retainedSelection.Clear();
-        _expandedTargets.Clear();
         _completedItems.Clear();
         _restoredItems.Clear();
-        _showRetained = false;
-        PreviewSections.SelectedItem = SummaryTitle;
-        RetainedSelectionToolbar.Visibility = Visibility.Collapsed;
-        _previewScrollOffset = _retainedScrollOffset = 0;
         CompletedItemsPanel.Children.Clear();
-        CompletedItemsPanel.Visibility = Visibility.Collapsed;
-        RetainedItemsPanel.Visibility = Visibility.Collapsed;
+        CompletedViewPanel.Visibility = Visibility.Collapsed;
         TargetSelectionHost.Visibility = Visibility.Visible;
         PreviewScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
-        _excludedSourcePaths.Clear();
-        _newPaths.Clear();
-        _targetSelections.Clear();
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = true;
         RetryPublicButton.Visibility = Visibility.Collapsed;
-        _optionalIncludedPaths.Clear();
         _runtimeRetainedItems.Clear();
         _hasCompletedExecution = false;
         _lastHistoryId = null;
         _pendingRecovery = null;
         UndoButton.Visibility = Visibility.Collapsed;
         UndoButton.Content = T("DesktopOrganization.Layout.Undo");
+        CompletedUndoButton.Content = T("DesktopOrganization.Layout.Undo");
         AbandonUndoButton.Visibility = Visibility.Collapsed;
         DoneButton.Visibility = Visibility.Collapsed;
         CancelButton.Visibility = Visibility.Visible;
@@ -221,8 +251,70 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         ExecutionProgressPanel.Visibility = Visibility.Collapsed;
         ExecutionProgressBar.Value = 0;
         ExecutionProgressText.Text = string.Empty;
-        StoragePathText.Text = SettingsService.NormalizeManagedStorageRootPath(
-            App.Current.SettingsService.Settings.DefaultManagedStorageRootPath);
+        string normalizedRoot = SettingsService.NormalizeManagedStorageRootPath(
+            App.Current.SettingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        UpdateStorageLocationDisplay(normalizedRoot);
+    }
+
+    private void UpdateStorageLocationDisplay(string storageRootPath)
+    {
+        StoragePathText.Text = storageRootPath;
+        StoragePillPathText.Text = storageRootPath;
+        ToolTipService.SetToolTip(
+            LocationsButton,
+            T("DesktopOrganization.Layout.Locations") + "\n" + storageRootPath);
+
+        if (string.IsNullOrWhiteSpace(storageRootPath))
+        {
+            StorageFreeSpaceText.Visibility = Visibility.Collapsed;
+            StorageWarningInfo.IsOpen = false;
+            return;
+        }
+
+        if (ManagedStoragePathService.OverlapsDesktop(storageRootPath))
+        {
+            StorageFreeSpaceText.Visibility = Visibility.Collapsed;
+            StorageWarningInfo.Severity = InfoBarSeverity.Error;
+            StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.DesktopOverlap");
+            StorageWarningInfo.IsOpen = true;
+            return;
+        }
+
+        ManagedStoragePathAssessment assessment = ManagedStoragePathService.AssessPath(storageRootPath);
+        if (assessment.AvailableFreeSpace is { } freeBytes && freeBytes >= 0)
+        {
+            StorageFreeSpaceText.Text = Format(
+                "DesktopOrganization.Layout.FreeSpaceAvailable",
+                DesktopOrganizationPreviewSummary.FormatBytes(freeBytes, App.Current.LocalizationService));
+            StorageFreeSpaceText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            StorageFreeSpaceText.Visibility = Visibility.Collapsed;
+        }
+
+        if (assessment.DriveType == DriveType.Removable || assessment.IsTransientBusDrive)
+        {
+            StorageWarningInfo.Severity = InfoBarSeverity.Warning;
+            StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.Removable");
+            StorageWarningInfo.IsOpen = true;
+        }
+        else if (assessment.DriveType == DriveType.Network)
+        {
+            StorageWarningInfo.Severity = InfoBarSeverity.Warning;
+            StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.Network");
+            StorageWarningInfo.IsOpen = true;
+        }
+        else if (assessment.IsCloudSynced)
+        {
+            StorageWarningInfo.Severity = InfoBarSeverity.Informational;
+            StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.CloudSync");
+            StorageWarningInfo.IsOpen = true;
+        }
+        else
+        {
+            StorageWarningInfo.IsOpen = false;
+        }
     }
 
     private static DesktopOrganizationCoordinator CreateCoordinator()
@@ -257,28 +349,35 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     private void ApplyStaticLocalization()
     {
+        StoragePillPrefixText.Text = T("DesktopOrganization.Layout.StoragePillPrefix");
         PathTitleText.Text = T("DesktopOrganization.Path.Title");
         StorageSectionTitleText.Text = T("DesktopOrganization.Path.SectionTitle");
         StorageSectionDescriptionText.Text = T("DesktopOrganization.Layout.GlobalStorageHelp");
         SourcePathsTitle.Text = T("DesktopOrganization.Layout.SourcePaths");
         SourceScopeText.Text = T("DesktopOrganization.Layout.Scope");
-        LocationsButton.Content = T("DesktopOrganization.Layout.Locations");
         ResetSelectionMenuItem.Text = T("DesktopOrganization.Layout.Reset");
+        OpenStorageMenuItem.Text = T("DesktopOrganization.Layout.OpenStorageFolder");
+        OpenStorageFolderButton.Content = T("DesktopOrganization.Layout.OpenStorageFolder");
+        CompletedOpenFolderButton.Content = T("DesktopOrganization.Layout.OpenStorageFolder");
         ToolTipService.SetToolTip(MoreButton, T("DesktopOrganization.Layout.More"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(MoreButton, T("DesktopOrganization.Layout.More"));
+        AutomationProperties.SetName(MoreButton, T("DesktopOrganization.Layout.More"));
         ViewPendingButton.Content = T("DesktopOrganization.Layout.ViewPending");
-        ToolTipService.SetToolTip(LocationsButton, T("DesktopOrganization.Layout.Locations"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LocationsButton, T("DesktopOrganization.Layout.Locations"));
+        AutomationProperties.SetName(LocationsButton, T("DesktopOrganization.Layout.Locations"));
         ChangePathButton.Content = T("DesktopOrganization.Layout.StorageSettings");
         ScanBusyText.Text = T("DesktopOrganization.Preview.Scanning");
-        RefreshButton.Content = T("DesktopOrganization.Preview.Refresh");
+        RefreshButtonText.Text = T("DesktopOrganization.Preview.Refresh");
+        ToolTipService.SetToolTip(RefreshButton, T("DesktopOrganization.Preview.Refresh"));
+        AutomationProperties.SetName(RefreshButton, T("DesktopOrganization.Preview.Refresh"));
         UndoButton.Content = T("DesktopOrganization.Layout.Undo");
+        CompletedUndoButton.Content = T("DesktopOrganization.Layout.Undo");
         CancelButton.Content = T("DesktopOrganization.Window.Cancel");
         RetryPublicButton.Content = T("DesktopOrganization.Layout.RetryRemaining");
         RecoverButton.Content = T("DesktopOrganization.Public.Recover");
         RecoveryInfo.Message = T("DesktopOrganization.Public.RecoveryPending");
         AbandonRecoveryButton.Content = T("DesktopOrganization.Public.AbandonRestore");
         AbandonUndoButton.Content = T("DesktopOrganization.Public.AbandonRestore");
+        StayOnDesktopHeaderTitleText.Text = T("DesktopOrganization.Layout.KeptTitle");
+        RestoreAllExcludedButton.Content = T("DesktopOrganization.Layout.Include");
         DoneButton.Content = T("DesktopOrganization.Window.Done");
     }
 

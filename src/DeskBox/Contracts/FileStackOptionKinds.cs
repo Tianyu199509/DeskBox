@@ -83,9 +83,9 @@ public static class FileStackOptionKinds
     }
 
     public static string NormalizeOpenMode(string? openMode) =>
-        string.Equals(openMode, OpenModePopover, StringComparison.OrdinalIgnoreCase)
-            ? OpenModePopover
-            : OpenModeInline;
+        string.Equals(openMode, OpenModeInline, StringComparison.OrdinalIgnoreCase)
+            ? OpenModeInline
+            : OpenModePopover;
 
     public static string NormalizePopoverLayout(string? layout) =>
         layout switch

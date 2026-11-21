@@ -113,34 +113,48 @@ public partial class App
     }
 
     private bool _isSettingsHost;
-    private SettingsIpcClient? _settingsHostClient;
-    private int _settingsHostMainProcessId;
-    private bool _settingsHostExitStarted;
-    private Views.SettingsWindow? _settingsHostWindow;
-    private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
 
     // Spawn-to-shown trace for the measurement script and crash diagnosis,
     // in the temp directory so it never touches the data root.
     private static readonly long SettingsHostBaselineTimestamp = Stopwatch.GetTimestamp();
 
-    private static void SettingsHostTrace(string marker)
+    internal static void SettingsHostTrace(string marker)
     {
         double elapsedMs =
             (Stopwatch.GetTimestamp() - SettingsHostBaselineTimestamp) * 1000.0 /
             Stopwatch.Frequency;
-        try
+        string line = $"{DateTimeOffset.UtcNow:O} +{elapsedMs:F0}ms pid={Environment.ProcessId} {marker}{Environment.NewLine}";
+        _ = Task.Run(() =>
         {
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "deskbox-settings-host.log"),
-                $"{DateTimeOffset.UtcNow:O} +{elapsedMs:F0}ms pid={Environment.ProcessId} {marker}{Environment.NewLine}");
-        }
-        catch (System.IO.IOException)
-        {
-            // Trace logging must never take the host down.
-        }
+            try
+            {
+                string logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "deskbox-settings-host.log");
+                if (System.IO.File.Exists(logPath) && new System.IO.FileInfo(logPath).Length > 512 * 1024)
+                {
+                    System.IO.File.WriteAllText(logPath, line);
+                }
+                else
+                {
+                    System.IO.File.AppendAllText(logPath, line);
+                }
+            }
+            catch (System.IO.IOException)
+            {
+                // Trace logging must never take the host down.
+            }
+        });
     }
 
     internal bool IsSettingsHost => _isSettingsHost;
+}
+
+public partial class App
+{
+    private SettingsIpcClient? _settingsHostClient;
+    private int _settingsHostMainProcessId;
+    private bool _settingsHostExitStarted;
+    private Views.SettingsWindow? _settingsHostWindow;
+    private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
 
     private SettingsService? SettingsHostSettingsService { get; set; }
 
@@ -182,6 +196,11 @@ public partial class App
     private async void LaunchSettingsHostAsync()
     {
         UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        if (UiDispatcherQueue is not null)
+        {
+            DeskBox.Platform.UiDispatch.MarkReady(UiDispatcherQueue);
+        }
+        DeskBox.Helpers.ImeCompositionGuard.EnsureGlobalFocusTracking();
         _settingsHostMainProcessId = SettingsHostLaunch.TryGetMainProcessId(
             Environment.GetCommandLineArgs());
         if (_settingsHostMainProcessId == 0)
@@ -201,7 +220,9 @@ public partial class App
         }
         catch (Exception ex)
         {
-            Log($"[SettingsHost] IPC connect failed: {ex.Message}");
+            Log(
+                $"[SettingsHost] IPC connect failed: {ex.GetType().FullName} " +
+                $"(0x{ex.HResult:X8}): {ex.Message}");
             ExitSettingsHost();
             return;
         }
@@ -225,7 +246,11 @@ public partial class App
             // A busy main process can make any boot step (load, VM
             // construction) throw — without this the host stayed alive with
             // no window (zombie) until the main process died (batch R5).
-            Log($"[SettingsHost] Boot failed: {ex.Message}");
+            // Log full type + HRESULT + stack trace because Native AOT resource-key
+            // stripping leaves COMException.Message empty on missing WinUI modules.
+            Log(
+                $"[SettingsHost] Boot failed: {ex.GetType().FullName} " +
+                $"(0x{ex.HResult:X8}): {ex.Message}{Environment.NewLine}{ex}");
             ExitSettingsHost();
         }
     }
@@ -270,13 +295,10 @@ public partial class App
             UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.DismissSaveFailedBanner());
         };
 
-        // The autostart toggle executes in THIS process (the settings page
-        // calls StartupService directly). Without Configure the static fell
-        // back to the parameterless DirectStartupService — the wrong backend
-        // on the Store channel (Run key pointing into WindowsApps instead
-        // of the StartupTask API) and a null mode writer on Direct, so
-        // autostart mode switches never persisted (batch R9).
-        StartupService.Configure(StartupServiceFactory.Create(DistributionService, settings));
+        // Auto-start reads and writes are owned by the MAIN process over IPC
+        // (ISettingsAppActions.GetAutoStartStatusAsync / SetAutoStartEnabledAsync),
+        // so the settings host never mutates Task Scheduler, registry Run keys,
+        // or Store StartupTask directly.
 
         // Per-widget Glance data edits from the settings section ride the
         // IPC relay: the desktop widgets' live Changed listeners and the
@@ -286,35 +308,41 @@ public partial class App
         // cached write-back (batch R8).
         GlanceWidgetStore.SaveRelay = async (widgetId, dataJson) =>
         {
-            // Failures THROW on purpose: the store rolls its cache back and
-            // the section's SaveAsync surfaces the error path — a log-only
-            // relay used to leave the host showing a fabricated success
-            // (batch R9).
             (bool ok, _, string? glanceError) = await client.RequestAsync(
                 SettingsIpcMethods.WidgetGlanceApplyData,
                 widgetId + "\n" + dataJson);
             if (!ok)
             {
-                // Deep review R13-2 (D14 audit): glance saves do not ride
-                // the settings sink, so the save-failed banner never heard
-                // about them — surface the failure here too (the throw
-                // alone only reached the host log through the section's
-                // async-void handlers).
                 UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.ShowSaveFailedBanner());
                 throw new InvalidOperationException(
                     $"Glance apply rejected for {widgetId}: {glanceError ?? "unknown"}");
             }
         };
 
+        CustomWidgetDataStore.SaveRelay = async (widgetId, storeJson, clearAttachments) =>
+        {
+            (bool ok, _, string? storeError) = await client.RequestAsync(
+                SettingsIpcMethods.WidgetCustomApplyStoreData,
+                CustomWidgetDataStore.ComposeRelayPayload(widgetId, storeJson, clearAttachments));
+            if (!ok)
+            {
+                UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.ShowSaveFailedBanner());
+                throw new InvalidOperationException(
+                    $"Custom widget store apply rejected for {widgetId}: {storeError ?? "unknown"}");
+            }
+        };
+
         var localization = new LocalizationService(settings);
         var theme = new ThemeService(settings);
 
-        // The settings tree reads these two through App.Current; publish the
+        // The settings tree reads these through App.Current; publish the
         // host instances for the lifetime of the process.
         SettingsService = settings;
         SettingsHostSettingsService = settings;
         SettingsHostLocalizationService = localization;
         LocalizationService = localization;
+        ThemeService = theme;
+        _ = Task.Run(() => ProcessEnvironmentSyncService.RefreshProcessEnvironmentFromRegistry("startup"));
 
         client.EventReceived += OnSettingsHostCommandEvent;
         client.EventReceived += (method, payload) =>
@@ -415,7 +443,7 @@ public partial class App
             SettingsHostTrace("window-closed");
             ExitSettingsHost();
         };
-        window.Activate();
+        window.ShowWindow();
 
         // Spawn-carried intent (batch R1): section/glance deep links, the
         // toast one-click-update flow, and the installer result dialog.
@@ -484,7 +512,8 @@ public partial class App
             // Deep review R13-2 (D15): layout write failures surface on the
             // save-failed banner instead of only the log.
             onWriteFailure: () => UiDispatcherQueue?.TryEnqueue(
-                () => _settingsHostWindow?.ShowSaveFailedBanner()));
+                () => _settingsHostWindow?.ShowSaveFailedBanner()),
+            mainProcessId: (uint)_settingsHostMainProcessId);
         var appActions = new RemoteSettingsAppActions(
             client,
             (uint)_settingsHostMainProcessId,
@@ -496,7 +525,7 @@ public partial class App
         // raised it in the host process — the guard was dead code here
         // (batch R9).
         appActions.DisplayTopologyChanged += () => UiDispatcherQueue.TryEnqueue(
-            () => DisplayTopologyChanged?.Invoke());
+            RaiseDisplayTopologyChanged);
 
         // The Todo/QuickCapture enable switches are feature-widget state: the
         // enabled dictionary lives in the widget-layout domain, which the main
@@ -531,7 +560,15 @@ public partial class App
         // card permanently unavailable — toggle/capture/reset could never
         // reach the service. CurrentGesture reads the local settings
         // mirror exactly like the real service does.
-        var hotkey = new RemoteSettingsHotkeyActions(client);
+        var hotkey = new RemoteSettingsHotkeyActions(
+            client,
+            mirrorGlobalActivationLocally: activation =>
+            {
+                settings.Settings.Core.GlobalHotkeyActivationKind = activation.Kind;
+                settings.Settings.Core.GlobalHotkeyModifiers = (int)activation.Gesture.Modifiers;
+                settings.Settings.Core.GlobalHotkeyKey = activation.Gesture.VirtualKey;
+            },
+            formatActivation: activation => GlobalHotkeyService.FormatActivation(activation, localization));
         var searchHotkey = new RemoteSearchHotkeyController(
             hotkey,
             () => GlobalHotkeyService.NormalizeGesture(
@@ -543,7 +580,19 @@ public partial class App
             () => GlobalHotkeyService.NormalizeActivation(
                 settings.Settings.GlobalHotkeyActivationKind,
                 settings.Settings.GlobalHotkeyModifiers,
-                settings.Settings.GlobalHotkeyKey));
+                settings.Settings.GlobalHotkeyKey),
+            mirrorEnabledLocally: enabled => settings.Settings.Search.SearchHotkeyEnabled = enabled,
+            readPersistedActivation: () => GlobalHotkeyService.NormalizeActivation(
+                settings.Settings.Search.SearchHotkeyActivationKind,
+                settings.Settings.Search.SearchHotkeyModifiers,
+                settings.Settings.Search.SearchHotkeyKey),
+            readMainEnabled: () => settings.Settings.Core.GlobalHotkeyEnabled,
+            mirrorActivationLocally: activation =>
+            {
+                settings.Settings.Search.SearchHotkeyActivationKind = activation.Kind;
+                settings.Settings.Search.SearchHotkeyModifiers = (int)activation.Gesture.Modifiers;
+                settings.Settings.Search.SearchHotkeyKey = activation.Gesture.VirtualKey;
+            });
         var search = new SearchSettingsCoordinator(
             settings,
             localization,
@@ -551,20 +600,11 @@ public partial class App
             ensureConnection: () => everythingConnection,
             getHotkey: () => searchHotkey,
             setContentSearchEnabled: _ => { },
-            // Explicit no-op (null falls back to a full settings save — a
-            // write amplifier on every external enable change, batch R7).
-            applyWidget: (_, _) => Task.CompletedTask,
-            setRuntimeEnabled: null,
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[SearchSettings] Operation failed: {ex}"));
-        var quickCaptureClipboard = new QuickCaptureClipboardRuntime(
-            shouldListen: () => false,
-            create: () => throw new InvalidOperationException(
-                "The settings host never listens to the clipboard"),
-            reportError: ex => Log($"[QuickCapture] Clipboard runtime failed: {ex}"));
+        searchHotkey.StateChanged += () => search.OnRuntimeChanged();
         var quickCapture = new QuickCaptureSettingsCoordinator(
             settings,
-            quickCaptureClipboard,
             // The enable chain rides the feature-switch command (see the Todo
             // wiring above): the main process owns the dictionary and the
             // widget window, and decides reveal like every other
@@ -657,7 +697,6 @@ public partial class App
                 RunOnUi(() =>
                 {
                     _settingsHostWindow?.ViewModel.RefreshCachedUpdateState();
-                    _settingsHostWindow?.BringUpdateStatusIntoView();
                 });
                 break;
             case SettingsIpcMethods.HostQueueUpdateResult:
@@ -707,10 +746,10 @@ public partial class App
             }
 
             Log($"[SettingsHost] Main process {mainProcessId} exited; shutting down host");
-            UiDispatcherQueue?.TryEnqueue(ExitSettingsHost);
+            UiDispatcherQueue?.TryEnqueue(() => ExitSettingsHost(mainProcessExited: true));
             if (UiDispatcherQueue is null)
             {
-                ExitSettingsHost();
+                ExitSettingsHost(mainProcessExited: true);
             }
         });
     }
@@ -721,7 +760,9 @@ public partial class App
     /// bare Application.Exit defers through the XAML message loop and a
     /// half-dead settings window must not linger.
     /// </summary>
-    internal void ExitSettingsHost()
+    internal void ExitSettingsHost() => ExitSettingsHost(mainProcessExited: false);
+
+    internal void ExitSettingsHost(bool mainProcessExited)
     {
         // Re-entrancy guard (batch R12): the pipe Disconnected subscription
         // fires from the reader task — including during this very method's
@@ -732,46 +773,53 @@ public partial class App
         }
 
         _settingsHostExitStarted = true;
-        // Farewell first (batch R11): the exit flush below keeps this
-        // process alive for up to ~2s, and "process alive" is the main
-        // process's spawn-vs-show criterion — without this notice, an
-        // open-settings inside the window is pushed onto the dying host
-        // and silently lost. Fire-and-forget: the flush that follows gives
-        // the request its flight time, and a lost farewell merely falls
-        // back to the old process-exit detection.
-        try
-        {
-            _ = _settingsHostClient?.RequestAsync(
-                SettingsIpcMethods.HostFarewell,
-                Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        }
-        catch (Exception ex)
-        {
-            Log($"[SettingsHost] Farewell send failed: {ex.Message}");
-        }
+        DeskBox.Platform.UiDispatch.MarkShutdown();
 
-        // Flush any debounced (1s) pending save first: the host process is
-        // the writer, and dying inside the debounce window used to silently
-        // drop the user's last edit (batch R5).
-        // Batch R11: the flush must run on a pool thread. Its await chain
-        // (SaveToFileOnlyAsync → sink) posts continuations through the
-        // calling context — started on this UI thread they queued behind
-        // the very Wait() below, so every close burned the full 2s budget
-        // and logged a false "edit may be lost" (and an in-flight debounce
-        // could genuinely outlive the wait).
-        try
+        // Backstop guarantees process termination even if a COM/WinRT finalizer blocks Environment.Exit.
+        var hardKill = new Thread(() =>
         {
-            if (SettingsHostSettingsService is { } pendingService &&
-                !Task.Run(() => pendingService.FlushPendingSaveAsync()).Wait(TimeSpan.FromSeconds(2)))
+            Thread.Sleep(TimeSpan.FromMilliseconds(2600));
+            try
             {
-                // A lost race with the in-flight debounced write: the wait
-                // timed out. Without this line the dropped edit left no trace.
-                Log("[SettingsHost] Pending save flush timed out after 2s; last edit may be lost");
+                DrainLogQueue();
+                Process.GetCurrentProcess().Kill();
             }
-        }
-        catch (Exception ex)
+            catch
+            {
+            }
+        })
         {
-            Log($"[SettingsHost] Pending save flush failed: {ex.Message}");
+            IsBackground = true,
+            Name = "DeskBox.SettingsHostExitBackstop",
+        };
+        hardKill.Start();
+
+        bool canFlushToMain = !mainProcessExited && IsMainProcessStillAlive(_settingsHostMainProcessId);
+        if (canFlushToMain)
+        {
+            try
+            {
+                _ = _settingsHostClient?.RequestAsync(
+                    SettingsIpcMethods.HostFarewell,
+                    Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            catch (Exception ex)
+            {
+                Log($"[SettingsHost] Farewell send failed: {ex.Message}");
+            }
+
+            try
+            {
+                if (SettingsHostSettingsService is { } pendingService &&
+                    !Task.Run(() => pendingService.FlushPendingSaveAsync()).Wait(TimeSpan.FromSeconds(2)))
+                {
+                    Log("[SettingsHost] Pending save flush timed out after 2s; last edit may be lost");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[SettingsHost] Pending save flush failed: {ex.Message}");
+            }
         }
 
         try
@@ -785,5 +833,23 @@ public partial class App
 
         DrainLogQueue();
         Environment.Exit(0);
+    }
+
+    private static bool IsMainProcessStillAlive(int mainProcessId)
+    {
+        if (mainProcessId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var main = Process.GetProcessById(mainProcessId);
+            return !main.HasExited;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

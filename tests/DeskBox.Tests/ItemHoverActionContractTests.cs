@@ -27,7 +27,8 @@ public sealed class ItemHoverActionContractTests
         Assert.Contains("Opacity=\"0\"", xaml, StringComparison.Ordinal);
         Assert.Contains("SetQuickCaptureItemActionButtonsVisible(sender as DependencyObject, true)", code, StringComparison.Ordinal);
         Assert.Contains("actionButtons.IsHitTestVisible = isVisible", code, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.PinRecentItemAsync(item)", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("textStack.Margin =", code, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.TogglePinnedAsync(item)", code, StringComparison.Ordinal);
         Assert.Contains("CopyItemWithFeedbackAsync(item)", code, StringComparison.Ordinal);
     }
 
@@ -89,6 +90,7 @@ public sealed class ItemHoverActionContractTests
         Assert.Contains("FindVisualChild<Border>(itemRoot, \"TodoItemActionHost\")", code, StringComparison.Ordinal);
         Assert.Contains("actions.Opacity = isHovered ? 1 : 0", code, StringComparison.Ordinal);
         Assert.Contains("actions.IsHitTestVisible = isHovered", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("contentPanel.Margin =", code, StringComparison.Ordinal);
         Assert.DoesNotContain("actions.Background =", code, StringComparison.Ordinal);
         Assert.DoesNotContain("actions.BorderBrush =", code, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyActionButtonTheme", code, StringComparison.Ordinal);

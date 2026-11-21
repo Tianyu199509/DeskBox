@@ -161,17 +161,24 @@ public sealed class ShortcutLaunchPolicyTests
     }
 
     [Fact]
-    public void StackPopoverMemberDrag_KeepsItsMembershipSemantics()
+    public void StackPopoverMemberDrag_LaunchesOnMainSurfaceButStaysReorderInsidePopover()
     {
-        // Popover paths address stack membership, not files to hand an
-        // application, so the reorder gesture must survive.
         Assert.Equal(
             ShortcutLaunchDecision.None,
             ShortcutLaunchPolicy.EvaluateInternalDrag(
                 isDeskBoxFileDrag: true,
                 isStackPopoverMemberDrag: true,
                 paths: [@"C:\grid\photo.png"],
-                shortcutPath: @"C:\grid\Photoshop.lnk"));
+                shortcutPath: @"C:\grid\Photoshop.lnk",
+                targetHostedInStackPopover: true));
+        Assert.Equal(
+            ShortcutLaunchDecision.Launch,
+            ShortcutLaunchPolicy.EvaluateInternalDrag(
+                isDeskBoxFileDrag: true,
+                isStackPopoverMemberDrag: true,
+                paths: [@"C:\grid\photo.png"],
+                shortcutPath: @"C:\grid\Photoshop.lnk",
+                targetHostedInStackPopover: false));
     }
 
     [Fact]
@@ -278,5 +285,65 @@ public sealed class ShortcutLaunchPolicyTests
         Assert.False(ShortcutLaunchPolicy.IsExpandedTargetDirectory(
             "%SystemRoot%\\System32\\notepad.exe"));
         Assert.False(ShortcutLaunchPolicy.IsExpandedTargetDirectory(string.Empty));
+    }
+
+    [Fact]
+    public void FolderShortcutWithArguments_DoesNotActAsFolderDropTarget()
+    {
+        string tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "DeskBox.Tests",
+            nameof(ShortcutLaunchPolicyTests),
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string realFolder = Directory.CreateDirectory(Path.Combine(tempDir, "TargetFolder")).FullName;
+        string plainFolderLnk = Path.Combine(tempDir, "PlainFolder.lnk");
+        string parameterizedFolderLnk = Path.Combine(tempDir, "ParameterizedFolder.lnk");
+
+        try
+        {
+            DeskBox.Helpers.ShortcutHelper.CreateOrUpdateFolderShortcut(plainFolderLnk, realFolder, "plain");
+            DragDropPermissionService.CreateOrUpdateShortcut(
+                parameterizedFolderLnk,
+                realFolder,
+                "--custom-flag",
+                iconPath: null);
+            DeskBox.Helpers.ShortcutHelper.InvalidateStoredMetadataCache(plainFolderLnk);
+            DeskBox.Helpers.ShortcutHelper.InvalidateStoredMetadataCache(parameterizedFolderLnk);
+
+            var plainItem = new DeskBox.Models.WidgetItem
+            {
+                Name = "PlainFolder",
+                Path = plainFolderLnk,
+                IsFolder = false,
+                IsShortcut = true,
+            };
+            var parameterizedItem = new DeskBox.Models.WidgetItem
+            {
+                Name = "ParameterizedFolder",
+                Path = parameterizedFolderLnk,
+                IsFolder = false,
+                IsShortcut = true,
+            };
+
+            Assert.True(ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                plainItem,
+                out string resolvedPlain));
+            Assert.Equal(realFolder, resolvedPlain, ignoreCase: true);
+
+            Assert.False(ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                parameterizedItem,
+                out _));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+            catch
+            {
+            }
+        }
     }
 }

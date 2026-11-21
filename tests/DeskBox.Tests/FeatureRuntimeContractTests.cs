@@ -1,5 +1,4 @@
 using DeskBox.Contracts;
-using DeskBox.Features.QuickCapture;
 using DeskBox.Features.Search;
 using DeskBox.Features.Todo;
 using DeskBox.Models;
@@ -24,19 +23,17 @@ public sealed class FeatureRuntimeContractTests
 {
     public static TheoryData<string> Cases => new()
     {
-        FakeName, TodoName, QuickCaptureName, SearchName
+        FakeName, TodoName, SearchName
     };
 
     private const string FakeName = "fake";
     private const string TodoName = "todo-reminders";
-    private const string QuickCaptureName = "quick-capture";
     private const string SearchName = "search";
 
     private static ILeaseCase CreateCase(string name) => name switch
     {
         FakeName => new FakeCase(),
         TodoName => new TodoCase(),
-        QuickCaptureName => new QuickCaptureCase(),
         SearchName => new SearchCase(),
         _ => throw new ArgumentException($"Unknown case '{name}'.", nameof(name)),
     };
@@ -337,66 +334,6 @@ public sealed class FeatureRuntimeContractTests
                 Disposals++;
                 return ValueTask.CompletedTask;
             }
-        }
-    }
-
-    private sealed class QuickCaptureCase : ILeaseCase
-    {
-        private readonly List<Session> _sessions = [];
-        private readonly QuickCaptureClipboardRuntime _runtime;
-        private bool _failNext;
-
-        public QuickCaptureCase()
-        {
-            _runtime = new QuickCaptureClipboardRuntime(
-                () => true,
-                () =>
-                {
-                    Session session = new() { FailRefresh = _failNext };
-                    _failNext = false;
-                    _sessions.Add(session);
-                    return session;
-                },
-                _ => { });
-        }
-
-        public string Name => QuickCaptureName;
-        public IFeatureRuntime Runtime => _runtime;
-        public bool LeaseHeld => _runtime.Current is not null;
-        public int Acquisitions => _sessions.Count;
-        public int CompletedReleases => _sessions.Count(session => session.Disposed);
-        public void FailNextAcquisition() => _failNext = true;
-        public void Dispose() { }
-
-        private sealed class Session : IQuickCaptureClipboardSession
-        {
-            public bool FailRefresh { get; init; }
-
-#pragma warning disable CS0067 // The runtime subscribes/unsubscribes; cases never raise it.
-            public event Action? DiagnosticsChanged;
-#pragma warning restore CS0067
-            public bool Listening { get; private set; }
-            public bool Disposed { get; private set; }
-
-            public void Refresh()
-            {
-                if (FailRefresh)
-                    throw new InvalidOperationException("listener wiring failed after subscription");
-                Listening = true;
-            }
-
-            public void CaptureCurrent() { }
-
-            public QuickCaptureClipboardDiagnostics GetDiagnostics() =>
-                new(true, Listening, null, Listening ? "enabled" : "disabled", null);
-
-            public Task StopAsync()
-            {
-                Listening = false;
-                return Task.CompletedTask;
-            }
-
-            public void Dispose() => Disposed = true;
         }
     }
 

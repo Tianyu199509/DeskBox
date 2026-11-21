@@ -34,21 +34,26 @@ public sealed partial class DesktopOrganizationTaskView
 
     private void SourceSelection_Changed(object sender, RoutedEventArgs e)
     {
-        if (_updatingSources || _isScanning || _isExecuting || _hasCompletedExecution || _basePlan is null) return;
+        if (_updatingSources || _isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null) return;
         try
         {
-            _plan = Coordinator.CreatePreviewPlanWithOptionalItems(_basePlan, _optionalIncludedPaths,
-                PersonalDesktopSourceButton.IsChecked == true, PublicDesktopSourceButton.IsChecked == true);
+            _dragController.CancelActiveDrag();
+            DesktopOrganizationPlan updatedScope = Coordinator.CreatePreviewPlanWithOptionalItems(
+                Session.BasePlan,
+                Array.Empty<string>(),
+                PersonalDesktopSourceButton.IsChecked == true,
+                PublicDesktopSourceButton.IsChecked == true);
+            Session.UpdateSourceScopes(updatedScope);
             SelectionFeedbackInfo.IsOpen = false;
-            RenderPlan(_plan);
+            RenderSessionPlan();
         }
         catch (Exception ex)
         {
             App.Log($"[DesktopOrganization] Source selection failed: {ex}");
-            if (_plan is not null) RenderSources(_plan);
+            if (Session.EffectivePlan is not null) RenderSources(Session.EffectivePlan);
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
-            ResultInfo.Message = ex.Message;
+            ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
             ResultInfo.IsOpen = true;
         }
     }
@@ -76,6 +81,7 @@ public sealed partial class DesktopOrganizationTaskView
     private async void RecoverButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isExecuting) return;
+        _dragController.CancelActiveDrag();
         _isExecuting = true;
         RecoverButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
@@ -96,13 +102,14 @@ public sealed partial class DesktopOrganizationTaskView
             RecoverButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
             SourceSelectionHost.IsEnabled = true;
-            UpdateSummary(_plan);
+            UpdateSummary();
         }
     }
 
     private async void RetryPublicButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isExecuting || _lastExecutionPlan is null) return;
+        _dragController.CancelActiveDrag();
         var remaining = _runtimeRetainedItems.Where(item => item.Reason != DesktopOrganizationRetentionReason.SourceChanged)
             .Select(item => item.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         try
@@ -115,7 +122,7 @@ public sealed partial class DesktopOrganizationTaskView
             App.Log($"[DesktopOrganization] Retry plan unavailable: {ex}");
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
-            ResultInfo.Message = ex.Message;
+            ResultInfo.Message = T("DesktopOrganization.Error.TargetUnavailable");
             ResultInfo.IsOpen = true;
         }
     }

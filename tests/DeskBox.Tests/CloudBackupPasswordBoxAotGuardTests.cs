@@ -20,7 +20,7 @@ public sealed class CloudBackupPasswordBoxAotGuardTests
     private const string CloudBackupPath =
         "src/DeskBox/Views/SettingsWindow.CloudBackup.cs";
     private const string DeepSmokePath =
-        "src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs";
+        "tests/DeskBox.AotSmoke/Views/SettingsWindow.AotDeepSmoke.cs";
 
     [Fact]
     public void TypedLookup_RootsTheProjectedPasswordBoxForAotNameResolution()
@@ -47,7 +47,7 @@ public sealed class CloudBackupPasswordBoxAotGuardTests
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>(\"CloudBackupSettings\", \"CloudBackupPasswordBox\");",
+            "FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>(\"Maintenance\", \"CloudBackupPasswordBox\");",
             source,
             StringComparison.Ordinal);
     }
@@ -107,7 +107,11 @@ public sealed class CloudBackupPasswordBoxAotGuardTests
         // throws InvalidCastException on an unfixed NativeAOT build and
         // returns null if the typed lookup is ever weakened again.
         Assert.Contains(
-            "NavigateToSettingsSection(\"CloudBackupSettings\")",
+            "NavigateToSettingsSection(sectionTag)",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "if (string.Equals(sectionTag, \"Maintenance\", StringComparison.Ordinal))",
             source,
             StringComparison.Ordinal);
         Assert.Contains(

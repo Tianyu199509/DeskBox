@@ -158,7 +158,7 @@ public sealed class ShellThumbnailProxyContractTests
             string shortcutPath = Path.Combine(
                 temporaryDirectory,
                 "Recycle Bin.lnk");
-            ShortcutHelper.CreateShellNamespaceShortcutWithCSharp(
+            Helpers.WindowsShellLinkTestOracle.CreateShellNamespaceShortcut(
                 shortcutPath,
                 "shell:RecycleBinFolder",
                 "DeskBox issue 119 regression");

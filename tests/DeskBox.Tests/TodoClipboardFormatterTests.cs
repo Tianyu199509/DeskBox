@@ -121,4 +121,25 @@ public sealed class TodoClipboardFormatterTests
         Assert.Contains(localization.T("Todo.Due.OverdueSuffix"), item.DueStatusText, StringComparison.Ordinal);
         Assert.Contains("\u00B7", item.DueStatusText, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void FormatBatch_IncludesTealAndPinkColorMarkers()
+    {
+        var localization = TestServices.CreateLocalizationService();
+        var tealItem = new TodoItemViewModel(new TodoItem
+        {
+            Text = "teal task",
+            ColorMarker = TodoItem.TealColorMarker
+        }, localization);
+        var pinkItem = new TodoItemViewModel(new TodoItem
+        {
+            Text = "pink task",
+            ColorMarker = TodoItem.PinkColorMarker
+        }, localization);
+
+        string formatted = TodoClipboardFormatter.FormatBatch([tealItem, pinkItem], localization);
+
+        Assert.Contains("- [ ] \U0001F7E6 teal task", formatted, StringComparison.Ordinal);
+        Assert.Contains("- [ ] \U0001F497 pink task", formatted, StringComparison.Ordinal);
+    }
 }

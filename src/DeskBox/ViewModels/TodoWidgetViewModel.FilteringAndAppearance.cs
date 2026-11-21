@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -68,6 +68,57 @@ public sealed partial class TodoWidgetViewModel
             : FindItem(item.Item.GeneratedNextItemId);
     }
 
+    private TodoItemViewModel? FindDeferredGeneratedOccurrence(TodoItemViewModel item)
+    {
+        if (!item.IsCompleted || string.IsNullOrWhiteSpace(item.Item.GeneratedNextItemId))
+        {
+            return null;
+        }
+
+        TodoItemViewModel? generated = FindItem(item.Item.GeneratedNextItemId);
+        return generated is not null && IsDeferredFutureOccurrence(generated)
+            ? generated
+            : null;
+    }
+
+    private bool IsDeferredFutureOccurrence(TodoItemViewModel item) =>
+        TodoRecurrenceService.IsDeferredOccurrence(item.Item, CurrentLocalDate);
+
+    private bool IsSameDayCompletedRecurringItem(TodoItemViewModel item)
+    {
+        return item.IsCompleted &&
+               item.HasRecurrence &&
+               !string.IsNullOrWhiteSpace(item.Item.GeneratedNextItemId) &&
+               item.CompletedAt is { } completedAt &&
+               completedAt.ToLocalTime().Date == CurrentLocalDate;
+    }
+
+    private bool IsSameDayCompletedRecurringInTodayView(TodoItemViewModel item)
+    {
+        return IsSameDayCompletedRecurringItem(item) &&
+               item.DueDate is { } dueDate &&
+               dueDate.ToLocalTime().Date <= CurrentLocalDate;
+    }
+
+    public bool RefreshIfDateChanged()
+    {
+        DateTime currentLocalDate = CurrentLocalDate;
+        if (currentLocalDate == _lastEvaluatedLocalDate)
+        {
+            return false;
+        }
+
+        _lastEvaluatedLocalDate = currentLocalDate;
+        foreach (TodoItemViewModel item in Items)
+        {
+            item.RefreshDateDependentProperties();
+        }
+
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        return true;
+    }
+
     internal async Task SaveAsync()  // internal: TodoReminderService single-writer routing (R15)
     {
         NormalizeSortOrders();
@@ -92,13 +143,26 @@ public sealed partial class TodoWidgetViewModel
     private void RefreshVisibleItems(TodoItemViewModel? preferredMovedItem = null)
     {
         ResetRecurringHistoryState();
+        ResetTodayGroupHeaderState();
 
         var filteredItems = Items.Where(ShouldShowItem).ToList();
-        filteredItems.Sort(CompareVisibleItems);
+        filteredItems.Sort((left, right) => CompareVisibleItemsForFilter(left, right, SelectedFilter));
 
         var activeItems = filteredItems
-            .Where(item => !item.IsCompleted)
+            .Where(item => !item.IsCompleted &&
+                           (SelectedFilter != TodoFilter.Today ||
+                            _isTodayOverdueExpanded ||
+                            !IsOverdueFromPreviousDays(item)))
             .ToList();
+
+        if (SelectedFilter == TodoFilter.Today &&
+            _isTodayOverdueExpanded &&
+            activeItems.Any(IsOverdueFromPreviousDays))
+        {
+            TodoItemViewModel? firstTodayActive = activeItems.FirstOrDefault(item => !IsOverdueFromPreviousDays(item));
+            firstTodayActive?.UpdateTodayGroupHeaderState(true);
+        }
+
         var completedItems = filteredItems
             .Where(item => item.IsCompleted)
             .ToList();
@@ -108,6 +172,7 @@ public sealed partial class TodoWidgetViewModel
         desiredItems.AddRange(BuildCompletedVisibleItems(completedItems));
 
         SynchronizeVisibleItems(desiredItems, preferredMovedItem);
+        _cachedVisibleItemsSource = null;
         OnPropertyChanged(nameof(VisibleItemsSource));
         RefreshVisibleStateProperties();
     }
@@ -181,6 +246,14 @@ public sealed partial class TodoWidgetViewModel
         }
     }
 
+    private void ResetTodayGroupHeaderState()
+    {
+        foreach (var item in Items)
+        {
+            item.UpdateTodayGroupHeaderState(false);
+        }
+    }
+
     private List<TodoItemViewModel> BuildCompletedVisibleItems(IReadOnlyList<TodoItemViewModel> completedItems)
     {
         if (completedItems.Count == 0)
@@ -242,18 +315,69 @@ public sealed partial class TodoWidgetViewModel
         return completedDisplayItems;
     }
 
-    private bool ShouldShowItem(TodoItemViewModel item)
+    private bool MatchesActiveColorFilter(TodoItemViewModel item)
     {
         string? selectedColorMarker = MapColorFilterToMarker(SelectedColorFilter);
-        if (selectedColorMarker is not null &&
-            !string.Equals(item.ColorMarker, selectedColorMarker, StringComparison.Ordinal))
+        return selectedColorMarker is null ||
+               string.Equals(item.ColorMarker, selectedColorMarker, StringComparison.Ordinal);
+    }
+
+    private bool MatchesSearchQuery(TodoItemViewModel item)
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            return true;
+        }
+
+        string query = _searchQuery.Trim();
+        if (item.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Notes) &&
+            item.Notes.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (TodoStepViewModel step in item.Steps)
+        {
+            if (step.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ShouldShowItem(TodoItemViewModel item)
+    {
+        if (!MatchesSearchQuery(item))
         {
             return false;
         }
 
+        if (!MatchesActiveColorFilter(item))
+        {
+            return false;
+        }
+
+        if (IsDeferredFutureOccurrence(item))
+        {
+            return SelectedFilter switch
+            {
+                TodoFilter.ThisWeek => IsDueThisWeek(item),
+                TodoFilter.ThisMonth => IsDueThisMonth(item),
+                _ => false
+            };
+        }
+
         if (!ShowCompletedTasks &&
             item.IsCompleted &&
-            SelectedFilter != TodoFilter.Completed)
+            SelectedFilter != TodoFilter.Completed &&
+            !IsSameDayCompletedRecurringItem(item))
         {
             return false;
         }
@@ -261,7 +385,8 @@ public sealed partial class TodoWidgetViewModel
         return SelectedFilter switch
         {
             TodoFilter.Active => !item.IsCompleted,
-            TodoFilter.Today => IsDueToday(item),
+            TodoFilter.Today => IsInTodayView(item) || IsSameDayCompletedRecurringInTodayView(item),
+            TodoFilter.Overdue => item.IsOverdue,
             TodoFilter.ThisWeek => IsDueThisWeek(item),
             TodoFilter.ThisMonth => IsDueThisMonth(item),
             TodoFilter.Important => item.IsImportant,
@@ -284,7 +409,13 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(ActiveCount));
         OnPropertyChanged(nameof(CompletedCount));
         OnPropertyChanged(nameof(AllFilterCount));
+        OnPropertyChanged(nameof(TodayDueOnlyCount));
         OnPropertyChanged(nameof(TodayFilterCount));
+        OnPropertyChanged(nameof(OverdueFilterCount));
+        OnPropertyChanged(nameof(TodayOverdueCount));
+        OnPropertyChanged(nameof(TodayOverdueBarVisibility));
+        OnPropertyChanged(nameof(TodayOverdueHeaderText));
+        OnPropertyChanged(nameof(OverdueTabSummaryText));
         OnPropertyChanged(nameof(ThisWeekFilterCount));
         OnPropertyChanged(nameof(ThisMonthFilterCount));
         OnPropertyChanged(nameof(ImportantFilterCount));
@@ -304,6 +435,7 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
+        OnPropertyChanged(nameof(OverdueFilterText));
         OnPropertyChanged(nameof(ThisWeekFilterText));
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
@@ -322,6 +454,10 @@ public sealed partial class TodoWidgetViewModel
     {
         OnPropertyChanged(nameof(HasVisibleItems));
         OnPropertyChanged(nameof(ListVisibility));
+        OnPropertyChanged(nameof(TodayOverdueCount));
+        OnPropertyChanged(nameof(TodayOverdueBarVisibility));
+        OnPropertyChanged(nameof(TodayOverdueHeaderText));
+        OnPropertyChanged(nameof(OverdueTabSummaryText));
         OnPropertyChanged(nameof(EmptyStateVisibility));
         OnPropertyChanged(nameof(ColorFilterVisibility));
         RefreshColorFilterVisibilityProperties();
@@ -332,9 +468,20 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(AddPlaceholderText));
         OnPropertyChanged(nameof(ExpandInputTooltipText));
+        OnPropertyChanged(nameof(CancelText));
+        OnPropertyChanged(nameof(QuickComposerHintText));
+        OnPropertyChanged(nameof(DraftImportantTooltipText));
+        OnPropertyChanged(nameof(DraftDueDateText));
+        OnPropertyChanged(nameof(DraftRecurrenceText));
+        OnPropertyChanged(nameof(DraftRecurrenceTooltipText));
+        OnPropertyChanged(nameof(TodayOverdueHeaderText));
+        OnPropertyChanged(nameof(OverdueTabSummaryText));
+        OnPropertyChanged(nameof(TodayOverdueToggleTooltipText));
+        OnPropertyChanged(nameof(RescheduleOverdueText));
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
+        OnPropertyChanged(nameof(OverdueFilterText));
         OnPropertyChanged(nameof(ThisWeekFilterText));
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
@@ -348,6 +495,13 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(DetailBackText));
         OnPropertyChanged(nameof(DetailSaveText));
         OnPropertyChanged(nameof(CopyText));
+        OnPropertyChanged(nameof(RenameText));
+        OnPropertyChanged(nameof(ConvertToQuickCaptureText));
+        OnPropertyChanged(nameof(DueDateText));
+        OnPropertyChanged(nameof(SearchPlaceholderText));
+        OnPropertyChanged(nameof(CloseSearchText));
+        OnPropertyChanged(nameof(ClearSearchText));
+        OnPropertyChanged(nameof(ShowTodayOverdueSection));
         OnPropertyChanged(nameof(DetailAddFileText));
         OnPropertyChanged(nameof(DetailRemoveAttachmentText));
         OnPropertyChanged(nameof(DetailFileMissingText));
@@ -399,6 +553,7 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(AutoSelectFirstInWideLayout));
         OnPropertyChanged(nameof(ItemPreviewLineCount));
         OnPropertyChanged(nameof(EditorEnterBehavior));
+        OnPropertyChanged(nameof(QuickComposerHintText));
 
         bool filterChanged = false;
         if (updateFilter)
@@ -427,6 +582,7 @@ public sealed partial class TodoWidgetViewModel
         {
             SettingsService.TodoDefaultFilterActive => TodoFilter.Active,
             SettingsService.TodoDefaultFilterToday => TodoFilter.Today,
+            SettingsService.TodoDefaultFilterOverdue => TodoFilter.Overdue,
             SettingsService.TodoDefaultFilterThisWeek => TodoFilter.ThisWeek,
             SettingsService.TodoDefaultFilterThisMonth => TodoFilter.ThisMonth,
             SettingsService.TodoDefaultFilterImportant => TodoFilter.Important,
@@ -440,11 +596,16 @@ public sealed partial class TodoWidgetViewModel
         return SettingsService.NormalizeTodoNewTaskPosition(value);
     }
 
-    private static DateTimeOffset? NormalizeDueDate(DateTimeOffset? dueDate)
+    private static DateTimeOffset? NormalizeDueDate(DateTimeOffset? dueDate, bool hasDueTime = true)
     {
         if (dueDate is not { } value)
         {
             return null;
+        }
+
+        if (!hasDueTime)
+        {
+            return TodoWidgetStore.NormalizeAllDayDueDate(value);
         }
 
         return new DateTimeOffset(
@@ -457,20 +618,58 @@ public sealed partial class TodoWidgetViewModel
             value.Offset);
     }
 
-    private static bool IsDueToday(TodoItemViewModel item)
+    private DateTimeOffset? ResolvePresetDueDate(TodoDuePreset preset)
     {
-        return item.DueDate is { } dueDate &&
-               dueDate.ToLocalTime().Date == DateTimeOffset.Now.Date;
+        DateTimeOffset today = TodoWidgetStore.NormalizeAllDayDueDate(_clock());
+        int daysUntilSunday = ((int)DayOfWeek.Sunday - (int)today.DayOfWeek + 7) % 7;
+        int daysUntilMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
+        if (daysUntilMonday == 0)
+        {
+            daysUntilMonday = 7;
+        }
+
+        return preset switch
+        {
+            TodoDuePreset.Today => today,
+            TodoDuePreset.Tomorrow => TodoWidgetStore.NormalizeAllDayDueDate(today.AddDays(1)),
+            TodoDuePreset.ThisWeek => TodoWidgetStore.NormalizeAllDayDueDate(today.AddDays(daysUntilSunday)),
+            TodoDuePreset.NextMonday => TodoWidgetStore.NormalizeAllDayDueDate(today.AddDays(daysUntilMonday)),
+            TodoDuePreset.Clear => null,
+            _ => null
+        };
     }
 
-    private static bool IsDueThisWeek(TodoItemViewModel item)
+    private bool IsDueToday(TodoItemViewModel item)
+    {
+        return item.DueDate is { } dueDate &&
+               dueDate.ToLocalTime().Date == CurrentLocalDate;
+    }
+
+    internal bool IsOverdueFromPreviousDays(TodoItemViewModel item)
+    {
+        return IsOverdueFromPreviousDays(item, CurrentLocalDate);
+    }
+
+    internal static bool IsOverdueFromPreviousDays(TodoItemViewModel item, DateTime localToday)
+    {
+        return !item.IsCompleted &&
+               item.DueDate is { } dueDate &&
+               dueDate.ToLocalTime().Date < localToday.Date;
+    }
+
+    private bool IsInTodayView(TodoItemViewModel item)
+    {
+        return IsDueToday(item) || IsOverdueFromPreviousDays(item);
+    }
+
+    private bool IsDueThisWeek(TodoItemViewModel item)
     {
         if (item.DueDate is not { } dueDate)
         {
             return false;
         }
 
-        DateTime today = DateTime.Today;
+        DateTime today = CurrentLocalDate;
         int daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
         DateTime weekStart = today.AddDays(-daysSinceMonday);
         DateTime nextWeekStart = weekStart.AddDays(7);
@@ -478,7 +677,7 @@ public sealed partial class TodoWidgetViewModel
         return localDueDate >= weekStart && localDueDate < nextWeekStart;
     }
 
-    private static bool IsDueThisMonth(TodoItemViewModel item)
+    private bool IsDueThisMonth(TodoItemViewModel item)
     {
         if (item.DueDate is not { } dueDate)
         {
@@ -486,7 +685,7 @@ public sealed partial class TodoWidgetViewModel
         }
 
         DateTime localDueDate = dueDate.ToLocalTime().Date;
-        DateTime today = DateTime.Today;
+        DateTime today = CurrentLocalDate;
         return localDueDate.Year == today.Year && localDueDate.Month == today.Month;
     }
 
@@ -496,6 +695,7 @@ public sealed partial class TodoWidgetViewModel
         _showAllTab = settings.TodoShowAllTab;
         _showActiveTab = settings.TodoShowActiveTab;
         _showTodayTab = settings.TodoShowTodayTab;
+        _showOverdueTab = settings.Todo.TodoShowOverdueTab;
         _showThisWeekTab = settings.TodoShowThisWeekTab;
         _showThisMonthTab = settings.TodoShowThisMonthTab;
         _showImportantTab = settings.TodoShowImportantTab;
@@ -504,6 +704,7 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(AllTabVisibility));
         OnPropertyChanged(nameof(ActiveTabVisibility));
         OnPropertyChanged(nameof(TodayTabVisibility));
+        OnPropertyChanged(nameof(OverdueTabVisibility));
         OnPropertyChanged(nameof(ThisWeekTabVisibility));
         OnPropertyChanged(nameof(ThisMonthTabVisibility));
         OnPropertyChanged(nameof(ImportantTabVisibility));
@@ -515,6 +716,7 @@ public sealed partial class TodoWidgetViewModel
     {
         TodoFilter.Active => _showActiveTab,
         TodoFilter.Today => _showTodayTab,
+        TodoFilter.Overdue => _showOverdueTab,
         TodoFilter.ThisWeek => _showThisWeekTab,
         TodoFilter.ThisMonth => _showThisMonthTab,
         TodoFilter.Important => _showImportantTab,
@@ -532,6 +734,44 @@ public sealed partial class TodoWidgetViewModel
             59,
             0,
             date.Offset);
+    }
+
+    private int CompareVisibleItemsForFilter(
+        TodoItemViewModel? left,
+        TodoItemViewModel? right,
+        TodoFilter filter)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left is null)
+        {
+            return 1;
+        }
+
+        if (right is null)
+        {
+            return -1;
+        }
+
+        if (left.IsCompleted != right.IsCompleted)
+        {
+            return left.IsCompleted ? 1 : -1;
+        }
+
+        if (filter == TodoFilter.Today && !left.IsCompleted && !right.IsCompleted)
+        {
+            bool leftOverdue = IsOverdueFromPreviousDays(left);
+            bool rightOverdue = IsOverdueFromPreviousDays(right);
+            if (leftOverdue != rightOverdue)
+            {
+                return leftOverdue ? -1 : 1;
+            }
+        }
+
+        return CompareVisibleItems(left, right);
     }
 
     private static int CompareVisibleItems(TodoItemViewModel? left, TodoItemViewModel? right)
@@ -556,6 +796,15 @@ public sealed partial class TodoWidgetViewModel
             return left.IsCompleted ? 1 : -1;
         }
 
+        if (left.IsCompleted && right.IsCompleted)
+        {
+            int completedCompare = Nullable.Compare(right.CompletedAt, left.CompletedAt);
+            if (completedCompare != 0)
+            {
+                return completedCompare;
+            }
+        }
+
         int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
         return sortCompare != 0
             ? sortCompare
@@ -564,12 +813,13 @@ public sealed partial class TodoWidgetViewModel
 
     private bool ShouldCountInNonCompletedFilter(TodoItemViewModel item)
     {
-        return ShowCompletedTasks || !item.IsCompleted;
+        return ShowCompletedTasks || !item.IsCompleted || IsSameDayCompletedRecurringItem(item);
     }
 
     private int GetColorFilterCount(string colorMarker)
     {
         return Items.Count(item =>
+            !IsDeferredFutureOccurrence(item) &&
             string.Equals(item.ColorMarker, colorMarker, StringComparison.Ordinal) &&
             ShouldCountInNonCompletedFilter(item));
     }
@@ -666,11 +916,20 @@ public sealed partial class TodoWidgetViewModel
         return Math.Max(0, Items.IndexOf(visibleWithoutMoving[targetVisibleIndex]));
     }
 
-    private void CaptureUndoSnapshot(string message)
+    private void CaptureDeleteUndoSnapshot(IReadOnlyList<TodoItemViewModel> deletedItems, string message)
     {
-        _undoSnapshot = new TodoUndoSnapshot(
-            Items.Select(item => CloneTodoItem(item.Item)).ToList(),
-            message);
+        var deletedSet = deletedItems.ToHashSet(ReferenceEqualityComparer.Instance);
+        var entries = new List<TodoUndoDeletedEntry>(deletedItems.Count);
+        for (int index = 0; index < Items.Count; index++)
+        {
+            TodoItemViewModel candidate = Items[index];
+            if (deletedSet.Contains(candidate))
+            {
+                entries.Add(new TodoUndoDeletedEntry(index, TodoWidgetStore.CloneItem(candidate.Item)));
+            }
+        }
+
+        _undoSnapshot = new TodoUndoSnapshot(entries, message);
         RefreshUndoProperties();
     }
 
@@ -679,49 +938,6 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(CanUndoLastAction));
         OnPropertyChanged(nameof(UndoText));
         OnPropertyChanged(nameof(UndoBarVisibility));
-    }
-
-    private static TodoItem CloneTodoItem(TodoItem item)
-    {
-        return new TodoItem
-        {
-            Id = item.Id,
-            Text = item.Text,
-            IsCompleted = item.IsCompleted,
-            IsImportant = item.IsImportant,
-            ColorMarker = item.ColorMarker,
-            DueDate = item.DueDate,
-            Recurrence = item.Recurrence?.Clone(),
-            Steps = item.Steps.Select(step => new TodoStep
-            {
-                Id = step.Id,
-                Text = step.Text,
-                IsCompleted = step.IsCompleted,
-                SortOrder = step.SortOrder
-            }).ToList(),
-            Notes = item.Notes,
-            Attachments = item.Attachments.Select(attachment => new TodoAttachment
-            {
-                Id = attachment.Id,
-                FilePath = attachment.FilePath,
-                DisplayName = attachment.DisplayName,
-                Type = attachment.Type,
-                StorageMode = attachment.StorageMode,
-                AddedAt = attachment.AddedAt
-            }).ToList(),
-            CompletedAt = item.CompletedAt,
-            ReminderLastNotifiedAt = item.ReminderLastNotifiedAt,
-            ReminderDismissedForDueDate = item.ReminderDismissedForDueDate,
-            ReminderOffsetMinutes = item.ReminderOffsetMinutes,
-            SnoozedUntil = item.SnoozedUntil,
-            SnoozeLastNotifiedAt = item.SnoozeLastNotifiedAt,
-            RecurrenceSeriesId = item.RecurrenceSeriesId,
-            GeneratedNextItemId = item.GeneratedNextItemId,
-            SortOrder = item.SortOrder,
-            CreatedAt = item.CreatedAt,
-            UpdatedAt = item.UpdatedAt,
-            IsDeleted = item.IsDeleted
-        };
     }
 
     private static bool AreRecurrenceEqual(TodoRecurrence? left, TodoRecurrence? right)

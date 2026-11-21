@@ -382,7 +382,7 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         var viewModel = CreateViewModel("todo-widget");
         await viewModel.InitializeAsync();
 
-        Assert.Equal(Visibility.Visible, viewModel.ColorFilterVisibility);
+        Assert.Equal(Visibility.Collapsed, viewModel.ColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.RedColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.OrangeColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.YellowColorFilterVisibility);
@@ -392,6 +392,11 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.Equal(TodoColorFilter.All, viewModel.SelectedColorFilter);
         Assert.False(viewModel.IsRedColorFilterSelected);
         Assert.False(viewModel.IsBlueColorFilterSelected);
+
+        var coloredTask = await viewModel.AddItemAsync("colored");
+        Assert.NotNull(coloredTask);
+        await viewModel.SetColorMarkerAsync(coloredTask.Id, TodoItem.TealColorMarker);
+        Assert.Equal(Visibility.Visible, viewModel.ColorFilterVisibility);
 
         viewModel.SetColorFilter(TodoColorFilter.Red);
 
@@ -716,7 +721,8 @@ public sealed class TodoWidgetViewModelTests : IDisposable
     [Fact]
     public async Task RefreshVisibleItems_CollapsesCompletedRecurringHistoryByDefaultAndCanExpand()
     {
-        var viewModel = CreateViewModel("todo-widget");
+        DateTimeOffset currentClock = new(new DateTime(2026, 7, 10, 11, 0, 0, DateTimeKind.Local));
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
         await viewModel.InitializeAsync();
         var first = await viewModel.AddItemAsync("repeat");
         Assert.NotNull(first);
@@ -726,9 +732,13 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.True(await viewModel.SetRecurrenceAsync(first.Id, TodoRecurrenceMode.Daily));
         Assert.True(await viewModel.SetCompletedAsync(first.Id, true));
 
+        currentClock = new DateTimeOffset(new DateTime(2026, 7, 11, 11, 0, 0, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
         var second = Assert.Single(viewModel.Items.Where(item => !item.IsCompleted));
         Assert.True(await viewModel.SetCompletedAsync(second.Id, true));
 
+        currentClock = new DateTimeOffset(new DateTime(2026, 7, 12, 9, 0, 0, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
         var activeCurrent = Assert.Single(viewModel.Items.Where(item => !item.IsCompleted));
         var standalone = await viewModel.AddItemAsync("one-off");
         Assert.NotNull(standalone);
@@ -944,6 +954,65 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         TodoItem savedItem = Assert.Single(reloaded.Items);
         Assert.True(savedItem.IsImportant);
         Assert.Equal(item.DueDate, savedItem.DueDate);
+    }
+
+    [Fact]
+    public async Task AddInputAsync_InheritsActiveFilterAndColorContext()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+        viewModel.SelectedColorFilter = TodoColorFilter.Teal;
+        viewModel.InputText = "today teal task";
+
+        TodoItemViewModel? todayItem = await viewModel.AddInputAsync();
+
+        Assert.NotNull(todayItem);
+        Assert.Equal(DateTimeOffset.Now.Date, todayItem.DueDate?.ToLocalTime().Date);
+        Assert.Equal(TodoItem.TealColorMarker, todayItem.ColorMarker);
+        Assert.Contains(todayItem, viewModel.VisibleItems);
+
+        viewModel.SelectedFilter = TodoFilter.Important;
+        viewModel.SelectedColorFilter = TodoColorFilter.All;
+        viewModel.InputText = "important task";
+
+        TodoItemViewModel? importantItem = await viewModel.AddInputAsync();
+
+        Assert.NotNull(importantItem);
+        Assert.True(importantItem.IsImportant);
+        Assert.Contains(importantItem, viewModel.VisibleItems);
+    }
+
+    [Fact]
+    public async Task OpenNewDetailFromDraft_CarriesDraftAndContextMetadataAndClearsInlineInput()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+
+        viewModel.SelectedFilter = TodoFilter.Important;
+        viewModel.SelectedColorFilter = TodoColorFilter.Blue;
+        viewModel.SetDraftDueDatePreset(TodoDuePreset.Tomorrow);
+        viewModel.InputText = "draft title ";
+
+        TodoItemViewModel draft = viewModel.OpenNewDetailFromDraft();
+
+        Assert.True(viewModel.IsCreatingDetailItem);
+        Assert.Same(draft, viewModel.SelectedDetailItem);
+        Assert.Equal("draft title ", draft.EditText);
+        Assert.True(draft.IsImportant);
+        Assert.Equal(TodoItem.BlueColorMarker, draft.ColorMarker);
+        Assert.Equal(DateTimeOffset.Now.Date.AddDays(1), draft.DueDate?.ToLocalTime().Date);
+        Assert.Empty(viewModel.InputText);
+        Assert.False(viewModel.DraftImportant);
+        Assert.Null(viewModel.DraftDueDate);
+
+        TodoItemViewModel? finalized = await viewModel.FinalizeDetailAsync(draft.EditText, closeDetail: false);
+        Assert.Same(draft, finalized);
+        Assert.Equal("draft title", draft.Text);
+        Assert.Equal("draft title ", draft.EditText);
+        Assert.False(viewModel.IsCreatingDetailItem);
+        Assert.Same(draft, viewModel.SelectedDetailItem);
     }
 
     [Fact]
@@ -1280,6 +1349,378 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.Null(Assert.Single(reloaded.Items).SnoozedUntil);
     }
 
+    [Fact]
+    public async Task SetDueDatePresetAsync_CreatesAllDayTaskWithoutEndOfDayTimestamp()
+    {
+        var viewModel = CreateViewModel("todo-all-day-preset");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("review PR");
+        Assert.NotNull(item);
+
+        Assert.True(await viewModel.SetDueDatePresetAsync(item.Id, TodoDuePreset.Today));
+
+        Assert.False(item.HasDueTime);
+        Assert.False(item.IsOverdue);
+        Assert.DoesNotContain("23:59", item.DueStatusText, StringComparison.Ordinal);
+        Assert.DoesNotContain("00:00", item.DueStatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TodayFilter_IncludesOverdueSupportsCollapseAndBulkRescheduleWithSingleUndo()
+    {
+        var viewModel = CreateViewModel("todo-today-overdue");
+        await viewModel.InitializeAsync();
+
+        var overdueAllDay = await viewModel.AddItemAsync("overdue all-day");
+        var overdueTimed = await viewModel.AddItemAsync("overdue timed");
+        var dueToday = await viewModel.AddItemAsync("due today");
+        Assert.NotNull(overdueAllDay);
+        Assert.NotNull(overdueTimed);
+        Assert.NotNull(dueToday);
+
+        DateTime twoDaysAgo = DateTime.Today.AddDays(-2);
+        DateTime yesterdayAt1430 = DateTime.Today.AddDays(-1).AddHours(14).AddMinutes(30);
+        var originalAllDayDue = new DateTimeOffset(twoDaysAgo, TimeZoneInfo.Local.GetUtcOffset(twoDaysAgo));
+        var originalTimedDue = new DateTimeOffset(yesterdayAt1430, TimeZoneInfo.Local.GetUtcOffset(yesterdayAt1430));
+
+        await viewModel.SetDueDateAsync(overdueAllDay.Id, originalAllDayDue, hasDueTime: false);
+        await viewModel.SetDueDateAsync(overdueTimed.Id, originalTimedDue, hasDueTime: true);
+        await viewModel.SetDueDatePresetAsync(dueToday.Id, TodoDuePreset.Today);
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+
+        Assert.Equal(3, viewModel.TodayFilterCount);
+        Assert.Equal(1, viewModel.TodayDueOnlyCount);
+        Assert.Equal(2, viewModel.TodayOverdueCount);
+        Assert.Equal(Visibility.Visible, viewModel.TodayOverdueBarVisibility);
+        Assert.Equal(3, viewModel.VisibleItems.Count);
+        Assert.True(dueToday.IsFirstTodayGroupItem);
+        Assert.False(overdueAllDay.IsFirstTodayGroupItem);
+
+        viewModel.ToggleTodayOverdueExpanded();
+        Assert.False(viewModel.IsTodayOverdueExpanded);
+        Assert.Single(viewModel.VisibleItems);
+        Assert.Equal(dueToday.Id, viewModel.VisibleItems[0].Id);
+
+        viewModel.ToggleTodayOverdueExpanded();
+        Assert.Equal(3, viewModel.VisibleItems.Count);
+
+        int moved = await viewModel.RescheduleOverdueToTodayAsync();
+        Assert.Equal(2, moved);
+        Assert.Equal(0, viewModel.TodayOverdueCount);
+        Assert.Equal(Visibility.Collapsed, viewModel.TodayOverdueBarVisibility);
+        Assert.False(overdueAllDay.HasDueTime);
+        Assert.Equal(DateTime.Today, overdueAllDay.DueDate!.Value.ToLocalTime().Date);
+        Assert.True(overdueTimed.HasDueTime);
+        Assert.Equal(DateTime.Today, overdueTimed.DueDate!.Value.ToLocalTime().Date);
+        Assert.Equal(new TimeSpan(14, 30, 0), overdueTimed.DueDate!.Value.ToLocalTime().TimeOfDay);
+        Assert.True(viewModel.CanUndoLastAction);
+
+        Assert.True(await viewModel.UndoLastActionAsync());
+        Assert.Equal(2, viewModel.TodayOverdueCount);
+        Assert.False(overdueAllDay.HasDueTime);
+        Assert.Equal(twoDaysAgo.Date, overdueAllDay.DueDate!.Value.ToLocalTime().Date);
+        Assert.True(overdueTimed.HasDueTime);
+        Assert.Equal(originalTimedDue, overdueTimed.DueDate);
+    }
+
+    [Fact]
+    public async Task OverdueFilter_ShowsOnlyOverdueIncompleteItemsAndSupportsBulkReschedule()
+    {
+        var viewModel = CreateViewModel("todo-widget-overdue-filter");
+        await viewModel.InitializeAsync();
+
+        var overdueYesterday = await viewModel.AddItemAsync("yesterday all-day");
+        var dueTodayAllDay = await viewModel.AddItemAsync("today all-day");
+        var completedOverdue = await viewModel.AddItemAsync("completed overdue");
+        Assert.NotNull(overdueYesterday);
+        Assert.NotNull(dueTodayAllDay);
+        Assert.NotNull(completedOverdue);
+
+        var yesterdayLocal = DateTime.Today.AddDays(-1);
+        await viewModel.SetDueDateAsync(
+            overdueYesterday.Id,
+            new DateTimeOffset(yesterdayLocal, TimeZoneInfo.Local.GetUtcOffset(yesterdayLocal)),
+            hasDueTime: false);
+        await viewModel.SetDueDatePresetAsync(dueTodayAllDay.Id, TodoDuePreset.Today);
+        await viewModel.SetDueDateAsync(
+            completedOverdue.Id,
+            new DateTimeOffset(yesterdayLocal, TimeZoneInfo.Local.GetUtcOffset(yesterdayLocal)),
+            hasDueTime: false);
+        await viewModel.SetCompletedAsync(completedOverdue.Id, true);
+
+        Assert.Equal(1, viewModel.OverdueFilterCount);
+        Assert.Equal(Visibility.Visible, viewModel.OverdueTabVisibility);
+
+        viewModel.SelectedFilter = TodoFilter.Overdue;
+        Assert.True(viewModel.IsOverdueFilterSelected);
+        Assert.False(viewModel.IsOverdueSectionToggleable);
+        Assert.Equal(Visibility.Collapsed, viewModel.OverdueSectionChevronVisibility);
+        Assert.Equal(Visibility.Visible, viewModel.TodayOverdueBarVisibility);
+        Assert.Single(viewModel.VisibleItems);
+        Assert.Equal(overdueYesterday.Id, viewModel.VisibleItems[0].Id);
+
+        viewModel.InputText = "第一行标题\r\n第二行补充说明";
+        var created = await viewModel.AddInputAsync();
+        Assert.NotNull(created);
+        Assert.Contains("第一行标题", created.Text, StringComparison.Ordinal);
+        Assert.Contains("第二行补充说明", created.Text, StringComparison.Ordinal);
+        Assert.Equal(TodoFilter.All, viewModel.SelectedFilter);
+        Assert.Contains(viewModel.VisibleItems, candidate => candidate.Id == created.Id);
+
+        Assert.Equal(3, DeskBox.Controls.Todo.TodoFilterBarController.GetSegmentIndex(TodoFilter.Overdue));
+        Assert.Equal(TodoFilter.Overdue, DeskBox.Controls.Todo.TodoFilterBarController.GetFilterFromSegmentIndex(3));
+    }
+
+    [Fact]
+    public async Task DailyRecurrence_CompletedTodayStaysStruckThroughHidesTomorrowAndAwakensAtMidnight()
+    {
+        // Monday 2026-11-09 14:00 local so Tuesday 2026-11-10 is in the same week and month.
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 14, 0, 0, DateTimeKind.Local));
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        var item = await viewModel.AddItemAsync("每日英语听力", isImportant: true);
+        Assert.NotNull(item);
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Daily));
+        TodoStepViewModel? step1 = await viewModel.AddStepAsync(item.Id, "精听 15 分钟");
+        TodoStepViewModel? step2 = await viewModel.AddStepAsync(item.Id, "跟读 10 分钟");
+        Assert.NotNull(step1);
+        Assert.NotNull(step2);
+        Assert.True(await viewModel.SetStepCompletedAsync(item.Id, step1.Id, true));
+
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+
+        Assert.Equal(2, viewModel.Items.Count);
+        Assert.Equal(0, viewModel.ActiveCount);
+        Assert.Equal(1, viewModel.AllFilterCount);
+        Assert.Equal(1, viewModel.ImportantFilterCount);
+        Assert.Equal(1, viewModel.TodayFilterCount);
+
+        viewModel.SelectedFilter = TodoFilter.All;
+        TodoItemViewModel completedToday = Assert.Single(viewModel.VisibleItems);
+        Assert.Equal(item.Id, completedToday.Id);
+        Assert.True(completedToday.IsCompleted);
+        Assert.Equal(Windows.UI.Text.TextDecorations.Strikethrough, completedToday.TextDecorations);
+        Assert.Contains("Done for today (resumes tomorrow)", completedToday.DueStatusText, StringComparison.Ordinal);
+
+        viewModel.SelectedFilter = TodoFilter.Active;
+        Assert.Empty(viewModel.VisibleItems);
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+        Assert.Equal(item.Id, Assert.Single(viewModel.VisibleItems).Id);
+
+        viewModel.SelectedFilter = TodoFilter.Important;
+        Assert.Equal(item.Id, Assert.Single(viewModel.VisibleItems).Id);
+
+        // Planning views (ThisWeek / ThisMonth) still show tomorrow's scheduled occurrence.
+        viewModel.SelectedFilter = TodoFilter.ThisWeek;
+        Assert.Equal(2, viewModel.VisibleItems.Count);
+        TodoItemViewModel tomorrowPreview = Assert.Single(viewModel.VisibleItems.Where(entry => !entry.IsCompleted));
+        Assert.True(tomorrowPreview.Item.IsGeneratedOccurrence);
+        Assert.Equal("0/2", tomorrowPreview.StepProgressText);
+
+        viewModel.SelectedFilter = TodoFilter.All;
+        Assert.False(viewModel.RefreshIfDateChanged());
+
+        // Cross local midnight -> 2026-11-10 00:00:05.
+        currentClock = new DateTimeOffset(new DateTime(2026, 11, 10, 0, 0, 5, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
+
+        Assert.Equal(1, viewModel.ActiveCount);
+        Assert.Equal(2, viewModel.AllFilterCount);
+        Assert.Equal(2, viewModel.VisibleItems.Count);
+        Assert.False(viewModel.VisibleItems[0].IsCompleted);
+        Assert.Equal(tomorrowPreview.Id, viewModel.VisibleItems[0].Id);
+        Assert.Equal("0/2", viewModel.VisibleItems[0].StepProgressText);
+        Assert.DoesNotContain("Done for today", completedToday.DueStatusText, StringComparison.Ordinal);
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+        Assert.Equal(tomorrowPreview.Id, Assert.Single(viewModel.VisibleItems).Id);
+    }
+
+    [Fact]
+    public async Task WeeklyRecurrence_CompletedTodayShowsNextCycleDateAndDefersUntilTargetDay()
+    {
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Local));
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        var item = await viewModel.AddItemAsync("每周周报");
+        Assert.NotNull(item);
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Weekly));
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+
+        Assert.Contains("11/16", item.DueStatusText, StringComparison.Ordinal);
+        Assert.Equal(0, viewModel.ActiveCount);
+        Assert.Equal(item.Id, Assert.Single(viewModel.VisibleItems).Id);
+
+        // Next day (Tuesday 11/10): next occurrence is due 11/16, so it stays deferred until 11/16!
+        currentClock = new DateTimeOffset(new DateTime(2026, 11, 10, 8, 0, 0, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
+        Assert.Equal(0, viewModel.ActiveCount);
+        Assert.Equal(item.Id, Assert.Single(viewModel.VisibleItems).Id);
+
+        // Target day (Monday 11/16): next occurrence wakes up!
+        currentClock = new DateTimeOffset(new DateTime(2026, 11, 16, 0, 0, 1, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
+        Assert.Equal(1, viewModel.ActiveCount);
+        Assert.False(viewModel.VisibleItems[0].IsCompleted);
+    }
+
+    [Fact]
+    public async Task RecurringTask_ThroughEditUncheckDeleteUndoAndClearCompletedMaintainSeriesInvariants()
+    {
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 15, 0, 0, DateTimeKind.Local));
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        var item = await viewModel.AddItemAsync("每日复盘");
+        Assert.NotNull(item);
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Daily));
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+
+        TodoItemViewModel hiddenNext = Assert.Single(viewModel.Items.Where(entry => !entry.IsCompleted));
+
+        // 1. Through-editing today's completed item syncs to the deferred next occurrence.
+        Assert.True(await viewModel.UpdateItemTextAsync(item.Id, "每日深度复盘"));
+        Assert.True(await viewModel.SetImportantAsync(item.Id, true));
+        Assert.True(await viewModel.SetColorMarkerAsync(item.Id, TodoItem.TealColorMarker));
+        Assert.True(await viewModel.UpdateNotesAsync(item.Id, "记录三件进展"));
+        Assert.NotNull(await viewModel.AddStepAsync(item.Id, "整理明日优先级"));
+
+        Assert.Equal("每日深度复盘", hiddenNext.Text);
+        Assert.True(hiddenNext.IsImportant);
+        Assert.Equal(TodoItem.TealColorMarker, hiddenNext.ColorMarker);
+        Assert.Equal("记录三件进展", hiddenNext.Notes);
+        Assert.Single(hiddenNext.Steps);
+        Assert.False(hiddenNext.Steps[0].IsCompleted);
+
+        // 2. Unchecking today's item STILL cleanly retracts the synced deferred occurrence.
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, false));
+        Assert.Single(viewModel.Items);
+
+        // 3. Deleting today's completed item deletes its deferred occurrence too, and Undo restores both.
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+        Assert.Equal(2, viewModel.Items.Count);
+        Assert.True(await viewModel.DeleteItemAsync(item.Id));
+        Assert.Empty(viewModel.Items);
+        Assert.True(await viewModel.UndoLastActionAsync());
+        Assert.Equal(2, viewModel.Items.Count);
+
+        // 4. ClearCompleted clears completed history WITHOUT deleting tomorrow's deferred occurrence.
+        TodoItemViewModel restoredCompleted = Assert.Single(viewModel.Items.Where(entry => entry.IsCompleted));
+        TodoItemViewModel restoredDeferred = Assert.Single(viewModel.Items.Where(entry => !entry.IsCompleted));
+        Assert.Equal(1, await viewModel.ClearCompletedAsync());
+        Assert.Single(viewModel.Items);
+        Assert.Equal(restoredDeferred.Id, viewModel.Items[0].Id);
+        Assert.Empty(viewModel.VisibleItems);
+        Assert.Equal(0, viewModel.ActiveCount);
+
+        // Reload from disk tonight -> still deferred, wakes up tomorrow!
+        var reloaded = CreateViewModel("todo-widget", clock: () => currentClock);
+        await reloaded.InitializeAsync();
+        Assert.Empty(reloaded.VisibleItems);
+
+        currentClock = new DateTimeOffset(new DateTime(2026, 11, 10, 0, 1, 0, DateTimeKind.Local));
+        Assert.True(reloaded.RefreshIfDateChanged());
+        Assert.Equal(restoredDeferred.Id, Assert.Single(reloaded.VisibleItems).Id);
+        Assert.Equal(1, reloaded.ActiveCount);
+        _ = restoredCompleted;
+    }
+
+    [Fact]
+    public async Task HideCompletedSetting_KeepsTodayCompletedRecurringVisibleUntilMidnight()
+    {
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 20, 0, 0, DateTimeKind.Local));
+        var settingsService = new SettingsService();
+        settingsService.Settings.TodoShowCompletedTasks = false;
+        var viewModel = CreateViewModel("todo-widget", settingsService, clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        var recurring = await viewModel.AddItemAsync("每日打卡");
+        Assert.NotNull(recurring);
+        Assert.True(await viewModel.SetRecurrenceAsync(recurring.Id, TodoRecurrenceMode.Daily));
+        Assert.True(await viewModel.SetCompletedAsync(recurring.Id, true));
+
+        viewModel.SelectedFilter = TodoFilter.All;
+        Assert.Equal(recurring.Id, Assert.Single(viewModel.VisibleItems).Id);
+        Assert.Equal(1, viewModel.AllFilterCount);
+
+        currentClock = new DateTimeOffset(new DateTime(2026, 11, 10, 0, 0, 2, DateTimeKind.Local));
+        Assert.True(viewModel.RefreshIfDateChanged());
+        TodoItemViewModel awakened = Assert.Single(viewModel.VisibleItems);
+        Assert.NotEqual(recurring.Id, awakened.Id);
+        Assert.False(awakened.IsCompleted);
+        Assert.Equal(1, viewModel.AllFilterCount);
+    }
+
+    [Fact]
+    public async Task DraftRecurrence_AutoAssignsTodayDueDateAndResetsAfterSubmit()
+    {
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 9, 0, 0, DateTimeKind.Local));
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        viewModel.InputText = "晨间阅读";
+        viewModel.SetDraftRecurrenceMode(TodoRecurrenceMode.Daily);
+        Assert.True(viewModel.DraftRecurrenceActive);
+        Assert.True(viewModel.DraftDueDateActive);
+        Assert.Equal(new DateTime(2026, 11, 9), viewModel.DraftDueDate!.Value.ToLocalTime().Date);
+
+        TodoItemViewModel? added = await viewModel.AddInputAsync();
+        Assert.NotNull(added);
+        Assert.Equal(TodoRecurrenceMode.Daily, added.RecurrenceMode);
+        Assert.Equal(new DateTime(2026, 11, 9), added.DueDate!.Value.ToLocalTime().Date);
+        Assert.False(added.HasDueTime);
+        Assert.False(viewModel.DraftRecurrenceActive);
+        Assert.False(viewModel.DraftDueDateActive);
+    }
+
+    [Fact]
+    public async Task LegacyStore_BackfillsIsGeneratedOccurrenceFromGeneratedNextItemId()
+    {
+        DateTimeOffset currentClock = new(new DateTime(2026, 11, 9, 18, 0, 0, DateTimeKind.Local));
+        var todayDue = new DateTimeOffset(new DateTime(2026, 11, 9, 0, 0, 0, DateTimeKind.Local));
+        var tomorrowDue = new DateTimeOffset(new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Local));
+
+        await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "completed-today",
+                    Text = "每日喝水",
+                    IsCompleted = true,
+                    CompletedAt = currentClock,
+                    DueDate = todayDue,
+                    HasDueTime = false,
+                    Recurrence = new TodoRecurrence { Mode = TodoRecurrenceMode.Daily, AnchorDueDate = todayDue },
+                    GeneratedNextItemId = "next-tomorrow",
+                    SortOrder = 0
+                },
+                new TodoItem
+                {
+                    Id = "next-tomorrow",
+                    Text = "每日喝水",
+                    IsCompleted = false,
+                    DueDate = tomorrowDue,
+                    HasDueTime = false,
+                    Recurrence = new TodoRecurrence { Mode = TodoRecurrenceMode.Daily, AnchorDueDate = todayDue },
+                    IsGeneratedOccurrence = false, // Legacy store had no flag
+                    SortOrder = 1
+                }
+            ]
+        });
+
+        var viewModel = CreateViewModel("todo-widget", clock: () => currentClock);
+        await viewModel.InitializeAsync();
+
+        Assert.Equal("completed-today", Assert.Single(viewModel.VisibleItems).Id);
+        Assert.Equal(0, viewModel.ActiveCount);
+    }
+
     public void Dispose()
     {
         try
@@ -1299,7 +1740,10 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         return new TodoWidgetStore(_widgetsDataRoot, widgetId);
     }
 
-    private TodoWidgetViewModel CreateViewModel(string widgetId, SettingsService? settingsService = null)
+    private TodoWidgetViewModel CreateViewModel(
+        string widgetId,
+        SettingsService? settingsService = null,
+        Func<DateTimeOffset>? clock = null)
     {
         var config = new WidgetConfig
         {
@@ -1314,6 +1758,7 @@ public sealed class TodoWidgetViewModelTests : IDisposable
                 ? TestServices.CreateLocalizationService()
                 : new LocalizationService(settingsService),
             config,
-            settingsService);
+            settingsService,
+            clock: clock);
     }
 }

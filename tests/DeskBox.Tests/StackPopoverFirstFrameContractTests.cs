@@ -29,12 +29,12 @@ public sealed class StackPopoverFirstFrameContractTests
             source,
             StringComparison.Ordinal);
 
-        int clearItems = source.IndexOf(
-            "_stackPopoverItems.Clear();",
+        int rebuildContent = source.IndexOf(
+            "RebuildStackPopoverContentForHost(",
             StringComparison.Ordinal);
         int reconcileItems = source.IndexOf(
             "ReconcileStackPopoverItems(_stackPopoverMembers);",
-            clearItems,
+            rebuildContent,
             StringComparison.Ordinal);
         int updateLayout = source.IndexOf(
             "_stackPopoverSurface.UpdateLayout();",
@@ -49,8 +49,8 @@ public sealed class StackPopoverFirstFrameContractTests
             prepareOffscreen,
             StringComparison.Ordinal);
 
-        Assert.True(clearItems >= 0);
-        Assert.True(reconcileItems > clearItems);
+        Assert.True(rebuildContent >= 0);
+        Assert.True(reconcileItems > rebuildContent);
         Assert.True(updateLayout > reconcileItems);
         Assert.True(prepareOffscreen > updateLayout);
         Assert.True(queueCommitGate > prepareOffscreen);
@@ -71,14 +71,14 @@ public sealed class StackPopoverFirstFrameContractTests
             "internal void RevealPrepared(RectInt32 bounds)",
             "internal void UpdateBounds(RectInt32 bounds)");
 
-        Assert.Contains("-32000", prepare, StringComparison.Ordinal);
+        Assert.Contains("SetCloaked(true);", prepare, StringComparison.Ordinal);
         Assert.Contains("_content?.UpdateLayout();", prepare, StringComparison.Ordinal);
-        Assert.Contains("_parked = true;", prepare, StringComparison.Ordinal);
-        Assert.DoesNotContain("Activate();", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("-32000", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActivateInput(", prepare, StringComparison.Ordinal);
 
         Assert.Contains("_appWindow.MoveAndResize(bounds);", reveal, StringComparison.Ordinal);
-        Assert.Contains("_parked = false;", reveal, StringComparison.Ordinal);
-        Assert.Contains("Activate();", reveal, StringComparison.Ordinal);
+        Assert.Contains("SetCloaked(false);", reveal, StringComparison.Ordinal);
+        Assert.Contains("ActivateInput();", reveal, StringComparison.Ordinal);
         Assert.DoesNotContain("UpdateLayout", reveal, StringComparison.Ordinal);
     }
 
@@ -103,6 +103,100 @@ public sealed class StackPopoverFirstFrameContractTests
         Assert.Contains(
             "_stackPopoverShowGeneration++;\n        CancelStackPopoverReveal();",
             source.Replace("\r\n", "\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StackSurfaceLookup_UsesItemsControlContainersAndRetiresDetachedHashSet()
+    {
+        string mainSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs");
+        string itemVisuals = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs");
+        string popoverSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs");
+        string elevatedDragSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ElevatedPointerDrag.cs");
+
+        Assert.DoesNotContain("_stackSurfaces", mainSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_stackSurfaces", itemVisuals, StringComparison.Ordinal);
+        Assert.DoesNotContain("_stackSurfaces", popoverSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_stackSurfaces", elevatedDragSource, StringComparison.Ordinal);
+
+        Assert.Contains("_stackSurfaceDataContextSubscriptions", itemVisuals, StringComparison.Ordinal);
+        Assert.Contains("border.DataContextChanged += StackSurface_DataContextChanged;", itemVisuals, StringComparison.Ordinal);
+
+        string findMethod = SliceBetween(
+            mainSource,
+            "private Border? FindStackSurface(string stackKey)",
+            "private FrameworkElement? FindStackNameElement");
+        Assert.Contains("GetMainItemsView()", findMethod, StringComparison.Ordinal);
+        Assert.Contains("ContainerFromItem(", findMethod, StringComparison.Ordinal);
+        Assert.Contains("FindDescendantByTag(", findMethod, StringComparison.Ordinal);
+        Assert.Contains("mainView.UpdateLayout();", findMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowStackPopover_DecouplesAnchorFallbackRebuildsContentAcrossStacksAndArmsRevealFallback()
+    {
+        string popoverSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs");
+
+        Assert.Contains(
+            "FindStackSurface(currentStack.StackKey)",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ResolveStackPopoverAnchorHint(currentStack.StackKey)",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RebuildStackPopoverContentForHost(",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DetachStackPopoverContentTree();",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_stackPopoverSurface?.InvalidateArrange();",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ArmStackPopoverRevealFallbackTimer(host, generation, stackKey);",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Win32Helper.GetDoubleClickTime()",
+            popoverSource,
+            StringComparison.Ordinal);
+
+        string rebuildMethod = SliceBetween(
+            popoverSource,
+            "private void RebuildStackPopoverContentForHost(",
+            "private void DetachStackPopoverContentTree()");
+        int detachCallIndex = rebuildMethod.IndexOf(
+            "DetachStackPopoverContentTree();",
+            StringComparison.Ordinal);
+        int clearItemsIndex = rebuildMethod.IndexOf(
+            "_stackPopoverItems.Clear();",
+            StringComparison.Ordinal);
+        Assert.True(detachCallIndex >= 0 && clearItemsIndex > detachCallIndex);
+
+        Assert.Contains(
+            "selectorItem.DragStarting -= Items_DragStarting;",
+            popoverSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "selectorItem.DropCompleted -= Items_DropCompleted;",
+            popoverSource,
+            StringComparison.Ordinal);
+
+        string renderWindowSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.RenderWindow.cs");
+        Assert.DoesNotContain(
+            "GetActiveItemsView()",
+            renderWindowSource,
             StringComparison.Ordinal);
     }
 

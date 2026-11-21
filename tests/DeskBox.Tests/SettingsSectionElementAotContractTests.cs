@@ -33,7 +33,7 @@ public sealed class SettingsSectionElementAotContractTests
         Assert.DoesNotMatch(RawCastAccessor, source);
         Assert.Contains("MarshalInspectable<T>.FromAbi", source, StringComparison.Ordinal);
         Assert.Contains(
-            "FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>(\"CloudBackupSettings\", \"CloudBackupPasswordBox\")",
+            "FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>(\"Maintenance\", \"CloudBackupPasswordBox\")",
             source,
             StringComparison.Ordinal);
     }

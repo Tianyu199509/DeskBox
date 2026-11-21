@@ -20,7 +20,9 @@ internal static class ExternalSettingsAppliers
         Action RefreshTrayIcon,
         Action RefreshThemeAppearance,
         Action ReplayLanguageChange,
-        Action<bool> ApplySearchContentToggle);
+        Action<bool> ApplySearchContentToggle,
+        Action? RefreshSearchHotkeyRegistration = null,
+        Action? RefreshClipboardHotkeyRegistration = null);
 
     internal static void ApplyValueAppliers(
         AppSettings before,
@@ -72,6 +74,22 @@ internal static class ExternalSettingsAppliers
         if (before.SearchIncludeDeskBoxContent != after.SearchIncludeDeskBoxContent)
         {
             delegates.ApplySearchContentToggle(after.SearchIncludeDeskBoxContent);
+        }
+
+        if (before.Search.SearchHotkeyActivationKind != after.Search.SearchHotkeyActivationKind ||
+            before.Search.SearchHotkeyModifiers != after.Search.SearchHotkeyModifiers ||
+            before.Search.SearchHotkeyKey != after.Search.SearchHotkeyKey ||
+            before.Search.SearchHotkeyEnabled != after.Search.SearchHotkeyEnabled)
+        {
+            delegates.RefreshSearchHotkeyRegistration?.Invoke();
+        }
+
+        if (before.Clipboard.ClipboardHotkeyActivationKind != after.Clipboard.ClipboardHotkeyActivationKind ||
+            before.Clipboard.ClipboardHotkeyModifiers != after.Clipboard.ClipboardHotkeyModifiers ||
+            before.Clipboard.ClipboardHotkeyKey != after.Clipboard.ClipboardHotkeyKey ||
+            before.Clipboard.ClipboardHotkeyEnabled != after.Clipboard.ClipboardHotkeyEnabled)
+        {
+            delegates.RefreshClipboardHotkeyRegistration?.Invoke();
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -64,6 +64,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     ];
     private static readonly string[] CornerPreferences =
     [
+        WidgetCornerKinds.Large,
         WidgetCornerKinds.Round,
         WidgetCornerKinds.Small,
         WidgetCornerKinds.Square
@@ -81,33 +82,24 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         LayoutDensityKinds.MinFileNameLineCount,
         LayoutDensityKinds.MaxFileNameLineCount
     ];
-    private static readonly string[] AnimationPresets =
-    [
-        WidgetAnimationKinds.PresetGentle,
-        WidgetAnimationKinds.PresetStandard,
-        WidgetAnimationKinds.PresetEmphasized,
-        WidgetAnimationKinds.PresetCustom
-    ];
     private static readonly string[] AnimationEffects =
     [
-        WidgetAnimationKinds.EffectSlideFade,
-        WidgetAnimationKinds.EffectFade,
         WidgetAnimationKinds.EffectScaleFade,
-        WidgetAnimationKinds.EffectZoom,
-        WidgetAnimationKinds.EffectEdgeScale,
-        WidgetAnimationKinds.EffectTilt,
-        WidgetAnimationKinds.EffectWipe
+        WidgetAnimationKinds.EffectSlideFade,
+        WidgetAnimationKinds.EffectScreenEdgeSlide,
+        WidgetAnimationKinds.EffectWipe,
+        WidgetAnimationKinds.EffectFade,
+        WidgetAnimationKinds.EffectNone
     ];
     private static readonly string[] AnimationSpeeds =
     [
-        WidgetAnimationKinds.SpeedVeryFast,
         WidgetAnimationKinds.SpeedFast,
         WidgetAnimationKinds.SpeedStandard,
-        WidgetAnimationKinds.SpeedRelaxed,
-        WidgetAnimationKinds.SpeedSlow
+        WidgetAnimationKinds.SpeedRelaxed
     ];
     private static readonly string[] AnimationSlideDirections =
     [
+        WidgetAnimationKinds.DirectionAuto,
         WidgetAnimationKinds.DirectionLeft,
         WidgetAnimationKinds.DirectionRight,
         WidgetAnimationKinds.DirectionUp,
@@ -115,10 +107,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     ];
     private static readonly string[] AnimationEasingIntensities =
     [
-        WidgetAnimationKinds.EasingNone,
-        WidgetAnimationKinds.EasingLight,
         WidgetAnimationKinds.EasingStandard,
-        WidgetAnimationKinds.EasingStrong,
         WidgetAnimationKinds.EasingSpring
     ];
     private static readonly string[] TitleIconModes =
@@ -142,7 +131,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
     private bool _isSyncingPresentation;
     private bool _isApplyingDensityPreset;
-    private bool _isApplyingAnimationPreset;
 
     private string[]? _cachedThemeNames;
     private string[]? _cachedTrayIconStyleNames;
@@ -153,7 +141,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string[]? _cachedCornerPreferenceNames;
     private string[]? _cachedLayoutDensityNames;
     private string[]? _cachedFileNameLineCountNames;
-    private string[]? _cachedAnimationPresetNames;
     private string[]? _cachedAnimationEffectNames;
     private string[]? _cachedAnimationSpeedNames;
     private string[]? _cachedAnimationSlideDirectionNames;
@@ -190,6 +177,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string _widgetBackgroundMode = WidgetBackgroundModeKinds.Material;
     private string _widgetBackgroundUnifiedFit = WidgetBackgroundKinds.FitFill;
     private double _widgetBackgroundDimPercent = WidgetBackgroundKinds.DefaultDimPercent;
+    private string? _unifiedImageFileName;
+    private string? _panoramaImageFileName;
+    private int _perWidgetOverrideCount;
     private bool _widgetTextShadowEnabled;
     private string[]? _cachedWidgetBackgroundModeNames;
     private string[]? _cachedWidgetBackgroundUnifiedFitNames;
@@ -212,12 +202,11 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string _interactiveChromeMode = WidgetChromeKinds.Standard;
 
     // Animation state.
-    private string _animationEffect = WidgetAnimationKinds.EffectSlideFade;
-    private string _animationSpeed = WidgetAnimationKinds.SpeedStandard;
+    private string _animationEffect = WidgetAnimationKinds.EffectScreenEdgeSlide;
+    private string _animationSpeed = WidgetAnimationKinds.SpeedRelaxed;
     private string _animationSlideDirection = WidgetAnimationKinds.DirectionRight;
     private bool _animationStaggerEnabled;
     private string _animationEasingIntensity = WidgetAnimationKinds.EasingStandard;
-    private string _animationPreset = WidgetAnimationKinds.PresetStandard;
 
     public AppearanceSettingsViewModel(
         IAppearanceSettings settings,
@@ -249,12 +238,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// answered with a plain debounced save.
     /// </summary>
     public event Action? LayoutDensityMarkedCustom;
-
-    /// <summary>
-    /// Host linkage: an animation preset was applied (four fields written
-    /// without individual saves); the shell runs the single debounced save.
-    /// </summary>
-    public event Action? AnimationPresetApplied;
 
     /// <summary>Host linkage: the user picked a theme; the shell owns the theme service write.</summary>
     public event Action<string>? ThemeUserChanged;
@@ -438,6 +421,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             }
 
             OnPropertyChanged(nameof(MaterialTypeText));
+            OnPropertyChanged(nameof(MaterialSummaryText));
             OnPropertyChanged(nameof(ShowOpacitySlider));
             OnPropertyChanged(nameof(ShowMaterialIntensitySlider));
         }
@@ -485,34 +469,25 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     // copy-on-write HKCU virtualization). The raw states are stored instead
     // of localized strings so RefreshLocalization can re-project the text
     // without a shell round-trip.
-    private bool? _windowShadowEnabled;
     private bool? _transparencyEffectsEnabled;
-
-    public string SystemShadowStatusText =>
-        LocalizeSystemEffectState(_windowShadowEnabled);
 
     public string SystemTransparencyStatusText =>
         LocalizeSystemEffectState(_transparencyEffectsEnabled);
 
     /// <summary>
-    /// Pushed by the shell: re-projects the Windows-wide visual-effect
-    /// switches. A null probe result means "unknown" and leaves the status
+    /// Pushed by the shell: re-projects the Windows-wide transparency-effects
+    /// switch. A null probe result means "unknown" and leaves the status
     /// blank instead of showing a state the OS may not actually have.
     /// </summary>
-    public void UpdateSystemEffectStates(
-        bool? windowShadowEnabled,
-        bool? transparencyEffectsEnabled)
-    {
-        if (_windowShadowEnabled != windowShadowEnabled)
-        {
-            _windowShadowEnabled = windowShadowEnabled;
-            OnPropertyChanged(nameof(SystemShadowStatusText));
-        }
+    public bool ShowSystemTransparencyWarning => _transparencyEffectsEnabled == false;
 
+    public void UpdateSystemEffectStates(bool? transparencyEffectsEnabled)
+    {
         if (_transparencyEffectsEnabled != transparencyEffectsEnabled)
         {
             _transparencyEffectsEnabled = transparencyEffectsEnabled;
             OnPropertyChanged(nameof(SystemTransparencyStatusText));
+            OnPropertyChanged(nameof(ShowSystemTransparencyWarning));
         }
     }
 
@@ -548,6 +523,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             _widgetOpacity = opacity;
             OnPropertyChanged(nameof(WidgetTransparency));
             OnPropertyChanged(nameof(WidgetOpacityValueText));
+            OnPropertyChanged(nameof(MaterialSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -580,6 +556,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             _materialIntensity = value;
             OnPropertyChanged(nameof(MaterialIntensity));
             OnPropertyChanged(nameof(MaterialIntensityValueText));
+            OnPropertyChanged(nameof(MaterialSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -674,6 +651,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(ShowUnifiedBackgroundOptions));
             OnPropertyChanged(nameof(ShowPanoramaBackgroundOptions));
             OnPropertyChanged(nameof(ShowImageBackgroundOptions));
+            OnPropertyChanged(nameof(CurrentBackgroundImageFileName));
+            OnPropertyChanged(nameof(HasCurrentBackgroundImage));
+            OnPropertyChanged(nameof(BackgroundImageDescriptionText));
+            OnPropertyChanged(nameof(MaterialSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -783,7 +764,46 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     }
 
     public string WidgetBackgroundDimValueText =>
-        ((int)Math.Round(WidgetBackgroundDimPercent)).ToString();
+        $"{(int)Math.Round(WidgetBackgroundDimPercent)}%";
+
+    public string? CurrentBackgroundImageFileName =>
+        WidgetBackgroundMode == WidgetBackgroundModeKinds.Panorama
+            ? _panoramaImageFileName
+            : WidgetBackgroundMode == WidgetBackgroundModeKinds.UnifiedImage
+                ? _unifiedImageFileName
+                : null;
+
+    public bool HasCurrentBackgroundImage =>
+        !string.IsNullOrWhiteSpace(CurrentBackgroundImageFileName);
+
+    public string BackgroundImageDescriptionText =>
+        HasCurrentBackgroundImage
+            ? $"{_localize("Settings.WidgetBackground.Image.CurrentPrefix")}{CurrentBackgroundImageFileName}"
+            : _localize("Settings.WidgetBackground.Image.Description");
+
+    public bool HasPerWidgetBackgroundOverrides => _perWidgetOverrideCount > 0;
+
+    public string MaterialSummaryText
+    {
+        get
+        {
+            if (WidgetBackgroundMode == WidgetBackgroundModeKinds.UnifiedImage)
+            {
+                return $"{MaterialTypeText} · {_localize("Settings.WidgetBackground.Mode.UnifiedImage")}";
+            }
+
+            if (WidgetBackgroundMode == WidgetBackgroundModeKinds.Panorama)
+            {
+                return $"{MaterialTypeText} · {_localize("Settings.WidgetBackground.Mode.Panorama")}";
+            }
+
+            return ShowOpacitySlider
+                ? $"{MaterialTypeText} · {WidgetOpacityValueText}"
+                : ShowMaterialIntensitySlider
+                    ? $"{MaterialTypeText} · {MaterialIntensityValueText}"
+                    : MaterialTypeText;
+        }
+    }
 
     /// <summary>Unified-image options only apply in UnifiedImage mode.</summary>
     public bool ShowUnifiedBackgroundOptions =>
@@ -828,8 +848,33 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     public int ClearPerWidgetBackgrounds()
     {
         int cleared = _settings.ClearPerWidgetBackgrounds();
+        _perWidgetOverrideCount = _settings.CountPerWidgetBackgroundOverrides();
+        OnPropertyChanged(nameof(HasPerWidgetBackgroundOverrides));
         AppearanceValueCommitted?.Invoke();
         return cleared;
+    }
+
+    /// <summary>
+    /// Clears the currently selected unified or panorama background image.
+    /// </summary>
+    public void ClearCurrentBackgroundImage()
+    {
+        if (WidgetBackgroundMode == WidgetBackgroundModeKinds.Panorama)
+        {
+            _panoramaImageFileName = null;
+            _settings.SetWidgetBackgroundPanoramaImage(null);
+        }
+        else if (WidgetBackgroundMode == WidgetBackgroundModeKinds.UnifiedImage)
+        {
+            _unifiedImageFileName = null;
+            _settings.SetWidgetBackgroundUnifiedImage(null);
+        }
+        else
+        {
+            return;
+        }
+
+        NotifyWidgetBackgroundImageChanged();
     }
 
     /// <summary>
@@ -840,6 +885,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(ShowUnifiedBackgroundOptions));
         OnPropertyChanged(nameof(ShowPanoramaBackgroundOptions));
+        OnPropertyChanged(nameof(CurrentBackgroundImageFileName));
+        OnPropertyChanged(nameof(HasCurrentBackgroundImage));
+        OnPropertyChanged(nameof(BackgroundImageDescriptionText));
+        OnPropertyChanged(nameof(MaterialSummaryText));
         AppearanceValueCommitted?.Invoke();
     }
 
@@ -849,6 +898,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// </summary>
     public void SetUnifiedBackgroundImage(string fileName)
     {
+        _unifiedImageFileName = fileName;
         _settings.SetWidgetBackgroundUnifiedImage(fileName);
         if (WidgetBackgroundMode != WidgetBackgroundModeKinds.UnifiedImage)
         {
@@ -861,6 +911,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// <summary>Stores a picked panorama image and selects panorama mode.</summary>
     public void SetPanoramaBackgroundImage(string fileName)
     {
+        _panoramaImageFileName = fileName;
         _settings.SetWidgetBackgroundPanoramaImage(fileName);
         if (WidgetBackgroundMode != WidgetBackgroundModeKinds.Panorama)
         {
@@ -910,6 +961,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             }
 
             OnPropertyChanged(nameof(IsBorderStyleEnabled));
+            OnPropertyChanged(nameof(BorderSummaryText));
         }
     }
 
@@ -950,8 +1002,15 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             {
                 _settings.SetWidgetBorderStyle(value);
             }
+
+            OnPropertyChanged(nameof(BorderSummaryText));
         }
     }
+
+    public string BorderSummaryText =>
+        BorderColorMode == WidgetBorderKinds.ColorNone
+            ? GetBorderColorModeDisplayName(BorderColorMode)
+            : $"{GetBorderColorModeDisplayName(BorderColorMode)} · {GetBorderStyleDisplayName(BorderStyle)}";
 
     public IReadOnlyList<SettingsOption> AvailableBorderStyleOptions
     {
@@ -1004,6 +1063,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
+                "Settings.Corner.Large",
                 "Settings.Corner.Round",
                 "Settings.Corner.Small",
                 "Settings.Corner.Square"
@@ -1295,6 +1355,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
             _defaultWidth = value;
             OnPropertyChanged(nameof(DefaultWidth));
+            OnPropertyChanged(nameof(WindowChromeSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -1323,6 +1384,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
             _defaultHeight = value;
             OnPropertyChanged(nameof(DefaultHeight));
+            OnPropertyChanged(nameof(WindowChromeSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -1353,11 +1415,15 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
             _settings.SetWidgetTitleIconMode(value);
             OnPropertyChanged(nameof(TitleIconModeText));
+            OnPropertyChanged(nameof(WindowChromeSummaryText));
             AppearanceValueCommitted?.Invoke();
         }
     }
 
     public string TitleIconModeText => GetTitleIconModeDisplayName(TitleIconMode);
+
+    public string WindowChromeSummaryText =>
+        $"{TitleIconModeText} · {(int)Math.Round(DefaultWidth)} × {(int)Math.Round(DefaultHeight)}";
 
     public IReadOnlyList<SettingsOption> AvailableTitleIconModeOptions
     {
@@ -1424,100 +1490,47 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
     // --- Animation subsection binding surface ---
 
-    public string AnimationPreset
-    {
-        get => _animationPreset;
-        set
-        {
-            string normalizedValue = value is
-                WidgetAnimationKinds.PresetGentle or
-                WidgetAnimationKinds.PresetStandard or
-                WidgetAnimationKinds.PresetEmphasized or
-                WidgetAnimationKinds.PresetCustom
-                    ? value
-                    : WidgetAnimationKinds.PresetStandard;
-            if (!SetProperty(ref _animationPreset, normalizedValue))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(AnimationPresetText));
-            if (_isSyncingPresentation || normalizedValue == WidgetAnimationKinds.PresetCustom)
-            {
-                return;
-            }
-
-            ApplyAnimationPreset(normalizedValue);
-        }
-    }
-
-    public string AnimationPresetText =>
-        GetAnimationPresetDisplayName(AnimationPreset);
-
-    public IReadOnlyList<SettingsOption> AvailableAnimationPresetOptions
-    {
-        get
-        {
-            string[] keys =
-            [
-                "Settings.Animation.Preset.Gentle",
-                "Settings.Animation.Preset.Emphasized",
-                "Settings.Animation.Preset.Custom",
-                "Settings.Animation.Preset.Standard"
-            ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                names[key] = _localize(key);
-            }
-
-            _cachedAnimationPresetNames = AnimationPresets
-                .Select(preset => preset switch
-                {
-                    WidgetAnimationKinds.PresetGentle => names["Settings.Animation.Preset.Gentle"],
-                    WidgetAnimationKinds.PresetEmphasized => names["Settings.Animation.Preset.Emphasized"],
-                    WidgetAnimationKinds.PresetCustom => names["Settings.Animation.Preset.Custom"],
-                    _ => names["Settings.Animation.Preset.Standard"]
-                })
-                .ToArray();
-            var options = new SettingsOption[AnimationPresets.Length];
-            for (int index = 0; index < AnimationPresets.Length; index++)
-            {
-                options[index] = new SettingsOption(AnimationPresets[index], _cachedAnimationPresetNames[index]);
-            }
-
-            return options;
-        }
-    }
-
     public string AnimationEffect
     {
         get => _animationEffect;
         set
         {
-            if (!SetProperty(ref _animationEffect, value))
+            string normalized = WidgetAnimationKinds.NormalizeEffect(value);
+            if (!SetProperty(ref _animationEffect, normalized))
             {
                 return;
             }
 
+            string normalizedDirection = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+                _animationEffect,
+                _animationSlideDirection);
+            bool directionChanged = !string.Equals(
+                _animationSlideDirection,
+                normalizedDirection,
+                StringComparison.Ordinal);
+            if (directionChanged)
+            {
+                _animationSlideDirection = normalizedDirection;
+            }
+
             if (!_isSyncingPresentation)
             {
-                _settings.SetAnimationEffect(
-                    _animationEffect,
-                    scheduleSave: !_isApplyingAnimationPreset);
+                _settings.SetAnimationEffect(_animationEffect);
             }
 
-            if (_animationEffect == WidgetAnimationKinds.EffectSlideFade &&
-                _animationSlideDirection == WidgetAnimationKinds.DirectionNone)
+            if (directionChanged)
             {
-                AnimationSlideDirection = WidgetAnimationKinds.DirectionRight;
+                OnPropertyChanged(nameof(AnimationSlideDirection));
             }
 
+            OnPropertyChanged(nameof(AvailableAnimationSlideDirectionOptions));
+            OnPropertyChanged(nameof(IsAnimationEnabled));
+            OnPropertyChanged(nameof(ShowAnimationDirection));
             OnPropertyChanged(nameof(IsDirectionEnabled));
             OnPropertyChanged(nameof(IsEasingEnabled));
             OnPropertyChanged(nameof(IsSpeedEnabled));
             OnPropertyChanged(nameof(IsStaggerEnabled));
-            SyncAnimationPresetSelection();
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1527,13 +1540,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Effect.SlideFade",
-                "Settings.Animation.Effect.Fade",
                 "Settings.Animation.Effect.ScaleFade",
-                "Settings.Animation.Effect.Zoom",
-                "Settings.Animation.Effect.EdgeScale",
-                "Settings.Animation.Effect.Tilt",
-                "Settings.Animation.Effect.Wipe"
+                "Settings.Animation.Effect.SlideFade",
+                "Settings.Animation.Effect.ScreenEdgeSlide",
+                "Settings.Animation.Effect.Wipe",
+                "Settings.Animation.Effect.Fade",
+                "Settings.Animation.Effect.None"
             ];
             _cachedAnimationEffectNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationEffects.Length];
@@ -1546,40 +1558,62 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         }
     }
 
-    public bool IsSpeedEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
+    public bool IsAnimationEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
 
-    public bool IsDirectionEnabled =>
+    public bool ShowAnimationDirection =>
         WidgetAnimationKinds.UsesSlideDirection(AnimationEffect);
 
-    /// <summary>
-    /// Staggering delays each window's HWND travel inside the batch driver;
-    /// stationary effects (fade/scale/tilt/wipe family) never move windows,
-    /// so the toggle does nothing for them and must not present as usable.
-    /// </summary>
-    public bool IsStaggerEnabled => AnimationEffect is
-        WidgetAnimationKinds.EffectSlideFade or
-        WidgetAnimationKinds.EffectScaleSlide;
+    public bool IsSpeedEnabled => IsAnimationEnabled;
 
-    public bool IsEasingEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
+    public bool IsDirectionEnabled => ShowAnimationDirection;
+
+    public bool IsStaggerEnabled => IsAnimationEnabled;
+
+    public bool IsEasingEnabled => IsAnimationEnabled;
+
+    public string AnimationSummaryText
+    {
+        get
+        {
+            if (!IsAnimationEnabled)
+            {
+                return _localize("Settings.Animation.Summary.Disabled");
+            }
+
+            var parts = new List<string>(4);
+            if (ShowAnimationDirection)
+            {
+                parts.Add(GetAnimationDirectionSummaryName(AnimationSlideDirection));
+            }
+
+            parts.Add(GetAnimationSpeedDisplayName(AnimationSpeed));
+            parts.Add(GetAnimationEasingDisplayName(AnimationEasingIntensity));
+            if (AnimationStaggerEnabled)
+            {
+                parts.Add(_localize("Settings.Animation.Stagger.Title"));
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
 
     public string AnimationSpeed
     {
         get => _animationSpeed;
         set
         {
-            if (!SetProperty(ref _animationSpeed, value))
+            string normalized = WidgetAnimationKinds.NormalizeSpeed(value);
+            if (!SetProperty(ref _animationSpeed, normalized))
             {
                 return;
             }
 
             if (!_isSyncingPresentation)
             {
-                _settings.SetAnimationSpeed(
-                    _animationSpeed,
-                    scheduleSave: !_isApplyingAnimationPreset);
+                _settings.SetAnimationSpeed(_animationSpeed);
             }
 
-            SyncAnimationPresetSelection();
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1589,28 +1623,11 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Speed.VeryFast",
                 "Settings.Animation.Speed.Fast",
-                "Settings.Animation.Speed.Relaxed",
-                "Settings.Animation.Speed.Slow",
-                "Settings.Animation.Speed.Standard"
+                "Settings.Animation.Speed.Standard",
+                "Settings.Animation.Speed.Relaxed"
             ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                names[key] = _localize(key);
-            }
-
-            _cachedAnimationSpeedNames = AnimationSpeeds
-                .Select(speed => speed switch
-                {
-                    WidgetAnimationKinds.SpeedVeryFast => names["Settings.Animation.Speed.VeryFast"],
-                    WidgetAnimationKinds.SpeedFast => names["Settings.Animation.Speed.Fast"],
-                    WidgetAnimationKinds.SpeedRelaxed => names["Settings.Animation.Speed.Relaxed"],
-                    WidgetAnimationKinds.SpeedSlow => names["Settings.Animation.Speed.Slow"],
-                    _ => names["Settings.Animation.Speed.Standard"]
-                })
-                .ToArray();
+            _cachedAnimationSpeedNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationSpeeds.Length];
             for (int index = 0; index < AnimationSpeeds.Length; index++)
             {
@@ -1626,19 +1643,20 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _animationSlideDirection;
         set
         {
-            if (!SetProperty(ref _animationSlideDirection, value))
+            string normalized = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+                _animationEffect,
+                value);
+            if (!SetProperty(ref _animationSlideDirection, normalized))
             {
                 return;
             }
 
             if (!_isSyncingPresentation)
             {
-                _settings.SetAnimationSlideDirection(
-                    _animationSlideDirection,
-                    scheduleSave: !_isApplyingAnimationPreset);
+                _settings.SetAnimationSlideDirection(_animationSlideDirection);
             }
 
-            SyncAnimationPresetSelection();
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1648,18 +1666,22 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
+                "Settings.Animation.Direction.Auto",
                 "Settings.Animation.Direction.Left",
                 "Settings.Animation.Direction.Right",
                 "Settings.Animation.Direction.Up",
                 "Settings.Animation.Direction.Down"
             ];
             _cachedAnimationSlideDirectionNames ??= keys.Select(key => _localize(key)).ToArray();
-            var options = new SettingsOption[AnimationSlideDirections.Length];
-            for (int index = 0; index < AnimationSlideDirections.Length; index++)
+            bool includeAuto = AnimationEffect == WidgetAnimationKinds.EffectScreenEdgeSlide;
+            int startIndex = includeAuto ? 0 : 1;
+            int count = AnimationSlideDirections.Length - startIndex;
+            var options = new SettingsOption[count];
+            for (int index = 0; index < count; index++)
             {
                 options[index] = new SettingsOption(
-                    AnimationSlideDirections[index],
-                    _cachedAnimationSlideDirectionNames[index]);
+                    AnimationSlideDirections[startIndex + index],
+                    _cachedAnimationSlideDirectionNames[startIndex + index]);
             }
 
             return options;
@@ -1671,19 +1693,18 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _animationEasingIntensity;
         set
         {
-            if (!SetProperty(ref _animationEasingIntensity, value))
+            string normalized = WidgetAnimationKinds.NormalizeEasingIntensity(value);
+            if (!SetProperty(ref _animationEasingIntensity, normalized))
             {
                 return;
             }
 
             if (!_isSyncingPresentation)
             {
-                _settings.SetAnimationEasingIntensity(
-                    _animationEasingIntensity,
-                    scheduleSave: !_isApplyingAnimationPreset);
+                _settings.SetAnimationEasingIntensity(_animationEasingIntensity);
             }
 
-            SyncAnimationPresetSelection();
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1701,6 +1722,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             {
                 _settings.SetAnimationStaggerEnabled(value);
             }
+
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1710,28 +1733,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Easing.None",
-                "Settings.Animation.Easing.Light",
-                "Settings.Animation.Easing.Strong",
                 "Settings.Animation.Easing.Standard",
                 "Settings.Animation.Easing.Spring"
             ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                names[key] = _localize(key);
-            }
-
-            _cachedAnimationEasingIntensityNames = AnimationEasingIntensities
-                .Select(intensity => intensity switch
-                {
-                    WidgetAnimationKinds.EasingNone => names["Settings.Animation.Easing.None"],
-                    WidgetAnimationKinds.EasingLight => names["Settings.Animation.Easing.Light"],
-                    WidgetAnimationKinds.EasingStrong => names["Settings.Animation.Easing.Strong"],
-                    WidgetAnimationKinds.EasingSpring => names["Settings.Animation.Easing.Spring"],
-                    _ => names["Settings.Animation.Easing.Standard"]
-                })
-                .ToArray();
+            _cachedAnimationEasingIntensityNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationEasingIntensities.Length];
             for (int index = 0; index < AnimationEasingIntensities.Length; index++)
             {
@@ -1786,64 +1791,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 nameof(LayoutDensity)))
         {
             OnPropertyChanged(nameof(LayoutDensityText));
-        }
-    }
-
-    private void ApplyAnimationPreset(string preset)
-    {
-        (string effect, string speed, string direction, string easing) = preset switch
-        {
-            WidgetAnimationKinds.PresetGentle => (
-                WidgetAnimationKinds.EffectFade,
-                WidgetAnimationKinds.SpeedRelaxed,
-                WidgetAnimationKinds.DirectionNone,
-                WidgetAnimationKinds.EasingLight),
-            WidgetAnimationKinds.PresetEmphasized => (
-                WidgetAnimationKinds.EffectScaleFade,
-                WidgetAnimationKinds.SpeedRelaxed,
-                WidgetAnimationKinds.DirectionNone,
-                WidgetAnimationKinds.EasingStrong),
-            _ => (
-                WidgetAnimationKinds.EffectSlideFade,
-                WidgetAnimationKinds.SpeedStandard,
-                WidgetAnimationKinds.DirectionRight,
-                WidgetAnimationKinds.EasingStandard)
-        };
-
-        _isApplyingAnimationPreset = true;
-        try
-        {
-            AnimationEffect = effect;
-            AnimationSpeed = speed;
-            AnimationSlideDirection = direction;
-            AnimationEasingIntensity = easing;
-        }
-        finally
-        {
-            _isApplyingAnimationPreset = false;
-        }
-
-        AnimationPresetApplied?.Invoke();
-    }
-
-    private void SyncAnimationPresetSelection()
-    {
-        if (_isApplyingAnimationPreset || _isSyncingPresentation)
-        {
-            return;
-        }
-
-        string resolvedPreset = WidgetAnimationKinds.ResolvePreset(
-            _animationEffect,
-            _animationSpeed,
-            _animationSlideDirection,
-            _animationEasingIntensity);
-        if (SetProperty(
-                ref _animationPreset,
-                resolvedPreset,
-                nameof(AnimationPreset)))
-        {
-            OnPropertyChanged(nameof(AnimationPresetText));
         }
     }
 
@@ -1904,14 +1851,34 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         };
     }
 
-    private string GetAnimationPresetDisplayName(string preset)
+    private string GetAnimationDirectionSummaryName(string direction)
     {
-        return preset switch
+        return direction switch
         {
-            WidgetAnimationKinds.PresetGentle => _localize("Settings.Animation.Preset.Gentle"),
-            WidgetAnimationKinds.PresetEmphasized => _localize("Settings.Animation.Preset.Emphasized"),
-            WidgetAnimationKinds.PresetCustom => _localize("Settings.Animation.Preset.Custom"),
-            _ => _localize("Settings.Animation.Preset.Standard")
+            WidgetAnimationKinds.DirectionAuto => _localize("Settings.Animation.Direction.AutoShort"),
+            WidgetAnimationKinds.DirectionLeft => _localize("Settings.Animation.Direction.Left"),
+            WidgetAnimationKinds.DirectionRight => _localize("Settings.Animation.Direction.Right"),
+            WidgetAnimationKinds.DirectionUp => _localize("Settings.Animation.Direction.Up"),
+            _ => _localize("Settings.Animation.Direction.Down")
+        };
+    }
+
+    private string GetAnimationSpeedDisplayName(string speed)
+    {
+        return speed switch
+        {
+            WidgetAnimationKinds.SpeedFast => _localize("Settings.Animation.Speed.Fast"),
+            WidgetAnimationKinds.SpeedRelaxed => _localize("Settings.Animation.Speed.Relaxed"),
+            _ => _localize("Settings.Animation.Speed.Standard")
+        };
+    }
+
+    private string GetAnimationEasingDisplayName(string intensity)
+    {
+        return intensity switch
+        {
+            WidgetAnimationKinds.EasingSpring => _localize("Settings.Animation.Easing.Spring"),
+            _ => _localize("Settings.Animation.Easing.Standard")
         };
     }
 
@@ -1924,6 +1891,26 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             WidgetTitleIconKinds.Hidden => _localize("Settings.WidgetTitleIcon.Hidden"),
             WidgetTitleIconKinds.TextLabel => _localize("Settings.WidgetTitleIcon.TextLabel"),
             _ => _localize("Settings.WidgetTitleIcon.FilledMono")
+        };
+    }
+
+    private string GetBorderColorModeDisplayName(string mode)
+    {
+        return mode switch
+        {
+            WidgetBorderKinds.ColorAccent => _localize("Settings.BorderColor.Accent"),
+            WidgetBorderKinds.ColorNone => _localize("Settings.BorderColor.None"),
+            _ => _localize("Settings.BorderColor.Neutral")
+        };
+    }
+
+    private string GetBorderStyleDisplayName(string style)
+    {
+        return style switch
+        {
+            WidgetBorderKinds.StyleMedium => _localize("Settings.Border.Medium"),
+            WidgetBorderKinds.StyleThick => _localize("Settings.Border.Thick"),
+            _ => _localize("Settings.Border.Thin")
         };
     }
 
@@ -1956,10 +1943,19 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             ForegroundColorHex = NormalizeHexColor(foreground.ForegroundColor);
             AppearanceWidgetBackgroundSettings widgetBackground =
                 _settings.ReadWidgetBackground();
+            _unifiedImageFileName = widgetBackground.UnifiedImageFileName;
+            _panoramaImageFileName = widgetBackground.PanoramaImageFileName;
+            _perWidgetOverrideCount = _settings.CountPerWidgetBackgroundOverrides();
             WidgetBackgroundMode = widgetBackground.Mode;
             WidgetBackgroundUnifiedFit = widgetBackground.UnifiedFit;
             WidgetBackgroundDimPercent = widgetBackground.DimPercent;
             WidgetTextShadowEnabled = _settings.ReadWidgetTextShadowEnabled();
+            OnPropertyChanged(nameof(CurrentBackgroundImageFileName));
+            OnPropertyChanged(nameof(HasCurrentBackgroundImage));
+            OnPropertyChanged(nameof(BackgroundImageDescriptionText));
+            OnPropertyChanged(nameof(HasPerWidgetBackgroundOverrides));
+            OnPropertyChanged(nameof(MaterialSummaryText));
+            OnPropertyChanged(nameof(BorderSummaryText));
 
             LayoutDensity = density.LayoutDensity;
             IconSize = density.IconSize;
@@ -1975,17 +1971,13 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             TitleIconMode = windowChrome.WidgetTitleIconMode;
             DisplayChromeMode = windowChrome.DisplayWidgetChromeMode;
             InteractiveChromeMode = windowChrome.InteractiveWidgetChromeMode;
+            OnPropertyChanged(nameof(WindowChromeSummaryText));
 
             AnimationEffect = animation.Effect;
             AnimationSpeed = animation.Speed;
             AnimationSlideDirection = animation.SlideDirection;
             AnimationEasingIntensity = animation.EasingIntensity;
             AnimationStaggerEnabled = animation.StaggerEnabled;
-            AnimationPreset = WidgetAnimationKinds.ResolvePreset(
-                animation.Effect,
-                animation.Speed,
-                animation.SlideDirection,
-                animation.EasingIntensity);
         }
         finally
         {
@@ -2078,7 +2070,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _cachedFileNameLineCountNames = null;
         _cachedTitleIconModeNames = null;
         _cachedLayoutDensityNames = null;
-        _cachedAnimationPresetNames = null;
         _cachedAnimationEffectNames = null;
         _cachedAnimationSpeedNames = null;
         _cachedAnimationSlideDirectionNames = null;
@@ -2097,7 +2088,6 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableCornerPreferenceOptions));
         OnPropertyChanged(nameof(AvailableLayoutDensityOptions));
         OnPropertyChanged(nameof(AvailableFileNameLineCountOptions));
-        OnPropertyChanged(nameof(AvailableAnimationPresetOptions));
         OnPropertyChanged(nameof(AvailableAnimationEffectOptions));
         OnPropertyChanged(nameof(AvailableAnimationSpeedOptions));
         OnPropertyChanged(nameof(AvailableAnimationSlideDirectionOptions));
@@ -2108,12 +2098,15 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(MaterialTypeText));
         OnPropertyChanged(nameof(Windows10CompatibilityTitle));
         OnPropertyChanged(nameof(Windows10CompatibilityMessage));
-        OnPropertyChanged(nameof(SystemShadowStatusText));
         OnPropertyChanged(nameof(SystemTransparencyStatusText));
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(LayoutDensityText));
-        OnPropertyChanged(nameof(AnimationPresetText));
+        OnPropertyChanged(nameof(AnimationSummaryText));
         OnPropertyChanged(nameof(TitleIconModeText));
+        OnPropertyChanged(nameof(BackgroundImageDescriptionText));
+        OnPropertyChanged(nameof(MaterialSummaryText));
+        OnPropertyChanged(nameof(BorderSummaryText));
+        OnPropertyChanged(nameof(WindowChromeSummaryText));
     }
 
     /// <summary>

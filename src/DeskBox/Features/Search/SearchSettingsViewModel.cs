@@ -7,7 +7,7 @@ namespace DeskBox.Features.Search;
 public enum SearchSettingsFailure { None, Connection, InvalidExecutable, Launch }
 
 /// <summary>Owns one visible settings visit and its probes, not the global search session.</summary>
-public sealed class SearchSettingsViewModel : ObservableObject, IDisposable
+public sealed partial class SearchSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchSettings _settings;
     private readonly Func<Action, bool> _tryEnqueue;
@@ -99,9 +99,19 @@ public sealed class SearchSettingsViewModel : ObservableObject, IDisposable
     public bool IsHotkeyOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
         IsActive && _settings.IsGestureOwnedByMainHotkey(gesture);
 
+    public bool IsActivationOwnedByMainHotkey(GlobalHotkeyActivation activation) =>
+        IsActive && _settings.IsActivationOwnedByMainHotkey(activation);
+
+    public bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation) =>
+        IsActive && _settings.IsActivationOwnedByClipboardHotkey(activation);
+
+    public string FormatHotkeyActivation(GlobalHotkeyActivation activation) =>
+        _settings.FormatHotkeyActivation(activation);
+
     public void SetHotkeyEnabled(bool enabled) => ApplyHotkeyChange(() => _settings.SetHotkeyEnabled(enabled));
     public void ApplyHotkey(GlobalHotkeyGesture gesture) => ApplyHotkeyChange(() => _settings.ApplyHotkey(gesture));
-    public void ResetHotkey() => ApplyHotkey(DefaultGesture);
+    public void ApplyHotkeyActivation(GlobalHotkeyActivation activation) => ApplyHotkeyChange(() => _settings.ApplyHotkeyActivation(activation));
+    public void ResetHotkey() => ApplyHotkeyActivation(GlobalHotkeyActivation.FromChord(DefaultGesture));
 
     private void ApplyHotkeyChange(Func<SearchHotkeyUpdateResult> action)
     {

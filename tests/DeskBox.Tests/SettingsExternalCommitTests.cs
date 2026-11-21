@@ -420,6 +420,59 @@ public sealed class SettingsExternalCommitTests : IDisposable
         Assert.Equal(1, toggledSnapCalls);
     }
 
+    [Fact]
+    public async Task AnimationOnlyPreviewAndCommit_SyncImmediatelyWithoutRepaintOrGeneralBroadcast()
+    {
+        var main = new SettingsService(SettingsRoot);
+        await main.LoadAsync();
+        await main.SaveAsync();
+
+        var sink = new ForwardingSink();
+        var host = new SettingsService(SettingsRoot, sink);
+        await host.LoadAsync();
+        var coordinator = new AppearanceSettingsCoordinator(host);
+
+        int hostPreviewCount = 0;
+        bool hostPreviewAnimationOnly = false;
+        host.AppearancePreviewChanged += () =>
+        {
+            hostPreviewCount++;
+            hostPreviewAnimationOnly = host.LastAppearancePreviewWasAnimationOnly;
+        };
+
+        coordinator.SetAnimationEffect(SettingsService.WidgetAnimationEffectWipe);
+        Assert.Equal(1, hostPreviewCount);
+        Assert.True(hostPreviewAnimationOnly);
+        Assert.Equal(SettingsChangeKind.Appearance, host.LastNotifiedChangeKind);
+
+        int mainPreviewCount = 0;
+        main.AppearancePreviewChanged += () => mainPreviewCount++;
+
+        string previewJson = host.SerializeCurrentSettings();
+        Assert.True(main.ApplyExternalAppearancePreview(previewJson));
+        Assert.Equal(
+            SettingsService.WidgetAnimationEffectWipe,
+            main.Settings.WidgetShell.WidgetAnimationEffect);
+        Assert.Equal(0, mainPreviewCount);
+
+        Assert.True(await host.SaveCheckedAsync());
+        SettingsChangeKind? mainCommitKind = null;
+        main.SettingsChanged += () => mainCommitKind = main.LastNotifiedChangeKind;
+        Assert.True(await sink.PumpAsync(main));
+        Assert.Equal(SettingsChangeKind.Appearance, mainCommitKind);
+
+        // If a non-animation field also changed before the preview swap, the
+        // subsequent commit still broadcasts General rather than Appearance.
+        sink.Commits.Clear();
+        host.Settings.TodoShowCompletedTasks = !host.Settings.TodoShowCompletedTasks;
+        coordinator.SetAnimationSpeed(SettingsService.WidgetAnimationSpeedFast);
+        Assert.True(main.ApplyExternalAppearancePreview(host.SerializeCurrentSettings()));
+        Assert.True(await host.SaveCheckedAsync());
+        mainCommitKind = null;
+        Assert.True(await sink.PumpAsync(main));
+        Assert.Equal(SettingsChangeKind.General, mainCommitKind);
+    }
+
     public void Dispose()
     {
         try

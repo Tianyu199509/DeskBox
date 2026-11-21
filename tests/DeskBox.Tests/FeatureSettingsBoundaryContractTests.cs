@@ -83,7 +83,7 @@ public sealed class FeatureSettingsBoundaryContractTests
         // plus the selected action set, idle/hidden working-set trims) writes
         // through InteractionSettingsCoordinator.
         Regex interactionWrite = new(
-            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetShell\s*\.\s*)?(?:AutoStart|AutoCheckForUpdates|DoubleClickToOpen|FileItemSystemContextMenuEnabled|ResizeSnapEnabled|WidgetSnapSpacing|KeepWidgetsVisibleOnShowDesktop|ShowHoverButtons|WidgetHoverButtonActions|WidgetLayerMode|IdleWorkingSetTrimEnabled|ImmediateHiddenWorkingSetTrimEnabled)\s*=(?!=)");
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetShell\s*\.\s*)?(?:AutoStart|AutoCheckForUpdates|DoubleClickToOpen|FileItemSystemContextMenuEnabled|ResizeSnapEnabled|WidgetSnapSpacing|KeepWidgetsVisibleOnShowDesktop|ShowHoverButtons|WidgetHoverButtonActions|WidgetLayerMode|DynamicClickRaiseScope|IdleWorkingSetTrimEnabled|ImmediateHiddenWorkingSetTrimEnabled)\s*=(?!=)");
         // Batch 35: the file-display section (file-name extension visibility
         // plus the shortcut-extension hiding rule, shortcut link-arrow
         // overlay, image-file icon projection, list-item detail lines,

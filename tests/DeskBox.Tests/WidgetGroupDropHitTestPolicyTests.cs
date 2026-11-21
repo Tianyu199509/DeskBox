@@ -61,4 +61,83 @@ public sealed class WidgetGroupDropHitTestPolicyTests
             610,
             317));
     }
+
+    [Fact]
+    public void GetCenterZone_InsetsAQuarterOfEachEdge()
+    {
+        RectInt32? zone = WidgetGroupDropHitTestPolicy.GetCenterZone(
+            new RectInt32(100, 100, 400, 300),
+            minimumSize: 80);
+
+        Assert.Equal(new RectInt32(200, 175, 200, 150), zone);
+    }
+
+    [Fact]
+    public void GetCenterZone_GrowsToTheMinimumButNeverPastTheSurface()
+    {
+        RectInt32? zone = WidgetGroupDropHitTestPolicy.GetCenterZone(
+            new RectInt32(0, 0, 120, 40),
+            minimumSize: 80);
+
+        Assert.Equal(new RectInt32(20, 0, 80, 40), zone);
+        Assert.Null(WidgetGroupDropHitTestPolicy.GetCenterZone(null, 80));
+        Assert.Null(WidgetGroupDropHitTestPolicy.GetCenterZone(new RectInt32(0, 0, 0, 40), 80));
+    }
+
+    [Fact]
+    public void ResolveZone_KeepsTheOuterRingForSnappingNotMerging()
+    {
+        var surface = new RectInt32(100, 100, 400, 300);
+        var title = new RectInt32(100, 100, 400, 40);
+
+        // Near the surface edge (where side-by-side arranging happens) the
+        // pointer is over the widget but outside every drop zone.
+        Assert.Equal(
+            WidgetGroupDropZone.None,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title, 110, 380, 80));
+        Assert.Equal(
+            WidgetGroupDropZone.None,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title, 490, 250, 80));
+        Assert.Equal(
+            WidgetGroupDropZone.Center,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title, 300, 250, 80));
+        Assert.Equal(
+            WidgetGroupDropZone.Title,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title, 110, 120, 80));
+    }
+
+    [Fact]
+    public void ResolveZone_TitleWinsWhereItOverlapsTheCenterZone()
+    {
+        // A collapsed capsule: the title strip covers the whole surface.
+        var capsule = new RectInt32(0, 0, 120, 36);
+
+        Assert.Equal(
+            WidgetGroupDropZone.Title,
+            WidgetGroupDropHitTestPolicy.ResolveZone(capsule, capsule, 60, 18, 80));
+    }
+
+    [Fact]
+    public void ResolveZone_HiddenTitleTargetsAreReachableThroughTheCenter()
+    {
+        var surface = new RectInt32(0, 0, 300, 300);
+
+        Assert.Equal(
+            WidgetGroupDropZone.Center,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title: null, 150, 150, 80));
+        Assert.Equal(
+            WidgetGroupDropZone.None,
+            WidgetGroupDropHitTestPolicy.ResolveZone(surface, title: null, 10, 10, 80));
+    }
+
+    [Fact]
+    public void GetDwell_TitleFastLaneArmsSoonerThanTheCenterZone()
+    {
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(200),
+            WidgetGroupDropHitTestPolicy.GetDwell(WidgetGroupDropZone.Title));
+        Assert.Equal(
+            TimeSpan.FromMilliseconds(450),
+            WidgetGroupDropHitTestPolicy.GetDwell(WidgetGroupDropZone.Center));
+    }
 }

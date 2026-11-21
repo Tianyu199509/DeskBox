@@ -367,6 +367,12 @@ internal sealed class CloudBackupService
             {
                 App.Log("[CloudBackup] Upload accepted; verification canceled, recording unverified success.");
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                App.Log(
+                    $"[CloudBackup] Upload accepted; listing verification threw for '{remoteFilePath}': {ex.Message}");
+                uploadVerified = false;
+            }
             if (!uploadVerified)
             {
                 App.Log(
@@ -670,7 +676,10 @@ internal sealed class CloudBackupService
     private static string BuildRemoteSnapshotName()
     {
         string deviceSuffix = DeviceIdentity.Id is { Length: >= 8 } id ? id[..8] : "nodevice";
-        return $"{SnapshotFilePrefix}{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}-{deviceSuffix}{SnapshotFileExtension}";
+        string timestamp = DateTimeOffset.UtcNow.ToString(
+            "yyyyMMdd'T'HHmmss'Z'",
+            System.Globalization.CultureInfo.InvariantCulture);
+        return $"{SnapshotFilePrefix}{timestamp}-{deviceSuffix}{SnapshotFileExtension}";
     }
 
     internal static bool IsSnapshotName(string name) =>

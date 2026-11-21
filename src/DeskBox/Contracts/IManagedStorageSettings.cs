@@ -12,6 +12,11 @@ public static class ManagedDropActions
     public const string Copy = "Copy";
     public const string Move = "Move";
     public const string FollowWindows = "FollowWindows";
+
+    public static bool IsValid(string? action) =>
+        string.Equals(action, Move, StringComparison.Ordinal) ||
+        string.Equals(action, Copy, StringComparison.Ordinal) ||
+        string.Equals(action, FollowWindows, StringComparison.Ordinal);
 }
 
 /// <summary>

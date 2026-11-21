@@ -64,7 +64,7 @@ public sealed class FileWidgetSettingsSlice
     /// How clicking a stack reveals its members. Valid values are
     /// <c>"Inline"</c> and <c>"Popover"</c>.
     /// </summary>
-    public string FileStackOpenMode { get; set; } = "Inline";
+    public string FileStackOpenMode { get; set; } = "Popover";
 
     /// <summary>
     /// Grid shape of the stack popover: <c>"Adaptive"</c>, <c>"Grid3"</c>
@@ -87,18 +87,21 @@ public sealed class FileWidgetSettingsSlice
     public string FileStackUnmatchedBehavior { get; set; } = "KeepLoose";
 
     /// <summary>
-    /// How files should be handled when dropped into a managed storage widget.
-    /// Valid values: <c>"Move"</c>, <c>"Copy"</c>, <c>"FollowWindows"</c>.
+    /// Default transfer behavior when files are dropped into a managed file
+    /// widget or transferred between widgets. Valid values:
+    /// <c>"Move"</c>, <c>"Copy"</c>, <c>"FollowWindows"</c>.
     /// </summary>
     public string ManagedDropAction { get; set; } = "Move";
 
     /// <summary>
-    /// The preferred drop effect advertised to external targets when files are
-    /// dragged out of a file widget. Valid values: <c>"FollowWindows"</c>
-    /// (no preferred effect — the target applies its native default),
-    /// <c>"Move"</c>, <c>"Copy"</c>.
+    /// Default transfer behavior advertised when files are dragged out of a
+    /// file widget to Desktop, Explorer, or external apps. Defaults to
+    /// <c>"Move"</c> on fresh installs and stays synchronized with
+    /// <see cref="ManagedDropAction"/> until customized independently (via
+    /// Settings, the drag HUD, or a preserved v1.5.9 upgrade). Valid values:
+    /// <c>"Move"</c>, <c>"Copy"</c>, <c>"FollowWindows"</c>.
     /// </summary>
-    public string ManagedDragOutAction { get; set; } = "FollowWindows";
+    public string ManagedDragOutAction { get; set; } = "Move";
 
     /// <summary>
     /// Whether the in-drag modifier tip (Shift=move / Ctrl=copy) is surfaced

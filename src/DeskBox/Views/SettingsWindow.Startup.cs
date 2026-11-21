@@ -10,13 +10,17 @@ public sealed partial class SettingsWindow
         object sender,
         WindowActivatedEventArgs args)
     {
-        if (args.WindowActivationState == WindowActivationState.Deactivated)
+        bool isActive = args.WindowActivationState != WindowActivationState.Deactivated;
+        global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.NotifyHostWindowActivationChanged(isActive);
+        if (!isActive)
         {
             return;
         }
 
         ViewModel.RefreshAutoStartState();
         RefreshSystemAppearanceStates();
+        CustomWidgetAiCredentialStore.Shared.CheckForExternalChangesAndNotify();
+        RefreshAiSettingsEntrySummary();
     }
 
     private async void OpenStartupAppsSettingsButton_Click(

@@ -5,7 +5,7 @@ using DeskBox.Services;
 namespace DeskBox.ViewModels;
 
 [WinRT.GeneratedBindableCustomProperty]
-public partial class FileStackCustomRuleEditor : ObservableObject
+public sealed partial class FileStackCustomRuleEditor : ObservableObject
 {
     public required string Id { get; init; }
 

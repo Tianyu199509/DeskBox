@@ -86,6 +86,12 @@ DeskBox.exe
 DeskBox.pdb
 DeskBox.pri
 DeskBox.runtimeconfig.json
+DeskBox.Settings.deps.json
+DeskBox.Settings.dll
+DeskBox.Settings.exe
+DeskBox.Settings.pdb
+DeskBox.Settings.pri
+DeskBox.Settings.runtimeconfig.json
 DeskBox.ThumbnailProxy.exe
 DeskBox.Updater.deps.json
 DeskBox.Updater.dll
@@ -569,6 +575,7 @@ WindowsBase.dll
 WinRT.Runtime.dll
 WinUIEdit.dll
 WinUIEx.dll
+onnxruntime.dll
 workloads.365.json
 workloads.j32.json
 workloads.json

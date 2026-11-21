@@ -319,6 +319,109 @@ public sealed class WidgetManagerMoveAllTests : IDisposable
         Assert.Null(second.DisconnectCollapsedForScreenId);
     }
 
+    [Fact]
+    public void ApplyNewWidgetPlacementCore_CapturesBoundScreenLabel_AndClearsOnRemoteOrDegenerateScreen()
+    {
+        Harness harness = Create();
+        var primary = new WidgetScreenInfo(
+            1,
+            "primary-pnp",
+            @"\\.\DISPLAY1",
+            new Windows.Graphics.RectInt32(0, 0, 1920, 1080),
+            new Windows.Graphics.RectInt32(0, 0, 1920, 1040),
+            IsPrimary: true,
+            DpiScale: 1.0,
+            FriendlyName: "Laptop Panel");
+        var external = new WidgetScreenInfo(
+            2,
+            "dell-u2723qe",
+            @"\\.\DISPLAY2",
+            new Windows.Graphics.RectInt32(1920, 0, 2560, 1440),
+            new Windows.Graphics.RectInt32(1920, 0, 2560, 1400),
+            IsPrimary: false,
+            DpiScale: 1.5,
+            FriendlyName: "DELL U2723QE");
+
+        var organizedConfig = new WidgetConfig
+        {
+            Id = "org-1",
+            Width = 320,
+            Height = 260,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+        };
+        harness.Manager.ApplyNewWidgetPlacementCore(
+            organizedConfig,
+            [primary, external],
+            new NewWidgetPlacementContext(
+                ExplicitBounds: new Windows.Graphics.RectInt32(2100, 80, 480, 390)));
+
+        Assert.Equal(WidgetScreenBindingMode.Pinned, organizedConfig.ScreenBindingMode);
+        Assert.Equal("dell-u2723qe", organizedConfig.BoundScreenId);
+        Assert.Equal("DELL U2723QE", organizedConfig.BoundScreenLabel);
+        Assert.NotNull(organizedConfig.LastUserPlacementUtc);
+
+        // Remote sessions degrade cleanly to Unbound and clear any stale label.
+        var remoteConfig = new WidgetConfig
+        {
+            Id = "remote-1",
+            Width = 320,
+            Height = 260,
+            BoundScreenLabel = "Stale Label",
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+        };
+        harness.Settings.Settings.WidgetNewPlacementTarget = SettingsService.WidgetNewPlacementMainDisplay;
+        harness.Manager.ApplyNewWidgetPlacementCore(
+            remoteConfig,
+            [primary],
+            isRemoteSession: true);
+
+        Assert.Equal(WidgetScreenBindingMode.Unbound, remoteConfig.ScreenBindingMode);
+        Assert.Null(remoteConfig.BoundScreenId);
+        Assert.Null(remoteConfig.BoundScreenLabel);
+    }
+
+    [Fact]
+    public void ApplyNewWidgetPlacementCore_SpecificDisplayOffline_FallsBackToPrimaryInsteadOfDeferredPlacement()
+    {
+        Harness harness = Create();
+        harness.Settings.Settings.WidgetNewPlacementTarget = SettingsService.WidgetNewPlacementSpecificDisplay;
+        harness.Settings.Settings.WidgetDefaultBoundScreenId = "unplugged-external";
+
+        var nonPrimaryLeft = new WidgetScreenInfo(
+            1,
+            "left-panel",
+            @"\\.\DISPLAY2",
+            new Windows.Graphics.RectInt32(-1920, 0, 1920, 1080),
+            new Windows.Graphics.RectInt32(-1920, 0, 1920, 1040),
+            IsPrimary: false,
+            DpiScale: 1.0,
+            FriendlyName: "Side Monitor");
+        var primary = new WidgetScreenInfo(
+            2,
+            "primary-panel",
+            @"\\.\DISPLAY1",
+            new Windows.Graphics.RectInt32(0, 0, 1920, 1080),
+            new Windows.Graphics.RectInt32(0, 0, 1920, 1040),
+            IsPrimary: true,
+            DpiScale: 1.0,
+            FriendlyName: "Main Monitor");
+
+        var config = new WidgetConfig
+        {
+            Id = "new-while-unplugged",
+            Width = 320,
+            Height = 260,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+        };
+        harness.Manager.ApplyNewWidgetPlacementCore(config, [nonPrimaryLeft, primary]);
+
+        Assert.False(config.NeedsInitialPlacement);
+        Assert.Equal(WidgetScreenBindingMode.Pinned, config.ScreenBindingMode);
+        Assert.Equal("primary-panel", config.BoundScreenId);
+        Assert.Equal("Main Monitor", config.BoundScreenLabel);
+        Assert.InRange(config.X, 0, 1920 - 320);
+    }
+
     public void Dispose()
     {
         try

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using DeskBox.Models;
 using DeskBox.Contracts;
@@ -22,6 +23,7 @@ internal sealed record SearchFileQueryPage(
 public sealed class EverythingSearchService : IDisposable, ISearchConnectionClient
 {
     private const int MaximumInitialListCapacity = 4_000;
+    private const int SupplementaryTopHitBatchSize = 100;
     private const long ConnectedProbeTtlMilliseconds = 30_000;
     private const long FailedProbeTtlMilliseconds = 2_000;
 
@@ -193,9 +195,12 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
 
         int offset = Math.Max(0, resultOffset);
         int resultCount = Math.Max(1, requestedResults);
-        string providerQuery = BuildProviderQuery(
-            query,
-            _settingsService.Settings.SearchEverythingAdvancedSyntaxEnabled);
+        bool advancedSyntax = _settingsService.Settings.SearchEverythingAdvancedSyntaxEnabled;
+        string providerQuery = BuildProviderQuery(query, advancedSyntax);
+        if (string.IsNullOrWhiteSpace(providerQuery))
+        {
+            return SearchFileQueryPage.Empty;
+        }
 
         await _nativeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -206,7 +211,8 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
                     query.Trim(),
                     offset,
                     resultCount,
-                    cancellationToken),
+                    cancellationToken,
+                    advancedSyntax),
                 cancellationToken).ConfigureAwait(false);
             return page;
         }
@@ -328,13 +334,212 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             return normalized;
         }
 
-        // Everything uses quotes to make operators and spaces literal. A literal quote
-        // cannot occur in a Windows filename, but escaping it keeps malformed input from
-        // changing the parser state.
-        return $"\"{normalized.Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
+        // Everything uses quotes to make operators (|, !, <, >) literal within each term,
+        // while whitespace-separated terms outside quotes act as multi-keyword AND filters.
+        // Explicit user-quoted phrases (including Windows "Copy as path" strings) stay intact
+        // as single quoted terms instead of double-escaping surrounding quotes.
+        IReadOnlyList<string> tokens = ExtractLiteralTokens(normalized);
+        if (tokens.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        if (tokens.Count == 1)
+        {
+            return $"\"{tokens[0]}\"";
+        }
+
+        var sb = new System.Text.StringBuilder(normalized.Length + (tokens.Count * 3));
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append(' ');
+            }
+
+            sb.Append('"');
+            sb.Append(tokens[i]);
+            sb.Append('"');
+        }
+
+        return sb.ToString();
     }
 
-    internal static double ComputeRelevance(string fileName, string query)
+    internal static IReadOnlyList<string> ExtractLiteralTokens(string query)
+    {
+        string normalized = query.Trim();
+        if (normalized.Length == 0)
+        {
+            return [];
+        }
+
+        var tokens = new List<string>(4);
+        int i = 0;
+        while (i < normalized.Length)
+        {
+            while (i < normalized.Length && char.IsWhiteSpace(normalized[i]))
+            {
+                i++;
+            }
+
+            if (i >= normalized.Length)
+            {
+                break;
+            }
+
+            if (normalized[i] == '"')
+            {
+                i++;
+                int start = i;
+                while (i < normalized.Length && normalized[i] != '"')
+                {
+                    i++;
+                }
+
+                ReadOnlySpan<char> quoted = normalized.AsSpan(start, i - start);
+                if (!quoted.IsWhiteSpace())
+                {
+                    tokens.Add(quoted.ToString());
+                }
+
+                if (i < normalized.Length && normalized[i] == '"')
+                {
+                    i++;
+                }
+            }
+            else
+            {
+                int start = i;
+                while (i < normalized.Length && !char.IsWhiteSpace(normalized[i]) && normalized[i] != '"')
+                {
+                    i++;
+                }
+
+                if (i > start)
+                {
+                    tokens.Add(normalized.Substring(start, i - start));
+                }
+            }
+        }
+
+        return tokens;
+    }
+
+    internal static string? BuildSupplementaryPrefixQuery(string rankingQuery)
+    {
+        if (HasPathSeparator(rankingQuery))
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> tokens = ExtractLiteralTokens(rankingQuery);
+        if (tokens.Count == 0)
+        {
+            return null;
+        }
+
+        string first = tokens[0];
+        if (first.Length < 2 || first.IndexOfAny(['*', '?']) >= 0)
+        {
+            return null;
+        }
+
+        if (tokens.Count == 1)
+        {
+            return $"\"{first}*\"";
+        }
+
+        var sb = new System.Text.StringBuilder(rankingQuery.Length + (tokens.Count * 3) + 1);
+        sb.Append('"').Append(first).Append("*\"");
+        for (int i = 1; i < tokens.Count; i++)
+        {
+            sb.Append(" \"").Append(tokens[i]).Append('"');
+        }
+
+        return sb.ToString();
+    }
+
+    internal static double ComputeRelevance(string fileName, string query, string? fullPath = null)
+    {
+        if (string.IsNullOrEmpty(fileName) || string.IsNullOrWhiteSpace(query))
+        {
+            return 10;
+        }
+
+        ReadOnlySpan<char> normalizedSpan = UnwrapSingleOuterQuotes(query.AsSpan().Trim());
+        if (normalizedSpan.IsEmpty || normalizedSpan.IsWhiteSpace())
+        {
+            return 10;
+        }
+
+        string normalizedQuery = normalizedSpan.ToString();
+        if (!string.IsNullOrEmpty(fullPath) && PathsEqualNormalized(fullPath, normalizedQuery))
+        {
+            return 100;
+        }
+
+        double directScore = ScoreContiguousFileNameMatch(fileName, normalizedQuery);
+        if (directScore > 10)
+        {
+            return directScore;
+        }
+
+        if (HasPathSeparator(normalizedQuery))
+        {
+            ReadOnlySpan<char> leaf = ExtractTrailingPathLeaf(normalizedQuery.AsSpan());
+            if (!leaf.IsEmpty && !leaf.IsWhiteSpace())
+            {
+                double leafScore = ScoreContiguousFileNameMatch(fileName, leaf.ToString());
+                if (leafScore > 10)
+                {
+                    return Math.Min(leafScore, 95);
+                }
+            }
+        }
+
+        IReadOnlyList<string> tokens = ExtractLiteralTokens(query);
+        if (tokens.Count == 0)
+        {
+            return 10;
+        }
+
+        if (tokens.Count == 1)
+        {
+            string single = tokens[0];
+            if (!string.Equals(single, normalizedQuery, StringComparison.Ordinal))
+            {
+                double singleScore = ScoreContiguousFileNameMatch(fileName, single);
+                if (singleScore > 10)
+                {
+                    return singleScore;
+                }
+            }
+
+            return 10;
+        }
+
+        int matchedInFileName = 0;
+        foreach (string token in tokens)
+        {
+            ReadOnlySpan<char> candidate = HasPathSeparator(token)
+                ? ExtractTrailingPathLeaf(token.AsSpan())
+                : token.AsSpan();
+            if (!candidate.IsEmpty &&
+                fileName.AsSpan().Contains(candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedInFileName++;
+            }
+        }
+
+        if (matchedInFileName == tokens.Count)
+        {
+            return fileName.StartsWith(tokens[0], StringComparison.OrdinalIgnoreCase) ? 48 : 45;
+        }
+
+        return matchedInFileName > 0 ? 25 : 10;
+    }
+
+    private static double ScoreContiguousFileNameMatch(string fileName, string query)
     {
         if (fileName.Equals(query, StringComparison.OrdinalIgnoreCase))
         {
@@ -360,6 +565,65 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
         return fileName.Contains(query, StringComparison.OrdinalIgnoreCase) ? 50 : 10;
     }
 
+    private static ReadOnlySpan<char> UnwrapSingleOuterQuotes(ReadOnlySpan<char> span)
+    {
+        if (span.Length >= 2 &&
+            span[0] == '"' &&
+            span[^1] == '"' &&
+            span[1..^1].IndexOf('"') < 0)
+        {
+            return span[1..^1];
+        }
+
+        return span;
+    }
+
+    private static bool HasPathSeparator(string text) =>
+        text.IndexOf('\\') >= 0 || text.IndexOf('/') >= 0;
+
+    private static ReadOnlySpan<char> ExtractTrailingPathLeaf(ReadOnlySpan<char> path)
+    {
+        int lastSep = path.LastIndexOfAny('\\', '/');
+        return lastSep >= 0 ? path[(lastSep + 1)..] : path;
+    }
+
+    private static bool PathsEqualNormalized(string left, string right)
+    {
+        ReadOnlySpan<char> a = TrimTrailingDirectorySeparators(left.AsSpan().Trim());
+        ReadOnlySpan<char> b = TrimTrailingDirectorySeparators(right.AsSpan().Trim());
+        if (a.Length != b.Length || a.IsEmpty)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            char ca = a[i] == '/' ? '\\' : a[i];
+            char cb = b[i] == '/' ? '\\' : b[i];
+            if (ca != cb && char.ToUpperInvariant(ca) != char.ToUpperInvariant(cb))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static ReadOnlySpan<char> TrimTrailingDirectorySeparators(ReadOnlySpan<char> path)
+    {
+        while (path.Length > 0 && path[^1] is '\\' or '/')
+        {
+            if (path.Length == 3 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+            {
+                break;
+            }
+
+            path = path[..^1];
+        }
+
+        return path;
+    }
+
     private async Task<EverythingConnectionSnapshot> EnsureConnectionForQueryAsync(
         CancellationToken cancellationToken)
     {
@@ -381,139 +645,144 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
 
     private static (bool Connected, string? Version, uint Error) ProbeNativeConnection()
     {
-        EverythingNativeMethods.Reset();
-        int loaded = EverythingNativeMethods.IsDatabaseLoaded();
-        uint error = EverythingNativeMethods.GetLastError();
-        if (loaded == 0)
-        {
-            return (false, null, error);
-        }
-
-        string version = string.Join(
-            '.',
-            EverythingNativeMethods.GetMajorVersion(),
-            EverythingNativeMethods.GetMinorVersion(),
-            EverythingNativeMethods.GetRevision(),
-            EverythingNativeMethods.GetBuildNumber());
-        return (true, version, EverythingNativeMethods.ErrorOk);
+        return EverythingNativeMethods.ProbeConnection();
     }
 
-    private static SearchFileQueryPage QueryNative(
+    internal static SearchFileQueryPage QueryNative(
         string providerQuery,
         string rankingQuery,
         int resultOffset,
         int resultCount,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool advancedSyntax = false,
+        string ipcWindowClass = EverythingNativeMethods.DefaultIpcWindowClass)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        uint searchFlags = !advancedSyntax && HasPathSeparator(rankingQuery)
+            ? EverythingNativeMethods.SearchFlagMatchPath
+            : 0;
+        if (!EverythingNativeMethods.TryQuery(
+                providerQuery,
+                offset: checked((uint)resultOffset),
+                maxResults: checked((uint)resultCount),
+                cancellationToken,
+                out EverythingIpcQueryReply reply,
+                out uint errorCode,
+                ipcWindowClass: ipcWindowClass,
+                searchFlags: searchFlags,
+                sortType: EverythingNativeMethods.SortNameAscending))
+        {
+            throw new EverythingIpcException(errorCode);
+        }
+
         var results = new List<SearchResultItem>(Math.Min(
-            resultCount,
+            Math.Max(reply.Items.Count + (resultOffset == 0 ? SupplementaryTopHitBatchSize * 2 : 0), 1),
             MaximumInitialListCapacity));
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        int totalMatches = 0;
-        uint nativeCount = 0;
+        int totalMatches = ClampToInt(reply.TotalResults);
+        uint nativeCount = (uint)reply.Items.Count;
 
-        try
+        AppendQueryEntries(reply.Items, rankingQuery, seenPaths, results, cancellationToken);
+
+        // When a broad query exceeds the first alphabetical page, supplement page 0 with
+        // filename-prefix matches and recently modified matches so exact/prefix hits and
+        // active user files beyond ASCII alphabetical order are never truncated from page 1.
+        if (resultOffset == 0 &&
+            reply.TotalResults > nativeCount &&
+            rankingQuery.Length >= 2)
+        {
+            if (!advancedSyntax &&
+                BuildSupplementaryPrefixQuery(rankingQuery) is { } prefixQuery)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (EverythingNativeMethods.TryQuery(
+                        prefixQuery,
+                        offset: 0,
+                        maxResults: SupplementaryTopHitBatchSize,
+                        cancellationToken,
+                        out EverythingIpcQueryReply prefixReply,
+                        out _,
+                        ipcWindowClass: ipcWindowClass,
+                        searchFlags: 0,
+                        sortType: EverythingNativeMethods.SortNameAscending))
+                {
+                    AppendQueryEntries(prefixReply.Items, rankingQuery, seenPaths, results, cancellationToken);
+                }
+            }
+
+            if (rankingQuery.Length >= 3 ||
+                !Ascii.IsValid(rankingQuery) ||
+                reply.TotalResults <= 25_000)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (EverythingNativeMethods.TryQuery(
+                        providerQuery,
+                        offset: 0,
+                        maxResults: SupplementaryTopHitBatchSize,
+                        cancellationToken,
+                        out EverythingIpcQueryReply recentReply,
+                        out _,
+                        ipcWindowClass: ipcWindowClass,
+                        searchFlags: searchFlags,
+                        sortType: EverythingNativeMethods.SortDateModifiedDescending))
+                {
+                    AppendQueryEntries(recentReply.Items, rankingQuery, seenPaths, results, cancellationToken);
+                }
+            }
+        }
+
+        int effectiveTotalMatches = Math.Max(totalMatches, results.Count);
+        int nextOffset = nativeCount == 0 || (resultOffset == 0 && results.Count >= effectiveTotalMatches)
+            ? effectiveTotalMatches
+            : (int)Math.Min(effectiveTotalMatches, (long)resultOffset + nativeCount);
+        return new SearchFileQueryPage(results, effectiveTotalMatches, nextOffset);
+    }
+
+    private static void AppendQueryEntries(
+        IReadOnlyList<EverythingIpcResultEntry> entries,
+        string rankingQuery,
+        HashSet<string> seenPaths,
+        List<SearchResultItem> results,
+        CancellationToken cancellationToken)
+    {
+        foreach (EverythingIpcResultEntry entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EverythingNativeMethods.Reset();
-            EverythingNativeMethods.SetSearch(providerQuery);
-            EverythingNativeMethods.SetMatchPath(0);
-            EverythingNativeMethods.SetMatchCase(0);
-            EverythingNativeMethods.SetMatchWholeWord(0);
-            EverythingNativeMethods.SetRegex(0);
-            EverythingNativeMethods.SetOffset(checked((uint)resultOffset));
-            EverythingNativeMethods.SetMax(checked((uint)resultCount));
-            EverythingNativeMethods.SetSort(EverythingNativeMethods.SortNameAscending);
-            EverythingNativeMethods.SetRequestFlags(
-                EverythingNativeMethods.RequestFileName |
-                EverythingNativeMethods.RequestPath |
-                EverythingNativeMethods.RequestSize |
-                EverythingNativeMethods.RequestDateModified);
-
-            // Deep review R15 (F6 audit): Query(1) blocks on the IPC reply
-            // with no timeout; an alive-but-hung Everything pinned the gate
-            // forever. Non-blocking submit + bounded poll instead — on
-            // timeout or cancel the query is stopped and the failure routes
-            // through the same EverythingIpcException path as an IPC error.
-            if (EverythingNativeMethods.Query(0) == 0)
+            if (entry.FileName.Length == 0)
             {
-                throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
+                continue;
             }
 
-            const int QueryWatchdogMs = 10_000;
-            var watchdog = Stopwatch.StartNew();
-            while (!EverythingNativeMethods.IsQueryAvailable())
+            string fullPath = BuildFullPath(entry.DirectoryPath, entry.FileName);
+            if (!seenPaths.Add(fullPath))
             {
-                if (watchdog.ElapsedMilliseconds >= QueryWatchdogMs)
-                {
-                    EverythingNativeMethods.StopQuery();
-                    throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-                Thread.Sleep(50);
+                continue;
             }
 
-            nativeCount = EverythingNativeMethods.GetNumResults();
-            totalMatches = ClampToInt(EverythingNativeMethods.GetTotalResults());
-            for (uint index = 0; index < nativeCount; index++)
+            DateTimeOffset? modified = null;
+            if (entry.DateModifiedFileTime is > 0 and var fileTime)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                string fileName = Marshal.PtrToStringUni(
-                    EverythingNativeMethods.GetResultFileName(index)) ?? string.Empty;
-                string directory = Marshal.PtrToStringUni(
-                    EverythingNativeMethods.GetResultPath(index)) ?? string.Empty;
-                if (fileName.Length == 0)
+                try
                 {
-                    continue;
+                    modified = DateTimeOffset.FromFileTime(fileTime);
                 }
-
-                string fullPath = BuildFullPath(directory, fileName);
-                if (!seenPaths.Add(fullPath))
+                catch (ArgumentOutOfRangeException)
                 {
-                    continue;
+                    // Keep the result even if an unusual filesystem timestamp is invalid.
                 }
-
-                bool isFolder = EverythingNativeMethods.IsFolderResult(index) != 0;
-                long? size = !isFolder &&
-                             EverythingNativeMethods.GetResultSize(index, out long nativeSize) != 0
-                    ? nativeSize
-                    : null;
-                DateTimeOffset? modified = null;
-                if (EverythingNativeMethods.GetResultDateModified(index, out long fileTime) != 0 &&
-                    fileTime > 0)
-                {
-                    try
-                    {
-                        modified = DateTimeOffset.FromFileTime(fileTime);
-                    }
-                    catch (ArgumentOutOfRangeException)
-                    {
-                        // Keep the result even if an unusual filesystem timestamp is invalid.
-                    }
-                }
-
-                results.Add(new SearchResultItem
-                {
-                    Kind = isFolder ? SearchResultKind.Folder : SearchResultKind.File,
-                    Title = fileName,
-                    Subtitle = directory,
-                    DetailPath = fullPath,
-                    FileSize = size,
-                    ModifiedAt = modified,
-                    RelevanceScore = ComputeRelevance(fileName, rankingQuery)
-                });
             }
+
+            results.Add(new SearchResultItem
+            {
+                Kind = entry.IsFolder ? SearchResultKind.Folder : SearchResultKind.File,
+                Title = entry.FileName,
+                Subtitle = entry.DirectoryPath,
+                DetailPath = fullPath,
+                FileSize = entry.IsFolder ? null : entry.FileSize,
+                ModifiedAt = modified,
+                RelevanceScore = ComputeRelevance(entry.FileName, rankingQuery, fullPath)
+            });
         }
-        finally
-        {
-            EverythingNativeMethods.Reset();
-        }
-
-        int nextOffset = nativeCount == 0
-            ? totalMatches
-            : (int)Math.Min(totalMatches, (long)resultOffset + nativeCount);
-        return new SearchFileQueryPage(results, totalMatches, nextOffset);
     }
 
     private EverythingConnectionSnapshot ClassifyIpcFailure(
@@ -583,34 +852,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
 
     public void Dispose()
     {
-        if (_isDisposed)
-        {
-            return;
-        }
-
         _isDisposed = true;
-        bool acquired = _nativeGate.Wait(TimeSpan.FromSeconds(1));
-        if (acquired)
-        {
-            try
-            {
-                try
-                {
-                    EverythingNativeMethods.CleanUp();
-                }
-                catch (Exception ex) when (
-                    ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
-                {
-                    // The provider may never have loaded in this process.
-                }
-            }
-            finally
-            {
-                _nativeGate.Release();
-            }
-
-            _nativeGate.Dispose();
-        }
     }
 
     private sealed class EverythingIpcException(uint errorCode) : Exception

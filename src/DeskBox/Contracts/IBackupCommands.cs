@@ -31,7 +31,7 @@ public interface IBackupCommands
 {
     bool IsStopping { get; }
     Task<LocalBackupResult> CreateSnapshotNowAsync(CancellationToken cancellationToken = default);
-    Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default);
+    Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default, bool includeClipboard = false);
     Task<CloudBackupRunResult> UploadNowAsync(CancellationToken cancellationToken = default);
 }
 
@@ -48,7 +48,7 @@ public interface IBackupBackend
     bool RefreshOptions();
     Task PrepareManualBackupAsync(CancellationToken cancellationToken);
     Task<LocalBackupResult> CreateSnapshotAsync(bool force, CancellationToken cancellationToken);
-    Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken);
+    Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken, bool includeClipboard = false);
     Task<CloudBackupRunResult> UploadAsync(bool scheduled, CancellationToken cancellationToken);
 }
 

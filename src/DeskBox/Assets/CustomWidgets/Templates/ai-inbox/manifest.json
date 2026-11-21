@@ -1,0 +1,2119 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.ai-inbox",
+  "name": "${$i18n.widgetName}",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "✨",
+  "version": "4.1.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "minSize": {
+    "width": 332,
+    "height": 340
+  },
+  "defaultSize": {
+    "width": 368,
+    "height": 412
+  },
+  "capabilities": [
+    "clipboard-workspace",
+    "ai-run",
+    "popover-and-markdown",
+    "advanced-inputs-and-styling",
+    "rich-controls-and-shells",
+    "native-media-and-audio"
+  ],
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "sources": [
+    {
+      "id": "clipboard",
+      "type": "clipboard",
+      "intervalMs": 2000
+    }
+  ],
+  "settings": [
+    {
+      "key": "defaultMode",
+      "type": "choice",
+      "label": "${$i18n.settingDefaultMode}",
+      "default": "translate",
+      "options": [
+        {
+          "value": "translate",
+          "label": "${$i18n.modeTranslate}"
+        },
+        {
+          "value": "polish",
+          "label": "${$i18n.modePolish}"
+        },
+        {
+          "value": "summarize",
+          "label": "${$i18n.modeSummarize}"
+        },
+        {
+          "value": "todos",
+          "label": "${$i18n.modeTodos}"
+        },
+        {
+          "value": "explain",
+          "label": "${$i18n.modeExplain}"
+        }
+      ]
+    },
+    {
+      "key": "targetLang",
+      "type": "choice",
+      "label": "${$i18n.settingTargetLang}",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "${$i18n.dstAutoMenu}"
+        },
+        {
+          "value": "zh-CN",
+          "label": "${$i18n.langZh}"
+        },
+        {
+          "value": "zh-TW",
+          "label": "${$i18n.langZhTw}"
+        },
+        {
+          "value": "en-US",
+          "label": "${$i18n.langEn}"
+        },
+        {
+          "value": "ja-JP",
+          "label": "${$i18n.langJa}"
+        },
+        {
+          "value": "ko-KR",
+          "label": "${$i18n.langKo}"
+        },
+        {
+          "value": "fr-FR",
+          "label": "${$i18n.langFr}"
+        },
+        {
+          "value": "de-DE",
+          "label": "${$i18n.langDe}"
+        },
+        {
+          "value": "es-ES",
+          "label": "${$i18n.langEs}"
+        },
+        {
+          "value": "pt-BR",
+          "label": "${$i18n.langPt}"
+        },
+        {
+          "value": "ru-RU",
+          "label": "${$i18n.langRu}"
+        },
+        {
+          "value": "ar-SA",
+          "label": "${$i18n.langAr}"
+        },
+        {
+          "value": "hi-IN",
+          "label": "${$i18n.langHi}"
+        },
+        {
+          "value": "bn-BD",
+          "label": "${$i18n.langBn}"
+        }
+      ]
+    },
+    {
+      "key": "toneStyle",
+      "type": "choice",
+      "label": "${$i18n.settingToneStyle}",
+      "default": "professional",
+      "options": [
+        {
+          "value": "professional",
+          "label": "${$i18n.toneFormal}"
+        },
+        {
+          "value": "concise",
+          "label": "${$i18n.toneConcise}"
+        },
+        {
+          "value": "developer",
+          "label": "${$i18n.toneDeveloper}"
+        },
+        {
+          "value": "friendly",
+          "label": "${$i18n.toneFriendly}"
+        },
+        {
+          "value": "natural",
+          "label": "${$i18n.toneNatural}"
+        }
+      ]
+    },
+    {
+      "key": "showClipboardBar",
+      "type": "toggle",
+      "label": "${$i18n.settingShowClipboardBar}",
+      "default": true
+    },
+    {
+      "key": "autoCopyResult",
+      "type": "toggle",
+      "label": "${$i18n.settingAutoCopyResult}",
+      "default": false
+    },
+    {
+      "key": "soundCue",
+      "type": "toggle",
+      "label": "${$i18n.settingSoundCue}",
+      "default": false
+    }
+  ],
+  "state": {
+    "previewSeeded": "false",
+    "activeTab": "workspace",
+    "mode": "",
+    "sourceLang": "auto",
+    "overrideLang": "",
+    "polishOutLang": "keep",
+    "otherOutLang": "auto",
+    "overrideTone": "",
+    "resultView": "primary",
+    "isEditingSource": "true",
+    "draft": "",
+    "resultText": "",
+    "resultTag": "",
+    "resultInsight": "",
+    "resultMode": "",
+    "resultId": "",
+    "resultStarred": "false",
+    "dictWord": "",
+    "dictPhonetic": "",
+    "dictPos": "",
+    "dictExample": "",
+    "todosJson": "[]",
+    "todosSynced": "false",
+    "copiedJustNow": "false",
+    "lastSourceText": "",
+    "lastSourceMeta": "",
+    "pendingSourceText": "",
+    "pendingOrigin": "draft",
+    "aiStatus": "idle",
+    "aiError": "",
+    "aiUpdatedAt": "",
+    "historySearch": "",
+    "historyScope": "all",
+    "historyMode": "all"
+  },
+  "collections": {
+    "items": {
+      "maxItems": 60,
+      "fields": [
+        "sourceText",
+        "sourcePreview",
+        "text",
+        "insight",
+        "tag",
+        "mode",
+        "starred",
+        "timeText",
+        "origin"
+      ]
+    }
+  },
+  "onDrop": {
+    "accept": "files,text,items",
+    "mode": "link",
+    "actions": [
+      {
+        "type": "script.run",
+        "fn": "prepareDropRun",
+        "args": {
+          "lang": "${state.overrideLang != '' ? state.overrideLang : $settings.targetLang}",
+          "tone": "${state.overrideTone != '' ? state.overrideTone : $settings.toneStyle}",
+          "autoCopy": "${$settings.autoCopyResult}"
+        }
+      },
+      {
+        "type": "ai.run",
+        "guard": "${state.pendingSourceText != ''}",
+        "jobKey": "ai-inbox-task",
+        "onComplete": "onAiDone",
+        "prompt": "${$computed.aiPrompt}"
+      }
+    ]
+  },
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "✨",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${state.aiStatus == 'error'}",
+    "enableBounceOnUpdate": true,
+    "primaryAction": {
+      "icon": "translate",
+      "tooltip": "${$i18n.capActionTooltip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "prepareClipboardRun",
+          "args": {
+            "text": "${$clipboard.text}",
+            "lang": "${state.overrideLang != '' ? state.overrideLang : $settings.targetLang}",
+            "tone": "${state.overrideTone != '' ? state.overrideTone : $settings.toneStyle}",
+            "autoCopy": "true",
+            "fromCapsule": "true"
+          }
+        },
+        {
+          "type": "ai.run",
+          "guard": "${state.pendingSourceText != ''}",
+          "jobKey": "ai-inbox-task",
+          "onComplete": "onAiDone",
+          "prompt": "${$computed.aiPrompt}"
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "spacing": 7,
+      "padding": "12,12,12,10",
+      "children": [
+        "workspace_tab",
+        "history_tab"
+      ]
+    },
+    "workspace_tab": {
+      "type": "Stack",
+      "spacing": 7,
+      "when": "${state.activeTab == 'workspace'}",
+      "children": [
+        "toolbar_header_grid",
+        "translate_lang_bar",
+        "polish_options_bar",
+        "dropdown_other_out_lang",
+        "clipboard_banner_card",
+        "ai_error_infobar",
+        "composer_card",
+        "source_anchor_card",
+        "running_section",
+        "result_card"
+      ]
+    },
+    "toolbar_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 8,
+      "children": [
+        "mode_tabs_card",
+        "toolbar_actions_row"
+      ]
+    },
+    "mode_tabs_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "subtle",
+      "padding": "3",
+      "children": [
+        "mode_tabs_grid"
+      ]
+    },
+    "mode_tabs_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "spacing": 2,
+      "children": [
+        "btn_mode_translate",
+        "btn_mode_polish",
+        "btn_mode_summarize",
+        "btn_mode_explain"
+      ]
+    },
+    "btn_mode_translate": {
+      "type": "Button",
+      "column": 0,
+      "horizontalAlignment": "stretch",
+      "padding": "6,4,6,4",
+      "variant": "${state.mode == 'translate' || state.mode == '' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.mode == 'translate' || state.mode == '' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.modeTranslate}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "selectMode",
+          "args": {
+            "mode": "translate"
+          }
+        }
+      ]
+    },
+    "btn_mode_polish": {
+      "type": "Button",
+      "column": 1,
+      "horizontalAlignment": "stretch",
+      "padding": "6,4,6,4",
+      "variant": "${state.mode == 'polish' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.mode == 'polish' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.modePolish}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "selectMode",
+          "args": {
+            "mode": "polish"
+          }
+        }
+      ]
+    },
+    "btn_mode_summarize": {
+      "type": "Button",
+      "column": 2,
+      "horizontalAlignment": "stretch",
+      "padding": "6,4,6,4",
+      "variant": "${state.mode == 'summarize' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.mode == 'summarize' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.modeSummarize}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "selectMode",
+          "args": {
+            "mode": "summarize"
+          }
+        }
+      ]
+    },
+    "btn_mode_explain": {
+      "type": "Button",
+      "column": 3,
+      "horizontalAlignment": "stretch",
+      "padding": "6,4,6,4",
+      "variant": "${state.mode == 'explain' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.mode == 'explain' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.modeExplain}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "selectMode",
+          "args": {
+            "mode": "explain"
+          }
+        }
+      ]
+    },
+    "toolbar_actions_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_fill_clipboard",
+        "btn_import_file",
+        "btn_open_history"
+      ]
+    },
+    "btn_fill_clipboard": {
+      "type": "IconButton",
+      "icon": "paste",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipFillClip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "fillClipboard",
+          "args": {
+            "text": "${$clipboard.text}"
+          }
+        }
+      ]
+    },
+    "btn_import_file": {
+      "type": "IconButton",
+      "icon": "open-file",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipImportFile}",
+      "onClick": [
+        {
+          "type": "file.pick",
+          "mode": "file",
+          "accept": ".txt,.md,.json,.log,.csv,.yml,.xml,.ini,.toml",
+          "onComplete": "onFileLoaded"
+        }
+      ]
+    },
+    "btn_open_history": {
+      "type": "IconButton",
+      "icon": "history",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipHistory}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "activeTab",
+          "value": "history"
+        },
+        {
+          "type": "script.run",
+          "fn": "onTabChanged"
+        }
+      ]
+    },
+    "translate_lang_bar": {
+      "type": "Grid",
+      "columns": "*,Auto,*",
+      "spacing": 6,
+      "when": "${state.mode == 'translate' || state.mode == ''}",
+      "children": [
+        "dropdown_source_lang",
+        "btn_swap_languages",
+        "dropdown_target_lang"
+      ]
+    },
+    "dropdown_source_lang": {
+      "type": "DropDownButton",
+      "column": 0,
+      "align": "stretch",
+      "label": "${$computed.srcLangBtnText}",
+      "tooltip": "${$i18n.tipSrcLang}",
+      "menuItems": [
+        {
+          "label": "${$computed.srcAutoMenuLabel}",
+          "icon": "${$computed.srcIcon_auto}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "separator": true
+        },
+        {
+          "label": "${$i18n.langZh}",
+          "icon": "${$computed.srcIcon_zhCN}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "zh-CN"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langEn}",
+          "icon": "${$computed.srcIcon_enUS}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "en-US"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langJa}",
+          "icon": "${$computed.srcIcon_jaJP}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "ja-JP"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langKo}",
+          "icon": "${$computed.srcIcon_koKR}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "ko-KR"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langZhTw}",
+          "icon": "${$computed.srcIcon_zhTW}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "zh-TW"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langFr}",
+          "icon": "${$computed.srcIcon_frFR}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "fr-FR"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langDe}",
+          "icon": "${$computed.srcIcon_deDE}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setSourceLang",
+              "args": {
+                "lang": "de-DE"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "btn_swap_languages": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "swap",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipSwapLang}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "swapLanguages"
+        }
+      ]
+    },
+    "dropdown_target_lang": {
+      "type": "DropDownButton",
+      "column": 2,
+      "align": "stretch",
+      "label": "${$computed.dstLangBtnText}",
+      "tooltip": "${$i18n.tipDstLang}",
+      "menuItems": [
+        {
+          "label": "${$i18n.langZh}",
+          "icon": "${$computed.dstIcon_zhCN}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "zh-CN"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langEn}",
+          "icon": "${$computed.dstIcon_enUS}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "en-US"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.dstAutoMenu}",
+          "icon": "${$computed.dstIcon_auto}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "separator": true
+        },
+        {
+          "label": "${$i18n.langZhTw}",
+          "icon": "${$computed.dstIcon_zhTW}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "zh-TW"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langJa}",
+          "icon": "${$computed.dstIcon_jaJP}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "ja-JP"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langKo}",
+          "icon": "${$computed.dstIcon_koKR}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "ko-KR"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langFr}",
+          "icon": "${$computed.dstIcon_frFR}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "fr-FR"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langDe}",
+          "icon": "${$computed.dstIcon_deDE}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "de-DE"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langEs}",
+          "icon": "${$computed.dstIcon_esES}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "es-ES"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langPt}",
+          "icon": "${$computed.dstIcon_ptBR}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "pt-BR"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langRu}",
+          "icon": "${$computed.dstIcon_ruRU}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "ru-RU"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langAr}",
+          "icon": "${$computed.dstIcon_arSA}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "ar-SA"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langHi}",
+          "icon": "${$computed.dstIcon_hiIN}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "hi-IN"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langBn}",
+          "icon": "${$computed.dstIcon_bnBD}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideLang",
+              "args": {
+                "lang": "bn-BD"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "polish_options_bar": {
+      "type": "Grid",
+      "columns": "*,*",
+      "spacing": 6,
+      "when": "${state.mode == 'polish'}",
+      "children": [
+        "dropdown_polish_style",
+        "dropdown_polish_out_lang"
+      ]
+    },
+    "dropdown_polish_style": {
+      "type": "DropDownButton",
+      "column": 0,
+      "align": "stretch",
+      "label": "${$computed.polishStyleBtnText}",
+      "tooltip": "${$i18n.tipPolishStyle}",
+      "menuItems": [
+        {
+          "label": "${$i18n.toneFormal}",
+          "icon": "${$computed.toneIcon_professional}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideTone",
+              "args": {
+                "tone": "professional"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.toneConcise}",
+          "icon": "${$computed.toneIcon_concise}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideTone",
+              "args": {
+                "tone": "concise"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.toneDeveloper}",
+          "icon": "${$computed.toneIcon_developer}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideTone",
+              "args": {
+                "tone": "developer"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.toneFriendly}",
+          "icon": "${$computed.toneIcon_friendly}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideTone",
+              "args": {
+                "tone": "friendly"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.toneNatural}",
+          "icon": "${$computed.toneIcon_natural}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOverrideTone",
+              "args": {
+                "tone": "natural"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "dropdown_polish_out_lang": {
+      "type": "DropDownButton",
+      "column": 1,
+      "align": "stretch",
+      "label": "${$computed.polishOutBtnText}",
+      "tooltip": "${$i18n.tipOutLang}",
+      "menuItems": [
+        {
+          "label": "${$i18n.outLangKeep}",
+          "icon": "${$computed.pOutIcon_keep}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setPolishOutLang",
+              "args": {
+                "lang": "keep"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langZh}",
+          "icon": "${$computed.pOutIcon_zhCN}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setPolishOutLang",
+              "args": {
+                "lang": "zh-CN"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langEn}",
+          "icon": "${$computed.pOutIcon_enUS}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setPolishOutLang",
+              "args": {
+                "lang": "en-US"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "dropdown_other_out_lang": {
+      "type": "DropDownButton",
+      "align": "left",
+      "when": "${state.mode == 'summarize' || state.mode == 'todos' || state.mode == 'explain'}",
+      "label": "${$computed.otherOutBtnText}",
+      "tooltip": "${$i18n.tipOutLang}",
+      "menuItems": [
+        {
+          "label": "${$i18n.outLangAuto}",
+          "icon": "${$computed.oOutIcon_auto}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOtherOutLang",
+              "args": {
+                "lang": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.outLangKeep}",
+          "icon": "${$computed.oOutIcon_keep}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOtherOutLang",
+              "args": {
+                "lang": "keep"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langZh}",
+          "icon": "${$computed.oOutIcon_zhCN}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOtherOutLang",
+              "args": {
+                "lang": "zh-CN"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.langEn}",
+          "icon": "${$computed.oOutIcon_enUS}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setOtherOutLang",
+              "args": {
+                "lang": "en-US"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "clipboard_banner_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6",
+      "when": "${$settings.showClipboardBar == 'true' && $clipboard.hasText == 'true' && $clipboard.text != state.draft && $clipboard.text != state.resultText && $clipboard.text != state.lastSourceText && state.aiStatus != 'running'}",
+      "children": [
+        "clipboard_banner_grid"
+      ]
+    },
+    "clipboard_banner_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "spacing": 6,
+      "children": [
+        "clipboard_banner_text",
+        "btn_clipboard_fill",
+        "btn_clipboard_run"
+      ]
+    },
+    "clipboard_banner_text": {
+      "type": "Text",
+      "column": 0,
+      "verticalAlignment": "center",
+      "text": "${$computed.clipBannerText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "btn_clipboard_fill": {
+      "type": "Button",
+      "column": 1,
+      "variant": "ghost",
+      "text": "${$i18n.btnFill}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "fillClipboard",
+          "args": {
+            "text": "${$clipboard.text}"
+          }
+        }
+      ]
+    },
+    "btn_clipboard_run": {
+      "type": "Button",
+      "column": 2,
+      "variant": "standard",
+      "text": "${$computed.clipDirectLabel}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "prepareClipboardRun",
+          "args": {
+            "text": "${$clipboard.text}",
+            "lang": "${state.overrideLang != '' ? state.overrideLang : $settings.targetLang}",
+            "tone": "${state.overrideTone != '' ? state.overrideTone : $settings.toneStyle}",
+            "autoCopy": "${$settings.autoCopyResult}"
+          }
+        },
+        {
+          "type": "ai.run",
+          "guard": "${state.pendingSourceText != ''}",
+          "jobKey": "ai-inbox-task",
+          "onComplete": "onAiDone",
+          "prompt": "${$computed.aiPrompt}"
+        }
+      ]
+    },
+    "ai_error_infobar": {
+      "type": "InfoBar",
+      "severity": "warning",
+      "title": "${$i18n.errTitle}",
+      "text": "${state.aiError}",
+      "isClosable": false,
+      "when": "${state.aiStatus == 'error' && state.aiError != ''}"
+    },
+    "composer_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 6,
+      "when": "${state.aiStatus != 'running' && (state.resultText == '' || state.isEditingSource == 'true')}",
+      "children": [
+        "composer_draft_input",
+        "composer_footer_grid"
+      ]
+    },
+    "composer_draft_input": {
+      "type": "TextArea",
+      "bind": "state.draft",
+      "placeholder": "${$computed.modePlaceholder}",
+      "minHeight": 82,
+      "maxHeight": 148,
+      "minLines": 3,
+      "maxLines": 6,
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "prepareDraftRun",
+          "args": {
+            "lang": "${state.overrideLang != '' ? state.overrideLang : $settings.targetLang}",
+            "tone": "${state.overrideTone != '' ? state.overrideTone : $settings.toneStyle}",
+            "autoCopy": "${$settings.autoCopyResult}"
+          }
+        },
+        {
+          "type": "ai.run",
+          "guard": "${state.pendingSourceText != ''}",
+          "jobKey": "ai-inbox-task",
+          "onComplete": "onAiDone",
+          "prompt": "${$computed.aiPrompt}"
+        }
+      ]
+    },
+    "composer_footer_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto,Auto",
+      "spacing": 5,
+      "children": [
+        "composer_hint_text",
+        "btn_clear_draft",
+        "btn_cancel_edit",
+        "btn_run_ai"
+      ]
+    },
+    "composer_hint_text": {
+      "type": "Text",
+      "column": 0,
+      "verticalAlignment": "center",
+      "text": "${$computed.composerHint}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "btn_clear_draft": {
+      "type": "IconButton",
+      "column": 1,
+      "verticalAlignment": "center",
+      "icon": "delete",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipClearDraft}",
+      "when": "${state.draft != ''}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearDraft"
+        }
+      ]
+    },
+    "btn_cancel_edit": {
+      "type": "Button",
+      "column": 2,
+      "verticalAlignment": "center",
+      "variant": "subtle",
+      "text": "${$i18n.btnCancelEdit}",
+      "when": "${state.resultText != '' && state.previewSeeded != 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "cancelSourceEdit"
+        }
+      ]
+    },
+    "btn_run_ai": {
+      "type": "Button",
+      "column": 3,
+      "verticalAlignment": "center",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "color": "cyan",
+      "icon": "translate",
+      "text": "${$computed.runBtnText}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "prepareDraftRun",
+          "args": {
+            "lang": "${state.overrideLang != '' ? state.overrideLang : $settings.targetLang}",
+            "tone": "${state.overrideTone != '' ? state.overrideTone : $settings.toneStyle}",
+            "autoCopy": "${$settings.autoCopyResult}"
+          }
+        },
+        {
+          "type": "ai.run",
+          "guard": "${state.pendingSourceText != ''}",
+          "jobKey": "ai-inbox-task",
+          "onComplete": "onAiDone",
+          "prompt": "${$computed.aiPrompt}"
+        }
+      ]
+    },
+    "source_anchor_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6",
+      "when": "${state.aiStatus != 'running' && state.resultText != '' && state.isEditingSource != 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "openSourceEditor"
+        }
+      ],
+      "children": [
+        "source_anchor_grid"
+      ]
+    },
+    "source_anchor_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "source_anchor_preview",
+        "source_anchor_edit_label"
+      ]
+    },
+    "source_anchor_preview": {
+      "type": "Text",
+      "column": 0,
+      "verticalAlignment": "center",
+      "text": "${$computed.sourceAnchorText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "source_anchor_edit_label": {
+      "type": "Text",
+      "column": 1,
+      "verticalAlignment": "center",
+      "text": "${$i18n.btnEdit}",
+      "style": "caption",
+      "color": "cyan",
+      "maxLines": 1
+    },
+    "running_section": {
+      "type": "Stack",
+      "spacing": 7,
+      "when": "${state.aiStatus == 'running'}",
+      "children": [
+        "running_source_card",
+        "running_progress_card"
+      ]
+    },
+    "running_source_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6",
+      "when": "${state.lastSourceText != '' || state.draft != ''}",
+      "children": [
+        "running_source_preview"
+      ]
+    },
+    "running_source_preview": {
+      "type": "Text",
+      "text": "${$computed.sourceAnchorText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "running_progress_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10",
+      "spacing": 8,
+      "children": [
+        "running_progress_bar",
+        "running_header_grid",
+        "running_sub_note"
+      ]
+    },
+    "running_progress_bar": {
+      "type": "ProgressBar",
+      "indeterminate": true,
+      "height": 3,
+      "color": "cyan"
+    },
+    "running_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 8,
+      "children": [
+        "running_status_label",
+        "btn_cancel_ai"
+      ]
+    },
+    "running_status_label": {
+      "type": "Text",
+      "column": 0,
+      "verticalAlignment": "center",
+      "text": "${$computed.runningLabel}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "btn_cancel_ai": {
+      "type": "Button",
+      "column": 1,
+      "verticalAlignment": "center",
+      "variant": "subtle",
+      "text": "${$i18n.btnCancel}",
+      "onClick": [
+        {
+          "type": "job.cancel",
+          "jobKey": "ai-inbox-task"
+        }
+      ]
+    },
+    "running_sub_note": {
+      "type": "Text",
+      "text": "${$i18n.runningSubNote}",
+      "style": "caption",
+      "color": "muted",
+      "wrapText": true
+    },
+    "result_card": {
+      "type": "Card",
+      "tone": "default",
+      "padding": "12,10",
+      "spacing": 7,
+      "when": "${state.aiStatus != 'running' && state.resultText != ''}",
+      "children": [
+        "result_header_grid",
+        "dict_result_section",
+        "primary_result_scroll",
+        "todos_result_section",
+        "bilingual_pairs_list",
+        "polish_diff_scroll",
+        "source_text_scroll",
+        "result_insight_divider",
+        "result_insight_text"
+      ]
+    },
+    "result_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 4,
+      "children": [
+        "result_view_tabs_row",
+        "todos_count_header",
+        "result_actions_row"
+      ]
+    },
+    "result_view_tabs_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 5,
+      "verticalAlignment": "center",
+      "when": "${state.resultMode != 'todos'}",
+      "children": [
+        "result_mode_badge",
+        "btn_toggle_secondary_view",
+        "btn_toggle_source_view"
+      ]
+    },
+    "result_mode_badge": {
+      "type": "Badge",
+      "variant": "pill",
+      "text": "${$computed.resultHeaderBadge}",
+      "tone": "${$computed.resultBadgeTone}"
+    },
+    "btn_toggle_secondary_view": {
+      "type": "Button",
+      "variant": "${state.resultView == 'secondary' ? 'standard' : 'ghost'}",
+      "padding": "6,2,6,2",
+      "text": "${$computed.rvSecondaryLabel}",
+      "when": "${state.resultMode == 'polish' || (state.resultMode == 'translate' && $computed.isDictResult != 'true')}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleSecondaryView"
+        }
+      ]
+    },
+    "btn_toggle_source_view": {
+      "type": "Button",
+      "variant": "${state.resultView == 'source' ? 'standard' : 'ghost'}",
+      "padding": "6,2,6,2",
+      "text": "${$i18n.rvSource}",
+      "when": "${state.isEditingSource != 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setResultView",
+          "args": {
+            "view": "${state.resultView == 'source' ? 'primary' : 'source'}"
+          }
+        }
+      ]
+    },
+    "todos_count_header": {
+      "type": "Text",
+      "column": 0,
+      "verticalAlignment": "center",
+      "when": "${state.resultMode == 'todos'}",
+      "text": "${$computed.todosHeader}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "result_actions_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_star_result",
+        "btn_unstar_result",
+        "btn_chain_to_draft",
+        "btn_copy_result"
+      ]
+    },
+    "btn_star_result": {
+      "type": "IconButton",
+      "icon": "target",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipStar}",
+      "when": "${state.resultStarred != 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleCurrentStar"
+        }
+      ]
+    },
+    "btn_unstar_result": {
+      "type": "IconButton",
+      "icon": "star-filled",
+      "size": 26,
+      "variant": "subtle",
+      "color": "warning",
+      "tooltip": "${$i18n.tipUnstar}",
+      "when": "${state.resultStarred == 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleCurrentStar"
+        }
+      ]
+    },
+    "btn_chain_to_draft": {
+      "type": "IconButton",
+      "icon": "edit",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipChain}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "chainResultToDraft"
+        }
+      ]
+    },
+    "btn_copy_result": {
+      "type": "Button",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "icon": "${$computed.copyBtnIcon}",
+      "text": "${$computed.copyBtnLabel}",
+      "tooltip": "${$i18n.tipCopy}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "copyResultWithFeedback"
+        }
+      ]
+    },
+    "dict_result_section": {
+      "type": "Stack",
+      "spacing": 5,
+      "when": "${state.resultView == 'primary' && $computed.isDictResult == 'true'}",
+      "children": [
+        "dict_headword_row",
+        "dict_definition_scroll",
+        "dict_example_text"
+      ]
+    },
+    "dict_headword_row": {
+      "type": "Stack",
+      "orientation": "horizontal",
+      "spacing": 6,
+      "children": [
+        "dict_word_text",
+        "dict_phonetic_text",
+        "dict_pos_badge"
+      ]
+    },
+    "dict_word_text": {
+      "type": "Text",
+      "verticalAlignment": "center",
+      "text": "${state.dictWord}",
+      "style": "subtitle",
+      "maxLines": 1
+    },
+    "dict_phonetic_text": {
+      "type": "Text",
+      "verticalAlignment": "center",
+      "text": "${state.dictPhonetic}",
+      "style": "mono",
+      "color": "cyan",
+      "when": "${state.dictPhonetic != ''}",
+      "maxLines": 1
+    },
+    "dict_pos_badge": {
+      "type": "Badge",
+      "verticalAlignment": "center",
+      "text": "${state.dictPos}",
+      "tone": "subtle",
+      "when": "${state.dictPos != ''}"
+    },
+    "dict_definition_scroll": {
+      "type": "Scroll",
+      "maxHeight": 100,
+      "children": [
+        "dict_definition_text"
+      ]
+    },
+    "dict_definition_text": {
+      "type": "Text",
+      "text": "${state.resultText}",
+      "style": "body",
+      "wrapText": true
+    },
+    "dict_example_text": {
+      "type": "Text",
+      "text": "${state.dictExample}",
+      "style": "caption",
+      "color": "secondary",
+      "wrapText": true,
+      "maxLines": 3,
+      "when": "${state.dictExample != ''}"
+    },
+    "primary_result_scroll": {
+      "type": "Scroll",
+      "maxHeight": 144,
+      "when": "${state.resultView == 'primary' && $computed.isDictResult != 'true' && state.resultMode != 'todos'}",
+      "children": [
+        "primary_result_text"
+      ]
+    },
+    "primary_result_text": {
+      "type": "Text",
+      "text": "${state.resultText}",
+      "style": "body",
+      "wrapText": true
+    },
+    "todos_result_section": {
+      "type": "Stack",
+      "spacing": 6,
+      "when": "${state.resultMode == 'todos'}",
+      "children": [
+        "todos_result_list",
+        "btn_sync_todos"
+      ]
+    },
+    "todos_result_list": {
+      "type": "List",
+      "items": "${$computed.todoItems}",
+      "maxHeight": 128,
+      "spacing": 3,
+      "itemTemplate": "todo_checkbox_item"
+    },
+    "todo_checkbox_item": {
+      "type": "CheckBox",
+      "value": "${$item.done}",
+      "text": "${$item.text}",
+      "strikethrough": true,
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "toggleExtractedTodo",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "btn_sync_todos": {
+      "type": "Button",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "color": "${state.todosSynced == 'true' ? 'emerald' : 'cyan'}",
+      "icon": "checkbox",
+      "text": "${$computed.syncTodosLabel}",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "syncTodosToDeskBox"
+        }
+      ]
+    },
+    "bilingual_pairs_list": {
+      "type": "List",
+      "when": "${state.resultView == 'secondary' && state.resultMode == 'translate'}",
+      "items": "${$computed.bilingualPairs}",
+      "variant": "divided",
+      "maxHeight": 148,
+      "spacing": 6,
+      "itemTemplate": "bilingual_pair_item"
+    },
+    "bilingual_pair_item": {
+      "type": "Stack",
+      "spacing": 2,
+      "children": [
+        "bilingual_source_text",
+        "bilingual_target_text"
+      ]
+    },
+    "bilingual_source_text": {
+      "type": "Text",
+      "text": "${$item.src}",
+      "style": "caption",
+      "color": "secondary",
+      "wrapText": true
+    },
+    "bilingual_target_text": {
+      "type": "Text",
+      "text": "${$item.dst}",
+      "style": "body",
+      "wrapText": true
+    },
+    "polish_diff_scroll": {
+      "type": "Scroll",
+      "maxHeight": 148,
+      "when": "${state.resultView == 'secondary' && state.resultMode == 'polish'}",
+      "children": [
+        "polish_diff_richtext"
+      ]
+    },
+    "polish_diff_richtext": {
+      "type": "RichText",
+      "items": "${$computed.diffSpans}",
+      "text": "${state.resultText}",
+      "wrapText": true
+    },
+    "source_text_scroll": {
+      "type": "Scroll",
+      "maxHeight": 148,
+      "when": "${state.resultView == 'source'}",
+      "children": [
+        "source_full_text"
+      ]
+    },
+    "source_full_text": {
+      "type": "Text",
+      "text": "${state.lastSourceText}",
+      "style": "body",
+      "color": "secondary",
+      "wrapText": true
+    },
+    "result_insight_divider": {
+      "type": "Divider",
+      "when": "${state.resultInsight != ''}"
+    },
+    "result_insight_text": {
+      "type": "Text",
+      "when": "${state.resultInsight != ''}",
+      "text": "${$computed.insightHeader}: ${state.resultInsight}",
+      "style": "caption",
+      "color": "secondary",
+      "wrapText": true,
+      "maxLines": 2
+    },
+    "history_tab": {
+      "type": "Stack",
+      "spacing": 7,
+      "when": "${state.activeTab == 'history'}",
+      "children": [
+        "history_header_grid",
+        "history_search_grid",
+        "history_filter_bar",
+        "history_items_list"
+      ]
+    },
+    "history_header_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "spacing": 6,
+      "children": [
+        "btn_back_workspace",
+        "history_title_text",
+        "dropdown_history_more"
+      ]
+    },
+    "btn_back_workspace": {
+      "type": "Button",
+      "column": 0,
+      "variant": "subtle",
+      "icon": "back",
+      "text": "${$i18n.btnBackWorkspace}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "activeTab",
+          "value": "workspace"
+        },
+        {
+          "type": "script.run",
+          "fn": "onTabChanged"
+        }
+      ]
+    },
+    "history_title_text": {
+      "type": "Text",
+      "column": 1,
+      "verticalAlignment": "center",
+      "text": "${$i18n.historyTitle}",
+      "style": "bodyStrong",
+      "align": "center",
+      "maxLines": 1
+    },
+    "dropdown_history_more": {
+      "type": "DropDownButton",
+      "column": 2,
+      "icon": "more",
+      "tooltip": "${$i18n.tipHistoryMore}",
+      "menuItems": [
+        {
+          "label": "${$i18n.menuExportMd}",
+          "icon": "export",
+          "onClick": [
+            {
+              "type": "collection.exportmarkdown",
+              "collection": "items",
+              "title": "${$i18n.exportTitle}"
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.menuClearUnstarred}",
+          "icon": "delete",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "clearHistory",
+              "args": {
+                "scope": "unstarred"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.menuClearAll}",
+          "icon": "delete",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "clearHistory",
+              "args": {
+                "scope": "all"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "history_search_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "spacing": 6,
+      "children": [
+        "input_history_search",
+        "history_search_actions"
+      ]
+    },
+    "input_history_search": {
+      "type": "Input",
+      "column": 0,
+      "bind": "state.historySearch",
+      "placeholder": "${$i18n.historySearchPh}",
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "applyHistoryFilter"
+        }
+      ]
+    },
+    "history_search_actions": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_apply_search",
+        "btn_clear_search"
+      ]
+    },
+    "btn_apply_search": {
+      "type": "IconButton",
+      "icon": "search",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipSearch}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "applyHistoryFilter"
+        }
+      ]
+    },
+    "btn_clear_search": {
+      "type": "IconButton",
+      "icon": "close",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipClearSearch}",
+      "when": "${state.historySearch != ''}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearHistorySearch"
+        }
+      ]
+    },
+    "history_filter_bar": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "spacing": 6,
+      "children": [
+        "history_scope_card",
+        "history_count_text",
+        "dropdown_history_mode"
+      ]
+    },
+    "history_scope_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "subtle",
+      "padding": "3",
+      "children": [
+        "history_scope_grid"
+      ]
+    },
+    "history_scope_grid": {
+      "type": "Grid",
+      "columns": "Auto,Auto",
+      "spacing": 2,
+      "children": [
+        "btn_scope_all",
+        "btn_scope_starred"
+      ]
+    },
+    "btn_scope_all": {
+      "type": "Button",
+      "column": 0,
+      "padding": "8,3,8,3",
+      "variant": "${state.historyScope != 'starred' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.historyScope != 'starred' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.scopeAll}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setHistoryScope",
+          "args": {
+            "scope": "all"
+          }
+        }
+      ]
+    },
+    "btn_scope_starred": {
+      "type": "Button",
+      "column": 1,
+      "padding": "8,3,8,3",
+      "variant": "${state.historyScope == 'starred' ? 'standard' : 'ghost'}",
+      "fontWeight": "${state.historyScope == 'starred' ? 'semiBold' : 'normal'}",
+      "text": "${$i18n.scopeStarred}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setHistoryScope",
+          "args": {
+            "scope": "starred"
+          }
+        }
+      ]
+    },
+    "history_count_text": {
+      "type": "Text",
+      "column": 1,
+      "verticalAlignment": "center",
+      "text": "${$computed.historyCountBadge}",
+      "style": "caption",
+      "color": "muted",
+      "align": "center",
+      "maxLines": 1
+    },
+    "dropdown_history_mode": {
+      "type": "DropDownButton",
+      "column": 2,
+      "icon": "filter",
+      "label": "${$computed.historyFilterBtnText}",
+      "menuItems": [
+        {
+          "label": "${$i18n.filterAllModes}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "all"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.modeTranslate}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "translate"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.modePolish}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "polish"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.modeSummarize}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "summarize"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.modeTodos}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "todos"
+              }
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.modeExplain}",
+          "onClick": [
+            {
+              "type": "script.run",
+              "fn": "setHistoryMode",
+              "args": {
+                "mode": "explain"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "history_items_list": {
+      "type": "List",
+      "items": "${$computed.filteredHistory}",
+      "maxHeight": 240,
+      "spacing": 5,
+      "emptyText": "${$computed.historyEmptyText}",
+      "itemTemplate": "history_item_card"
+    },
+    "history_item_card": {
+      "type": "Stack",
+      "spacing": 4,
+      "children": [
+        "history_item_header",
+        "history_item_source",
+        "history_item_result"
+      ]
+    },
+    "history_item_header": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "spacing": 6,
+      "children": [
+        "history_item_badge",
+        "history_item_time",
+        "history_item_actions"
+      ]
+    },
+    "history_item_badge": {
+      "type": "Badge",
+      "column": 0,
+      "text": "${$item.tag != '' ? $item.tag : $item.modeLabel}",
+      "tone": "${$item.modeBadgeTone}"
+    },
+    "history_item_time": {
+      "type": "Text",
+      "column": 1,
+      "verticalAlignment": "center",
+      "text": "${$item.timeText}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "history_item_actions": {
+      "type": "Stack",
+      "column": 2,
+      "orientation": "horizontal",
+      "spacing": 0,
+      "children": [
+        "btn_star_history_item",
+        "btn_unstar_history_item",
+        "btn_copy_history_item",
+        "btn_load_history_item",
+        "btn_delete_history_item"
+      ]
+    },
+    "btn_star_history_item": {
+      "type": "IconButton",
+      "icon": "target",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipStar}",
+      "when": "${$item.starred != 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleItemStar",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "btn_unstar_history_item": {
+      "type": "IconButton",
+      "icon": "star-filled",
+      "size": 24,
+      "variant": "subtle",
+      "color": "warning",
+      "tooltip": "${$i18n.tipUnstar}",
+      "when": "${$item.starred == 'true'}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleItemStar",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "btn_copy_history_item": {
+      "type": "IconButton",
+      "icon": "copy",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipCopy}",
+      "onClick": [
+        {
+          "type": "clipboard.copy",
+          "value": "${$item.text}"
+        }
+      ]
+    },
+    "btn_load_history_item": {
+      "type": "IconButton",
+      "icon": "open",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipReuse}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "loadHistoryItem",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "btn_delete_history_item": {
+      "type": "IconButton",
+      "icon": "delete",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipDelete}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "removeHistoryItem",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "history_item_source": {
+      "type": "Text",
+      "text": "${$item.sourcePreview}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "history_item_result": {
+      "type": "Text",
+      "text": "${$item.text}",
+      "style": "body",
+      "maxLines": 2,
+      "wrapText": true
+    }
+  }
+}

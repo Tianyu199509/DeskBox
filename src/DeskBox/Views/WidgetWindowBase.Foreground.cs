@@ -34,11 +34,16 @@ public abstract partial class WidgetWindowBase
             palette.Primary, palette.Secondary, palette.Disabled, highContrast);
     }
 
+    protected virtual void OnWidgetForegroundChanged()
+    {
+    }
+
     protected void SetWidgetForegroundModeOverride(string? mode)
     {
         WidgetForegroundSettings.SetModeOverride(Config, mode);
         SettingsService.UpdateWidget(Config);
         ApplyWidgetForegroundAppearance();
+        OnWidgetForegroundChanged();
     }
 
     /// <summary>
@@ -110,6 +115,7 @@ public abstract partial class WidgetWindowBase
                     WidgetForegroundSettings.ModeCustom);
                 SettingsService.UpdateWidget(Config);
                 ApplyWidgetForegroundAppearance();
+                OnWidgetForegroundChanged();
             }
             catch (Exception ex)
             {
@@ -120,6 +126,27 @@ public abstract partial class WidgetWindowBase
                 flyout.Hide();
             }
         };
+        if (flyout.Content is StackPanel rootPanel &&
+            rootPanel.Children.Count > 0 &&
+            rootPanel.Children[0] is TextBlock titleText)
+        {
+            rootPanel.Children.RemoveAt(0);
+            titleText.VerticalAlignment = VerticalAlignment.Center;
+            var headerGrid = new Grid { ColumnSpacing = 8 };
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            headerGrid.Children.Add(titleText);
+            Button closeButton = WidgetEditorPopoverWindow.CreateHeaderCloseButton(
+                localization.T("Common.Close"),
+                () => flyout.Hide(),
+                RootElement);
+            Grid.SetColumn(closeButton, 1);
+            headerGrid.Children.Add(closeButton);
+            rootPanel.Children.Insert(0, headerGrid);
+            rootPanel.GotFocus += (_, e) =>
+                FlyoutTextInputActivation.ActivateVisibleBridges("WidgetForegroundColorPicker", e.OriginalSource);
+        }
+
         return flyout;
     }
 
@@ -146,7 +173,11 @@ public abstract partial class WidgetWindowBase
         AccessibilitySettings sender,
         object args)
     {
-        if (!DispatcherQueue.TryEnqueue(ApplyWidgetForegroundAppearance))
+        if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                ApplyWidgetForegroundAppearance();
+                OnWidgetForegroundChanged();
+            }))
         {
             App.LogVerbose("[WidgetForeground] Could not queue high-contrast refresh.");
         }

@@ -16,6 +16,12 @@ In the meantime, community feedback is extremely valuable. Bug reports, feature 
 
 Even if a PR cannot currently be merged, I sincerely appreciate the time and effort people put into exploring and improving DeskBox. Thank you for your understanding and support!
 
+### Licensing & Future Contributions
+
+DeskBox is dual-licensed under `GPL-3.0-only` and a Commercial License (see [LICENSING.md](LICENSING.md)). To keep copyright ownership clear across both licensing tracks, if external Pull Requests are reopened in the future, contributors submitting code to this repository will be asked to agree to a Contributor License Agreement (CLA) granting dual-licensing rights.
+
+Note that **independent `.dbxwidget` custom widgets** created by community authors remain their own independent works and are explicitly exempt from DeskBox's GPL copyleft obligations as documented in [LICENSING.md](LICENSING.md).
+
 ---
 
 ## 中文
@@ -33,3 +39,9 @@ DeskBox 目前主要由个人独立开发和维护。现阶段项目仍处于较
 在此之前，非常欢迎通过 **Issue / Discussion** 提交 Bug、功能建议、UI/UX 意见、技术方案、原型或实现思路。
 
 即使现阶段无法直接合并 PR，我也非常感谢每一位愿意花时间研究和改进 DeskBox 的朋友。感谢理解与支持！
+
+### 开源协议与未来贡献边界
+
+DeskBox 采用 `GPL-3.0-only` 与商业授权双轨发布（详见 [LICENSING.md](LICENSING.md)）。为保持两条授权轨道下著作权归属清晰，未来重新开放外部 Pull Request 时，向本仓库提交的代码贡献将需签署贡献者许可协议（CLA），以授予双授权使用权限。
+
+同时需要说明：社区作者独立编写的 **`.dbxwidget` 自定义组件** 属于创作者的独立作品，依据 [LICENSING.md](LICENSING.md) 明确豁免主程序的 GPL 传染约束。

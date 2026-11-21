@@ -1,7 +1,8 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
@@ -45,6 +46,7 @@ public sealed partial class WidgetIconCustomizer : UserControl
         EmojiGrid.ItemClick += EmojiGrid_ItemClick;
         RandomButton.Click += (_, _) => SelectRandomEmoji();
         ResetButton.Click += (_, _) => ResetToDefault();
+        CloseButton.Click += (_, _) => HostFlyout?.Hide();
         ChooseImageButton.Click += (_, _) =>
         {
             HostFlyout?.Hide();
@@ -56,6 +58,9 @@ public sealed partial class WidgetIconCustomizer : UserControl
     {
         _config = config;
         LocalizationService localization = App.Current.LocalizationService;
+        string closeLabel = localization.T("Common.Close");
+        AutomationProperties.SetName(CloseButton, closeLabel);
+        ToolTipService.SetToolTip(CloseButton, closeLabel);
         TitleText.Text = localization.T("Widget.CustomIcon.Title");
         SubtitleText.Text = localization.T("Widget.CustomIcon.Subtitle");
         EmojiTabItem.Content = localization.T("Widget.CustomIcon.TabEmoji");
@@ -79,9 +84,7 @@ public sealed partial class WidgetIconCustomizer : UserControl
 
     private static string ResolveDefaultIconKind(WidgetConfig config)
     {
-        return config.WidgetKind == WidgetKind.File
-            ? WidgetTitleIconKindNames.FromFileWidget(config.FollowsDefaultStoragePath)
-            : WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
+        return WidgetTitleIconKindNames.FromWidgetConfig(config);
     }
 
     private static List<WidgetEmojiCategoryOption> BuildCategoryOptions()

@@ -48,16 +48,17 @@ public static class ElevatedFileLauncher
     /// refuses them and the association list is empty, so open-with UI
     /// must be hidden for these types (shared with ShellOpenWithHelper).
     /// </summary>
-    internal static readonly HashSet<string> ExecutableExtensions =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
+    internal static readonly System.Collections.Frozen.FrozenSet<string> ExecutableExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
             ".exe",
             ".com",
             ".scr",
             ".msi",
             ".bat",
             ".cmd"
-        };
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static bool CanRunAsAdministrator(WidgetItem item) =>
         item is not null && TryCreateLaunchRequest(item, out _);
@@ -87,9 +88,17 @@ public static class ElevatedFileLauncher
         IntPtr ownerWindow,
         string filePath)
     {
+        return RunAsAdministrator(ownerWindow, filePath, targetPathHint: null);
+    }
+
+    internal static ElevatedFileLaunchResult RunAsAdministrator(
+        IntPtr ownerWindow,
+        string? candidatePath,
+        string? targetPathHint)
+    {
         if (!TryCreateLaunchRequest(
-                filePath,
-                null,
+                candidatePath,
+                targetPathHint,
                 out ElevatedFileLaunchRequest request))
         {
             return new ElevatedFileLaunchResult(
@@ -98,6 +107,24 @@ public static class ElevatedFileLauncher
 
         return RunAsAdministrator(ownerWindow, in request);
     }
+
+    public static Task<ElevatedFileLaunchResult> RunAsAdministratorAsync(
+        IntPtr ownerWindow,
+        WidgetItem item,
+        CancellationToken cancellationToken = default) =>
+        DeskBox.Services.ShellLaunchService.RunAsAdministratorAsync(
+            ownerWindow,
+            item,
+            cancellationToken);
+
+    public static Task<ElevatedFileLaunchResult> RunAsAdministratorAsync(
+        IntPtr ownerWindow,
+        string filePath,
+        CancellationToken cancellationToken = default) =>
+        DeskBox.Services.ShellLaunchService.RunAsAdministratorAsync(
+            ownerWindow,
+            filePath,
+            cancellationToken);
 
     private static ElevatedFileLaunchResult RunAsAdministrator(
         IntPtr ownerWindow,
@@ -131,6 +158,10 @@ public static class ElevatedFileLauncher
             Directory = request.WorkingDirectory,
             Show = 1
         };
+
+        using IDisposable? childLaunchScope =
+            DeskBox.Services.ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
+        _ = Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
 
         try
         {
@@ -231,14 +262,18 @@ public static class ElevatedFileLauncher
         }
 
         string candidate = candidatePath.Trim();
+        string rawShortcutTarget = string.Empty;
+        bool fromShellLink = false;
         string arguments = string.Empty;
         string workingDirectory = string.Empty;
         if (ShortcutHelper.IsShellLinkPath(candidate))
         {
+            fromShellLink = true;
             ShortcutInfo? metadata = ShortcutHelper.ReadStoredMetadata(candidate);
-            candidate = !string.IsNullOrWhiteSpace(metadata?.TargetPath)
+            rawShortcutTarget = !string.IsNullOrWhiteSpace(metadata?.TargetPath)
                 ? metadata.TargetPath.Trim()
                 : targetPathHint?.Trim() ?? string.Empty;
+            candidate = rawShortcutTarget;
             arguments = metadata?.Arguments?.Trim() ?? string.Empty;
             workingDirectory = metadata?.WorkingDirectory?.Trim() ?? string.Empty;
         }
@@ -248,9 +283,46 @@ public static class ElevatedFileLauncher
             candidate = targetPathHint.Trim();
         }
 
-        candidate = Environment.ExpandEnvironmentVariables(candidate);
-        if (candidate.Length == 0 ||
-            Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri) &&
+        if (!TryNormalizeExistingExecutableCandidate(
+                rawShortcutTarget,
+                candidate,
+                out string resolvedExecutable))
+        {
+            if (!fromShellLink)
+            {
+                return false;
+            }
+
+            string? effectiveShortcutTarget =
+                ShortcutHelper.TryReadEffectiveTargetPath(candidatePath.Trim());
+            if (!TryNormalizeExistingExecutableCandidate(
+                    effectiveShortcutTarget,
+                    effectiveShortcutTarget ?? string.Empty,
+                    out resolvedExecutable))
+            {
+                return false;
+            }
+        }
+
+        workingDirectory = ResolveWorkingDirectory(
+            workingDirectory,
+            resolvedExecutable);
+        request = CreateLaunchRequest(
+            resolvedExecutable,
+            arguments,
+            workingDirectory);
+        return true;
+    }
+
+    private static bool TryNormalizeExistingExecutableCandidate(
+        string? rawTarget,
+        string candidate,
+        out string normalizedExecutable)
+    {
+        normalizedExecutable = string.Empty;
+        string expanded = Environment.ExpandEnvironmentVariables(candidate);
+        if (expanded.Length == 0 ||
+            Uri.TryCreate(expanded, UriKind.Absolute, out Uri? uri) &&
             !uri.IsFile)
         {
             return false;
@@ -258,27 +330,42 @@ public static class ElevatedFileLauncher
 
         try
         {
-            candidate = Path.GetFullPath(candidate);
+            expanded = Path.GetFullPath(expanded);
         }
         catch
         {
             return false;
         }
 
-        string extension = Path.GetExtension(candidate);
-        if (!ExecutableExtensions.Contains(extension) || !File.Exists(candidate))
+        if (ExecutableExtensions.Contains(Path.GetExtension(expanded)) &&
+            File.Exists(expanded))
         {
-            return false;
+            normalizedExecutable = expanded;
+            return true;
         }
 
-        workingDirectory = ResolveWorkingDirectory(
-            workingDirectory,
-            candidate);
-        request = CreateLaunchRequest(
-            candidate,
-            arguments,
-            workingDirectory);
-        return true;
+        if (!string.IsNullOrWhiteSpace(rawTarget) &&
+            DeskBox.Services.ShortcutTargetProbe.TryResolveProgramFilesX86Counterpart(
+                rawTarget,
+                expanded,
+                out string x86Counterpart))
+        {
+            try
+            {
+                string fullX86 = Path.GetFullPath(x86Counterpart);
+                if (ExecutableExtensions.Contains(Path.GetExtension(fullX86)) &&
+                    File.Exists(fullX86))
+                {
+                    normalizedExecutable = fullX86;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
     }
 
     internal static ElevatedFileLaunchRequest CreateLaunchRequest(
@@ -434,24 +521,55 @@ public static class ElevatedFileLauncher
         return false;
     }
 
-    private static bool TryGetProcessPath(
+    private static unsafe bool TryGetProcessPath(
         IntPtr processHandle,
         out string processPath)
     {
-        var path = new StringBuilder(32_768);
-        uint length = (uint)path.Capacity;
-        if (!ElevatedLaunchNativeMethods.QueryFullProcessImageName(
+        const int ErrorInsufficientBuffer = 122;
+        char* stackBuffer = stackalloc char[1024];
+        uint length = 1024;
+        if (ElevatedLaunchNativeMethods.QueryFullProcessImageName(
                 processHandle,
                 flags: 0,
-                path,
-                ref length))
+                stackBuffer,
+                ref length) &&
+            length > 0)
+        {
+            processPath = new string(stackBuffer, 0, (int)length);
+            return true;
+        }
+
+        if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer)
         {
             processPath = string.Empty;
             return false;
         }
 
-        processPath = path.ToString();
-        return processPath.Length > 0;
+        char[] rented = System.Buffers.ArrayPool<char>.Shared.Rent(32_768);
+        try
+        {
+            fixed (char* rentedPtr = rented)
+            {
+                length = (uint)rented.Length;
+                if (!ElevatedLaunchNativeMethods.QueryFullProcessImageName(
+                        processHandle,
+                        flags: 0,
+                        rentedPtr,
+                        ref length) ||
+                    length == 0)
+                {
+                    processPath = string.Empty;
+                    return false;
+                }
+
+                processPath = new string(rentedPtr, 0, (int)length);
+                return true;
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        }
     }
 
     private static bool TryGetTokenElevation(

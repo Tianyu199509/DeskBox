@@ -380,6 +380,7 @@ public sealed class WidgetGroupSettingsTests
 
     [Theory]
     [InlineData(WidgetGroupNavigationStyles.Tabs)]
+    [InlineData(WidgetGroupNavigationStyles.EqualTabs)]
     [InlineData(WidgetGroupNavigationStyles.Stack)]
     public void Resolve_FollowDefaultUsesNormalizedGlobalChoice(string defaultStyle)
     {

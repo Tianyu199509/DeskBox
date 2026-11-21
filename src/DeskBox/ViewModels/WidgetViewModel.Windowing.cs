@@ -26,12 +26,52 @@ public partial class WidgetViewModel
     private const int RenderWindowActivationThreshold = 300;
     private const int RenderWindowInitialSize = 30;
     private const int RenderWindowGrowChunk = 200;
+    private const int ProgressiveRematerializationInitialSlice = 24;
+    private const int ProgressiveRematerializationSliceChunk = 24;
 
     public ObservableCollection<WidgetItem> RenderedItems { get; } = [];
 
     private int _renderWindowBudget = RenderWindowInitialSize;
+    private int? _progressiveRematerializationCap;
+    private int _progressiveRematerializationGeneration;
     private bool _renderWindowReconcileQueued;
     private bool _pendingPostBatchHydration;
+    private bool _pendingHealAfterActiveHydration;
+    private string? _openPopoverStackKey;
+    private bool _isIconHydrationDormant;
+    private bool _activeHydrationSkippedIconsWhileDormant;
+
+    /// <summary>
+    /// Hydration snapshots the rendered prefix synchronously at startup. When a
+    /// caller starts hydration immediately after mutating <see cref="Items"/>
+    /// (such as <see cref="LoadFolderContentsAsync"/> during initial load or the
+    /// first cold-start group tab switch), the stack display rebuild and render
+    /// window reconcile may still be sitting in the dispatcher queue. Flushing
+    /// them synchronously here guarantees the first hydration pass sees the
+    /// actual rendered items instead of an empty pre-reconcile prefix.
+    /// </summary>
+    internal void EnsureProjectionAndRenderWindowSynchronizedForHydration()
+    {
+        if (_isDisposed ||
+            _itemMutationBatchDepth > 0 ||
+            _deferredStackRebuildDepth > 0)
+        {
+            return;
+        }
+
+        if (UsesStackProjection && (!_hasBuiltStackDisplay || _stackRebuildQueued))
+        {
+            RebuildStackDisplayItems();
+        }
+
+        if (_renderWindowReconcileQueued ||
+            RenderedItems.Count != EffectiveRenderTarget)
+        {
+            _renderWindowReconcileQueued = false;
+            ReconcileRenderWindow();
+            RenderWindowSourceChanged?.Invoke();
+        }
+    }
 
     /// <summary>
     /// Fired (coalesced per dispatcher pass, and deferred to the batch
@@ -47,8 +87,16 @@ public partial class WidgetViewModel
         ? _stackDisplayItems.Count
         : Items.Count;
 
-    private int EffectiveRenderTarget =>
-        DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+    private int EffectiveRenderTarget
+    {
+        get
+        {
+            int target = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+            return _progressiveRematerializationCap is int cap
+                ? Math.Min(cap, target)
+                : target;
+        }
+    }
 
     /// <summary>
     /// Pure target derivation shared with behavior tests: folders at or below
@@ -79,6 +127,110 @@ public partial class WidgetViewModel
     internal IEnumerable<WidgetItem> HydrationUniverseItems => UsesStackProjection
         ? Items
         : RenderedItems;
+
+    internal void SetOpenPopoverStackKey(string? stackKey)
+    {
+        if (string.Equals(_openPopoverStackKey, stackKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _openPopoverStackKey = stackKey;
+        if (!string.IsNullOrWhiteSpace(stackKey) &&
+            FindStackByKey(stackKey) is { } stack &&
+            stack.Members.Any(member =>
+                member.Icon is null ||
+                (member.IsFolder && !member.IsFolderItemCountLoaded) ||
+                (member.IsShortcut && !member.IsShortcutTargetLoaded)) &&
+            IsItemHydrationActive)
+        {
+            StartItemHydration();
+        }
+    }
+
+    internal void ResumeIconHydrationFromDormancy() =>
+        _isIconHydrationDormant = false;
+
+    internal IEnumerable<WidgetItem> ResolveIconHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (_isIconHydrationDormant)
+        {
+            return [];
+        }
+
+        if (!UsesStackProjection)
+        {
+            return fallbackUniverse;
+        }
+
+        HashSet<WidgetItem> displayed = ComputeDisplayedIconKeepSet(RenderedItems);
+        if (!string.IsNullOrWhiteSpace(_openPopoverStackKey) &&
+            FindStackByKey(_openPopoverStackKey) is { } popoverStack)
+        {
+            foreach (WidgetItem member in popoverStack.Members)
+            {
+                displayed.Add(member);
+            }
+        }
+
+        return Items.Where(displayed.Contains);
+    }
+
+    internal bool HasMissingTargetIcons() =>
+        ResolveIconHydrationItems(HydrationUniverseItems)
+            .Any(item => item.Icon is null);
+
+    internal IEnumerable<WidgetItem> ResolveDisplayedMetadataHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (!UsesStackProjection)
+        {
+            return fallbackUniverse;
+        }
+
+        HashSet<WidgetItem> displayed = ComputeDisplayedIconKeepSet(RenderedItems);
+        if (!string.IsNullOrWhiteSpace(_openPopoverStackKey) &&
+            FindStackByKey(_openPopoverStackKey) is { } popoverStack)
+        {
+            foreach (WidgetItem member in popoverStack.Members)
+            {
+                displayed.Add(member);
+            }
+        }
+
+        return Items.Where(displayed.Contains);
+    }
+
+    internal IEnumerable<WidgetItem> ResolveFolderCountHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse) =>
+        ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+
+    internal IEnumerable<WidgetItem> ResolveShortcutHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse) =>
+        ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+
+    internal IEnumerable<WidgetItem> ResolveShellKindHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (UsesStackProjection &&
+            _settingsService.Settings.FileWidget.FileStackAutoStacking &&
+            string.Equals(
+                FileStackGroupBy,
+                Services.SettingsService.FileStackGroupByKind,
+                StringComparison.Ordinal))
+        {
+            return fallbackUniverse.Where(item => !item.IsFolder);
+        }
+
+        return ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+    }
+
+    internal bool HasMissingDisplayedItemMetadata() =>
+        ResolveDisplayedMetadataHydrationItems(HydrationUniverseItems)
+            .Any(item =>
+                (item.IsFolder && !item.IsFolderItemCountLoaded) ||
+                (item.IsShortcut && !item.IsShortcutTargetLoaded));
 
     private void AttachRenderWindowTracking()
     {
@@ -124,7 +276,7 @@ public partial class WidgetViewModel
         }
 
         _renderWindowReconcileQueued = true;
-        if (!_dispatcherQueue.TryEnqueue(() =>
+        void ApplyRenderWindowReconcile()
         {
             _renderWindowReconcileQueued = false;
             if (_isDisposed)
@@ -143,7 +295,7 @@ public partial class WidgetViewModel
                 _pendingPostBatchHydration = false;
                 StartItemHydration();
             }
-            else
+            else if (!_isIconHydrationDormant)
             {
                 // Acquisition half of the release/acquire pairing: icons
                 // released while nothing displayed them come back as their
@@ -152,7 +304,15 @@ public partial class WidgetViewModel
                 // equivalent of a recycled container being realized again.
                 HealReleasedItemIconsIfIdle();
             }
-        }))
+        }
+
+        if (_dispatcherQueue is null)
+        {
+            ApplyRenderWindowReconcile();
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(() => ApplyRenderWindowReconcile()))
         {
             // The queued flag (and a deferred hydration start with it) must
             // not survive a failed enqueue, or the widget would never
@@ -187,8 +347,106 @@ public partial class WidgetViewModel
     /// </summary>
     internal void ResetRenderWindow()
     {
+        CancelProgressiveRematerialization();
         _renderWindowBudget = RenderWindowInitialSize;
         ReconcileRenderWindow();
+    }
+
+    /// <summary>
+    /// Caps the initial synchronous <see cref="RenderedItems"/> layout pass when a
+    /// hibernated capsule view rematerializes on the UI thread, then streams the
+    /// remaining tiles across low-priority dispatcher frames so post-expand reveal
+    /// animations never drop frames on folders with 25–300 items.
+    /// </summary>
+    internal void BeginProgressiveRematerialization()
+    {
+        if (_isDisposed || _dispatcherQueue is null)
+        {
+            return;
+        }
+
+        int fullTarget = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+        if (fullTarget <= ProgressiveRematerializationInitialSlice)
+        {
+            CancelProgressiveRematerialization();
+            return;
+        }
+
+        int generation = ++_progressiveRematerializationGeneration;
+        _progressiveRematerializationCap = ProgressiveRematerializationInitialSlice;
+        ReconcileRenderWindow();
+        EnqueueNextProgressiveRematerializationSlice(generation);
+    }
+
+    internal void CompleteProgressiveRematerializationNow()
+    {
+        if (_progressiveRematerializationCap is null)
+        {
+            return;
+        }
+
+        CancelProgressiveRematerialization();
+        if (!_isDisposed)
+        {
+            ReconcileRenderWindow();
+            if (!_isIconHydrationDormant)
+            {
+                HealReleasedItemIconsIfIdle();
+            }
+        }
+    }
+
+    private void CancelProgressiveRematerialization()
+    {
+        _progressiveRematerializationGeneration++;
+        _progressiveRematerializationCap = null;
+    }
+
+    private void EnqueueNextProgressiveRematerializationSlice(int generation)
+    {
+        if (_isDisposed || _dispatcherQueue is null || _progressiveRematerializationCap is null)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => AdvanceProgressiveRematerializationSlice(generation)))
+        {
+            CancelProgressiveRematerialization();
+        }
+    }
+
+    private void AdvanceProgressiveRematerializationSlice(int generation)
+    {
+        if (_isDisposed ||
+            generation != _progressiveRematerializationGeneration ||
+            _progressiveRematerializationCap is not int currentCap)
+        {
+            return;
+        }
+
+        int fullTarget = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+        int nextCap = currentCap + ProgressiveRematerializationSliceChunk;
+        if (nextCap >= fullTarget)
+        {
+            _progressiveRematerializationCap = null;
+            ReconcileRenderWindow();
+            RenderWindowSourceChanged?.Invoke();
+            if (!_isIconHydrationDormant)
+            {
+                HealReleasedItemIconsIfIdle();
+            }
+            return;
+        }
+
+        _progressiveRematerializationCap = nextCap;
+        ReconcileRenderWindow();
+        if (!_isIconHydrationDormant)
+        {
+            HealReleasedItemIconsIfIdle();
+        }
+        EnqueueNextProgressiveRematerializationSlice(generation);
     }
 
     /// <summary>
@@ -255,6 +513,7 @@ public partial class WidgetViewModel
     /// </summary>
     internal void EnsureItemRendered(WidgetItem item)
     {
+        CompleteProgressiveRematerializationNow();
         if (_isDisposed || RenderedItems.Contains(item) || !CanGrowRenderWindow)
         {
             return;

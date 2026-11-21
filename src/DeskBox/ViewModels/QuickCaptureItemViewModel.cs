@@ -82,11 +82,13 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
 
     public IReadOnlyList<TodoAttachmentViewModel> Attachments { get; private set; } = [];
 
+    private object[]? _cachedImageAttachmentItemsSource;
+
     public IReadOnlyList<TodoAttachmentViewModel> ImageAttachments { get; private set; } = [];
 
     // ItemsControl.ItemsSource is object-valued at the WinRT ABI boundary.
     // Project the typed image list so the legacy window remains Native AOT safe.
-    public object[] ImageAttachmentItemsSource => ImageAttachments.Cast<object>().ToArray();
+    public object[] ImageAttachmentItemsSource => _cachedImageAttachmentItemsSource ??= ImageAttachments.Cast<object>().ToArray();
 
     public TodoAttachmentViewModel? PrimaryImageAttachment => ImageAttachments.FirstOrDefault();
 
@@ -184,9 +186,9 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         ? Visibility.Visible
         : Visibility.Collapsed;
 
-    public string UpdatedAtText => FormatUpdatedAt(_model.UpdatedAt);
+    public string UpdatedAtText => FormatRelativeTimestamp(_model.UpdatedAt, _localizationService);
 
-    public string CreatedAtText => FormatUpdatedAt(_model.CreatedAt);
+    public string CreatedAtText => FormatRelativeTimestamp(_model.CreatedAt, _localizationService);
 
     public double TextSize => _textSize;
 
@@ -227,7 +229,12 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         SortOrder = _model.SortOrder,
         PinnedSortOrder = _model.PinnedSortOrder,
         CreatedAt = _model.CreatedAt,
-        UpdatedAt = _model.UpdatedAt
+        UpdatedAt = _model.UpdatedAt,
+        DeviceId = _model.DeviceId,
+        PopoutX = _model.PopoutX,
+        PopoutY = _model.PopoutY,
+        PopoutWidth = _model.PopoutWidth,
+        PopoutHeight = _model.PopoutHeight
     };
 
     public void Update(QuickCaptureItem model)
@@ -329,6 +336,8 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(CreatedAtText));
         }
+
+        NotifyOptimizationPropertiesChanged(old, model);
     }
 
     public void UpdateSearchText(string? searchText)
@@ -343,6 +352,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HighlightStartIndex));
         OnPropertyChanged(nameof(HighlightLength));
         OnPropertyChanged(nameof(HighlightVisibility));
+        OnPropertyChanged(nameof(SearchKeyword));
     }
 
     public void UpdateAppearance(double textSize, double iconSize, double? contentTextSize = null)
@@ -382,17 +392,9 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         _canMovePinnedUp = canMoveUp;
         _canMovePinnedDown = canMoveDown;
         OnPropertyChanged(nameof(PinnedSortControlsVisibility));
+        OnPropertyChanged(nameof(PinnedBadgeVisibility));
         OnPropertyChanged(nameof(CanMovePinnedUp));
         OnPropertyChanged(nameof(CanMovePinnedDown));
-    }
-
-    private static string FormatUpdatedAt(DateTimeOffset updatedAt)
-    {
-        var local = updatedAt.ToLocalTime();
-        var now = DateTimeOffset.Now;
-        return local.Date == now.Date
-            ? local.ToString("HH:mm:ss")
-            : local.ToString("MM-dd HH:mm:ss");
     }
 
     private static string NormalizeSearchText(string? searchText)
@@ -438,14 +440,23 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         return isTruncated ? $"{displayText}…" : displayText;
     }
 
+    public void ReleaseAttachmentThumbnails()
+    {
+        foreach (TodoAttachmentViewModel attachment in Attachments)
+        {
+            attachment.ReleaseThumbnail();
+        }
+    }
+
     private void RefreshAttachments()
     {
         Attachments = (_model.Attachments ?? [])
-            .Select(attachment => new TodoAttachmentViewModel(attachment))
+            .Select(attachment => new TodoAttachmentViewModel(attachment, TodoAttachmentViewModel.QuickCapturePreviewCacheScope))
             .ToList();
         ImageAttachments = Attachments
             .Where(attachment => attachment.IsImage)
             .ToList();
+        _cachedImageAttachmentItemsSource = null;
     }
 
     private static string GetAttachmentSignature(TodoAttachment attachment)

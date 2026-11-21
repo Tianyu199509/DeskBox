@@ -42,4 +42,6 @@ public interface IPerformanceSettings
     void SetDecorativeAnimationEnabled(string option, bool enabled);
 
     void SetQuiescenceWorkingSetTrimEnabled(bool enabled);
+
+    void SetKeepCapsuleContentWarm(bool enabled);
 }
