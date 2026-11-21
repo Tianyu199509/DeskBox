@@ -339,11 +339,16 @@ internal sealed partial class StudioAiTurnOrchestrator
 
         bool isOk = parseRes.Manifest is not null && !parseRes.Diagnostics.Any(static d => d.IsError);
 
+        // effectiveLogicJs is newline-normalized by the workspace; normalize the baseline
+        // too so a CRLF current script is not misreported as Replace (same fix as 7d58f45c).
+        string? normalizedOriginalLogicJs = string.IsNullOrWhiteSpace(originalLogicJs)
+            ? null
+            : StudioWorkspaceEngine.NormalizeNewlines(originalLogicJs);
         StudioLogicJsPatchMode logicMode = effectiveLogicJs is null
-            ? (string.IsNullOrWhiteSpace(originalLogicJs)
+            ? (normalizedOriginalLogicJs is null
                 ? StudioLogicJsPatchMode.KeepExisting
                 : StudioLogicJsPatchMode.Remove)
-            : (string.Equals(effectiveLogicJs, originalLogicJs, StringComparison.Ordinal)
+            : (string.Equals(effectiveLogicJs, normalizedOriginalLogicJs, StringComparison.Ordinal)
                 ? StudioLogicJsPatchMode.KeepExisting
                 : StudioLogicJsPatchMode.Replace);
 

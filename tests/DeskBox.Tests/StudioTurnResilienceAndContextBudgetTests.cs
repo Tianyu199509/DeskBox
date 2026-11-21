@@ -1173,6 +1173,63 @@ public sealed class StudioTurnResilienceAndContextBudgetTests
     }
 
     [Fact]
+    public void BuildWorkspaceTurnResult_CrlfBaselineUnchangedScript_StaysKeepExisting_AndRealEditStillReplaces()
+    {
+        const string manifest = """
+        {
+          "schemaVersion": 1,
+          "id": "custom.crlf-gate",
+          "name": "CRLF Gate",
+          "script": { "entry": "logic.js" },
+          "root": "root",
+          "elements": {
+            "root": { "type": "Text", "text": "${$computed.banner}" }
+          }
+        }
+        """;
+        const string logicJs = "export function onInit(ctx) { ctx.computed.banner = 'v1'; }\nexport function bump(ctx) { ctx.computed.banner = 'v2'; }";
+        string crlfBaseline = logicJs.Replace("\n", "\r\n", StringComparison.Ordinal);
+
+        var unchanged = new StudioWorkspaceEngine(manifest, logicJs, null);
+        (StudioTurnResult unchangedTurn, _) = StudioAiTurnOrchestrator.BuildWorkspaceTurnResult(
+            unchanged,
+            firstFinish: null,
+            latestFinish: null,
+            capturedSampleDataJson: null,
+            existingSampleDataJson: null,
+            originalManifestJson: manifest,
+            originalLogicJs: crlfBaseline,
+            originalLocales: null,
+            effectiveLanguage: "en-US",
+            preferredEmoji: null,
+            isInitialCreation: false,
+            wasAutoRepaired: false,
+            providerId: "test",
+            effectiveModel: "test");
+        Assert.True(unchangedTurn.Success, unchangedTurn.ErrorMessage);
+        Assert.Equal(StudioLogicJsPatchMode.KeepExisting, unchangedTurn.LogicJsPatchMode);
+
+        var edited = new StudioWorkspaceEngine(manifest, logicJs.Replace("v2", "v3", StringComparison.Ordinal), null);
+        (StudioTurnResult editedTurn, _) = StudioAiTurnOrchestrator.BuildWorkspaceTurnResult(
+            edited,
+            firstFinish: null,
+            latestFinish: null,
+            capturedSampleDataJson: null,
+            existingSampleDataJson: null,
+            originalManifestJson: manifest,
+            originalLogicJs: crlfBaseline,
+            originalLocales: null,
+            effectiveLanguage: "en-US",
+            preferredEmoji: null,
+            isInitialCreation: false,
+            wasAutoRepaired: false,
+            providerId: "test",
+            effectiveModel: "test");
+        Assert.True(editedTurn.Success, editedTurn.ErrorMessage);
+        Assert.Equal(StudioLogicJsPatchMode.Replace, editedTurn.LogicJsPatchMode);
+    }
+
+    [Fact]
     public async Task ValidatorAndPreviewLifecycle_FlagColdStartSplitState_SampleStateGap_FailedProbeHost_AndRunImmediatePreviewOnTick()
     {
         const string splitStateManifest = """
