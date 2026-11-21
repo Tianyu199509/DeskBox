@@ -21,13 +21,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Commit message attribution check
-        if: github.event_name == 'pull_request'
+      - name: Commit identity and attribution check
         shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          TRIGGER_USER: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login || github.actor }}
+          ALLOWED_LOGIN: Tianyu199509
+          ALLOWED_EMAIL: 1047078635@qq.com
         run: |
-          $messages = git log --format=%B "${{ github.event.pull_request.base.sha }}..HEAD"
+          if ($env:TRIGGER_USER -ne $env:ALLOWED_LOGIN) {
+            Write-Host "Forbidden: trigger user '$env:TRIGGER_USER' is not the single-account owner ($env:ALLOWED_LOGIN)."
+            exit 1
+          }
+          $base = $env:BASE_SHA
+          $head = $env:HEAD_SHA
+          $isNewRef = [string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$'
+          if ($isNewRef) {
+            $messages = git log -1 --format=%B $head
+            $identities = git log -1 --no-merges --format='%ae%n%ce' $head
+          } else {
+            $messages = git log --format=%B "$base..$head"
+            $identities = git log --no-merges --format='%ae%n%ce' "$base..$head"
+          }
           if ($messages -match '(?im)^\s*(co-authored-by|generated[ -]with|generated-by)\s*[: ]') {
             Write-Host 'Forbidden attribution trailer (Co-Authored-By / Generated with) found in commit messages.'
+            exit 1
+          }
+          $bad = @($identities | Where-Object { $_ -and $_ -ne $env:ALLOWED_EMAIL })
+          if ($bad.Count -gt 0) {
+            Write-Host 'Forbidden: commit author/committer emails outside the single-identity whitelist:'
+            $bad | Select-Object -Unique | ForEach-Object { Write-Host "  $_" }
             exit 1
           }
 
