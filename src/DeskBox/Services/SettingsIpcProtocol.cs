@@ -290,6 +290,7 @@ public static class SettingsIpcMethods
     /// appearance page's only valid channel for the batch clear.
     /// </summary>
     public const string AppearanceClearPerWidgetBackgrounds = "appearance.clear-per-widget-backgrounds";
+    public const string AppearanceResetWidgetChromeOverrides = "appearance.reset-widget-chrome-overrides";
 
     /// <summary>Reads the authoritative widget-layout slice JSON.</summary>
     public const string WidgetLayoutRead = "widget.layout-read";

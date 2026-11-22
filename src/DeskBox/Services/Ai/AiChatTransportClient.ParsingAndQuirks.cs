@@ -588,21 +588,6 @@ internal static partial class AiChatTransportClient
             out _,
             out _);
 
-    internal static bool TryAppendSseDelta(
-        string dataJson,
-        StreamingTurnAccumulator accumulator,
-        out string? streamError,
-        out string? finishReason) =>
-        TryAppendSseDeltaCore(
-            dataJson,
-            chunk => accumulator.AppendContentDelta(chunk.AsSpan()),
-            chunk => accumulator.AppendReasoningDelta(chunk.AsSpan()),
-            accumulator,
-            out streamError,
-            out finishReason,
-            out _,
-            out _);
-
     internal static bool TryAppendSseDeltaCore(
         string dataJson,
         Action<string> appendContent,
@@ -1065,13 +1050,6 @@ internal static partial class AiChatTransportClient
         out string content,
         out string reasoning) =>
         TryExtractNonStreamingReply(rawJson, out content, out reasoning, out _, out _);
-
-    internal static bool TryExtractNonStreamingReply(
-        string rawJson,
-        out string content,
-        out string reasoning,
-        out string? finishReason) =>
-        TryExtractNonStreamingReply(rawJson, out content, out reasoning, out finishReason, out _);
 
     internal static bool TryExtractNonStreamingReply(
         string rawJson,

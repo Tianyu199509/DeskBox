@@ -111,7 +111,7 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
-        if (TryHandleElevatedPointerMoved(e) || TryHandleWin10ShellPointerMoved(e))
+        if (TryHandleElevatedPointerMoved(e))
         {
             return;
         }
@@ -160,7 +160,6 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
-        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
         if (TryHandleElevatedPointerReleased(e))
         {
             return;
@@ -218,7 +217,6 @@ public sealed partial class FileSurfaceContent
 
     private void HandleItemsPointerCaptureLost(ListViewBase listView)
     {
-        DisarmWin10ShellDragCandidate();
         FinishBoxSelection(listView);
         // Capture loss ends the gesture that staged the drag snapshot. A
         // stale snapshot keeps the deactivation selection clear guarded

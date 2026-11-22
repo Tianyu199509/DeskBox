@@ -271,6 +271,11 @@ public sealed class CustomWidgetDataStore
     /// </summary>
     public static Func<string, string, bool, Task>? SaveRelay { get; set; }
 
+    internal Func<string, string, bool, Task>? SaveRelayOverride { get; init; }
+
+    private Func<string, string, bool, Task>? EffectiveSaveRelay =>
+        SaveRelayOverride ?? (_useSharedSaveRelay ? SaveRelay : null);
+
     public CustomWidgetDataStore(string widgetId, string? rootDataDirectory = null, bool createDirectory = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(widgetId);
@@ -433,20 +438,13 @@ public sealed class CustomWidgetDataStore
                             CustomWidgetStorageFileOps.ReplaceTextFileAtomically(_manifestPath, stampedBuiltIn);
                             CustomWidgetLocaleCatalog.WriteOrDeleteDirectoryAtomically(newerBuiltIn.Locales, _localesDirectory);
                             WriteOrDeleteSidecarNoLock(_logicJsPath, newerBuiltIn.LogicJs, MaxLogicJsBytes, "logic.js");
+                            CustomWidgetTrustStore.Shared.RecordExecutableSurfaceAfterWrite(
+                                WidgetId,
+                                stampedBuiltIn,
+                                newerBuiltIn.LogicJs,
+                                trustedLocalAuthoring: false,
+                                preserveTrustedAuthoringOnExternalWrite: true);
                             existing = stampedBuiltIn;
-                        }
-                        else if (!Directory.Exists(_localesDirectory))
-                        {
-                            CustomWidgetParseResult curParsed = CustomWidgetManifestParser.Parse(existing);
-                            string? knownId = CustomWidgetTemplates.TryNormalizeKnownTemplateId(curParsed.Manifest?.Id);
-                            if (!string.IsNullOrWhiteSpace(knownId))
-                            {
-                                CustomWidgetTemplateBundle curBuiltIn = CustomWidgetTemplates.GetTemplateBundle(knownId);
-                                if (curBuiltIn.Locales is { HasAnyLocale: true })
-                                {
-                                    curBuiltIn.Locales.WriteToDirectoryAtomically(_localesDirectory);
-                                }
-                            }
                         }
 
                         CustomWidgetRemoteCatalogService effectiveCatalog =
@@ -545,8 +543,7 @@ public sealed class CustomWidgetDataStore
             }
 
             string rawId = idEl.GetString() ?? string.Empty;
-            if (!rawId.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase) &&
-                !rawId.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
+            if (!rawId.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -806,6 +803,18 @@ public sealed class CustomWidgetDataStore
 
     private async Task<CustomWidgetStorePayload> EnsureCachedNoLockAsync()
     {
+        if (_cached is not null && EffectiveSaveRelay is not null)
+        {
+            string currentDiskHash = ReadCurrentStoreContentHash();
+            if (!string.Equals(
+                    currentDiskHash,
+                    Volatile.Read(ref _lastSavedStoreContentHash),
+                    StringComparison.Ordinal))
+            {
+                _cached = null;
+            }
+        }
+
         if (_cached is null)
         {
             string loadedHash = string.Empty;
@@ -935,7 +944,7 @@ public sealed class CustomWidgetDataStore
     {
         ArgumentNullException.ThrowIfNull(payload);
         CustomWidgetStorePayload normalized = Normalize(payload);
-        if (_useSharedSaveRelay && SaveRelay is { } relay && _widgetId.Length > 0)
+        if (EffectiveSaveRelay is { } relay && _widgetId.Length > 0)
         {
             await RelaySaveOrClearAsync(relay, normalized, clearAttachments: false, origin);
             return;
@@ -974,7 +983,7 @@ public sealed class CustomWidgetDataStore
 
     public async Task ClearAllDataAsync(object? origin = null)
     {
-        if (_useSharedSaveRelay && SaveRelay is { } relay && _widgetId.Length > 0)
+        if (EffectiveSaveRelay is { } relay && _widgetId.Length > 0)
         {
             CustomWidgetStorePayload fresh;
             await _gate.WaitAsync();
@@ -1106,6 +1115,28 @@ public sealed class CustomWidgetDataStore
             throw;
         }
 
+        await _gate.WaitAsync();
+        try
+        {
+            if (ReferenceEquals(_cached, optimisticCache))
+            {
+                string diskHash = ReadCurrentStoreContentHash();
+                if (!string.IsNullOrEmpty(diskHash))
+                {
+                    Volatile.Write(ref _lastSavedStoreContentHash, diskHash);
+                }
+                else
+                {
+                    // In-memory mock relay did not write disk; align hash with empty disk.
+                    Volatile.Write(ref _lastSavedStoreContentHash, string.Empty);
+                }
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         StoreMutated?.Invoke(origin, false);
         StoreChanged?.Invoke(_storePath, _widgetId);
     }
@@ -1128,17 +1159,13 @@ public sealed class CustomWidgetDataStore
 
         ReadOnlySpan<char> header = wirePayload.AsSpan(0, newline);
         int pipe = header.LastIndexOf('|');
-        string widgetId;
-        bool clearAttachments = false;
-        if (pipe > 0)
+        if (pipe <= 0)
         {
-            widgetId = header[..pipe].ToString();
-            clearAttachments = header[(pipe + 1)..] is "1";
+            return (false, null, "malformed header");
         }
-        else
-        {
-            widgetId = header.ToString();
-        }
+
+        string widgetId = header[..pipe].ToString();
+        bool clearAttachments = header[(pipe + 1)..] is "1";
 
         if (string.IsNullOrWhiteSpace(widgetId))
         {
@@ -1541,14 +1568,14 @@ public sealed class CustomWidgetDataStore
 
         var payload = new CustomWidgetStorePayload
         {
-            SchemaVersion = TryGetStoreProp(root, "schemaVersion", "SchemaVersion", out JsonElement svEl) &&
+            SchemaVersion = root.TryGetProperty("schemaVersion", out JsonElement svEl) &&
                             svEl.ValueKind == JsonValueKind.Number &&
                             svEl.TryGetInt32(out int sv)
                 ? Math.Max(1, sv)
                 : 1
         };
 
-        if (TryGetStoreProp(root, "settings", "Settings", out JsonElement settingsEl) &&
+        if (root.TryGetProperty("settings", out JsonElement settingsEl) &&
             settingsEl.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty prop in settingsEl.EnumerateObject())
@@ -1557,7 +1584,7 @@ public sealed class CustomWidgetDataStore
             }
         }
 
-        if (TryGetStoreProp(root, "state", "State", out JsonElement stateEl) &&
+        if (root.TryGetProperty("state", out JsonElement stateEl) &&
             stateEl.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty prop in stateEl.EnumerateObject())
@@ -1571,7 +1598,7 @@ public sealed class CustomWidgetDataStore
             }
         }
 
-        if (TryGetStoreProp(root, "collections", "Collections", out JsonElement colsEl) &&
+        if (root.TryGetProperty("collections", out JsonElement colsEl) &&
             colsEl.ValueKind == JsonValueKind.Object)
         {
             foreach (JsonProperty colProp in colsEl.EnumerateObject())
@@ -1589,31 +1616,31 @@ public sealed class CustomWidgetDataStore
                         continue;
                     }
 
-                    string id = TryGetStoreProp(recEl, "id", "Id", out JsonElement idEl) &&
+                    string id = recEl.TryGetProperty("id", out JsonElement idEl) &&
                                 idEl.ValueKind == JsonValueKind.String &&
                                 !string.IsNullOrWhiteSpace(idEl.GetString())
                         ? idEl.GetString()!
                         : Guid.NewGuid().ToString("N")[..12];
 
-                    long createdTicks = TryGetStoreProp(recEl, "createdAtUtcTicks", "CreatedAtUtcTicks", out JsonElement cEl) &&
+                    long createdTicks = recEl.TryGetProperty("createdAtUtcTicks", out JsonElement cEl) &&
                                         cEl.ValueKind == JsonValueKind.Number &&
                                         cEl.TryGetInt64(out long ct) &&
                                         ct > 0
                         ? ct
                         : DateTimeOffset.UtcNow.UtcTicks;
 
-                    long updatedTicks = TryGetStoreProp(recEl, "updatedAtUtcTicks", "UpdatedAtUtcTicks", out JsonElement uEl) &&
+                    long updatedTicks = recEl.TryGetProperty("updatedAtUtcTicks", out JsonElement uEl) &&
                                         uEl.ValueKind == JsonValueKind.Number &&
                                         uEl.TryGetInt64(out long ut) &&
                                         ut > 0
                         ? ut
                         : createdTicks;
 
-                    bool isDeleted = TryGetStoreProp(recEl, "isDeleted", "IsDeleted", out JsonElement dEl) &&
+                    bool isDeleted = recEl.TryGetProperty("isDeleted", out JsonElement dEl) &&
                                      dEl.ValueKind == JsonValueKind.True;
 
                     var fieldsJson = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-                    if (TryGetStoreProp(recEl, "fields", "Fields", out JsonElement fieldsEl) &&
+                    if (recEl.TryGetProperty("fields", out JsonElement fieldsEl) &&
                         fieldsEl.ValueKind == JsonValueKind.Object)
                     {
                         foreach (JsonProperty fp in fieldsEl.EnumerateObject())
@@ -1641,13 +1668,6 @@ public sealed class CustomWidgetDataStore
 
         return Normalize(payload);
     }
-
-    private static bool TryGetStoreProp(
-        JsonElement obj,
-        string camelName,
-        string pascalName,
-        out JsonElement value) =>
-        obj.TryGetProperty(camelName, out value) || obj.TryGetProperty(pascalName, out value);
 
     internal static void WriteStorePayloadJson(Utf8JsonWriter writer, CustomWidgetStorePayload? payload)
     {

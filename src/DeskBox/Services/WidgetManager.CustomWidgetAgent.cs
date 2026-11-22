@@ -26,9 +26,8 @@ public sealed record CustomWidgetLiveRuntimeSnapshot(
     string DisplayMode,
     Dictionary<string, string> State,
     Dictionary<string, int> CollectionCounts,
-    Dictionary<string, List<Dictionary<string, string>>> SampleItems,
-    IReadOnlyDictionary<string, JsonElement>? StateJson = null,
-    IReadOnlyDictionary<string, List<Dictionary<string, JsonElement>>>? SampleItemsJson = null);
+    IReadOnlyDictionary<string, JsonElement> StateJson,
+    IReadOnlyDictionary<string, List<Dictionary<string, JsonElement>>> SampleItemsJson);
 
 public sealed record CustomWidgetPreviewCaptureResult(
     byte[]? PngBytes,
@@ -212,8 +211,7 @@ public sealed partial class WidgetManager
                                 ? prevManifest.ForkedFromVersion
                                 : forkedFromVersion;
                         }
-                        else if (prevManifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase) ||
-                                 prevManifest.Id.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
+                        else if (prevManifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase))
                         {
                             forkedFromId = prevManifest.Id;
                             forkedFromVersion = prevManifest.Version;
@@ -853,29 +851,19 @@ public sealed partial class WidgetManager
             }
         }
         var countsCopy = new Dictionary<string, int>(StringComparer.Ordinal);
-        var samplesCopy = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.Ordinal);
         var samplesJsonCopy = new Dictionary<string, List<Dictionary<string, JsonElement>>>(StringComparer.Ordinal);
 
         foreach ((string colName, List<CustomWidgetRecord> records) in vm.Collections)
         {
             countsCopy[colName] = records.Count;
-            var sampleList = new List<Dictionary<string, string>>(Math.Min(3, records.Count));
             var sampleJsonList = new List<Dictionary<string, JsonElement>>(Math.Min(3, records.Count));
             for (int i = 0; i < records.Count && i < 3; i++)
             {
                 CustomWidgetRecord rec = records[i];
-                var itemDict = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["id"] = rec.Id
-                };
                 var itemJsonDict = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
                 {
                     ["id"] = CustomWidgetScriptEngine.CreateStringJsonElement(rec.Id)
                 };
-                foreach ((string fk, string fv) in rec.Fields)
-                {
-                    itemDict[fk] = fv;
-                }
                 foreach ((string fk, JsonElement fv) in rec.FieldsJson)
                 {
                     if (!string.Equals(fk, "id", StringComparison.Ordinal) &&
@@ -884,10 +872,15 @@ public sealed partial class WidgetManager
                         itemJsonDict[fk] = fv.Clone();
                     }
                 }
-                sampleList.Add(itemDict);
+                foreach ((string fk, string fv) in rec.Fields)
+                {
+                    if (!itemJsonDict.ContainsKey(fk))
+                    {
+                        itemJsonDict[fk] = CustomWidgetScriptEngine.CreateStringJsonElement(fv);
+                    }
+                }
                 sampleJsonList.Add(itemJsonDict);
             }
-            samplesCopy[colName] = sampleList;
             samplesJsonCopy[colName] = sampleJsonList;
         }
 
@@ -901,7 +894,6 @@ public sealed partial class WidgetManager
             DisplayMode: displayMode,
             State: stateCopy,
             CollectionCounts: countsCopy,
-            SampleItems: samplesCopy,
             StateJson: stateJsonCopy,
             SampleItemsJson: samplesJsonCopy);
     }

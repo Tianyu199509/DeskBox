@@ -241,7 +241,8 @@ public partial class SettingsViewModel
             ToTriState(group.WheelSwitchEnabled),
             ToTriState(group.HoverSwitchEnabled),
             group.CollapseBehavior,
-            group.ChromeMode));
+            group.ChromeMode,
+            group.Name));
     }
 
     private static GroupPresentationTriState ToTriState(bool? value) =>

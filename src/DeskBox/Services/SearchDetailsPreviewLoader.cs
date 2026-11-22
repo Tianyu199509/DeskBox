@@ -521,7 +521,7 @@ internal static class SearchDetailsPreviewLoader
                 return await TryLoadIsolatedShellThumbnailBitmapAsync(filePath, cancellationToken);
             }
 
-            byte[]? bytes = await Task.Run(() =>
+            FileStream? fileStream = await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var info = new FileInfo(filePath);
@@ -530,36 +530,44 @@ internal static class SearchDetailsPreviewLoader
                     return null;
                 }
 
-                using var fs = new FileStream(
+                return new FileStream(
                     filePath,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete,
                     bufferSize: 16384,
-                    FileOptions.SequentialScan);
-                byte[] data = new byte[fs.Length];
-                int read = 0;
-                while (read < data.Length)
-                {
-                    int n = fs.Read(data, read, data.Length - read);
-                    if (n <= 0)
-                    {
-                        break;
-                    }
-                    read += n;
-                }
-
-                return read == data.Length ? data : data[..read];
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
             }, cancellationToken).ConfigureAwait(true);
+
+            if (fileStream is not null)
+            {
+                await using (fileStream)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return null;
+                    }
+
+                    try
+                    {
+                        using IRandomAccessStream winRtStream = fileStream.AsRandomAccessStream();
+                        var bitmap = new BitmapImage
+                        {
+                            DecodePixelWidth = PreviewDecodeWidth
+                        };
+                        await bitmap.SetSourceAsync(winRtStream);
+                        return bitmap;
+                    }
+                    catch
+                    {
+                        // Fall through to isolated shell thumbnail proxy for unsupported/corrupt frames.
+                    }
+                }
+            }
 
             if (cancellationToken.IsCancellationRequested)
             {
                 return null;
-            }
-
-            if (bytes is { Length: > 0 })
-            {
-                return await DecodeBytesToBitmapImageAsync(bytes);
             }
 
             return await TryLoadIsolatedShellThumbnailBitmapAsync(filePath, cancellationToken);

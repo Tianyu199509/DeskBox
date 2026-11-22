@@ -208,6 +208,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
             RebuildTabLayoutList(forceRebuild: true);
             ShowSourceAppToggle.IsOn = slice.ClipboardShowSourceApp;
             IgnorePrivacyFormatsToggle.IsOn = slice.ClipboardIgnoreSystemPrivacyFormats;
+            FetchUrlTitlesToggle.IsOn = slice.ClipboardFetchUrlTitles;
             SelectByTag(SecretProtectionComboBox, slice.ClipboardSensitiveProtectionMode);
             SelectByTag(MaxItemsComboBox, slice.ClipboardMaxItems.ToString());
             SelectByTag(RetentionDaysComboBox, slice.ClipboardRetentionDays.ToString());
@@ -403,7 +404,8 @@ public sealed partial class ClipboardSettingsSection : UserControl
         }
 
         bool desired = EnableClipboardToggle.IsOn;
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Clipboard, desired);
+        _settingsService.MutateGraphUnderLock(() =>
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Clipboard, desired));
         ApplyFeatureEnableGating(desired);
         try
         {
@@ -413,7 +415,8 @@ public sealed partial class ClipboardSettingsSection : UserControl
                 _isLoading = true;
                 try
                 {
-                    FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Clipboard, applied);
+                    _settingsService.MutateGraphUnderLock(() =>
+                        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Clipboard, applied));
                     EnableClipboardToggle.IsOn = applied;
                 }
                 finally
@@ -1219,6 +1222,16 @@ public sealed partial class ClipboardSettingsSection : UserControl
         }
 
         await SaveSliceMutationAsync(slice => slice.ClipboardIgnoreSystemPrivacyFormats = IgnorePrivacyFormatsToggle.IsOn);
+    }
+
+    private async void FetchUrlTitlesToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        await SaveSliceMutationAsync(slice => slice.ClipboardFetchUrlTitles = FetchUrlTitlesToggle.IsOn);
     }
 
     private async void SecretProtectionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

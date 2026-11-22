@@ -3337,8 +3337,9 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         DisposeColdHiddenCleanupTimer();
         DisposeExternalDragFadeTimer();
         StopHeightMorphTimer();
-        _detailsUpdateCoalesceTimer?.Stop();
-        _detailsUpdateCoalesceTimer = null;
+        CancelPendingDetailsFilePreview();
+        _detailsEntranceStoryboard?.Stop(); _detailsEntranceStoryboard = null;
+        _detailsUpdateCoalesceTimer?.Stop(); _detailsUpdateCoalesceTimer = null;
         ClearSelectedResultRow();
         _multiSelectedItems.Clear();
         _rubberBandBaseSelection.Clear();

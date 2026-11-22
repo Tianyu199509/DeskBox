@@ -158,6 +158,7 @@ public sealed partial class CustomWidgetViewModel : ObservableObject, IDisposabl
         _weatherSource = weatherSource ?? CustomWidgetWeatherSource.Shared;
         _systemControlService = systemControlService ?? CustomWidgetSystemControlService.Shared;
         _settingsService = settingsService;
+        _systemControlService.AttachFallbackSettingsService(settingsService);
         _remoteCatalogService = isPreviewOnly
             ? remoteCatalogService
             : (remoteCatalogService ?? CustomWidgetRemoteCatalogService.Shared);

@@ -1274,6 +1274,7 @@ public sealed partial class QuickCaptureService
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            if (_data is null && !await HasLegacyRecentItemsOnDiskAsync(cancellationToken).ConfigureAwait(false)) return 0;
             await EnsureLoadedCoreAsync();
             if (_data is null || _data.RecentItems.Count == 0)
             {

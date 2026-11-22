@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "隐私与安全",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "遵循系统隐私剪贴板标记",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "自动忽略密码管理器等标记为禁止剪贴板历史记录的私密内容",
+  "Settings.Clipboard.FetchUrlTitles.Title": "自动获取复制链接的网页标题",
+  "Settings.Clipboard.FetchUrlTitles.Description": "开启后在后台联网读取公开网页标题（自动跳过含登录、验证或签名参数的链接）",
   "Settings.Clipboard.SecretProtection.Title": "API 密钥与令牌保护",
   "Settings.Clipboard.SecretProtection.Description": "检测到疑似 API 密钥、访问令牌或私钥时的保护方式",
   "Settings.Clipboard.SecretProtection.Mask": "脱敏显示并允许复制",

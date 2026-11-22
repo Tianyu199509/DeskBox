@@ -662,6 +662,7 @@ public sealed record CustomWidgetManifest
     public CustomWidgetCapsuleSpec? Capsule { get; init; }
     public IReadOnlyList<CustomWidgetNodeSpec> Popovers { get; init; } = [];
     public CustomWidgetNodeSpec View { get; init; } = new();
+    internal DeskBox.Services.DeviceStateQueryFields? ParsedBodyDeviceFields { get; init; }
 
     public IEnumerable<CustomWidgetNodeSpec> EnumerateAllNodes()
     {

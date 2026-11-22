@@ -22,9 +22,9 @@ public static partial class CustomWidgetManifestParser
         JsonElement el,
         string path,
         List<CustomWidgetValidationDiagnostic> diagnostics,
+        FlatGraphParseContext flatGraph,
         int depth = 0,
         IReadOnlyDictionary<string, IReadOnlyList<CustomWidgetOptionSpec>>? settingOptionsByKey = null,
-        FlatGraphParseContext? flatGraph = null,
         string? implicitElementId = null)
     {
         if (depth > MaxNodeTreeDepth)
@@ -112,9 +112,9 @@ public static partial class CustomWidgetManifestParser
         {
             if (itemTplEl.ValueKind == JsonValueKind.Object)
             {
-                itemTemplate = ParseNode(itemTplEl, $"{path}.itemTemplate", diagnostics, depth + 1, settingOptionsByKey, flatGraph);
+                itemTemplate = ParseNode(itemTplEl, $"{path}.itemTemplate", diagnostics, flatGraph, depth + 1, settingOptionsByKey);
             }
-            else if (flatGraph is not null && itemTplEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(itemTplEl.GetString()))
+            else if (itemTplEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(itemTplEl.GetString()))
             {
                 itemTemplate = ResolveFlatElement(itemTplEl.GetString()!, $"{path}.itemTemplate", flatGraph, diagnostics, depth + 1, settingOptionsByKey);
             }
@@ -125,9 +125,9 @@ public static partial class CustomWidgetManifestParser
         {
             if (actBtnEl.ValueKind == JsonValueKind.Object)
             {
-                actionButton = ParseNode(actBtnEl, $"{path}.actionButton", diagnostics, depth + 1, settingOptionsByKey, flatGraph);
+                actionButton = ParseNode(actBtnEl, $"{path}.actionButton", diagnostics, flatGraph, depth + 1, settingOptionsByKey);
             }
-            else if (flatGraph is not null && actBtnEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(actBtnEl.GetString()))
+            else if (actBtnEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(actBtnEl.GetString()))
             {
                 actionButton = ResolveFlatElement(actBtnEl.GetString()!, $"{path}.actionButton", flatGraph, diagnostics, depth + 1, settingOptionsByKey);
             }
@@ -138,9 +138,9 @@ public static partial class CustomWidgetManifestParser
         {
             if (paneEl.ValueKind == JsonValueKind.Object)
             {
-                paneNode = ParseNode(paneEl, $"{path}.pane", diagnostics, depth + 1, settingOptionsByKey, flatGraph);
+                paneNode = ParseNode(paneEl, $"{path}.pane", diagnostics, flatGraph, depth + 1, settingOptionsByKey);
             }
-            else if (flatGraph is not null && paneEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(paneEl.GetString()))
+            else if (paneEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(paneEl.GetString()))
             {
                 paneNode = ResolveFlatElement(paneEl.GetString()!, $"{path}.pane", flatGraph, diagnostics, depth + 1, settingOptionsByKey);
             }
@@ -155,9 +155,9 @@ public static partial class CustomWidgetManifestParser
             {
                 if (child.ValueKind == JsonValueKind.Object)
                 {
-                    hoverActions.Add(ParseNode(child, $"{path}.hoverActions[{idx}]", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
+                    hoverActions.Add(ParseNode(child, $"{path}.hoverActions[{idx}]", diagnostics, flatGraph, depth + 1, settingOptionsByKey));
                 }
-                else if (flatGraph is not null && child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
+                else if (child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
                 {
                     hoverActions.Add(ResolveFlatElement(child.GetString()!, $"{path}.hoverActions[{idx}]", flatGraph, diagnostics, depth + 1, settingOptionsByKey));
                 }
@@ -177,9 +177,9 @@ public static partial class CustomWidgetManifestParser
                 {
                     if (child.ValueKind == JsonValueKind.Object)
                     {
-                        children.Add(ParseNode(child, $"{path}.children[{idx}]", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
+                        children.Add(ParseNode(child, $"{path}.children[{idx}]", diagnostics, flatGraph, depth + 1, settingOptionsByKey));
                     }
-                    else if (flatGraph is not null && child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
+                    else if (child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
                     {
                         children.Add(ResolveFlatElement(child.GetString()!, $"{path}.children[{idx}]", flatGraph, diagnostics, depth + 1, settingOptionsByKey));
                     }
@@ -187,9 +187,7 @@ public static partial class CustomWidgetManifestParser
                     {
                         diagnostics.Add(new(
                             $"{path}.children[{idx}]",
-                            flatGraph is not null
-                                ? $"Child entry at '{path}.children[{idx}]' must be an element ID string or node object, not {child.ValueKind}."
-                                : $"Child element at '{path}.children[{idx}]' must be a node JSON object, not {child.ValueKind}.",
+                            $"Child entry at '{path}.children[{idx}]' must be an element ID string or node object, not {child.ValueKind}.",
                             IsError: true,
                             Code: "InvalidChildrenBinding"));
                     }
@@ -200,7 +198,7 @@ public static partial class CustomWidgetManifestParser
             {
                 diagnostics.Add(new(
                     $"{path}.children",
-                    $"'{type}.children' must be a static JSON array of {(flatGraph is not null ? "element ID strings" : "node objects")}, not {childrenEl.ValueKind}. DeskBox compiles native WinUI visual trees and does NOT support dynamic VDOM arrays in 'children'. For dynamic 2D grids/timetables, use '\"type\": \"ItemsGrid\"' with integer '\"columns\": 5' (or 6), '\"items\": \"${{$computed.cells}}\"', compact cell '\"padding\": \"4,3,4,3\"', and a declarative '\"itemTemplate\"' using 'when' branches for filled cards vs. empty '+' buttons (or use '\"type\": \"List\"').",
+                    $"'{type}.children' must be a static JSON array of element ID strings, not {childrenEl.ValueKind}. DeskBox compiles native WinUI visual trees and does NOT support dynamic VDOM arrays in 'children'. For dynamic 2D grids/timetables, use '\"type\": \"ItemsGrid\"' with integer '\"columns\": 5' (or 6), '\"items\": \"${{$computed.cells}}\"', compact cell '\"padding\": \"4,3,4,3\"', and a declarative '\"itemTemplate\"' using 'when' branches for filled cards vs. empty '+' buttons (or use '\"type\": \"List\"').",
                     IsError: true,
                     Code: "InvalidChildrenBinding"));
             }
@@ -210,9 +208,9 @@ public static partial class CustomWidgetManifestParser
         {
             if (singleChildEl.ValueKind == JsonValueKind.Object)
             {
-                children.Add(ParseNode(singleChildEl, $"{path}.children[0]", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
+                children.Add(ParseNode(singleChildEl, $"{path}.children[0]", diagnostics, flatGraph, depth + 1, settingOptionsByKey));
             }
-            else if (flatGraph is not null && singleChildEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(singleChildEl.GetString()))
+            else if (singleChildEl.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(singleChildEl.GetString()))
             {
                 children.Add(ResolveFlatElement(singleChildEl.GetString()!, $"{path}.child", flatGraph, diagnostics, depth + 1, settingOptionsByKey));
             }
@@ -223,34 +221,9 @@ public static partial class CustomWidgetManifestParser
                 {
                     if (child.ValueKind == JsonValueKind.Object)
                     {
-                        children.Add(ParseNode(child, $"{path}.children[{idx}]", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
+                        children.Add(ParseNode(child, $"{path}.children[{idx}]", diagnostics, flatGraph, depth + 1, settingOptionsByKey));
                     }
-                    else if (flatGraph is not null && child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
-                    {
-                        children.Add(ResolveFlatElement(child.GetString()!, $"{path}.children[{idx}]", flatGraph, diagnostics, depth + 1, settingOptionsByKey));
-                    }
-                    idx++;
-                }
-            }
-        }
-        else if (string.Equals(type, "Popover", StringComparison.OrdinalIgnoreCase) &&
-                 (el.TryGetProperty("view", out JsonElement inlinePopBody) ||
-                  el.TryGetProperty("content", out inlinePopBody)))
-        {
-            if (inlinePopBody.ValueKind == JsonValueKind.Object)
-            {
-                children.Add(ParseNode(inlinePopBody, $"{path}.view", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
-            }
-            else if (inlinePopBody.ValueKind == JsonValueKind.Array)
-            {
-                int idx = 0;
-                foreach (JsonElement child in inlinePopBody.EnumerateArray())
-                {
-                    if (child.ValueKind == JsonValueKind.Object)
-                    {
-                        children.Add(ParseNode(child, $"{path}.children[{idx}]", diagnostics, depth + 1, settingOptionsByKey, flatGraph));
-                    }
-                    else if (flatGraph is not null && child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
+                    else if (child.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(child.GetString()))
                     {
                         children.Add(ResolveFlatElement(child.GetString()!, $"{path}.children[{idx}]", flatGraph, diagnostics, depth + 1, settingOptionsByKey));
                     }

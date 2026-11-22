@@ -568,7 +568,8 @@ public partial class App
                 settings.Settings.Core.GlobalHotkeyModifiers = (int)activation.Gesture.Modifiers;
                 settings.Settings.Core.GlobalHotkeyKey = activation.Gesture.VirtualKey;
             },
-            formatActivation: activation => GlobalHotkeyService.FormatActivation(activation, localization));
+            formatActivation: activation => GlobalHotkeyService.FormatActivation(activation, localization),
+            mirrorDoubleClickEnabledLocally: enabled => settings.Settings.Core.DesktopDoubleClickEnabled = enabled);
         var searchHotkey = new RemoteSearchHotkeyController(
             hotkey,
             () => GlobalHotkeyService.NormalizeGesture(

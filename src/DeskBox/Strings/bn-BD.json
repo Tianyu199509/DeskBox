@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "গোপনীয়তা ও নিরাপত্তা",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "সিস্টেম গোপনীয়তা মার্কার মেনে চলুন",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "পাসওয়ার্ড ম্যানেজার দ্বারা চিহ্নিত গোপন তথ্য স্বয়ংক্রিয়ভাবে উপেক্ষা করুন",
+  "Settings.Clipboard.FetchUrlTitles.Title": "কপি করা লিঙ্কের ওয়েবপেজ শিরোনাম সংগ্রহ করুন",
+  "Settings.Clipboard.FetchUrlTitles.Description": "চালু থাকলে ব্যাকগ্রাউন্ডে পাবলিক ওয়েবপেজের শিরোনাম সংগ্রহ করে (লগইন, যাচাইকরণ বা স্বাক্ষরযুক্ত প্যারামিটারসহ লিঙ্ক এড়িয়ে যাওয়া হয়)",
   "Settings.Clipboard.SecretProtection.Title": "API কী ও টোকেন সুরক্ষা",
   "Settings.Clipboard.SecretProtection.Description": "API কী, অ্যাক্সেস টোকেন বা প্রাইভেট কী সদৃশ টেক্সট শনাক্ত হলে করণীয়",
   "Settings.Clipboard.SecretProtection.Mask": "প্রিভিউ আড়াল রেখে কপির অনুমতি দিন",

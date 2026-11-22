@@ -83,12 +83,6 @@ public static class ShellNewMenuHelper
         return entries;
     }
 
-    internal static void InvalidateCacheForTests()
-    {
-        _cachedEntries = null;
-        _cacheReadAt = 0;
-    }
-
     /// <summary>
     /// The New→Shortcut entry, sourced from <c>HKCR\.lnk\ShellNew</c> so the
     /// label ("快捷方式" / "Shortcut") is the OS-localized one. Null when the

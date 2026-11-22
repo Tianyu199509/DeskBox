@@ -33,12 +33,12 @@ Built on C#, WinUI 3, .NET 10 Native AOT, and a Rust native Shell layer, DeskBox
 
 | Channel | Package & Highlights | Link |
 | --- | --- | --- |
-| **GitHub Releases (Direct)** | Offline `x64` & `ARM64` Full Native AOT installers bundling a private Windows App Runtime 2.6, silent in-app updates, and companion-process UI isolation | [Latest GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/latest) |
+| **GitHub Releases (Direct)** | Offline `x64` & `ARM64` Full Native AOT installers bundling a private Windows App Runtime 2.7, silent in-app updates, and companion-process UI isolation | [Latest GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/latest) |
 | **Official Website** | Product overview, direct installer downloads, and documentation | [deskbox.fun](https://deskbox.fun) |
 | **Microsoft Store** | Store-signed MSIX package with Store updates — ideal for supporting ongoing maintenance | [Get it from Microsoft Store](https://apps.microsoft.com/store/detail/9PBZSNB4D69H) |
 
 - **Integrity verification**: Every GitHub Release installer ships alongside a matching `.sha256` sidecar file so you can verify package integrity before running Setup; see the [code signing and verification policy](docs/code-signing.md).
-- **System requirements**: **Windows 10 version 2004 (build 19041) or later** and **Windows 11 (22H2+ recommended)** on `x64` or native `ARM64` PCs. Installs per user by default and works fully offline.
+- **System requirements**: **Windows 10 version 2004 (build 19041) or later** and **Windows 11 (22H2+ recommended)** on `x64` or native `ARM64` PCs. Supports standard `Program Files` or unelevated per-user installation and works fully offline.
 - **Release history**: See [CHANGELOG.md](CHANGELOG.md) for the complete version-by-version history.
 
 ---
@@ -54,16 +54,16 @@ Built on C#, WinUI 3, .NET 10 Native AOT, and a Rust native Shell layer, DeskBox
 
 ### 2. Everyday Productivity & Desktop Widgets
 
-- **Unified Global Search popup**: Connects over local IPC to an existing Everything installation (not bundled) and merges file results with DeskBox notes, todos, apps, and settings in one window — featuring an instant calculator, command palette, one-keystroke web fallback, and editable recommendations.
+- **Unified Global Search popup (`Alt+D`)**: Connects over local IPC to an existing Everything installation (not bundled) and merges file results with DeskBox notes, todos, clipboard history, apps, and settings in one window — featuring an instant calculator, command palette, one-keystroke web fallback, and Recommendation Edit Mode (app folders & multi-select drag-to-reorder).
 - **Clipboard History & Quick Paste (`Alt+V`)**: Captures text, HTML/RTF, images, files, and color swatches with instant search, a keyboard-first `Alt+V` Quick Paste popup, offline image OCR text indexing, per-app exclusions, externalized large entries, and automatic local DPAPI encryption and UI masking for sensitive secrets.
 - **Responsive Todo & Quick Capture**: Adaptive single- and dual-pane layouts, task reminders, recurrence, color markers, a popout pinned note window, and live Markdown folder mirroring with linked or managed attachments.
 - **Glance, Weather & Music**: Glance displays date, weekday, lunar calendar, solar terms, and custom rotating backgrounds; Weather pairs MSN Weather with Open-Meteo fallback across four bundled icon packs; Music controls Windows media sessions with album-color ambience, audio spectrum visualization, and LRCLIB / local `.lrc` synced lyrics.
 
 ### 3. Custom Widgets & Widget Studio
 
-- **Zero-WebView declarative engine**: Renders native WinUI 3 desktop widgets from `manifest.json` without permanent WebView memory overhead.
-- **Air-gapped QuickJS script sandbox**: Interactive custom widgets can run `logic.js` inside an isolated QuickJS sandbox enforced by strict instruction-count, wall-clock, and memory limits.
-- **Studio ecosystem & Agent integration**: Includes curated official templates, AI prompt generation and repair flows, live diagnostics, `.dbxwidget` package import/export, `deskbox://` deep links, and a local `--mcp` stdio Agent bridge with mandatory **stage-and-preview confirmation** before applying desktop changes.
+- **Zero-WebView declarative engine**: Renders native WinUI 3 desktop widgets from a flat element graph (`manifest.json`) without permanent WebView memory overhead.
+- **Air-gapped QuickJS script sandbox & permission gates**: Interactive custom widgets run `logic.js` inside an isolated QuickJS sandbox enforced by strict instruction-count, wall-clock, and memory quotas, backed by per-widget capability permissions (Internet, LAN/localhost, clipboard/system, local files, command execution).
+- **Three authoring channels & Agent integration**: Create or edit widgets via **Direct API (BYOK)**, **External Coding Agents** (`--mcp` stdio bridge & CLI skills for Claude Code, Cursor, Codex, Windsurf, etc.), or **zero-setup Web AI prompt handoff** — alongside 14 localized official templates, ECDSA P-256 signed remote catalog/prompt updates, `.dbxwidget` import/export, `deskbox://` deep links, and mandatory **host approval / stage-and-preview confirmation** before applying external changes.
 
 ### 4. Capsule Mode, Native Materials & Multi-Monitor Memory
 
@@ -74,7 +74,7 @@ Built on C#, WinUI 3, .NET 10 Native AOT, and a Rust native Shell layer, DeskBox
 ### 5. Lightweight Native AOT Runtime, Backup & Reliability
 
 - **Isolated companion processes & low footprint**: Powered by `.NET 10 Full Native AOT` and a Rust native Shell layer. Settings and Widget Studio run in isolated companion host processes over authenticated named-pipe IPC and Shell thumbnails run out-of-process, reclaiming UI memory as soon as windows close alongside tiered idle working-set trimming.
-- **Resilient storage & encrypted backups**: Atomic snapshot writes protect settings and layouts from corruption, backed by scheduled local snapshots, optional domain-scoped personal WebDAV cloud backups (credentials stored in Windows Credential Manager), and one-click privacy-filtered diagnostic bundles.
+- **Resilient storage, portable snapshots & cloud backups**: Atomic snapshot writes and automatic wipe-recovery offers protect settings and layouts from corruption, backed by scheduled local snapshots, portable cross-device backup exports (with optional decrypted clipboard snapshots and automatic credential stripping on untrusted restores), domain-scoped personal WebDAV cloud backups, and one-click privacy-filtered diagnostic bundles.
 
 ---
 
@@ -86,20 +86,28 @@ DeskBox adopts Windows 11 native materials and rounded geometry so widgets blend
 | --- | --- |
 | ![DeskBox desktop widgets with Mica material in English](docs/images/screenshots/en-us/云母材质.png) | ![DeskBox desktop widgets with Acrylic material in English](docs/images/screenshots/en-us/亚克力材质.png) |
 
+| Widget Studio — Official Templates & Channels | Widget Studio — Live Stage & AI Co-Creation |
+| --- | --- |
+| ![DeskBox Widget Studio template gallery in English](docs/images/screenshots/en-us/studio-gallery.png) | ![DeskBox Widget Studio live stage preview and AI co-creation in English](docs/images/screenshots/en-us/studio-stage.png) |
+
 <details>
-<summary>Expand Settings screenshots (General / Appearance / Capsule / File Widgets / Feature Widgets / Shortcuts)</summary>
+<summary>Expand Settings screenshots (General / Appearance / Windows & Interaction / Files & Organization / Feature Widgets / Custom Widgets / Global Search / Data & Backup)</summary>
 
 | General | Appearance |
 | --- | --- |
-| ![DeskBox General settings in English](docs/images/screenshots/en-us/常规.png) | ![DeskBox Appearance settings in English](docs/images/screenshots/en-us/外观.png) |
+| ![DeskBox General settings in English](docs/images/screenshots/en-us/settings-general.png) | ![DeskBox Appearance settings in English](docs/images/screenshots/en-us/settings-appearance.png) |
 
-| Capsule mode | File widgets |
+| Windows & interaction | Files & organization |
 | --- | --- |
-| ![DeskBox Capsule mode settings in English](docs/images/screenshots/en-us/胶囊模式.png) | ![DeskBox File widget settings in English](docs/images/screenshots/en-us/文件格子.png) |
+| ![DeskBox Windows and interaction settings in English](docs/images/screenshots/en-us/settings-interaction.png) | ![DeskBox Files and organization settings in English](docs/images/screenshots/en-us/settings-files-organization.png) |
 
-| Feature widgets | Shortcuts & interaction |
+| Feature widgets | Custom widgets & Widget Studio |
 | --- | --- |
-| ![DeskBox Feature widget settings in English](docs/images/screenshots/en-us/功能格子.png) | ![DeskBox Shortcuts and interaction settings in English](docs/images/screenshots/en-us/快捷与交互.png) |
+| ![DeskBox Built-in feature widgets settings in English](docs/images/screenshots/en-us/settings-feature-widgets.png) | ![DeskBox Custom widgets and Widget Studio settings in English](docs/images/screenshots/en-us/settings-custom-widgets.png) |
+
+| Global search | Data & backup |
+| --- | --- |
+| ![DeskBox Global search settings in English](docs/images/screenshots/en-us/settings-search.png) | ![DeskBox Data and backup settings in English](docs/images/screenshots/en-us/settings-backup.png) |
 
 </details>
 
@@ -111,7 +119,7 @@ DeskBox adopts Windows 11 native materials and rounded geometry so widgets blend
 | --- | --- |
 | **Supported OS** | Windows 10 version 2004 (build 19041) or later; Windows 11 (22H2+ recommended) |
 | **Architectures** | `x64` (Intel / AMD) and native `ARM64` (Windows on ARM) |
-| **Stack** | C#, WinUI 3, .NET 10 Full Native AOT, Windows App SDK 2.6, Rust native Shell layer, QuickJS sandbox |
+| **Stack** | C#, WinUI 3, .NET 10 Full Native AOT, Windows App SDK 2.7, Rust native Shell layer, QuickJS sandbox |
 | **Data model** | Local-first; no account or mandatory cloud sync |
 | **Languages (13)** | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian, Korean |
 | **Licensing** | [GPL-3.0-only](LICENSE) + [Commercial License](LICENSING.md) (dual-licensed) |
@@ -120,15 +128,15 @@ DeskBox adopts Windows 11 native materials and rounded geometry so widgets blend
 
 ## Local-First, Privacy & Installation Notes
 
-- **Your data stays local**: No account required. Settings and widget data live under `%LocalAppData%\DeskBox\data`, and new managed storage folders default to a fixed non-system drive with ample free space (such as `D:\DeskBox\<user>`) or `%UserProfile%\DeskBox`.
-- **Network calls are strictly opt-in / intentional**: DeskBox only accesses the network for weather forecasts, update checks, remote widget catalog (`catalog`) updates, user-configured WebDAV backups, confirmed remote URL imports, or explicitly submitted feedback diagnostics.
-- **Upgrades, privileges & safe uninstall**: Direct builds install per user via Inno Setup and preserve all settings and storage across upgrades. Launching elevated shows a clear Explorer drag-and-drop notice with a one-click normal-privilege restart. Uninstalling lets you keep or remove `%LocalAppData%\DeskBox` app data while **always preserving user files inside managed storage folders**.
+- **Your data stays local**: No account required. Settings and widget data live under `%LocalAppData%\DeskBox\data` on Direct builds (and `%UserProfile%\DeskBox\.appdata` on Microsoft Store builds so MSIX package resets never wipe your data), while new managed storage folders default to a fixed non-system drive with ample free space (such as `D:\DeskBox\<user>`) or `%UserProfile%\DeskBox`.
+- **Network calls are strictly opt-in / intentional**: DeskBox only accesses the network for weather forecasts, update checks, ECDSA-verified remote widget/prompt catalog (`catalog`) updates, user-configured AI / WebDAV endpoints, enabled custom-widget network sources, confirmed remote URL imports, or explicitly submitted feedback diagnostics.
+- **Upgrades, privileges & safe uninstall**: Direct builds install to `Program Files\DeskBox` or unelevated per-user `%LocalAppData%\Programs\DeskBox` via Inno Setup and preserve existing scope, settings, and storage across upgrades. Launching elevated shows a clear Explorer drag-and-drop notice with a one-click normal-privilege restart. Uninstalling lets you keep or remove app data while **always preserving user files inside managed storage folders**.
 
 ---
 
 ## Build from Source
 
-Development requires **Windows 11** and **.NET SDK 10.0.403** (or a later `10.0.4xx` patch pinned in [global.json](global.json); Visual Studio with the Windows App SDK workload is recommended). Retail Native AOT builds and native Rust / QuickJS modules (`-p:DeskBoxRustNative=true`) also require the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml) and Visual Studio C++ build tools (`VC.Tools.x86.x64` for `x64`, `VC.Tools.ARM64` for `ARM64`).
+Development requires **Windows 11** and **.NET SDK 10.0.404** (or a later `10.0.4xx` patch pinned in [global.json](global.json); Visual Studio with the Windows App SDK workload is recommended). Retail Native AOT builds and native Rust / QuickJS modules (`-p:DeskBoxRustNative=true`) also require the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml) and Visual Studio C++ build tools (`VC.Tools.x86.x64` for `x64`, `VC.Tools.ARM64` for `ARM64`).
 
 Restore, test, and build `x64` Debug:
 
@@ -138,7 +146,7 @@ dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Debug --n
 dotnet build .\src\DeskBox\DeskBox.csproj --configuration Debug --no-restore -p:Platform=x64 -v:minimal
 ```
 
-Publish retail Full Native AOT payloads via the authoritative script (compiles Rust / QuickJS native libraries, bundles private Windows App Runtime 2.6, and generates `DeskBox.InstallManifest.txt` for safe upgrades):
+Publish retail Full Native AOT payloads via the authoritative script (compiles Rust / QuickJS native libraries, bundles private Windows App Runtime 2.7, and generates `DeskBox.InstallManifest.txt` for safe upgrades):
 
 ```powershell
 .\scripts\publish-aot-retail.ps1 -Platform x64

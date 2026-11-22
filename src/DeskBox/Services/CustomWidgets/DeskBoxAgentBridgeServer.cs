@@ -681,27 +681,17 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         writer.WriteStartObject("state");
         if (liveSnapshot is not null)
         {
-            if (liveSnapshot.StateJson is { Count: > 0 })
+            foreach ((string k, JsonElement el) in liveSnapshot.StateJson)
             {
-                foreach ((string k, JsonElement el) in liveSnapshot.StateJson)
+                if (el.ValueKind != JsonValueKind.Undefined)
                 {
-                    if (el.ValueKind != JsonValueKind.Undefined)
-                    {
-                        writer.WritePropertyName(k);
-                        el.WriteTo(writer);
-                    }
-                }
-                foreach ((string k, string v) in liveSnapshot.State)
-                {
-                    if (!liveSnapshot.StateJson.ContainsKey(k))
-                    {
-                        writer.WriteString(k, v);
-                    }
+                    writer.WritePropertyName(k);
+                    el.WriteTo(writer);
                 }
             }
-            else
+            foreach ((string k, string v) in liveSnapshot.State)
             {
-                foreach ((string k, string v) in liveSnapshot.State)
+                if (!liveSnapshot.StateJson.ContainsKey(k))
                 {
                     writer.WriteString(k, v);
                 }
@@ -740,43 +730,23 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         writer.WriteStartObject("sampleItems");
         if (liveSnapshot is not null)
         {
-            if (liveSnapshot.SampleItemsJson is { Count: > 0 })
+            foreach ((string col, List<Dictionary<string, JsonElement>> sampleList) in liveSnapshot.SampleItemsJson)
             {
-                foreach ((string col, List<Dictionary<string, JsonElement>> sampleList) in liveSnapshot.SampleItemsJson)
+                writer.WriteStartArray(col);
+                foreach (Dictionary<string, JsonElement> sample in sampleList)
                 {
-                    writer.WriteStartArray(col);
-                    foreach (Dictionary<string, JsonElement> sample in sampleList)
+                    writer.WriteStartObject();
+                    foreach ((string fk, JsonElement fv) in sample)
                     {
-                        writer.WriteStartObject();
-                        foreach ((string fk, JsonElement fv) in sample)
+                        if (fv.ValueKind != JsonValueKind.Undefined)
                         {
-                            if (fv.ValueKind != JsonValueKind.Undefined)
-                            {
-                                writer.WritePropertyName(fk);
-                                fv.WriteTo(writer);
-                            }
+                            writer.WritePropertyName(fk);
+                            fv.WriteTo(writer);
                         }
-                        writer.WriteEndObject();
                     }
-                    writer.WriteEndArray();
+                    writer.WriteEndObject();
                 }
-            }
-            else
-            {
-                foreach ((string col, List<Dictionary<string, string>> sampleList) in liveSnapshot.SampleItems)
-                {
-                    writer.WriteStartArray(col);
-                    foreach (Dictionary<string, string> sample in sampleList)
-                    {
-                        writer.WriteStartObject();
-                        foreach ((string fk, string fv) in sample)
-                        {
-                            writer.WriteString(fk, fv);
-                        }
-                        writer.WriteEndObject();
-                    }
-                    writer.WriteEndArray();
-                }
+                writer.WriteEndArray();
             }
         }
         else if (diskPayload is not null)
@@ -1092,9 +1062,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         string activeCulture = manager.ActiveCultureName;
         string? widgetId = root.TryGetProperty("widgetId", out JsonElement idEl) && idEl.ValueKind == JsonValueKind.String
             ? idEl.GetString()
-            : (root.TryGetProperty("targetWidgetId", out JsonElement tidEl) && tidEl.ValueKind == JsonValueKind.String
-                ? tidEl.GetString()
-                : null);
+            : null;
 
         bool hasCallerManifest = root.TryGetProperty("manifestJson", out JsonElement mEl) &&
                                  mEl.ValueKind == JsonValueKind.String &&

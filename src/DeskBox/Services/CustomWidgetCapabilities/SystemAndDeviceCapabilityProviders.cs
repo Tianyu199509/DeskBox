@@ -619,8 +619,13 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
 {
     private readonly CustomWidgetViewModel _vm;
     private DispatcherQueueTimer? _deviceStateTimer;
+    private IDisposable? _recycleBinSubscription;
     private CustomWidgetDeviceStateSnapshot _deviceStateSnapshot = CustomWidgetDeviceStateSnapshot.Empty;
     private int _deviceRefreshInFlight;
+    private CustomWidgetManifest? _cachedFieldsManifest;
+    private CustomWidgetCompiledScript? _cachedFieldsScript;
+    private bool _cachedFieldsCollapsed;
+    private DeviceStateQueryFields _cachedRequiredFields;
 
     internal DeviceStateCapabilityProvider(CustomWidgetViewModel vm) => _vm = vm;
 
@@ -637,6 +642,8 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
 
     public void Stop()
     {
+        _recycleBinSubscription?.Dispose();
+        _recycleBinSubscription = null;
         if (_deviceStateTimer is not null)
         {
             _deviceStateTimer.Stop();
@@ -663,6 +670,8 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
 
         if (!shouldRun)
         {
+            _recycleBinSubscription?.Dispose();
+            _recycleBinSubscription = null;
             if (_deviceStateTimer is not null)
             {
                 _deviceStateTimer.Stop();
@@ -677,6 +686,27 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
                 _vm.NotifyViewRebuildRequested();
             }
             return;
+        }
+
+        DeviceStateQueryFields requiredFields = GetRequiredDeviceFields();
+        if ((requiredFields & DeviceStateQueryFields.RecycleBin) != 0 && _vm.DispatcherQueueInternal is not null)
+        {
+            _recycleBinSubscription ??= CustomWidgetRecycleBinService.Shared.Subscribe(
+                state =>
+                {
+                    _ = state;
+                    if (!_vm.IsDisposedInternal)
+                    {
+                        _ = RefreshDeviceStateNowAsync();
+                    }
+                },
+                _vm.DispatcherQueueInternal,
+                attachNativeWatcher: true);
+        }
+        else if (_recycleBinSubscription is not null)
+        {
+            _recycleBinSubscription.Dispose();
+            _recycleBinSubscription = null;
         }
 
         CustomWidgetSourceSpec? spec = _vm.ManifestInternal.Sources
@@ -728,7 +758,8 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
 
         try
         {
-            CustomWidgetDeviceStateSnapshot snap = await _vm.SystemControlServiceInternal.RefreshSnapshotAsync();
+            DeviceStateQueryFields requiredFields = GetRequiredDeviceFields();
+            CustomWidgetDeviceStateSnapshot snap = await _vm.SystemControlServiceInternal.RefreshSnapshotAsync(requiredFields);
             if (_vm.IsDisposedInternal)
             {
                 return;
@@ -743,8 +774,8 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
 
                 _deviceStateSnapshot = snap;
                 _vm.RefreshCapsuleProjection(bumpLiveState: true);
-                if (!CustomWidgetViewModel.NodeTreeContainsType(_vm.ManifestInternal.View, "ControlTile") &&
-                    !CapabilityProviderHelpers.NodeTreeWhenReferencesToken(_vm.ManifestInternal.View, "device."))
+                if (!_vm.ManifestInternal.EnumerateAllNodes().Any(static n => string.Equals(n.Type, "ControlTile", StringComparison.OrdinalIgnoreCase)) &&
+                    !CapabilityProviderHelpers.ManifestWhenReferencesToken(_vm.ManifestInternal, "device."))
                 {
                     _vm.NotifyMetricsRefreshed();
                 }
@@ -766,6 +797,172 @@ internal sealed class DeviceStateCapabilityProvider : ICustomWidgetCapabilityPro
         finally
         {
             Interlocked.Exchange(ref _deviceRefreshInFlight, 0);
+        }
+    }
+
+    internal DeviceStateQueryFields GetRequiredDeviceFields()
+    {
+        CustomWidgetManifest manifest = _vm.ManifestInternal;
+        CustomWidgetCompiledScript? script = _vm.CompiledScriptInternal;
+        bool collapsed = _vm.IsCompactCollapsedInternal;
+
+        if (ReferenceEquals(manifest, _cachedFieldsManifest) &&
+            ReferenceEquals(script, _cachedFieldsScript) &&
+            collapsed == _cachedFieldsCollapsed)
+        {
+            return _cachedRequiredFields;
+        }
+
+        DeviceStateQueryFields fields = ComputeRequiredDeviceFields(manifest, script, collapsed);
+        _cachedFieldsManifest = manifest;
+        _cachedFieldsScript = script;
+        _cachedFieldsCollapsed = collapsed;
+        _cachedRequiredFields = fields;
+        return fields;
+    }
+
+    internal static DeviceStateQueryFields ComputeRequiredDeviceFields(
+        CustomWidgetManifest manifest,
+        CustomWidgetCompiledScript? compiledScript,
+        bool collapsedOnly)
+    {
+        DeviceStateQueryFields fields = DeviceStateQueryFields.KeepAwake | DeviceStateQueryFields.Theme;
+
+        if (manifest.Capsule is { } cap)
+        {
+            ScanDeviceExpression(cap.Title, ref fields);
+            ScanDeviceExpression(cap.Summary, ref fields);
+            ScanDeviceExpression(cap.Glyph, ref fields);
+            ScanDeviceExpression(cap.Badge, ref fields);
+            ScanDeviceExpression(cap.BadgeIsWarning, ref fields);
+            ScanDeviceExpression(cap.Progress, ref fields);
+            if (cap.PrimaryAction is { } pa)
+            {
+                ScanDeviceExpression(pa.Icon, ref fields);
+                ScanDeviceExpression(pa.Tooltip, ref fields);
+                foreach (CustomWidgetActionSpec act in CustomWidgetNodeSpec.ExpandActionList(pa.OnClick))
+                {
+                    ScanSystemControlCommand(act, ref fields);
+                }
+            }
+        }
+
+        if (collapsedOnly)
+        {
+            if (manifest.Script is not null &&
+                (CustomWidgetViewModel.CapsuleReferencesToken(manifest.Capsule, "computed.") ||
+                 CustomWidgetViewModel.CapsuleReferencesToken(manifest.Capsule, "state.")))
+            {
+                fields |= compiledScript?.ReferencedDeviceFields ?? DeviceStateQueryFields.All;
+            }
+
+            return fields;
+        }
+
+        fields |= manifest.ParsedBodyDeviceFields ?? DeviceStateQueryFields.All;
+        foreach (CustomWidgetActionSpec act in manifest.EnumerateAllActions())
+        {
+            ScanSystemControlCommand(act, ref fields);
+        }
+
+        if (manifest.Script is not null)
+        {
+            fields |= compiledScript?.ReferencedDeviceFields ?? DeviceStateQueryFields.All;
+        }
+
+        return fields;
+    }
+
+    internal static DeviceStateQueryFields ScanDeviceTokensInManifestText(string? rawManifestJson)
+    {
+        DeviceStateQueryFields fields = DeviceStateQueryFields.None;
+        ScanDeviceExpression(rawManifestJson, ref fields);
+        return fields;
+    }
+
+    private static void ScanSystemControlCommand(CustomWidgetActionSpec act, ref DeviceStateQueryFields fields)
+    {
+        if (!string.Equals(act.Type, "system.control", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string cmd = (act.TargetId ?? act.Key ?? string.Empty).Trim();
+        if (cmd.StartsWith("volume.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Volume;
+        }
+        else if (cmd.StartsWith("brightness.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Brightness;
+        }
+        else if (cmd.StartsWith("audio.", StringComparison.OrdinalIgnoreCase) ||
+                 cmd.StartsWith("sound.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.AudioDevice;
+        }
+        else if (cmd.StartsWith("radio.", StringComparison.OrdinalIgnoreCase) ||
+                 cmd.StartsWith("wifi.", StringComparison.OrdinalIgnoreCase) ||
+                 cmd.StartsWith("bluetooth.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Radios;
+        }
+        else if (cmd.StartsWith("media.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Media;
+        }
+        else if (cmd.StartsWith("recyclebin.", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.RecycleBin;
+        }
+    }
+
+    private static void ScanDeviceExpression(string? expr, ref DeviceStateQueryFields fields)
+    {
+        if (string.IsNullOrEmpty(expr))
+        {
+            return;
+        }
+
+        if (expr.Contains("device[", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.All;
+            return;
+        }
+
+        if (!expr.Contains("device.", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (expr.Contains("device.volume", StringComparison.OrdinalIgnoreCase) ||
+            expr.Contains("device.muted", StringComparison.OrdinalIgnoreCase) ||
+            expr.Contains("device.isMuted", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Volume;
+        }
+        if (expr.Contains("device.brightness", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Brightness;
+        }
+        if (expr.Contains("device.audioDevice", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.AudioDevice;
+        }
+        if (expr.Contains("device.wifi", StringComparison.OrdinalIgnoreCase) ||
+            expr.Contains("device.bluetooth", StringComparison.OrdinalIgnoreCase) ||
+            expr.Contains("device.networkConnected", StringComparison.OrdinalIgnoreCase) ||
+            expr.Contains("device.online", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Radios;
+        }
+        if (expr.Contains("device.media", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.Media;
+        }
+        if (expr.Contains("device.recycleBin", StringComparison.OrdinalIgnoreCase))
+        {
+            fields |= DeviceStateQueryFields.RecycleBin;
         }
     }
 

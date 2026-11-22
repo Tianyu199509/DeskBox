@@ -20,7 +20,6 @@ public sealed class WeatherService : IDisposable
     // ── Open-Meteo constants ──
     private const string OpenMeteoForecastUrl = "https://api.open-meteo.com/v1/forecast";
     private const string GeocodingBaseUrl = "https://geocoding-api.open-meteo.com/v1/search";
-    private const string ReverseGeocodingBaseUrl = "https://geocoding-api.open-meteo.com/v1/get-by-id";
 
     // ── MSN Weather constants ──
     private const string MsnWeatherUrl = "https://api.msn.com/weather/overview";

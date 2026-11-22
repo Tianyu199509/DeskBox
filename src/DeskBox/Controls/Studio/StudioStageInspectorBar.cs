@@ -89,7 +89,7 @@ internal sealed class StudioStageInspectorBar
         CustomWidgetManifest? manifest = _shell.StageViewport.ResolvePreviewManifestWithSidecar(_session.CurrentManifestJson);
         CustomWidgetNodeSpec? spec = StudioManifestInspector.FindManifestNodeByPath(manifest, picked.NodePath);
         if (spec is null ||
-            JsonNode.Parse(_session.CurrentManifestJson!) is not JsonObject rootObj ||
+            StudioWorkspaceEngine.ParsePermissiveJsonNode(_session.CurrentManifestJson!) is not JsonObject rootObj ||
             !StudioManifestInspector.TryResolveJsonNodeByPath(rootObj, picked.NodePath, out JsonObject? targetObj) ||
             targetObj is null)
         {
@@ -144,7 +144,7 @@ internal sealed class StudioStageInspectorBar
             }
         });
 
-        bool hasParent = StudioManifestInspector.TryGetParentNodePath(picked.NodePath, out string parentPath);
+        bool hasParent = StudioManifestInspector.TryGetParentNodePath(rootObj, picked.NodePath, out string parentPath);
         var upBtn = new Button
         {
             Height = 26,

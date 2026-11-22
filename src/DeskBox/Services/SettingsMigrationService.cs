@@ -55,15 +55,15 @@ public sealed class SettingsMigrationPipeline
     internal SettingsMigrationPipeline(IEnumerable<ISettingsMigration> migrations)
     {
         _migrations.AddRange(migrations);
+        _migrations.Sort(static (left, right) => left.FromVersion.CompareTo(right.FromVersion));
     }
 
     /// <summary>
     /// Runs all necessary migrations to bring the settings from their current
     /// schema version up to <see cref="CurrentSchemaVersion"/>. Runs
-    /// copy-on-write: every step executes on a deserialized copy of the last
-    /// committed state and a failed step is discarded wholesale, so the
-    /// returned graph is either fully migrated through its recorded
-    /// checkpoint or byte-for-byte the input. The caller replaces its
+    /// copy-on-write: clones the input graph once on entry and only captures
+    /// pre-step checkpoint bytes before mutating steps, deserializing a
+    /// rollback checkpoint solely when a step throws. The caller replaces its
     /// settings reference with the returned one.
     /// </summary>
     public (AppSettings Settings, bool AnyApplied) RunMigrationsOnCopy(AppSettings settings)
@@ -73,11 +73,27 @@ public sealed class SettingsMigrationPipeline
             return (settings, false);
         }
 
-        AppSettings working = settings;
+        byte[]? lastCheckpointSnapshot = TrySerializeSettings(settings);
+        if (lastCheckpointSnapshot is null)
+        {
+            App.Log(
+                $"[SettingsMigration] Migration from version {settings.SchemaVersion} skipped: " +
+                "the pre-step settings snapshot could not be taken.");
+            return (settings, false);
+        }
+
+        if (TryDeserializeSettings(lastCheckpointSnapshot) is not { } working)
+        {
+            App.Log(
+                $"[SettingsMigration] Migration from version {settings.SchemaVersion} skipped: " +
+                "the pre-step settings snapshot could not be read back.");
+            return (settings, false);
+        }
+
         int version = settings.SchemaVersion;
         bool anyApplied = false;
 
-        foreach (var migration in _migrations.OrderBy(m => m.FromVersion))
+        foreach (ISettingsMigration migration in _migrations)
         {
             if (migration.FromVersion != version)
             {
@@ -89,50 +105,55 @@ public sealed class SettingsMigrationPipeline
                 break;
             }
 
-            byte[]? snapshot = TrySerializeSettings(working);
-            if (snapshot is null)
-            {
-                App.Log(
-                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
-                    "the pre-step settings snapshot could not be taken.");
-                break;
-            }
+            bool isVersionAdvanceOnly = migration is Migration_9_To_10
+                or Migration_10_To_11
+                or Migration_14_To_15
+                or Migration_17_To_18;
 
-            if (TryDeserializeSettings(snapshot) is not { } stepCopy)
+            if (anyApplied && !isVersionAdvanceOnly)
             {
-                App.Log(
-                    $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
-                    "the pre-step settings snapshot could not be read back.");
-                break;
+                lastCheckpointSnapshot = TrySerializeSettings(working);
+                if (lastCheckpointSnapshot is null)
+                {
+                    App.Log(
+                        $"[SettingsMigration] Migration from version {migration.FromVersion} skipped: " +
+                        "the pre-step settings snapshot could not be taken.");
+                    break;
+                }
             }
 
             try
             {
-                migration.Migrate(stepCopy);
+                migration.Migrate(working);
             }
             catch (Exception ex)
             {
-                // A failed step must stop the chain and leave the graph
-                // untouched: every later migration assumes the schema the
-                // failed step was supposed to produce, and the discarded copy
-                // carries no half-applied mutations.
+                // A failed step must stop the chain and restore the last
+                // committed checkpoint so half-applied mutations never leak.
                 App.Log(
                     $"[SettingsMigration] Migration from version {migration.FromVersion} failed: {ex.Message}; " +
                     $"state untouched, stopping at schema version {version} (will retry on next launch)");
+                working = anyApplied
+                    ? (TryDeserializeSettings(lastCheckpointSnapshot!) ?? settings)
+                    : settings;
                 break;
             }
 
-            working = stepCopy;
             version = migration.FromVersion + 1;
             anyApplied = true;
             App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
+        }
+
+        if (!anyApplied)
+        {
+            return (settings, false);
         }
 
         // Record the checkpoint the chain actually reached. A partial run
         // keeps the last successful version so the failed step retries next
         // launch; only a full pass reaches CurrentSchemaVersion.
         working.SchemaVersion = version;
-        return (working, anyApplied);
+        return (working, true);
     }
 
     private static byte[]? TrySerializeSettings(AppSettings settings)
@@ -737,10 +758,9 @@ internal sealed class Migration_14_To_15 : ISettingsMigration
 }
 
 /// <summary>
-/// v16 adds ClipboardViewMode (Standard/Compact), flips the default of
-/// ClipboardMoveToTopOnReuse to false, and upgrades v1.5.9 drag-out defaults
-/// safely without clobbering conservative Copy overrides or Windows 10
-/// FollowWindows profiles.
+/// v16 adds ClipboardViewMode (Standard/Compact), preserves explicit v1.5.9
+/// image-clipboard opt-outs, and upgrades v1.5.9 drag-out defaults safely
+/// without clobbering conservative Copy overrides or Windows 10 FollowWindows profiles.
 /// </summary>
 internal sealed class Migration_15_To_16 : ISettingsMigration
 {
@@ -748,7 +768,6 @@ internal sealed class Migration_15_To_16 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
-        settings.Clipboard.ClipboardMoveToTopOnReuse = false;
         if (string.IsNullOrWhiteSpace(settings.Clipboard.ClipboardViewMode))
         {
             settings.Clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
@@ -876,9 +895,9 @@ internal sealed class Migration_16_To_17 : ISettingsMigration
 }
 
 /// <summary>
-/// v18 flips the default of KeepCapsuleContentWarm to true so collapsed
-/// capsules retain their inner views and expand without reloading unless the
-/// user explicitly turns capsule cache retention off in Settings.
+/// Schema v18 advances the version checkpoint for 1.6.0 capsule warm-cache
+/// settings (KeepCapsuleContentWarm already defaults to true on fresh and
+/// upgraded v1.5.9 profiles).
 /// </summary>
 internal sealed class Migration_17_To_18 : ISettingsMigration
 {
@@ -886,7 +905,6 @@ internal sealed class Migration_17_To_18 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
-        settings.Performance.KeepCapsuleContentWarm = true;
     }
 }
 

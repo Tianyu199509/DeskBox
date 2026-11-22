@@ -15,6 +15,7 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     private readonly SettingsIpcClient _client;
     private readonly Action<GlobalHotkeyActivation>? _mirrorGlobalActivationLocally;
     private readonly Func<GlobalHotkeyActivation, string>? _formatActivation;
+    private readonly Action<bool>? _mirrorDoubleClickEnabledLocally;
 
     // Deep review R18 (A-#3): GetRuntimeState used to take a blocking pipe
     // roundtrip on EVERY settings push (the host's ApplySettingsSnapshot →
@@ -27,13 +28,15 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     public RemoteSettingsHotkeyActions(
         SettingsIpcClient client,
         Action<GlobalHotkeyActivation>? mirrorGlobalActivationLocally = null,
-        Func<GlobalHotkeyActivation, string>? formatActivation = null)
+        Func<GlobalHotkeyActivation, string>? formatActivation = null,
+        Action<bool>? mirrorDoubleClickEnabledLocally = null)
     {
         _client = client;
         _mirrorGlobalActivationLocally = mirrorGlobalActivationLocally;
         _formatActivation = formatActivation;
+        _mirrorDoubleClickEnabledLocally = mirrorDoubleClickEnabledLocally;
         _client.EventReceived += OnEventReceived;
-        RefreshRuntimeStateCache();
+        RefreshRuntimeStateCache(notifyAfterRefresh: false);
     }
 
     public event Action? RegistrationChanged;
@@ -42,16 +45,12 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     {
         if (method == SettingsIpcMethods.HotkeyRegistrationChanged)
         {
-            RefreshRuntimeStateCache();
-            RegistrationChanged?.Invoke();
+            RefreshRuntimeStateCache(notifyAfterRefresh: true);
         }
     }
 
-    private void RefreshRuntimeStateCache()
+    private void RefreshRuntimeStateCache(bool notifyAfterRefresh = false)
     {
-        // Fire-and-forget: the answer lands a roundtrip later; until then
-        // callers see the previous state (or null before the first refresh
-        // completes — matching the pre-split no-service behavior).
         _ = Task.Run(async () =>
         {
             try
@@ -68,6 +67,13 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
             catch (Exception ex)
             {
                 App.Log($"[SearchHotkey] Runtime state cache refresh failed: {ex.Message}");
+            }
+            finally
+            {
+                if (notifyAfterRefresh)
+                {
+                    RegistrationChanged?.Invoke();
+                }
             }
         });
     }
@@ -245,10 +251,17 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
             _client,
             SettingsIpcMethods.HotkeyDoubleClickSet,
             SettingsIpcPayload.EncodeBoolean(enabled));
-        return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.DesktopDoubleClickToggleResult)
-            is { } result
-                ? result
-                : new DesktopDoubleClickToggleResult(Applied: false, ErrorCode: 0);
+        if (ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.DesktopDoubleClickToggleResult)
+            is { } result)
+        {
+            if (result.Applied)
+            {
+                _mirrorDoubleClickEnabledLocally?.Invoke(enabled);
+            }
+            return result;
+        }
+
+        return new DesktopDoubleClickToggleResult(Applied: false, ErrorCode: 0);
     }
 
     // The recorder's OnOpened follows this with _hook.TryStart(); with the

@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "الخصوصية والأمان",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "احترام علامات خصوصية النظام",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "تجاهل كلمات المرور والبيانات المستثناة من سجل الحافظة تلقائياً",
+  "Settings.Clipboard.FetchUrlTitles.Title": "جلب عناوين صفحات الويب للروابط المنسوخة",
+  "Settings.Clipboard.FetchUrlTitles.Description": "عند التفعيل، يتم جلب عناوين الصفحات العامة في الخلفية (يتم تخطي الروابط التي تتضمن معاملات تسجيل دخول أو تحقق أو توقيع)",
   "Settings.Clipboard.SecretProtection.Title": "حماية مفاتيح API والرموز السرية",
   "Settings.Clipboard.SecretProtection.Description": "طريقة التعامل مع النصوص المشابهة لمفاتيح API أو رموز الوصول أو المفاتيح الخاصة",
   "Settings.Clipboard.SecretProtection.Mask": "إخفاء المعاينة والسماح بالنسخ",

@@ -983,4 +983,7 @@ public sealed class AppSettings
 
     /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardDoubleCopyAction"/>
     public string ClipboardDoubleCopyAction { get => Clipboard.ClipboardDoubleCopyAction; set => Clipboard.ClipboardDoubleCopyAction = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardFetchUrlTitles"/>
+    public bool ClipboardFetchUrlTitles { get => Clipboard.ClipboardFetchUrlTitles; set => Clipboard.ClipboardFetchUrlTitles = value; }
 }

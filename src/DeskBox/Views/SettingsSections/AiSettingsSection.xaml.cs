@@ -12,10 +12,8 @@ namespace DeskBox.Views.SettingsSections;
 
 public sealed partial class AiSettingsSection : UserControl
 {
-    private ISettingsWidgetActions? _widgetActions;
     private LocalizationService? _localization;
     private readonly AiProviderConfigFormController _form;
-    private IntPtr _ownerWindow;
     private bool _isSectionLoaded;
     private bool _isAiMethodUiSyncing;
     private bool _isSavingInlineCredentials;
@@ -87,8 +85,8 @@ public sealed partial class AiSettingsSection : UserControl
 
     public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow, LocalizationService? localization = null)
     {
-        _widgetActions = widgetActions;
-        _ownerWindow = ownerWindow;
+        _ = widgetActions;
+        _ = ownerWindow;
         if (localization is not null && !ReferenceEquals(_localization, localization))
         {
             if (_localization is not null)
@@ -142,11 +140,6 @@ public sealed partial class AiSettingsSection : UserControl
         CustomWidgetAiCredentialStore.Shared.CheckForExternalChangesAndNotify();
         SettingsWindow.ApplyNoticeMessageTypography(AiStatusInfoBar);
         SettingsWindow.EnsureInformationalSeverityPinned(AiStatusInfoBar);
-        if (FindName("AiInlineOllamaContextInfoBar") is InfoBar ollamaContextInfoBar)
-        {
-            SettingsWindow.ApplyNoticeMessageTypography(ollamaContextInfoBar);
-            SettingsWindow.EnsureInformationalSeverityPinned(ollamaContextInfoBar);
-        }
         if (_localization is not null)
         {
             _localization.LanguageChanged -= OnLanguageChanged;
@@ -393,6 +386,11 @@ public sealed partial class AiSettingsSection : UserControl
             return;
         }
 
+        if (Interlocked.Exchange(ref _inlineAiOpCts, null) is { } prevCts)
+        {
+            try { prevCts.Cancel(); } catch { }
+        }
+
         string providerId = ResolveSelectedAiProviderId();
         CustomWidgetStudioPreferencesStore.Shared.SetPreferredAiProviderId(providerId);
 
@@ -465,7 +463,9 @@ public sealed partial class AiSettingsSection : UserControl
             try
             {
                 AiConnectionTestResult res = await DeskBoxAiService.Shared.TestConnectionAsync(providerId, cancellationToken: token);
-                if (token.IsCancellationRequested || !_isSectionLoaded)
+                if (token.IsCancellationRequested ||
+                    !_isSectionLoaded ||
+                    !string.Equals(providerId, ResolveSelectedAiProviderId(), StringComparison.OrdinalIgnoreCase))
                 {
                     return;
                 }
@@ -574,6 +574,11 @@ public sealed partial class AiSettingsSection : UserControl
         if (_isAiMethodUiSyncing)
         {
             return;
+        }
+
+        if (Interlocked.Exchange(ref _inlineAiOpCts, null) is { } prevCts)
+        {
+            try { prevCts.Cancel(); } catch { }
         }
 
         string providerId = ResolveSelectedAiProviderId();
@@ -760,7 +765,9 @@ public sealed partial class AiSettingsSection : UserControl
                     providerId,
                     cancellationToken: token,
                     persistDiscoveredModels: false);
-                if (token.IsCancellationRequested || !_isSectionLoaded)
+                if (token.IsCancellationRequested ||
+                    !_isSectionLoaded ||
+                    !string.Equals(providerId, ResolveSelectedAiProviderId(), StringComparison.OrdinalIgnoreCase))
                 {
                     return;
                 }

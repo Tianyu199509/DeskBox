@@ -286,6 +286,28 @@ public static class CustomWidgetHostSnapshotService
         }
     }
 
+    internal static bool HasActiveSharedMusicSession
+    {
+        get
+        {
+            lock (s_musicGate)
+            {
+                return s_sharedMusicSession is not null;
+            }
+        }
+    }
+
+    internal static bool IsSharedMusicObserverConnected
+    {
+        get
+        {
+            lock (s_musicGate)
+            {
+                return s_sharedMusicSession?.ConnectionState == DeskBox.Services.Media.MediaSessionConnectionState.Healthy;
+            }
+        }
+    }
+
     public static IDisposable SubscribeMusicChanged(EventHandler handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -301,6 +323,7 @@ public static class CustomWidgetHostSnapshotService
                 s_sharedMusicSession.PlaybackInfoChanged += OnSharedMusicEvent;
                 s_sharedMusicSession.MediaPropertiesChanged += OnSharedMusicEvent;
                 s_sharedMusicSession.TimelinePropertiesChanged += OnSharedMusicEvent;
+                s_sharedMusicSession.ConnectionStateChanged += OnSharedMusicEvent;
                 toInit = s_sharedMusicSession;
             }
         }
@@ -327,6 +350,7 @@ public static class CustomWidgetHostSnapshotService
                 s_sharedMusicSession.PlaybackInfoChanged -= OnSharedMusicEvent;
                 s_sharedMusicSession.MediaPropertiesChanged -= OnSharedMusicEvent;
                 s_sharedMusicSession.TimelinePropertiesChanged -= OnSharedMusicEvent;
+                s_sharedMusicSession.ConnectionStateChanged -= OnSharedMusicEvent;
                 s_sharedMusicSession = null;
             }
         }

@@ -405,50 +405,6 @@ public static class LocalFileLyricsProvider
         return null;
     }
 
-    public static async Task<string?> TryReadLocalLrcAsync(
-        LyricsQuery query,
-        string? localFolder,
-        CancellationToken cancellationToken = default)
-    {
-        if (!query.IsValid || string.IsNullOrWhiteSpace(localFolder))
-        {
-            return null;
-        }
-
-        string folder;
-        try
-        {
-            folder = Path.GetFullPath(localFolder.Trim());
-            if (!Directory.Exists(folder))
-            {
-                return null;
-            }
-        }
-        catch
-        {
-            return null;
-        }
-
-        List<string> candidates = BuildExactCandidateBaseNames(query);
-        foreach (string fileName in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            string fullPath = Path.Combine(folder, fileName + ".lrc");
-            if (!File.Exists(fullPath))
-            {
-                continue;
-            }
-
-            string? text = await ReadTextWithEncodingFallbackAsync(fullPath, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
-        }
-
-        return null;
-    }
-
     internal static string DecodeLrcBytes(byte[] bytes)
     {
         if (bytes.Length == 0)
@@ -1062,14 +1018,6 @@ public static class LocalFileLyricsProvider
         {
             return null;
         }
-    }
-
-    private static async Task<string?> ReadTextWithEncodingFallbackAsync(
-        string filePath,
-        CancellationToken cancellationToken)
-    {
-        byte[]? bytes = await ReadBoundedBytesAsync(filePath, cancellationToken).ConfigureAwait(false);
-        return bytes is null ? null : DecodeLrcBytes(bytes);
     }
 
     private static void EnsureCodePagesRegistered()

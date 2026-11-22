@@ -318,9 +318,26 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
         _cachedNavigationStyleNames = null;
         _cachedTitleDisplayModeNames = null;
         _cachedSwitchAnimationNames = null;
-        OnPropertyChanged(nameof(AvailableNavigationStyleOptions));
-        OnPropertyChanged(nameof(AvailableTitleDisplayModeOptions));
-        OnPropertyChanged(nameof(AvailableSwitchAnimationOptions));
+        string prevNav = DefaultNavigationStyle;
+        string prevTitle = DefaultTitleDisplayMode;
+        string prevAnim = DefaultSwitchAnimationStyle;
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableNavigationStyleOptions));
+            OnPropertyChanged(nameof(AvailableTitleDisplayModeOptions));
+            OnPropertyChanged(nameof(AvailableSwitchAnimationOptions));
+            DefaultNavigationStyle = prevNav;
+            DefaultTitleDisplayMode = prevTitle;
+            DefaultSwitchAnimationStyle = prevAnim;
+            OnPropertyChanged(nameof(DefaultNavigationStyle));
+            OnPropertyChanged(nameof(DefaultTitleDisplayMode));
+            OnPropertyChanged(nameof(DefaultSwitchAnimationStyle));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
     }
 
     // --- Coordinator seam retained for non-XAML callers and tests ---

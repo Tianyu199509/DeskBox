@@ -797,6 +797,14 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task<DesktopOrganizationUndoResult> AbandonDesktopOrganizationUndoAsync(string historyId) =>
             Task.FromResult(new DesktopOrganizationUndoResult(DesktopOrganizationUndoOutcome.Completed));
+
+        public bool? LastResetChromeInteractiveArg { get; private set; }
+
+        public Task ResetWidgetChromeOverrides(bool interactive)
+        {
+            LastResetChromeInteractiveArg = interactive;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeAppActions : ISettingsAppActions
@@ -1686,6 +1694,36 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(download.Success);
             Assert.Same(manifest, inProcessStore.DownloadManifestArg);
             Assert.Null(loop.UpdateService.DownloadManifestArg);
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task WidgetFacade_RoundTripsGroupRenameAndResetWidgetChromeOverrides()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var remote = new RemoteSettingsWidgetActions(loop.Client, settings);
+            var renameChange = new Contracts.GroupPresentationChange(
+                "grp-1",
+                NavigationStyle: "Top",
+                TitleDisplayMode: "IconOnly",
+                Name: "Workstation");
+            await remote.ApplyGroupPresentation(renameChange);
+            Assert.Single(loop.Widget.GroupPresentations);
+            Assert.Equal("Workstation", loop.Widget.GroupPresentations[0].Name);
+
+            await remote.ResetWidgetChromeOverrides(interactive: true);
+            Assert.True(loop.Widget.LastResetChromeInteractiveArg);
+
+            await remote.ResetWidgetChromeOverrides(interactive: false);
+            Assert.False(loop.Widget.LastResetChromeInteractiveArg);
         }
         finally
         {

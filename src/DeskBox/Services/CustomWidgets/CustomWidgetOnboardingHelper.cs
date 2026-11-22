@@ -346,7 +346,7 @@ public static partial class CustomWidgetOnboardingHelper
     private static string BuildUniqueForkManifestId(string sourceId)
     {
         string working = sourceId.Trim().ToLowerInvariant();
-        string[] prefixes = ["deskbox.", "starter.", "user.fork-", "fork-"];
+        string[] prefixes = ["deskbox.", "user.fork-", "fork-"];
         foreach (string prefix in prefixes)
         {
             if (working.StartsWith(prefix, StringComparison.Ordinal))

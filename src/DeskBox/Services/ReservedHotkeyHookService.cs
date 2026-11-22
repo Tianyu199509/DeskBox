@@ -370,7 +370,7 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                 if (!startupWasCancelled)
                 {
                     _threadId = threadId;
-                    _hookHandle = installedHook;
+                    Volatile.Write(ref _hookHandle, installedHook);
                     installedHook = IntPtr.Zero;
                     _startupError = startupError;
                 }
@@ -416,7 +416,7 @@ internal sealed class ReservedHotkeyHookService : IDisposable
 
                     _thread = null;
                     _threadId = 0;
-                    _hookHandle = IntPtr.Zero;
+                    Volatile.Write(ref _hookHandle, IntPtr.Zero);
                     _notificationWindow = IntPtr.Zero;
                     _notificationMessage = 0;
                 }
@@ -449,14 +449,7 @@ internal sealed class ReservedHotkeyHookService : IDisposable
         // A delivered callback is the only observable proof the hook is still
         // installed; Windows removes timed-out hooks without notification.
         Volatile.Write(ref _lastCallbackTicks, Environment.TickCount64);
-        IntPtr notificationWindow;
-        uint notificationMessage;
-        lock (_sync)
-        {
-            hookHandle = _hookHandle;
-            notificationWindow = _notificationWindow;
-            notificationMessage = _notificationMessage;
-        }
+        hookHandle = Volatile.Read(ref _hookHandle);
 
         bool isKeyDown = wParam == Win32Helper.WM_KEYDOWN ||
                          wParam == Win32Helper.WM_SYSKEYDOWN;
@@ -525,6 +518,15 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             ReservedHotkeyEventDisposition.TriggerAndSuppress or
             ReservedHotkeyEventDisposition.TriggerAndPassThrough)
         {
+            IntPtr notificationWindow;
+            uint notificationMessage;
+            lock (_sync)
+            {
+                hookHandle = _hookHandle;
+                notificationWindow = _notificationWindow;
+                notificationMessage = _notificationMessage;
+            }
+
             if (notificationWindow == IntPtr.Zero || notificationMessage == 0)
             {
                 CancelSuppression();

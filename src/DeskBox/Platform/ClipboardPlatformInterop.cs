@@ -270,9 +270,6 @@ internal static partial class ClipboardPlatformInterop
     internal static bool TryOpenClipboardOnce() =>
         ClipboardNativeMethods.OpenClipboard(IntPtr.Zero);
 
-    internal static bool TryOpenClipboardWithRetry() =>
-        TryOpenClipboardOnce();
-
     /// <summary>
     /// Inspects standard Windows privacy clipboard formats and Explorer move-only drop flags
     /// in a single non-blocking OpenClipboard session, plus extracts UTF-16 text, HTML/RTF,
@@ -1039,27 +1036,8 @@ internal static partial class ClipboardPlatformInterop
         return finalName;
     }
 
-    internal static string NormalizeFriendlyAppDisplayName(string? rawName)
-    {
-        if (string.IsNullOrWhiteSpace(rawName))
-        {
-            return string.Empty;
-        }
-
-        string name = rawName.Trim();
-        if (name.Length > 4 && name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-        {
-            name = name[..^4].Trim();
-        }
-
-        if (string.Equals(name, "DeskBox.Settings", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "DeskBox.ThumbnailProxy", StringComparison.OrdinalIgnoreCase))
-        {
-            return "DeskBox";
-        }
-
-        return name;
-    }
+    internal static string NormalizeFriendlyAppDisplayName(string? rawName) =>
+        DeskBox.Services.ClipboardClassifier.NormalizeFriendlyAppDisplayName(rawName);
 
     private static unsafe void TryReadClipboardUnicodeText(
         bool materializeText,

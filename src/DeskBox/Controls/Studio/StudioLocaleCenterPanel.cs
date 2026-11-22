@@ -271,7 +271,7 @@ internal sealed class StudioLocaleCenterPanel : IDisposable
         _session.IsI18nQueueRunning = true;
         _session.ActiveI18nWorkingManifestJson = workingManifestJson;
         _session.ActiveI18nWorkingCatalog = plan.SeededCatalog;
-        _session.CachedI18nSyncPlan = null;
+        _session.InvalidateI18nSyncPlanCache();
         _session.LiveLocaleJobUpdates.Clear();
 
         if (scopeSet is null)
@@ -393,7 +393,7 @@ internal sealed class StudioLocaleCenterPanel : IDisposable
                             }
 
                             _session.ActiveI18nWorkingCatalog = snapshotCatalog;
-                            _session.CachedI18nSyncPlan = null;
+                            _session.InvalidateI18nSyncPlanCache();
                             _session.PersistI18nCheckpointDraft(workingManifestJson, currentLogicJs, snapshotCatalog);
                             if (_shell.StageViewport.PreviewVm is not null)
                             {
@@ -421,7 +421,7 @@ internal sealed class StudioLocaleCenterPanel : IDisposable
             _session.ActiveI18nWorkingManifestJson = null;
             _session.ActiveI18nWorkingCatalog = null;
             _session.LiveLocaleJobUpdates.Clear();
-            _session.CachedI18nSyncPlan = null;
+            _session.InvalidateI18nSyncPlanCache();
 
             foreach (string doneCulture in batchResult.CompletedLocales)
             {
@@ -543,7 +543,7 @@ internal sealed class StudioLocaleCenterPanel : IDisposable
                 _session.ActiveI18nWorkingManifestJson = null;
                 _session.ActiveI18nWorkingCatalog = null;
                 _session.LiveLocaleJobUpdates.Clear();
-                _session.CachedI18nSyncPlan = null;
+                _session.InvalidateI18nSyncPlanCache();
                 _shell.ChatPanel.RefreshInPlaceGenerationChrome();
                 RefreshLocaleCenterChrome();
             }
@@ -556,7 +556,7 @@ internal sealed class StudioLocaleCenterPanel : IDisposable
                 _session.ActiveI18nWorkingManifestJson = null;
                 _session.ActiveI18nWorkingCatalog = null;
                 _session.LiveLocaleJobUpdates.Clear();
-                _session.CachedI18nSyncPlan = null;
+                _session.InvalidateI18nSyncPlanCache();
                 _shell.ChatPanel.RefreshInPlaceGenerationChrome();
                 RefreshLocaleCenterChrome();
                 _shell.ShowPageMessage(InfoBarSeverity.Error, string.Empty, ex.Message, null);

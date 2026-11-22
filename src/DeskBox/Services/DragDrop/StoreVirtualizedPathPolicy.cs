@@ -310,28 +310,14 @@ internal static class StoreVirtualizedPathPolicy
     private static string? TryResolveViaAncestorReparsePoints(string candidate)
     {
         bool hasLinkAncestor = false;
-        string? nearestExisting = null;
-        var nonExistentTail = new Stack<string>();
         string? current = candidate;
         while (!string.IsNullOrWhiteSpace(current))
         {
-            bool exists = File.Exists(current) || Directory.Exists(current);
-            if (exists)
+            if ((File.Exists(current) || Directory.Exists(current)) &&
+                StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(current))
             {
-                nearestExisting ??= current;
-                if (StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(current))
-                {
-                    hasLinkAncestor = true;
-                    break;
-                }
-            }
-            else if (nearestExisting is null)
-            {
-                string segment = Path.GetFileName(current);
-                if (!string.IsNullOrWhiteSpace(segment))
-                {
-                    nonExistentTail.Push(segment);
-                }
+                hasLinkAncestor = true;
+                break;
             }
 
             string? parent = Path.GetDirectoryName(current);

@@ -175,10 +175,23 @@ public sealed partial class FeatureWidgetsSettingsViewModel : ObservableObject
     {
         _cachedFolderOpenBehaviorNames = null;
         _cachedAttachmentStorageModeNames = null;
-        OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptions));
-        OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptionItems));
-        OnPropertyChanged(nameof(FolderOpenBehavior));
-        OnPropertyChanged(nameof(AvailableAttachmentStorageModeOptions));
+        string prevFolder = FolderOpenBehavior;
+        string prevAttach = AttachmentStorageMode;
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptions));
+            OnPropertyChanged(nameof(AvailableFolderOpenBehaviorOptionItems));
+            OnPropertyChanged(nameof(AvailableAttachmentStorageModeOptions));
+            FolderOpenBehavior = prevFolder;
+            AttachmentStorageMode = prevAttach;
+            OnPropertyChanged(nameof(FolderOpenBehavior));
+            OnPropertyChanged(nameof(AttachmentStorageMode));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
     }
 
     public void SetFeatureWidgetEnabled(WidgetKind kind, bool enabled) =>
@@ -196,18 +209,6 @@ public sealed partial class FeatureWidgetsSettingsViewModel : ObservableObject
     public bool SetMusicHideTimelineWhenUnavailable(bool value) =>
         _settings.SetMusicHideTimelineWhenUnavailable(value);
 
-    public bool SetMusicShowLyrics(bool value) =>
-        _settings.SetMusicShowLyrics(value);
-
-    public bool SetMusicShowCapsuleLyrics(bool value) =>
-        _settings.SetMusicShowCapsuleLyrics(value);
-
-    public bool SetMusicLocalLyricsFolder(string? folderPath) =>
-        _settings.SetMusicLocalLyricsFolder(folderPath);
-
-    public bool SetMusicSpectrumStyle(string? style) =>
-        _settings.SetMusicSpectrumStyle(style);
-
     public void ResetMusicPresentationPreferences(bool scheduleSave = true) =>
         _settings.ResetMusicPresentationPreferences(scheduleSave);
 
@@ -222,9 +223,6 @@ public sealed partial class FeatureWidgetsSettingsViewModel : ObservableObject
 
     public bool SetWeatherSkin(string? skin) =>
         _settings.SetWeatherSkin(skin);
-
-    public bool SetWeatherIconStyle(string? style) =>
-        _settings.SetWeatherIconStyle(style);
 
     public bool SetWeatherDataSource(string? source) =>
         _settings.SetWeatherDataSource(source);

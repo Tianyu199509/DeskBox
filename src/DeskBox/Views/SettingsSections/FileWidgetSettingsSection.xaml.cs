@@ -238,15 +238,6 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         ManagedStorageWarningCard.Visibility = visibility;
     }
 
-    public void SetOrphanFoldersSummary(int count, string summary)
-    {
-        OrphanManagedStorageCard.Description = summary;
-        ManageOrphanFoldersButton.IsEnabled = count > 0;
-        ManageOrphanFoldersButton.Visibility = count > 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-    }
-
     public void SetOrphanFoldersState(int count, string summaryText, string buttonText)
     {
         OrphanManagedStorageCard.Description = summaryText;

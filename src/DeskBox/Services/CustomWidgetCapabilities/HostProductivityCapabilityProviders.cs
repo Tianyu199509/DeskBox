@@ -209,7 +209,7 @@ internal sealed class ClipboardCapabilityProvider : ICustomWidgetCapabilityProvi
                 _vm.TryRunScriptLifecycleHook("onInit", CustomWidgetScriptEngine.DefaultInitOrSourceTimeoutMs, persistIfMutated: false);
                 _vm.RefreshCapsuleProjection(bumpLiveState: true);
                 if (prev.HasText == next.HasText &&
-                    !CapabilityProviderHelpers.NodeTreeWhenReferencesNonPresenceToken(_vm.ManifestInternal.View, "clipboard."))
+                    !CapabilityProviderHelpers.ManifestWhenReferencesNonPresenceToken(_vm.ManifestInternal, "clipboard."))
                 {
                     _vm.NotifyMetricsRefreshed();
                 }
@@ -229,12 +229,14 @@ internal sealed class ClipboardCapabilityProvider : ICustomWidgetCapabilityProvi
 
 internal sealed class MusicCapabilityProvider : ICustomWidgetCapabilityProvider
 {
+    private const int MaxIdleEmptyMusicProbesBeforeSleep = 3;
     private readonly CustomWidgetViewModel _vm;
     private DispatcherQueueTimer? _musicTimer;
     private CustomWidgetMusicSnapshot _musicSnapshot = CustomWidgetMusicSnapshot.Empty;
     private int _musicRefreshInFlight;
     private int _musicRefreshPending;
     private int _musicRefreshPendingRebuild;
+    private int _consecutiveEmptyMusicProbes;
     private IDisposable? _musicObserverSubscription;
 
     internal MusicCapabilityProvider(CustomWidgetViewModel vm) => _vm = vm;
@@ -250,6 +252,7 @@ internal sealed class MusicCapabilityProvider : ICustomWidgetCapabilityProvider
     {
         _musicObserverSubscription?.Dispose();
         _musicObserverSubscription = null;
+        _consecutiveEmptyMusicProbes = 0;
         if (_musicTimer is not null)
         {
             _musicTimer.Stop();
@@ -282,9 +285,11 @@ internal sealed class MusicCapabilityProvider : ICustomWidgetCapabilityProvider
             }
             _musicObserverSubscription?.Dispose();
             _musicObserverSubscription = null;
+            _consecutiveEmptyMusicProbes = 0;
             return;
         }
 
+        _consecutiveEmptyMusicProbes = 0;
         if (_musicObserverSubscription is null && _vm.MusicSnapshotProviderOverride is null)
         {
             _musicObserverSubscription = CustomWidgetHostSnapshotService.SubscribeMusicChanged((_, _) =>
@@ -294,13 +299,29 @@ internal sealed class MusicCapabilityProvider : ICustomWidgetCapabilityProvider
                     return;
                 }
 
+                void WakeAndRefresh()
+                {
+                    if (_vm.IsDisposedInternal)
+                    {
+                        return;
+                    }
+
+                    _consecutiveEmptyMusicProbes = 0;
+                    if (_musicTimer is { IsRunning: false })
+                    {
+                        _musicTimer.Start();
+                    }
+
+                    _ = RefreshMusicNowAsync(triggerRebuild: true);
+                }
+
                 if (_vm.DispatcherQueueInternal is not null && !_vm.DispatcherQueueInternal.HasThreadAccess)
                 {
-                    _vm.DispatcherQueueInternal.TryEnqueue(() => _ = RefreshMusicNowAsync(triggerRebuild: true));
+                    _vm.DispatcherQueueInternal.TryEnqueue(WakeAndRefresh);
                 }
                 else
                 {
-                    _ = RefreshMusicNowAsync(triggerRebuild: true);
+                    WakeAndRefresh();
                 }
             });
         }
@@ -422,6 +443,36 @@ internal sealed class MusicCapabilityProvider : ICustomWidgetCapabilityProvider
                             callKind: CustomWidgetScriptCallKind.SourceData);
                     }
                 });
+
+                if (next.IsPlaying)
+                {
+                    _consecutiveEmptyMusicProbes = 0;
+                    if (_musicTimer is { IsRunning: false })
+                    {
+                        _musicTimer.Start();
+                    }
+                }
+                else if (next.HasSession)
+                {
+                    _consecutiveEmptyMusicProbes = 0;
+                    if (_musicObserverSubscription is not null &&
+                        CustomWidgetHostSnapshotService.IsSharedMusicObserverConnected &&
+                        _musicTimer is { IsRunning: true })
+                    {
+                        _musicTimer.Stop();
+                    }
+                }
+                else
+                {
+                    _consecutiveEmptyMusicProbes++;
+                    if (_musicObserverSubscription is not null &&
+                        CustomWidgetHostSnapshotService.IsSharedMusicObserverConnected &&
+                        _consecutiveEmptyMusicProbes >= MaxIdleEmptyMusicProbesBeforeSleep &&
+                        _musicTimer is { IsRunning: true })
+                    {
+                        _musicTimer.Stop();
+                    }
+                }
 
                 if (effectiveRebuild)
                 {

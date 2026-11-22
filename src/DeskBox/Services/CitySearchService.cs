@@ -64,6 +64,7 @@ public sealed class CitySearchService : IDisposable
 
     private static readonly object s_instancesLock = new();
     private static readonly List<WeakReference<CitySearchService>> s_liveInstances = [];
+    private static PreparedCityEntry[]? s_sharedPreparedCities;
 
     private static Stream? OpenCitiesDataStream()
     {
@@ -120,11 +121,28 @@ public sealed class CitySearchService : IDisposable
         return entries;
     }
 
+    private static PreparedCityEntry[] GetOrLoadSharedPreparedCities()
+    {
+        PreparedCityEntry[]? shared = Volatile.Read(ref s_sharedPreparedCities);
+        if (shared is not null)
+        {
+            return shared;
+        }
+
+        PreparedCityEntry[] built = BuildPreparedCities(LoadPredefinedCities());
+        lock (s_instancesLock)
+        {
+            s_sharedPreparedCities ??= built;
+            return s_sharedPreparedCities;
+        }
+    }
+
     public static void ReleaseIdleCache(bool force = false)
     {
         _ = force;
         lock (s_instancesLock)
         {
+            s_sharedPreparedCities = null;
             for (int i = s_liveInstances.Count - 1; i >= 0; i--)
             {
                 if (!s_liveInstances[i].TryGetTarget(out CitySearchService? instance) || instance._isDisposed)
@@ -174,7 +192,7 @@ public sealed class CitySearchService : IDisposable
             return cached;
         }
 
-        PreparedCityEntry[] loaded = BuildPreparedCities(LoadPredefinedCities());
+        PreparedCityEntry[] loaded = GetOrLoadSharedPreparedCities();
         if (!_isDisposed)
         {
             Volatile.Write(ref _cachedCities, loaded);
@@ -196,8 +214,10 @@ public sealed class CitySearchService : IDisposable
         PredefinedCity? best = null;
         double bestDist = double.MaxValue;
 
-        foreach (var c in LoadPredefinedCities())
+        PreparedCityEntry[] prepared = GetOrLoadSharedPreparedCities();
+        for (int i = 0; i < prepared.Length; i++)
         {
+            PredefinedCity c = prepared[i].City;
             double d = HaversineDistance(lat, lon, c.Lat, c.Lon);
             if (d < bestDist)
             {
@@ -293,7 +313,7 @@ public sealed class CitySearchService : IDisposable
             {
                 merged.Add(new CitySearchCandidate(
                     r,
-                    GetLocalResultRelevance(preparedCities, r, query),
+                    GetLocalResultRelevance(preparedCities, r, query, useTraditional),
                     IsLocal: true,
                     Sequence: sequence++));
             }
@@ -405,7 +425,7 @@ public sealed class CitySearchService : IDisposable
         string query,
         bool isEn,
         bool useTraditional = false) =>
-        SearchLocal(BuildPreparedCities(LoadPredefinedCities()), query, isEn, useTraditional);
+        SearchLocal(GetOrLoadSharedPreparedCities(), query, isEn, useTraditional);
 
     private static List<WeatherCitySearchResult> SearchLocal(
         IReadOnlyList<PreparedCityEntry> predefined,
@@ -431,7 +451,7 @@ public sealed class CitySearchService : IDisposable
                     || c.CountryEnNorm.Contains(normalizedQuery, StringComparison.Ordinal)
                     || c.Admin1ZhNorm.Contains(normalizedQuery, StringComparison.Ordinal)
                     || c.Admin1EnNorm.Contains(normalizedQuery, StringComparison.Ordinal)
-                    || (isPinyinInitials && MatchesPinyinInitials(c.PinyinNorm, lower));
+                    || (isPinyinInitials && MatchesPreNormalizedPinyinInitials(c.PinyinNorm, lower));
             })
             .OrderByDescending(c => GetSearchRelevance(c, normalizedQuery))
             .Take(8)
@@ -454,6 +474,11 @@ public sealed class CitySearchService : IDisposable
 
         string normalizedPinyin = NormalizeSearchText(pinyin);
         string normalizedInitials = NormalizeSearchText(initials);
+        return MatchesPreNormalizedPinyinInitials(normalizedPinyin, normalizedInitials);
+    }
+
+    private static bool MatchesPreNormalizedPinyinInitials(string normalizedPinyin, string normalizedInitials)
+    {
         if (normalizedPinyin.Length == 0 || normalizedInitials.Length == 0)
         {
             return false;
@@ -632,14 +657,18 @@ public sealed class CitySearchService : IDisposable
     private static int GetLocalResultRelevance(
         IReadOnlyList<PreparedCityEntry> predefined,
         WeatherCitySearchResult result,
-        string query)
+        string query,
+        bool useTraditional = false)
     {
         PreparedCityEntry? city = predefined.FirstOrDefault(candidate =>
             Math.Abs(candidate.City.Lat - result.Latitude) < 0.0001 &&
             Math.Abs(candidate.City.Lon - result.Longitude) < 0.0001);
+        string matchingQuery = useTraditional
+            ? ChineseTextConverter.ToSimplified(query)
+            : query;
         return city is null
             ? GetResultRelevance(result, query)
-            : GetSearchRelevance(city, NormalizeSearchText(query));
+            : GetSearchRelevance(city, NormalizeSearchText(matchingQuery));
     }
 
     internal static string NormalizeSearchText(string? value)
@@ -647,6 +676,11 @@ public sealed class CitySearchService : IDisposable
         if (string.IsNullOrWhiteSpace(value))
         {
             return string.Empty;
+        }
+
+        if (IsAlreadyNormalizedFastPath(value))
+        {
+            return value;
         }
 
         string decomposed = value.Normalize(NormalizationForm.FormD);
@@ -661,6 +695,23 @@ public sealed class CitySearchService : IDisposable
         }
 
         return builder.ToString().Normalize(NormalizationForm.FormC);
+    }
+
+    private static bool IsAlreadyNormalizedFastPath(string value)
+    {
+        for (int i = 0; i < value.Length; i++)
+        {
+            char ch = value[i];
+            bool ok = (ch >= 'a' && ch <= 'z') ||
+                      (ch >= '0' && ch <= '9') ||
+                      (ch >= '\u4e00' && ch <= '\u9fff');
+            if (!ok)
+            {
+                return false;
+            }
+        }
+
+        return value.Length > 0;
     }
 
     private static bool IsValidCoordinate(double latitude, double longitude)
@@ -737,6 +788,7 @@ public sealed class CitySearchService : IDisposable
         Volatile.Write(ref _cachedCities, null);
         lock (s_instancesLock)
         {
+            bool anyRemainingCached = false;
             for (int i = s_liveInstances.Count - 1; i >= 0; i--)
             {
                 if (!s_liveInstances[i].TryGetTarget(out CitySearchService? instance) ||
@@ -744,7 +796,18 @@ public sealed class CitySearchService : IDisposable
                     instance._isDisposed)
                 {
                     s_liveInstances.RemoveAt(i);
+                    continue;
                 }
+
+                if (Volatile.Read(ref instance._cachedCities) is not null)
+                {
+                    anyRemainingCached = true;
+                }
+            }
+
+            if (!anyRemainingCached)
+            {
+                s_sharedPreparedCities = null;
             }
         }
 

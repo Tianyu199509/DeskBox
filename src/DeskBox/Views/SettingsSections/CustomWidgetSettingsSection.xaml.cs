@@ -1202,7 +1202,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
     private CustomWidgetSettingsFormOptions CreateSettingsFormOptions(string widgetId) =>
         new()
         {
-            Localization = _localization!,
+            Localization = _localization ?? new LocalizationService(new SettingsService()),
             CultureName = Localization.CurrentCultureName,
             OwnerWindowHandle = _ownerWindow,
             ThemeScope = this,

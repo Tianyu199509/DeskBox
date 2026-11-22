@@ -28,15 +28,6 @@ public static class StudioTurnStageRouter
         "nothing shows", "no data", "stuck loading", "search not working", "not working", "doesn't work", "still broken"
     ];
 
-    private static readonly string[] AdditionalCrossNodeKeywords =
-    [
-        "加载", "一直在", "转圈", "卡住", "卡死", "空的", "显示不出", "出不来", "乱码",
-        "搜索", "搜不到", "筛选", "过滤", "排序", "切换", "联动",
-        "无效", "点击没", "点进去", "打不开", "报错", "错误", "失败", "异常", "不对", "bug",
-        "弹窗", "详情", "刷新", "接口", "数据源",
-        "stuck", "loading", "empty", "blank", "broken", "filter", "search", "no response", "error"
-    ];
-
     private static readonly string[] FeatureAdditionVerbs =
     [
         "增加", "加上", "添加", "新增", "支持", "改成", "改为", "换成", "加入",
@@ -62,13 +53,6 @@ public static class StudioTurnStageRouter
         "trending", "news", "stock", "market", "crypto", "weather", "dashboard", "monitor", "feed"
     ];
 
-    private static readonly string[] LocalizedMicroEditKeywords =
-    [
-        "颜色", "字号", "字体", "加粗", "圆角", "间距", "边距", "内边距", "紧凑", "宽松",
-        "标题", "改名", "文案", "图标", "透明", "柔和", "亮一点", "暗一点", "大一点", "小一点",
-        "color", "font", "size", "bold", "radius", "spacing", "padding", "compact", "title", "icon", "softer"
-    ];
-
     public static bool IsDiagnosticComplaintOnly(string? prompt)
     {
         if (string.IsNullOrWhiteSpace(prompt))
@@ -90,17 +74,6 @@ public static class StudioTurnStageRouter
         return ContainsAny(trimmed, PureComplaintKeywords);
     }
 
-    public static bool IsSymptomOrCrossNodePrompt(string? prompt)
-    {
-        if (string.IsNullOrWhiteSpace(prompt))
-        {
-            return false;
-        }
-
-        string trimmed = prompt.Trim();
-        return ContainsAny(trimmed, PureComplaintKeywords) || ContainsAny(trimmed, AdditionalCrossNodeKeywords);
-    }
-
     public static bool ShouldEnforceHardSubtreeGuard(string? targetNodePath, string? userPrompt)
     {
         // Treat targetNodePath as a soft focus hint in the prompt rather than a hard edit-rejection lock
@@ -108,28 +81,6 @@ public static class StudioTurnStageRouter
         _ = targetNodePath;
         _ = userPrompt;
         return false;
-    }
-
-    public static bool IsLocalizedVisualOrCopyMicroEdit(string? userPrompt, bool hasExistingManifest)
-    {
-        if (!hasExistingManifest || string.IsNullOrWhiteSpace(userPrompt))
-        {
-            return false;
-        }
-
-        string trimmed = userPrompt.Trim();
-        if (trimmed.Length > 64 || IsSymptomOrCrossNodePrompt(trimmed))
-        {
-            return false;
-        }
-
-        // Structural/feature keywords require normal reasoning rather than micro-edit fast path
-        if (ContainsAny(trimmed, ["脚本", "逻辑", "接口", "API", "http", "定时", "图表", "趋势", "新增模块", "script", "chart", "source"]))
-        {
-            return false;
-        }
-
-        return ContainsAny(trimmed, LocalizedMicroEditKeywords);
     }
 
     public static bool ShouldPreferInitialClarification(
@@ -318,9 +269,6 @@ public static class StudioTurnStageRouter
             ? DowngradeToFastNonThinkingInvocation(turnInvocation, thinkingParamsUnsupportedOnRoute, fetchedModels)
             : turnInvocation;
     }
-
-    public static string BuildCompactViewOutline(string? manifestJson, int maxLines = 28) =>
-        StudioWorkspaceEngine.BuildCompactViewOutline(manifestJson, maxLines);
 
     public static string BuildDataflowSpotlightHint(
         string? manifestJson,

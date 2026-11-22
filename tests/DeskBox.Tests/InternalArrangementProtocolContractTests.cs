@@ -66,7 +66,7 @@ public sealed class InternalArrangementProtocolContractTests
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
 
         Assert.Contains(
-            "if (_isSurfaceReorderDragActive || (_stackPopoverDragActive && !_win10ShellDragInFlight))",
+            "if (_isSurfaceReorderDragActive || _stackPopoverDragActive)",
             surfaceSource,
             StringComparison.Ordinal);
         Assert.Contains(

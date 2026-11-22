@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -296,6 +297,11 @@ internal sealed class WindowsCrashEventCollector
         if (_stdoutOverride is not null)
         {
             return await _stdoutOverride();
+        }
+
+        if (Win32Helper.IsWindowsInSModeLockdown())
+        {
+            throw new PlatformNotSupportedException("wevtutil is skipped under Windows S Mode lockdown policy.");
         }
 
         return await RunProcessAsync(startInfo, cancellationToken);

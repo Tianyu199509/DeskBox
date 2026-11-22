@@ -2400,9 +2400,8 @@ internal sealed class StudioCoCreationChatPanel : IDisposable
             return;
         }
 
-        _session.RevisionIndex = target;
-        _session.SyncChatSupersededWithRevisionIndex();
-        _session.CachedI18nSyncPlan = null;
+        _session.SelectRevisionIndex(target);
+        _session.InvalidateI18nSyncPlanCache();
         _shell.StageViewport.ApplyLivePreviewUpdateInPlace();
     }
 
@@ -2786,7 +2785,7 @@ internal sealed class StudioCoCreationChatPanel : IDisposable
         }
 
         CustomWidgetManifest? manifest = CustomWidgetManifestParser.Parse(manifestJson).Manifest;
-        if (manifest?.View is null)
+        if (manifest is null)
         {
             return null;
         }
@@ -2806,44 +2805,19 @@ internal sealed class StudioCoCreationChatPanel : IDisposable
             }
         }
 
-        return FindMatchingNodePath(manifest.View, "root", targetId, pill);
-    }
-
-    private static string? FindMatchingNodePath(
-        CustomWidgetNodeSpec node,
-        string path,
-        string? targetId,
-        string rawPill)
-    {
-        if (!string.IsNullOrWhiteSpace(targetId) &&
-            string.Equals(node.Id, targetId, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(targetId))
         {
-            return path;
+            return StudioManifestInspector.FindMatchingNodePath(
+                manifest,
+                node => string.Equals(node.Id, targetId, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (string.IsNullOrWhiteSpace(targetId) &&
-            !string.IsNullOrWhiteSpace(node.Type) &&
-            !string.Equals(path, "root", StringComparison.Ordinal) &&
-            rawPill.Contains(node.Type, StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        for (int i = 0; i < node.Children.Count; i++)
-        {
-            if (FindMatchingNodePath(node.Children[i], $"{path}/children[{i}]", targetId, rawPill) is { } childMatch)
-            {
-                return childMatch;
-            }
-        }
-
-        if (node.ItemTemplate is not null &&
-            FindMatchingNodePath(node.ItemTemplate, $"{path}/itemTemplate", targetId, rawPill) is { } tplMatch)
-        {
-            return tplMatch;
-        }
-
-        return null;
+        string rootPath = manifest.View.NodePath;
+        return StudioManifestInspector.FindMatchingNodePath(
+            manifest,
+            node => !string.IsNullOrWhiteSpace(node.Type) &&
+                    !string.Equals(node.NodePath, rootPath, StringComparison.Ordinal) &&
+                    pill.Contains(node.Type, StringComparison.OrdinalIgnoreCase));
     }
 
     internal string FormatDirectStatsText(

@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "プライバシーとセキュリティ",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "システムのプライバシー除外フラグを尊重",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "パスワードマネージャー等が履歴除外に設定した機密データを自動的に無視します",
+  "Settings.Clipboard.FetchUrlTitles.Title": "コピーしたリンクのページタイトルを取得",
+  "Settings.Clipboard.FetchUrlTitles.Description": "有効にすると公開Webページのタイトルをバックグラウンドで取得します（ログイン・認証・署名付きパラメータを含むリンクはスキップ）",
   "Settings.Clipboard.SecretProtection.Title": "APIキー・トークン保護",
   "Settings.Clipboard.SecretProtection.Description": "APIキーやアクセストークン、秘密鍵らしき文字列を検出した際の処理方法",
   "Settings.Clipboard.SecretProtection.Mask": "マスク表示してコピーを許可",

@@ -155,14 +155,6 @@ public sealed class LyricsCacheStore
             _offsetsGate.Release();
         }
 
-        // Seamless migration fallback from pre-1.6.0 cache entries.
-        CachedLyricsEntry? raw = await TryGetRawAsync(cacheKey, cancellationToken).ConfigureAwait(false);
-        if (raw is { UserOffsetMs: not 0 })
-        {
-            await PersistSavedUserOffsetAsync(cacheKey, raw.UserOffsetMs, cancellationToken).ConfigureAwait(false);
-            return raw.UserOffsetMs;
-        }
-
         return 0;
     }
 

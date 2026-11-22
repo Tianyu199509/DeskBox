@@ -30,7 +30,7 @@ internal static class LocalLyricsFormatDecoder
         0x98, 0x25, 0xB0, 0xAC, 0xE3, 0x02, 0x83, 0x68, 0xE8, 0xFC, 0x6C
     ];
 
-    private static ReadOnlySpan<byte> Qmc1StaticKey =>
+    internal static ReadOnlySpan<byte> Qmc1StaticKey =>
     [
         0xC3, 0x4A, 0xD6, 0xCA, 0x90, 0x67, 0xF7, 0x52, 0xD8, 0xA1, 0x66, 0x62, 0x9F, 0x5B, 0x09, 0x00,
         0xC3, 0x5E, 0x95, 0x23, 0x9F, 0x13, 0x11, 0x7E, 0xD8, 0x92, 0x3F, 0xBC, 0x90, 0xBB, 0x74, 0x0E,
@@ -42,9 +42,9 @@ internal static class LocalLyricsFormatDecoder
         0xC3, 0x00, 0x09, 0x5B, 0x9F, 0x62, 0x66, 0xA1, 0xD8, 0x52, 0xF7, 0x67, 0x90, 0xCA, 0xD6, 0x4A
     ];
 
-    private static ReadOnlySpan<byte> Krc1Magic => "krc1"u8;
+    internal static ReadOnlySpan<byte> Krc1Magic => "krc1"u8;
 
-    private static ReadOnlySpan<byte> KrcXorKey =>
+    internal static ReadOnlySpan<byte> KrcXorKey =>
     [
         0x40, 0x47, 0x61, 0x77, 0x5E, 0x32, 0x74, 0x47,
         0x51, 0x36, 0x31, 0x2D, 0xCE, 0xD2, 0x6E, 0x69
@@ -196,30 +196,6 @@ internal static class LocalLyricsFormatDecoder
         return TryDecompressZlibBounded(decoded);
     }
 
-    internal static byte[] EncryptKrcBytesForTesting(ReadOnlySpan<byte> utf8PlainBytes)
-    {
-        byte[] compressed;
-        using (var ms = new MemoryStream())
-        {
-            using (var zs = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-            {
-                zs.Write(utf8PlainBytes);
-            }
-
-            compressed = ms.ToArray();
-        }
-
-        ReadOnlySpan<byte> key = KrcXorKey;
-        byte[] output = new byte[4 + compressed.Length];
-        Krc1Magic.CopyTo(output);
-        for (int i = 0; i < compressed.Length; i++)
-        {
-            output[4 + i] = (byte)(compressed[i] ^ key[i & 0x0F]);
-        }
-
-        return output;
-    }
-
     internal static byte[]? TryDecryptQrcBytes(ReadOnlySpan<byte> rawBytes)
     {
         if (rawBytes.Length < 16)
@@ -266,51 +242,6 @@ internal static class LocalLyricsFormatDecoder
         }
 
         return TryDecompressZlibBounded(cipherBuffer);
-    }
-
-    internal static byte[] EncryptLocalQmcQrcBytesForTesting(ReadOnlySpan<byte> utf8PlainBytes)
-    {
-        byte[] compressed;
-        using (var ms = new MemoryStream())
-        {
-            using (var zs = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-            {
-                zs.Write(utf8PlainBytes);
-            }
-
-            compressed = ms.ToArray();
-        }
-
-        int paddedLen = (compressed.Length + 7) & ~7;
-        Array.Resize(ref compressed, paddedLen);
-
-        ulong[] k3Enc = BuildQqDesSubkeys("!@#)(*$%"u8, encrypt: true);
-        ulong[] k2Dec = BuildQqDesSubkeys("123ZXC!@"u8, encrypt: false);
-        ulong[] k1Enc = BuildQqDesSubkeys("!@#)(NHL"u8, encrypt: true);
-
-        for (int offset = 0; offset < compressed.Length; offset += 8)
-        {
-            Span<byte> block = compressed.AsSpan(offset, 8);
-            ulong state = BinaryPrimitives.ReadUInt64LittleEndian(block);
-            state = QqDesTransformBlock(state, k3Enc);
-            state = QqDesTransformBlock(state, k2Dec);
-            state = QqDesTransformBlock(state, k1Enc);
-            BinaryPrimitives.WriteUInt64LittleEndian(block, state);
-        }
-
-        ReadOnlySpan<byte> prefix = "[offset:0]\n"u8;
-        byte[] output = new byte[prefix.Length + compressed.Length];
-        prefix.CopyTo(output);
-        compressed.CopyTo(output.AsSpan(prefix.Length));
-
-        ReadOnlySpan<byte> qmcKey = Qmc1StaticKey;
-        for (int i = 0; i < output.Length; i++)
-        {
-            int maskIndex = i > 0x7FFF ? ((i % 0x7FFF) & 0x7F) : (i & 0x7F);
-            output[i] ^= qmcKey[maskIndex];
-        }
-
-        return output;
     }
 
     private static byte[]? TryDecompressZlibBounded(byte[] compressed)

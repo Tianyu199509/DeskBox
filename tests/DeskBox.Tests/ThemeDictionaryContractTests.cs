@@ -18,6 +18,7 @@ public sealed class ThemeDictionaryContractTests
 {
     private const string AppXamlPath = "src/DeskBox/App.xaml";
     private const string FeedbackPresenterPath = "src/DeskBox/Controls/WidgetFeedbackPresenter.xaml";
+    private const string SettingsWindowXamlPath = "src/DeskBox/Views/SettingsWindow.xaml";
 
     [Fact]
     public void AppThemeDictionaries_CoverAllFourThemesWithIdenticalKeys()
@@ -62,6 +63,26 @@ public sealed class ThemeDictionaryContractTests
 
         AssertIdenticalKeySets(dictionaries, FeedbackPresenterPath);
         Assert.Contains("SystemColorWindowTextColor", dictionaries["HighContrast"], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsWindowThemeDictionaries_CoverAllFourThemesAndSystemHighContrast()
+    {
+        var dictionaries = ExtractThemeDictionaries(ReadRepositoryFile(SettingsWindowXamlPath));
+
+        Assert.True(dictionaries.ContainsKey("Light"), "SettingsWindow.xaml must author a Light theme dictionary.");
+        Assert.True(dictionaries.ContainsKey("Dark"), "SettingsWindow.xaml must author a Dark theme dictionary.");
+        Assert.True(dictionaries.ContainsKey("Default"), "SettingsWindow.xaml must author a Default fallback dictionary.");
+        Assert.True(dictionaries.ContainsKey("HighContrast"),
+            "SettingsWindow.xaml must author a HighContrast dictionary so NavigationViewContentBackground stays system-owned under contrast themes.");
+
+        AssertIdenticalKeySets(dictionaries, SettingsWindowXamlPath);
+        foreach (var brush in ExtractBrushEntries(dictionaries["HighContrast"]))
+        {
+            Assert.True(brush.Value.Contains("SystemColor", StringComparison.Ordinal) ||
+                        brush.Value.Contains("Transparent", StringComparison.Ordinal),
+                $"SettingsWindow.xaml HighContrast brush '{brush.Key}' must map to a SystemColor* resource or Transparent, found '{brush.Value}'.");
+        }
     }
 
     private static Dictionary<string, string> ExtractThemeDictionaries(string xaml)

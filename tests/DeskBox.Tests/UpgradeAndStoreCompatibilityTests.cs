@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -711,5 +712,178 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
         Assert.Equal("\uE892", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AC", isWindows11OrLater: false));
         Assert.Equal("\uE893", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AD", isWindows11OrLater: false));
         Assert.Equal("\uE769", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AE", isWindows11OrLater: false));
+    }
+
+    [Fact]
+    public async Task StoreUserAssetMigration_RebasesClipboardDroppedFilesAndCustomWidgetStores_PreservingDroppedAttachments()
+    {
+        string legacyData = Directory.CreateDirectory(Path.Combine(_tempRoot, "LegacyClipData")).FullName;
+        string durableData = Directory.CreateDirectory(Path.Combine(_tempRoot, "DurableClipData")).FullName;
+
+        string oldDroppedFile = Path.Combine(legacyData, "clipboard", "dropped", "entry-1", "invoice.pdf");
+        string newDroppedFile = Path.Combine(durableData, "clipboard", "dropped", "entry-1", "invoice.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(newDroppedFile)!);
+        await File.WriteAllTextAsync(newDroppedFile, "pdf-bytes", Encoding.UTF8);
+
+        var durableClipStore = new ClipboardStore(Path.Combine(durableData, "clipboard"));
+        byte[] hmacKey = RandomNumberGenerator.GetBytes(32);
+        await File.WriteAllTextAsync(
+            Path.Combine(durableClipStore.RootDirectory, "hmac-key.bin"),
+            DpapiSecretProtector.ProtectUtf8ToBase64(Convert.ToBase64String(hmacKey)),
+            Encoding.UTF8);
+
+        string oldHash = DeskBox.Features.Clipboard.ClipboardContentHashing.ComputeFilesContentHash([oldDroppedFile], hmacKey);
+        var clipDoc = new ClipboardStoreDocument
+        {
+            Items =
+            [
+                new ClipboardHistoryItem
+                {
+                    Id = "c1",
+                    Kind = ClipboardItemKind.Files,
+                    TextContent = oldDroppedFile,
+                    FilePaths = [oldDroppedFile],
+                    ContentHash = oldHash
+                }
+            ]
+        };
+        string clipJson = JsonSerializer.Serialize(clipDoc, ClipboardJsonContext.Default.ClipboardStoreDocument);
+        await File.WriteAllTextAsync(durableClipStore.StorePath, clipJson, Encoding.UTF8);
+        await File.WriteAllTextAsync(durableClipStore.StorePath + ".bak", clipJson, Encoding.UTF8);
+
+        string cwDir = Directory.CreateDirectory(Path.Combine(durableData, "custom-widgets", "cw-1")).FullName;
+        string oldCwAttachment = Path.Combine(legacyData, "custom-widgets", "cw-1", "attachments", "photo.png");
+        string newCwAttachment = Path.Combine(durableData, "custom-widgets", "cw-1", "attachments", "photo.png");
+        await File.WriteAllTextAsync(
+            Path.Combine(cwDir, "store.json"),
+            JsonSerializer.Serialize(new { cover = oldCwAttachment }),
+            Encoding.UTF8);
+
+        StoreUserAssetMigrationFileOps.RebaseMigratedJsonStorePaths(legacyData, durableData);
+
+        ClipboardStoreDocument migratedDoc = await durableClipStore.LoadAsync();
+        ClipboardHistoryItem migratedItem = Assert.Single(migratedDoc.Items);
+        Assert.Equal(newDroppedFile, Assert.Single(migratedItem.FilePaths));
+        Assert.Equal(newDroppedFile, migratedItem.TextContent);
+        Assert.Equal(
+            DeskBox.Features.Clipboard.ClipboardContentHashing.ComputeFilesContentHash([newDroppedFile], hmacKey),
+            migratedItem.ContentHash);
+
+        ClipboardStore.CleanupOrphanedDroppedStorage(durableClipStore, migratedDoc.Items);
+        Assert.True(File.Exists(newDroppedFile), "Rebased dropped attachment must survive orphan cleanup.");
+
+        JsonNode? cwNode = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(cwDir, "store.json"), Encoding.UTF8));
+        Assert.Equal(newCwAttachment, cwNode?["cover"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task CustomWidgetDataStore_CompanionSaveRelay_InvalidatesCacheWhenMainProcessUpdatesDisk()
+    {
+        string sharedDataRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "CompanionRelayData")).FullName;
+        var mainStore = new CustomWidgetDataStore("w-live", sharedDataRoot);
+        var initialPayload = new CustomWidgetStorePayload();
+        initialPayload.Settings["city"] = "Beijing";
+        await mainStore.SaveAsync(initialPayload);
+
+        var studioStore = new CustomWidgetDataStore("w-live", sharedDataRoot)
+        {
+            SaveRelayOverride = async (widgetId, jsonPayload, clearAttachments) =>
+            {
+                string wire = CustomWidgetDataStore.ComposeRelayPayload(widgetId, jsonPayload, clearAttachments);
+                using JsonDocument doc = JsonDocument.Parse(wire[(wire.IndexOf('\n') + 1)..]);
+                CustomWidgetStorePayload parsed = JsonSerializer.Deserialize(
+                    doc.RootElement.GetRawText(),
+                    CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload)!;
+                if (clearAttachments)
+                {
+                    await mainStore.ClearAllDataAsync();
+                }
+
+                await mainStore.SaveAsync(parsed);
+            }
+        };
+
+        CustomWidgetStorePayload firstStudioLoad = await studioStore.LoadAsync();
+        Assert.Equal("Beijing", firstStudioLoad.Settings["city"]);
+
+        // Simulate main process / MCP updating store.json while Studio remains open.
+        var externalPayload = await mainStore.LoadAsync();
+        externalPayload.Settings["city"] = "Shanghai";
+        externalPayload.Collections["tasks"] =
+        [
+            CustomWidgetRecord.CreateProjected("r1", ("title", "Added from desktop"))
+        ];
+        await mainStore.SaveAsync(externalPayload);
+
+        CustomWidgetStorePayload secondStudioLoad = await studioStore.LoadAsync();
+        Assert.Equal("Shanghai", secondStudioLoad.Settings["city"]);
+        Assert.True(secondStudioLoad.Collections.ContainsKey("tasks"));
+        Assert.Single(secondStudioLoad.Collections["tasks"]);
+    }
+
+    [Fact]
+    public void ChannelMigration_StoreToDirectImport_ResolvesUtf8BomSourceLanguageWhenExplicitCultureOmitted()
+    {
+        string directRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "DirectEmpty")).FullName;
+        string storeRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "StoreConfigured")).FullName;
+        string storeData = Directory.CreateDirectory(Path.Combine(storeRoot, "data")).FullName;
+
+        // Encoding.UTF8 writes a 3-byte UTF-8 BOM; pre-UI culture resolution must strip it cleanly.
+        File.WriteAllText(
+            Path.Combine(storeData, "settings.json"),
+            """{"schemaVersion":18,"language":"ja-JP"}""",
+            Encoding.UTF8);
+
+        string? capturedPromptTitle = null;
+        ChannelMigrationOutcome outcome = ChannelMigrationService.RunDirectStartupImportFromStore(
+            directRoot,
+            storeRoot,
+            isInteractiveLaunch: true,
+            cultureName: null,
+            confirmPrompt: (title, _) =>
+            {
+                capturedPromptTitle = title;
+                return true;
+            },
+            otherChannelInstalledProbe: () => true);
+
+        Assert.Equal(ChannelMigrationOutcomeKind.ImportedFromStoreToDirect, outcome.Kind);
+        Assert.Equal(
+            LocalizationService.TranslateForCulture("ja-JP", "ChannelCoexistence.StoreImportPrompt.Title"),
+            capturedPromptTitle);
+    }
+
+    [Fact]
+    public void StripMachineBoundSecrets_PreservesSecretsForPreRestoreAndCustomAutoBackupRoots()
+    {
+        string recoveryRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "DefaultRecovery")).FullName;
+        string preRestoreRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "DataRoot", "backups", "pre-restore")).FullName;
+        string customAutoRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "CustomAutoDir")).FullName;
+
+        string stagedPreRestore = Directory.CreateDirectory(Path.Combine(_tempRoot, "StagedPreRestore")).FullName;
+        Directory.CreateDirectory(Path.Combine(stagedPreRestore, "clipboard"));
+        File.WriteAllText(Path.Combine(stagedPreRestore, "ai-credentials.json"), """{"providers":{"openai":{"apiKey":"enc"}}}""");
+        File.WriteAllBytes(Path.Combine(stagedPreRestore, "clipboard", "hmac-key.bin"), [1, 2, 3, 4]);
+
+        DeskBox.Services.Backup.PortableBackupProcessor.StripMachineBoundSecretsIfUntrustedRestore(
+            stagedPreRestore,
+            Path.Combine(preRestoreRoot, "pre-restore-20261122.zip"),
+            recoveryRoot,
+            manifestKind: "pre-restore",
+            preRestoreRoot,
+            customAutoRoot);
+        Assert.True(File.Exists(Path.Combine(stagedPreRestore, "ai-credentials.json")));
+        Assert.True(File.Exists(Path.Combine(stagedPreRestore, "clipboard", "hmac-key.bin")));
+
+        string stagedCustomAuto = Directory.CreateDirectory(Path.Combine(_tempRoot, "StagedCustomAuto")).FullName;
+        File.WriteAllText(Path.Combine(stagedCustomAuto, "widget-secrets.json"), """{"secrets":{}}""");
+        DeskBox.Services.Backup.PortableBackupProcessor.StripMachineBoundSecretsIfUntrustedRestore(
+            stagedCustomAuto,
+            Path.Combine(customAutoRoot, "auto-20261122.zip"),
+            recoveryRoot,
+            manifestKind: "automatic",
+            preRestoreRoot,
+            customAutoRoot);
+        Assert.True(File.Exists(Path.Combine(stagedCustomAuto, "widget-secrets.json")));
     }
 }

@@ -1737,11 +1737,6 @@ public sealed class CustomWidgetRemoteCatalogService
             return trimmed["deskbox.".Length..];
         }
 
-        if (trimmed.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
-        {
-            return trimmed["starter.".Length..];
-        }
-
         return trimmed;
     }
 

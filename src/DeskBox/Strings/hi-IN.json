@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "गोपनीयता और सुरक्षा",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "सिस्टम गोपनीयता चिह्नों का सम्मान करें",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "पासवर्ड मैनेजर द्वारा इतिहास से वर्जित चिह्नित गोपनीय सामग्री स्वतः अनदेखी करें",
+  "Settings.Clipboard.FetchUrlTitles.Title": "कॉपी किए गए लिंक के वेबपेज शीर्षक प्राप्त करें",
+  "Settings.Clipboard.FetchUrlTitles.Description": "सक्षम होने पर सार्वजनिक वेबपेजों के शीर्षक पृष्ठभूमि में प्राप्त करता है (लॉगिन, सत्यापन या हस्ताक्षरित पैरामीटर वाले लिंक छोड़ दिए जाते हैं)",
   "Settings.Clipboard.SecretProtection.Title": "API कुंजी और टोकन सुरक्षा",
   "Settings.Clipboard.SecretProtection.Description": "API कुंजी, एक्सेस टोकन या निजी कुंजी जैसे दिखने वाले टेक्स्ट के लिए नीति",
   "Settings.Clipboard.SecretProtection.Mask": "प्रीव्यू छिपाएँ पर कॉपी की अनुमति दें",

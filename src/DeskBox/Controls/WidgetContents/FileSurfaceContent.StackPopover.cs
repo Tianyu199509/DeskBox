@@ -4616,7 +4616,6 @@ public sealed partial class FileSurfaceContent
                 : null;
         }
 
-        if (IsSameStackPopoverWin10ShellDrag()) return null;
         string stackName = _stackPopoverKey is { } key &&
             ViewModel.FindStackByKey(key) is { } stack
                 ? stack.Name
@@ -4720,10 +4719,9 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
-            bool isWin10SamePopoverDrag = _win10ShellDragInFlight && _stackPopoverDragActive;
             if (!hasFileData ||
                 _isImportBusy ||
-                (_stackPopoverDragActive && !isWin10SamePopoverDrag))
+                _stackPopoverDragActive)
             {
                 _stackPopoverNativeItemTarget = null;
                 _stackPopoverNativeLaunchTarget = null;
@@ -4739,8 +4737,7 @@ public sealed partial class FileSurfaceContent
             }
 
             BeginStackPopoverDragAutoScroll();
-            if (!isWin10SamePopoverDrag &&
-                TryResolveStackPopoverChildIconDropTarget(
+            if (TryResolveStackPopoverChildIconDropTarget(
                     screenX,
                     screenY,
                     out Border? childBorder,
@@ -4805,7 +4802,7 @@ public sealed partial class FileSurfaceContent
             _stackPopoverNativeLaunchTarget = null;
             ClearFolderDropTarget();
             ClearLaunchDropTarget();
-            if (!isWin10SamePopoverDrag && _stackPopoverSurface is { } surface)
+            if (_stackPopoverSurface is { } surface)
             {
                 SetStackMemberDropTarget(surface);
             }

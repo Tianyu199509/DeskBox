@@ -186,8 +186,30 @@ internal static partial class CustomWidgetQuickJsInterop
         bool requireExport,
         ReadOnlySpan<byte> payloadJsonUtf8,
         uint timeoutMs,
-        nuint memoryLimitBytes)
+        nuint memoryLimitBytes) =>
+        InvokeBytecodeCore(bytecode, fnName, requireExport, payloadJsonUtf8, timeoutMs, memoryLimitBytes, rentFromPool: false, out _);
+
+    internal static unsafe DeskBoxQjsNativeInvokeOutcome InvokeBytecodePooled(
+        ReadOnlySpan<byte> bytecode,
+        string fnName,
+        bool requireExport,
+        ReadOnlySpan<byte> payloadJsonUtf8,
+        uint timeoutMs,
+        nuint memoryLimitBytes,
+        out int resultByteLength) =>
+        InvokeBytecodeCore(bytecode, fnName, requireExport, payloadJsonUtf8, timeoutMs, memoryLimitBytes, rentFromPool: true, out resultByteLength);
+
+    private static unsafe DeskBoxQjsNativeInvokeOutcome InvokeBytecodeCore(
+        ReadOnlySpan<byte> bytecode,
+        string fnName,
+        bool requireExport,
+        ReadOnlySpan<byte> payloadJsonUtf8,
+        uint timeoutMs,
+        nuint memoryLimitBytes,
+        bool rentFromPool,
+        out int resultByteLength)
     {
+        resultByteLength = 0;
         if (!IsAvailable(out string? unavailableReason))
         {
             return new DeskBoxQjsNativeInvokeOutcome(
@@ -205,7 +227,19 @@ internal static partial class CustomWidgetQuickJsInterop
                 "Input payload JSON exceeds 4 MB maximum size.");
         }
 
-        byte[] fnBytes = BuildNullTerminatedUtf8(fnName);
+        byte* stackFnPtr = stackalloc byte[128];
+        byte[]? heapFnBytes = null;
+        int maxPossibleUtf8 = Encoding.UTF8.GetMaxByteCount(fnName.Length);
+        if (maxPossibleUtf8 < 128)
+        {
+            int written = Encoding.UTF8.GetBytes(fnName.AsSpan(), new Span<byte>(stackFnPtr, 127));
+            stackFnPtr[written] = 0;
+        }
+        else
+        {
+            heapFnBytes = BuildNullTerminatedUtf8(fnName);
+        }
+
         nint outResult = 0;
         nuint outResultLen = 0;
         nint outError = 0;
@@ -215,15 +249,16 @@ internal static partial class CustomWidgetQuickJsInterop
         {
             int rawStatus;
             fixed (byte* bcPtr = bytecode)
-            fixed (byte* fnPtr = fnBytes)
+            fixed (byte* heapFnPtr = heapFnBytes)
             fixed (byte* payloadPtr = payloadJsonUtf8)
             {
                 byte dummyBc = 0;
                 byte dummyPayload = 0;
+                byte* effectiveFnPtr = heapFnBytes is null ? stackFnPtr : heapFnPtr;
                 rawStatus = NativeInvokeBytecode(
                     bytecode.Length > 0 ? bcPtr : &dummyBc,
                     (nuint)bytecode.Length,
-                    fnPtr,
+                    effectiveFnPtr,
                     requireExport ? 1 : 0,
                     payloadJsonUtf8.Length > 0 ? payloadPtr : &dummyPayload,
                     (nuint)payloadJsonUtf8.Length,
@@ -235,12 +270,18 @@ internal static partial class CustomWidgetQuickJsInterop
                     out outErrorLen);
             }
 
-            byte[] resultJsonUtf8 = CopyBuffer(outResult, outResultLen);
+            DeskBoxQjsNativeStatus mappedStatus = MapStatus(rawStatus);
             string errorMsg = DecodeUtf8Buffer(outError, outErrorLen);
-            return new DeskBoxQjsNativeInvokeOutcome(
-                MapStatus(rawStatus),
-                resultJsonUtf8,
-                errorMsg);
+            if (mappedStatus != DeskBoxQjsNativeStatus.Ok || outResult == 0 || outResultLen == 0)
+            {
+                return new DeskBoxQjsNativeInvokeOutcome(mappedStatus, [], errorMsg);
+            }
+
+            int len = checked((int)outResultLen);
+            resultByteLength = len;
+            byte[] dest = rentFromPool ? System.Buffers.ArrayPool<byte>.Shared.Rent(len) : new byte[len];
+            new ReadOnlySpan<byte>((void*)outResult, len).CopyTo(dest);
+            return new DeskBoxQjsNativeInvokeOutcome(mappedStatus, dest, errorMsg);
         }
         finally
         {

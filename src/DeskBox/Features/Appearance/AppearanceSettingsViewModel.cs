@@ -258,7 +258,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _theme;
         set
         {
-            if (!SetProperty(ref _theme, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _theme, value))
             {
                 return;
             }
@@ -293,7 +293,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _trayIconStyle;
         set
         {
-            if (!SetProperty(ref _trayIconStyle, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _trayIconStyle, value))
             {
                 return;
             }
@@ -336,7 +336,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _accentColorSource;
         set
         {
-            if (!SetProperty(ref _accentColorSource, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _accentColorSource, value))
             {
                 return;
             }
@@ -408,7 +408,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _materialType;
         set
         {
-            if (!SetProperty(ref _materialType, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _materialType, value))
             {
                 return;
             }
@@ -1121,28 +1121,32 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     {
         get
         {
-            string[] keys =
-            [
-                "Settings.Density.Compact",
-                "Settings.Density.Relaxed",
-                "Settings.Density.Custom",
-                "Settings.Density.Standard"
-            ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
+            if (_cachedLayoutDensityNames is null)
             {
-                names[key] = _localize(key);
+                string[] keys =
+                [
+                    "Settings.Density.Compact",
+                    "Settings.Density.Relaxed",
+                    "Settings.Density.Custom",
+                    "Settings.Density.Standard"
+                ];
+                var names = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (string key in keys)
+                {
+                    names[key] = _localize(key);
+                }
+
+                _cachedLayoutDensityNames = LayoutDensities
+                    .Select(density => density switch
+                    {
+                        LayoutDensityKinds.Compact => names["Settings.Density.Compact"],
+                        LayoutDensityKinds.Relaxed => names["Settings.Density.Relaxed"],
+                        LayoutDensityKinds.Custom => names["Settings.Density.Custom"],
+                        _ => names["Settings.Density.Standard"]
+                    })
+                    .ToArray();
             }
 
-            _cachedLayoutDensityNames = LayoutDensities
-                .Select(density => density switch
-                {
-                    LayoutDensityKinds.Compact => names["Settings.Density.Compact"],
-                    LayoutDensityKinds.Relaxed => names["Settings.Density.Relaxed"],
-                    LayoutDensityKinds.Custom => names["Settings.Density.Custom"],
-                    _ => names["Settings.Density.Standard"]
-                })
-                .ToArray();
             var options = new SettingsOption[LayoutDensities.Length];
             for (int index = 0; index < LayoutDensities.Length; index++)
             {
@@ -2075,26 +2079,96 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _cachedAnimationSlideDirectionNames = null;
         _cachedAnimationEasingIntensityNames = null;
         _cachedChromeModeNames = null;
-        OnPropertyChanged(nameof(AvailableThemeOptions));
-        OnPropertyChanged(nameof(AvailableTrayIconStyleOptions));
-        OnPropertyChanged(nameof(AvailableAccentColorSourceOptions));
-        OnPropertyChanged(nameof(AvailableMaterialTypeOptions));
-        OnPropertyChanged(nameof(AvailableForegroundModeOptions));
-        OnPropertyChanged(nameof(AvailableWidgetBackgroundModeOptions));
-        OnPropertyChanged(nameof(AvailableWidgetBackgroundUnifiedFitOptions));
-        OnPropertyChanged(nameof(WidgetBackgroundDimValueText));
-        OnPropertyChanged(nameof(AvailableBorderColorModeOptions));
-        OnPropertyChanged(nameof(AvailableBorderStyleOptions));
-        OnPropertyChanged(nameof(AvailableCornerPreferenceOptions));
-        OnPropertyChanged(nameof(AvailableLayoutDensityOptions));
-        OnPropertyChanged(nameof(AvailableFileNameLineCountOptions));
-        OnPropertyChanged(nameof(AvailableAnimationEffectOptions));
-        OnPropertyChanged(nameof(AvailableAnimationSpeedOptions));
-        OnPropertyChanged(nameof(AvailableAnimationSlideDirectionOptions));
-        OnPropertyChanged(nameof(AvailableAnimationEasingIntensityOptions));
-        OnPropertyChanged(nameof(AvailableTitleIconModeOptions));
-        OnPropertyChanged(nameof(AvailableDisplayChromeModeOptions));
-        OnPropertyChanged(nameof(AvailableInteractiveChromeModeOptions));
+
+        string prevTheme = _theme;
+        string prevTrayIconStyle = _trayIconStyle;
+        string prevAccentColorSource = _accentColorSource;
+        string prevMaterialType = _materialType;
+        string prevForegroundMode = _foregroundMode;
+        string prevWidgetBackgroundMode = _widgetBackgroundMode;
+        string prevWidgetBackgroundUnifiedFit = _widgetBackgroundUnifiedFit;
+        string prevBorderColorMode = _borderColorMode;
+        string prevBorderStyle = _borderStyle;
+        string prevCornerPreference = _cornerPreference;
+        string prevLayoutDensity = _layoutDensity;
+        int prevFileNameLineCount = _fileNameLineCount;
+        string prevAnimationEffect = _animationEffect;
+        string prevAnimationSpeed = _animationSpeed;
+        string prevAnimationSlideDirection = _animationSlideDirection;
+        string prevAnimationEasingIntensity = _animationEasingIntensity;
+        string prevTitleIconMode = _titleIconMode;
+        string prevDisplayChromeMode = _displayChromeMode;
+        string prevInteractiveChromeMode = _interactiveChromeMode;
+
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableThemeOptions));
+            OnPropertyChanged(nameof(AvailableTrayIconStyleOptions));
+            OnPropertyChanged(nameof(AvailableAccentColorSourceOptions));
+            OnPropertyChanged(nameof(AvailableMaterialTypeOptions));
+            OnPropertyChanged(nameof(AvailableForegroundModeOptions));
+            OnPropertyChanged(nameof(AvailableWidgetBackgroundModeOptions));
+            OnPropertyChanged(nameof(AvailableWidgetBackgroundUnifiedFitOptions));
+            OnPropertyChanged(nameof(WidgetBackgroundDimValueText));
+            OnPropertyChanged(nameof(AvailableBorderColorModeOptions));
+            OnPropertyChanged(nameof(AvailableBorderStyleOptions));
+            OnPropertyChanged(nameof(AvailableCornerPreferenceOptions));
+            OnPropertyChanged(nameof(AvailableLayoutDensityOptions));
+            OnPropertyChanged(nameof(AvailableFileNameLineCountOptions));
+            OnPropertyChanged(nameof(AvailableAnimationEffectOptions));
+            OnPropertyChanged(nameof(AvailableAnimationSpeedOptions));
+            OnPropertyChanged(nameof(AvailableAnimationSlideDirectionOptions));
+            OnPropertyChanged(nameof(AvailableAnimationEasingIntensityOptions));
+            OnPropertyChanged(nameof(AvailableTitleIconModeOptions));
+            OnPropertyChanged(nameof(AvailableDisplayChromeModeOptions));
+            OnPropertyChanged(nameof(AvailableInteractiveChromeModeOptions));
+
+            _theme = prevTheme;
+            _trayIconStyle = prevTrayIconStyle;
+            _accentColorSource = prevAccentColorSource;
+            _materialType = prevMaterialType;
+            _foregroundMode = prevForegroundMode;
+            _widgetBackgroundMode = prevWidgetBackgroundMode;
+            _widgetBackgroundUnifiedFit = prevWidgetBackgroundUnifiedFit;
+            _borderColorMode = prevBorderColorMode;
+            _borderStyle = prevBorderStyle;
+            _cornerPreference = prevCornerPreference;
+            _layoutDensity = prevLayoutDensity;
+            _fileNameLineCount = prevFileNameLineCount;
+            _animationEffect = prevAnimationEffect;
+            _animationSpeed = prevAnimationSpeed;
+            _animationSlideDirection = prevAnimationSlideDirection;
+            _animationEasingIntensity = prevAnimationEasingIntensity;
+            _titleIconMode = prevTitleIconMode;
+            _displayChromeMode = prevDisplayChromeMode;
+            _interactiveChromeMode = prevInteractiveChromeMode;
+
+            OnPropertyChanged(nameof(Theme));
+            OnPropertyChanged(nameof(TrayIconStyle));
+            OnPropertyChanged(nameof(AccentColorSource));
+            OnPropertyChanged(nameof(MaterialType));
+            OnPropertyChanged(nameof(ForegroundMode));
+            OnPropertyChanged(nameof(WidgetBackgroundMode));
+            OnPropertyChanged(nameof(WidgetBackgroundUnifiedFit));
+            OnPropertyChanged(nameof(BorderColorMode));
+            OnPropertyChanged(nameof(BorderStyle));
+            OnPropertyChanged(nameof(CornerPreference));
+            OnPropertyChanged(nameof(LayoutDensity));
+            OnPropertyChanged(nameof(FileNameLineCount));
+            OnPropertyChanged(nameof(AnimationEffect));
+            OnPropertyChanged(nameof(AnimationSpeed));
+            OnPropertyChanged(nameof(AnimationSlideDirection));
+            OnPropertyChanged(nameof(AnimationEasingIntensity));
+            OnPropertyChanged(nameof(TitleIconMode));
+            OnPropertyChanged(nameof(DisplayChromeMode));
+            OnPropertyChanged(nameof(InteractiveChromeMode));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
+
         OnPropertyChanged(nameof(MaterialTypeText));
         OnPropertyChanged(nameof(Windows10CompatibilityTitle));
         OnPropertyChanged(nameof(Windows10CompatibilityMessage));

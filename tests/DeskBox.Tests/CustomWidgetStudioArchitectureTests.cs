@@ -298,11 +298,15 @@ public sealed class CustomWidgetStudioArchitectureTests
         Assert.False(StudioManifestInspector.TryExtractPureI18nKey("${$i18n.bad key}", out _));
         Assert.False(StudioManifestInspector.TryExtractPureI18nKey("@i18n:card.title", out _));
 
-        Assert.True(StudioManifestInspector.TryGetParentNodePath("view.children[2].children[0]", out string parentPath));
-        Assert.Equal("view.children[2]", parentPath);
-        Assert.False(StudioManifestInspector.TryGetParentNodePath("view", out _));
-
         var root = JsonNode.Parse(SampleManifestV1)!.AsObject();
+        Assert.True(StudioManifestInspector.TryGetParentNodePath(root, "#title_text", out string parentPath));
+        Assert.Equal("#root", parentPath);
+        Assert.False(StudioManifestInspector.TryGetParentNodePath(root, "#root", out _));
+
+        Assert.True(StudioManifestInspector.TryResolveJsonNodeByPath(root, "#title_text", out JsonObject? flatLeafNode));
+        Assert.NotNull(flatLeafNode);
+        Assert.Equal("Text", flatLeafNode!["type"]?.GetValue<string>());
+
         Assert.True(StudioManifestInspector.TryResolveJsonNodeByPath(root, "$.elements.title_text", out JsonObject? leafNode));
         Assert.NotNull(leafNode);
         Assert.Equal("Text", leafNode!["type"]?.GetValue<string>());

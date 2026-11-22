@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -48,6 +49,15 @@ internal static partial class SettingsSearchMatcher
     {
         string[] terms = (query ?? string.Empty)
             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return GetScore(terms.AsSpan(), title, breadcrumb, description);
+    }
+
+    internal static int GetScore(
+        ReadOnlySpan<string> terms,
+        string title,
+        string breadcrumb,
+        string description)
+    {
         if (terms.Length == 0)
         {
             return NoMatch;
@@ -231,71 +241,79 @@ internal static partial class SettingsSearchMatcher
             return NoMatch;
         }
 
-        List<PinyinToken> tokens = ExtractPinyinTokens(text);
-        if (tokens.Count == 0)
+        PinyinToken[] rented = ArrayPool<PinyinToken>.Shared.Rent(text.Length);
+        try
         {
-            return NoMatch;
-        }
-
-        ReadOnlySpan<PinyinToken> tokenSpan = CollectionsMarshal.AsSpan(tokens);
-        ReadOnlySpan<char> querySpan = asciiQuery.AsSpan();
-        int best = NoMatch;
-
-        // 1. Multi-reading Pinyin initials (e.g., "tmd" -> "透明度", "cz"/"zz" -> "重置").
-        if (tokenSpan.Length >= querySpan.Length)
-        {
-            if (MatchesInitialsAt(tokenSpan, 0, querySpan))
+            int tokenCount = ExtractPinyinTokensInto(text, rented);
+            if (tokenCount == 0)
             {
-                if (tokenSpan.Length == querySpan.Length)
+                return NoMatch;
+            }
+
+            ReadOnlySpan<PinyinToken> tokenSpan = rented.AsSpan(0, tokenCount);
+            ReadOnlySpan<char> querySpan = asciiQuery.AsSpan();
+            int best = NoMatch;
+
+            // 1. Multi-reading Pinyin initials (e.g., "tmd" -> "透明度", "cz"/"zz" -> "重置").
+            if (tokenSpan.Length >= querySpan.Length)
+            {
+                if (MatchesInitialsAt(tokenSpan, 0, querySpan))
+                {
+                    if (tokenSpan.Length == querySpan.Length)
+                    {
+                        return exactScore;
+                    }
+
+                    best = Math.Min(best, prefixScore);
+                }
+                else
+                {
+                    int maxStart = tokenSpan.Length - querySpan.Length;
+                    for (int startToken = 1; startToken <= maxStart; startToken++)
+                    {
+                        if (MatchesInitialsAt(tokenSpan, startToken, querySpan))
+                        {
+                            best = Math.Min(best, substringBaseScore + Math.Min(startToken, 9));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Multi-reading syllable-boundary full Pinyin (e.g., "toumingdu", "chongzhi"/"zhongzhi", "suolvetu"/"suoluetu").
+            if (MatchesFullPinyinFrom(tokenSpan, 0, querySpan, out bool consumedAllTokens))
+            {
+                if (consumedAllTokens)
                 {
                     return exactScore;
                 }
 
                 best = Math.Min(best, prefixScore);
             }
-            else
+            else if (best > substringBaseScore)
             {
-                int maxStart = tokenSpan.Length - querySpan.Length;
-                for (int startToken = 1; startToken <= maxStart; startToken++)
+                for (int startToken = 1; startToken < tokenSpan.Length; startToken++)
                 {
-                    if (MatchesInitialsAt(tokenSpan, startToken, querySpan))
+                    int candidateScore = substringBaseScore + Math.Min(startToken, 9);
+                    if (candidateScore >= best)
                     {
-                        best = Math.Min(best, substringBaseScore + Math.Min(startToken, 9));
+                        break;
+                    }
+
+                    if (MatchesFullPinyinFrom(tokenSpan, startToken, querySpan, out _))
+                    {
+                        best = candidateScore;
                         break;
                     }
                 }
             }
-        }
 
-        // 2. Multi-reading syllable-boundary full Pinyin (e.g., "toumingdu", "chongzhi"/"zhongzhi", "suolvetu"/"suoluetu").
-        if (MatchesFullPinyinFrom(tokenSpan, 0, querySpan, out bool consumedAllTokens))
+            return best;
+        }
+        finally
         {
-            if (consumedAllTokens)
-            {
-                return exactScore;
-            }
-
-            best = Math.Min(best, prefixScore);
+            ArrayPool<PinyinToken>.Shared.Return(rented, clearArray: true);
         }
-        else if (best > substringBaseScore)
-        {
-            for (int startToken = 1; startToken < tokenSpan.Length; startToken++)
-            {
-                int candidateScore = substringBaseScore + Math.Min(startToken, 9);
-                if (candidateScore >= best)
-                {
-                    break;
-                }
-
-                if (MatchesFullPinyinFrom(tokenSpan, startToken, querySpan, out _))
-                {
-                    best = candidateScore;
-                    break;
-                }
-            }
-        }
-
-        return best;
     }
 
     private static bool MatchesInitialsAt(
@@ -405,41 +423,57 @@ internal static partial class SettingsSearchMatcher
         return false;
     }
 
-    private static List<PinyinToken> ExtractPinyinTokens(string text)
+    private static int ExtractPinyinTokensInto(string text, Span<PinyinToken> destination)
     {
-        var tokens = new List<PinyinToken>(text.Length);
-        var asciiRun = new StringBuilder();
+        int count = 0;
+        int asciiRunStart = -1;
 
         for (int index = 0; index < text.Length; index++)
         {
             char ch = text[index];
             if (TryGetCjkPinyinToken(ch, out PinyinToken cjkToken))
             {
-                if (asciiRun.Length > 0)
+                if (asciiRunStart >= 0)
                 {
-                    tokens.Add(new PinyinToken(asciiRun.ToString()));
-                    asciiRun.Clear();
+                    destination[count++] = new PinyinToken(SliceLowerAscii(text, asciiRunStart, index - asciiRunStart));
+                    asciiRunStart = -1;
                 }
 
-                tokens.Add(cjkToken);
+                destination[count++] = cjkToken;
             }
             else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))
             {
-                asciiRun.Append(char.ToLowerInvariant(ch));
+                if (asciiRunStart < 0)
+                {
+                    asciiRunStart = index;
+                }
             }
-            else if (asciiRun.Length > 0)
+            else if (asciiRunStart >= 0)
             {
-                tokens.Add(new PinyinToken(asciiRun.ToString()));
-                asciiRun.Clear();
+                destination[count++] = new PinyinToken(SliceLowerAscii(text, asciiRunStart, index - asciiRunStart));
+                asciiRunStart = -1;
             }
         }
 
-        if (asciiRun.Length > 0)
+        if (asciiRunStart >= 0)
         {
-            tokens.Add(new PinyinToken(asciiRun.ToString()));
+            destination[count++] = new PinyinToken(SliceLowerAscii(text, asciiRunStart, text.Length - asciiRunStart));
         }
 
-        return tokens;
+        return count;
+    }
+
+    private static string SliceLowerAscii(string text, int start, int length)
+    {
+        return string.Create(length, (text, start), static (dst, state) =>
+        {
+            ReadOnlySpan<char> src = state.text.AsSpan(state.start, dst.Length);
+            for (int i = 0; i < src.Length; i++)
+            {
+                char c = src[i];
+                dst[i] = (c >= 'A' && c <= 'Z') ? (char)(c | 0x20) : c;
+            }
+        });
     }
 
     internal static bool TryGetCjkReadings(char ch, out string[] readings)

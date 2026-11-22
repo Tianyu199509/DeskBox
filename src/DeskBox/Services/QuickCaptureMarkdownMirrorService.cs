@@ -83,12 +83,14 @@ public sealed class QuickCaptureMarkdownMirrorService : IDisposable
                 .ToList();
 
             var expectedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var activeShortIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int writtenCount = 0;
 
             foreach (QuickCaptureItem item in activeItems)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string shortId = GetShortId(item.Id);
+                activeShortIds.Add(shortId);
                 string fileName = BuildMirrorFileName(item, shortId);
                 expectedFileNames.Add(fileName);
 
@@ -119,6 +121,20 @@ public sealed class QuickCaptureMarkdownMirrorService : IDisposable
                 try
                 {
                     QuickCaptureStorageFileOps.DeleteOwnedMirrorFile(normalizedRoot, existingFile);
+                    int tagIdx = existingName.LastIndexOf(MirrorFileTagMarker, StringComparison.OrdinalIgnoreCase);
+                    if (tagIdx >= 0 && existingName.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int idStart = tagIdx + MirrorFileTagMarker.Length;
+                        int idLen = existingName.Length - 3 - idStart;
+                        if (idLen > 0)
+                        {
+                            string staleShortId = existingName.Substring(idStart, idLen);
+                            if (!activeShortIds.Contains(staleShortId))
+                            {
+                                QuickCaptureStorageFileOps.DeleteOwnedMirrorAssetsForShortId(normalizedRoot, staleShortId);
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {

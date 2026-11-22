@@ -32,8 +32,15 @@ internal static class CustomWidgetSystemControlInterop
 
     private static readonly object PlaySoundSync = new();
     private static readonly object KeepAwakeSync = new();
+    private static readonly object ExternalBrightnessSync = new();
+    private const long ExternalBrightnessSupportedTtlMs = 60_000L;
+    private const long ExternalBrightnessUnsupportedTtlMs = 300_000L;
     private static byte[]? s_activePlaySoundBuffer;
     private static IntPtr s_keepAwakePowerRequest;
+    private static IntPtr s_cachedBrightnessMonitor;
+    private static int s_cachedBrightnessPercent = 80;
+    private static bool s_cachedBrightnessSupported;
+    private static long s_cachedBrightnessExpiresTick64;
 
     [DllImport("winmm.dll", ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -231,7 +238,7 @@ internal static class CustomWidgetSystemControlInterop
         keybd_event(virtualKey, 0, KeyEventfKeyUp, UIntPtr.Zero);
     }
 
-    internal static bool TryGetDisplayBrightnessPercent(out int percent)
+    internal static bool TryGetDisplayBrightnessPercent(out int percent, bool bypassCache = false)
     {
         percent = 80;
 
@@ -271,42 +278,84 @@ internal static class CustomWidgetSystemControlInterop
         {
         }
 
-        // 2. External DDC/CI physical monitor via dxva2
+        // 2. External DDC/CI physical monitor via dxva2 (cached to avoid 50-100ms I2C bus stalls)
+        IntPtr hMon = IntPtr.Zero;
         try
         {
-            IntPtr hMon = MonitorFromPoint(new NativePoint { X = 0, Y = 0 }, MonitorDefaultToPrimary);
-            if (hMon != IntPtr.Zero &&
-                GetNumberOfPhysicalMonitorsFromHMONITOR(hMon, out uint count) &&
+            hMon = MonitorFromPoint(new NativePoint { X = 0, Y = 0 }, MonitorDefaultToPrimary);
+            if (hMon == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            long nowTick = Environment.TickCount64;
+            if (!bypassCache)
+            {
+                lock (ExternalBrightnessSync)
+                {
+                    if (s_cachedBrightnessMonitor == hMon && nowTick < s_cachedBrightnessExpiresTick64)
+                    {
+                        percent = s_cachedBrightnessPercent;
+                        return s_cachedBrightnessSupported;
+                    }
+                }
+            }
+
+            bool supported = false;
+            int queriedPercent = 80;
+            if (GetNumberOfPhysicalMonitorsFromHMONITOR(hMon, out uint count) &&
                 count > 0 && count <= 8)
             {
-                var monitors = new PhysicalMonitor[count];
                 unsafe
                 {
-                    fixed (PhysicalMonitor* pMonitors = monitors)
+                    PhysicalMonitor* pMonitors = stackalloc PhysicalMonitor[(int)count];
+                    if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
                     {
-                        if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
+                        try
                         {
-                            try
+                            if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out uint curB, out uint maxB) &&
+                                maxB > minB)
                             {
-                                if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out uint curB, out uint maxB) &&
-                                    maxB > minB)
-                                {
-                                    double normalized = (curB - minB) * 100.0 / (maxB - minB);
-                                    percent = (int)Math.Clamp(Math.Round(normalized), 0, 100);
-                                    return true;
-                                }
+                                double normalized = (curB - minB) * 100.0 / (maxB - minB);
+                                queriedPercent = (int)Math.Clamp(Math.Round(normalized), 0, 100);
+                                supported = true;
                             }
-                            finally
-                            {
-                                _ = DestroyPhysicalMonitors(count, pMonitors);
-                            }
+                        }
+                        finally
+                        {
+                            _ = DestroyPhysicalMonitors(count, pMonitors);
                         }
                     }
                 }
             }
+
+            long ttlMs = supported ? ExternalBrightnessSupportedTtlMs : ExternalBrightnessUnsupportedTtlMs;
+            lock (ExternalBrightnessSync)
+            {
+                s_cachedBrightnessMonitor = hMon;
+                s_cachedBrightnessSupported = supported;
+                if (supported)
+                {
+                    s_cachedBrightnessPercent = queriedPercent;
+                }
+                s_cachedBrightnessExpiresTick64 = Environment.TickCount64 + ttlMs;
+                percent = s_cachedBrightnessPercent;
+            }
+
+            return supported;
         }
         catch
         {
+            if (hMon != IntPtr.Zero)
+            {
+                lock (ExternalBrightnessSync)
+                {
+                    s_cachedBrightnessMonitor = hMon;
+                    s_cachedBrightnessSupported = false;
+                    s_cachedBrightnessExpiresTick64 = Environment.TickCount64 + ExternalBrightnessUnsupportedTtlMs;
+                    percent = s_cachedBrightnessPercent;
+                }
+            }
         }
 
         return false;
@@ -362,32 +411,30 @@ internal static class CustomWidgetSystemControlInterop
                 GetNumberOfPhysicalMonitorsFromHMONITOR(hMon, out uint count) &&
                 count > 0 && count <= 8)
             {
-                var monitors = new PhysicalMonitor[count];
                 unsafe
                 {
-                    fixed (PhysicalMonitor* pMonitors = monitors)
+                    PhysicalMonitor* pMonitors = stackalloc PhysicalMonitor[(int)count];
+                    if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
                     {
-                        if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
+                        try
                         {
-                            try
+                            if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out _, out uint maxB) &&
+                                maxB > minB)
                             {
-                                if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out _, out uint maxB) &&
-                                    maxB > minB)
+                                uint mapped = (uint)Math.Clamp(
+                                    Math.Round(minB + ((maxB - minB) * (clamped / 100.0))),
+                                    minB,
+                                    maxB);
+                                if (SetMonitorBrightness(pMonitors[0].hPhysicalMonitor, mapped))
                                 {
-                                    uint mapped = (uint)Math.Clamp(
-                                        Math.Round(minB + ((maxB - minB) * (clamped / 100.0))),
-                                        minB,
-                                        maxB);
-                                    if (SetMonitorBrightness(pMonitors[0].hPhysicalMonitor, mapped))
-                                    {
-                                        return true;
-                                    }
+                                    CacheExternalBrightnessWriteThrough(hMon, clamped);
+                                    return true;
                                 }
                             }
-                            finally
-                            {
-                                _ = DestroyPhysicalMonitors(count, pMonitors);
-                            }
+                        }
+                        finally
+                        {
+                            _ = DestroyPhysicalMonitors(count, pMonitors);
                         }
                     }
                 }
@@ -398,5 +445,16 @@ internal static class CustomWidgetSystemControlInterop
         }
 
         return false;
+    }
+
+    private static void CacheExternalBrightnessWriteThrough(IntPtr hMonitor, int clampedPercent)
+    {
+        lock (ExternalBrightnessSync)
+        {
+            s_cachedBrightnessMonitor = hMonitor;
+            s_cachedBrightnessPercent = clampedPercent;
+            s_cachedBrightnessSupported = true;
+            s_cachedBrightnessExpiresTick64 = Environment.TickCount64 + ExternalBrightnessSupportedTtlMs;
+        }
     }
 }

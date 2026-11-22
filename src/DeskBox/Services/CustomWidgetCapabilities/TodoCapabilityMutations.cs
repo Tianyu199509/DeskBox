@@ -115,10 +115,7 @@ internal static class TodoCapabilityMutations
             }
 
             await store.SaveAsync(data).ConfigureAwait(false);
-            if (!allowLiveBridge)
-            {
-                await notifyRefresherAsync(targetWidgetId).ConfigureAwait(false);
-            }
+            await notifyRefresherAsync(targetWidgetId).ConfigureAwait(false);
 
             return true;
         }
@@ -396,10 +393,7 @@ internal static class TodoCapabilityMutations
 
                 await store.SaveAsync(data).ConfigureAwait(false);
                 await RecycleOfflineStoreAttachmentsAsync(store, data).ConfigureAwait(false);
-                if (!allowLiveBridge)
-                {
-                    await notifyRefresherAsync(widgetId).ConfigureAwait(false);
-                }
+                await notifyRefresherAsync(widgetId).ConfigureAwait(false);
 
                 clearedCount += matchedCompleted.Count;
             }
@@ -573,10 +567,7 @@ internal static class TodoCapabilityMutations
                 }
 
                 await store.SaveAsync(data).ConfigureAwait(false);
-                if (!allowLiveBridge)
-                {
-                    await notifyRefresherAsync(widgetId).ConfigureAwait(false);
-                }
+                await notifyRefresherAsync(widgetId).ConfigureAwait(false);
 
                 rolledCount += widgetRolled;
             }
@@ -687,10 +678,7 @@ internal static class TodoCapabilityMutations
                     await RecycleOfflineStoreAttachmentsAsync(store, data).ConfigureAwait(false);
                 }
 
-                if (!allowLiveBridge)
-                {
-                    await notifyRefresherAsync(widgetId).ConfigureAwait(false);
-                }
+                await notifyRefresherAsync(widgetId).ConfigureAwait(false);
 
                 return true;
             }

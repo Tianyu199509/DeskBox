@@ -293,6 +293,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(0x56, s.ClipboardHotkeyKey);
         Assert.Equal("FollowCaret", s.ClipboardPopupPlacementMode);
         Assert.Equal("None", s.ClipboardDoubleCopyAction);
+        Assert.False(s.ClipboardFetchUrlTitles);
     }
 
     [Fact]
@@ -599,5 +600,6 @@ public sealed class SettingsSliceContractBaselineTests
         "clipboardHotkeyKey",
         "clipboardPopupPlacementMode",
         "clipboardDoubleCopyAction",
+        "clipboardFetchUrlTitles",
     ];
 }

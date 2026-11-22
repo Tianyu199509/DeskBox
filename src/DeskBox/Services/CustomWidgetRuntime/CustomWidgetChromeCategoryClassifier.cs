@@ -161,8 +161,7 @@ public static class CustomWidgetChromeCategoryClassifier
             string.Equals(type, "TextArea", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "RichTextInput", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "SearchBox", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "DropZone", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "DataTable", StringComparison.OrdinalIgnoreCase))
+            string.Equals(type, "DropZone", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

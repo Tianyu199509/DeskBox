@@ -15,12 +15,21 @@ public sealed partial class SearchHistoryService
     private const int MaxRecentResultEntries = 12;
     private const int MaxFrecencyPoolEntries = 48;
 
+    private readonly record struct FrecencyEntry(
+        int UseCount,
+        long LastUsedUtcTicks,
+        int RankIndex);
+
+    private static readonly Dictionary<string, FrecencyEntry> EmptyFrecencySnapshot =
+        new(0, StringComparer.OrdinalIgnoreCase);
+
     private readonly string _storePath;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private long _saveVersion;
     private long _flushedVersion;
     private PersistedData _data = new();
+    private volatile Dictionary<string, FrecencyEntry> _frecencySnapshot = EmptyFrecencySnapshot;
 
     public SearchHistoryService()
         : this(Path.Combine(
@@ -79,22 +88,14 @@ public sealed partial class SearchHistoryService
             return 0;
         }
 
-        int useCount;
-        long lastUsedUtcTicks;
-        int rankIndex;
-        lock (_gate)
+        if (!_frecencySnapshot.TryGetValue(identityKey, out FrecencyEntry matched))
         {
-            rankIndex = _data.RecentResults.FindIndex(existing =>
-                string.Equals(existing.Identity, identityKey, StringComparison.OrdinalIgnoreCase));
-            if (rankIndex < 0)
-            {
-                return 0;
-            }
-
-            PersistedResult matched = _data.RecentResults[rankIndex];
-            useCount = Math.Max(1, matched.UseCount);
-            lastUsedUtcTicks = matched.LastUsedUtcTicks;
+            return 0;
         }
+
+        int useCount = matched.UseCount;
+        long lastUsedUtcTicks = matched.LastUsedUtcTicks;
+        int rankIndex = matched.RankIndex;
 
         double frequencyFactor = Math.Min(16.0, 5.0 + (Math.Log2(useCount) * 4.5));
         double recencyMultiplier;
@@ -194,6 +195,8 @@ public sealed partial class SearchHistoryService
                     MaxFrecencyPoolEntries,
                     _data.RecentResults.Count - MaxFrecencyPoolEntries);
             }
+
+            RebuildFrecencySnapshotUnderGate();
         }
 
         Save();
@@ -300,10 +303,36 @@ public sealed partial class SearchHistoryService
             _data.Recent.Clear();
             _data.Favorites.Clear();
             _data.RecentResults.Clear();
+            _frecencySnapshot = EmptyFrecencySnapshot;
         }
 
         Save();
         RecentQueriesChanged?.Invoke();
+    }
+
+    private void RebuildFrecencySnapshotUnderGate()
+    {
+        int count = _data.RecentResults.Count;
+        if (count == 0)
+        {
+            _frecencySnapshot = EmptyFrecencySnapshot;
+            return;
+        }
+
+        var map = new Dictionary<string, FrecencyEntry>(count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < count; i++)
+        {
+            PersistedResult entry = _data.RecentResults[i];
+            if (!string.IsNullOrWhiteSpace(entry.Identity) && !map.ContainsKey(entry.Identity))
+            {
+                map[entry.Identity] = new FrecencyEntry(
+                    Math.Max(1, entry.UseCount),
+                    entry.LastUsedUtcTicks,
+                    i);
+            }
+        }
+
+        _frecencySnapshot = map.Count == 0 ? EmptyFrecencySnapshot : map;
     }
 
     private void Load()
@@ -329,6 +358,7 @@ public sealed partial class SearchHistoryService
                 data.Favorites ??= [];
                 data.RecentResults ??= [];
                 _data = data;
+                RebuildFrecencySnapshotUnderGate();
             }
         }
         catch (Exception ex)

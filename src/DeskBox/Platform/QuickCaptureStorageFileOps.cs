@@ -52,6 +52,45 @@ internal static class QuickCaptureStorageFileOps
         return true;
     }
 
+    public static void DeleteOwnedMirrorAssetsForShortId(string mirrorRootDirectory, string shortId)
+    {
+        if (string.IsNullOrWhiteSpace(mirrorRootDirectory) || string.IsNullOrWhiteSpace(shortId))
+        {
+            return;
+        }
+
+        foreach (char ch in shortId)
+        {
+            if (!char.IsAsciiLetterOrDigit(ch))
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            string assetsDir = Path.Combine(Path.GetFullPath(mirrorRootDirectory), "assets");
+            if (!Directory.Exists(assetsDir))
+            {
+                return;
+            }
+
+            foreach (string assetFile in Directory.EnumerateFiles(assetsDir, $"{shortId}_*", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    File.Delete(assetFile);
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
     public static void TryCleanupTempPasteFiles(string tempRootDirectory, IEnumerable<string> paths)
     {
         string tempRoot;

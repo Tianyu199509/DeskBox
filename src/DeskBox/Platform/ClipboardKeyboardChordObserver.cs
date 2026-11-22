@@ -395,7 +395,7 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
                 if (!cancelled)
                 {
                     _threadId = threadId;
-                    _hookHandle = installedHook;
+                    Volatile.Write(ref _hookHandle, installedHook);
                     installedHook = IntPtr.Zero;
                 }
             }
@@ -430,7 +430,7 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
 
                     _thread = null;
                     _threadId = 0;
-                    _hookHandle = IntPtr.Zero;
+                    Volatile.Write(ref _hookHandle, IntPtr.Zero);
                 }
 
                 _stateMachine.Reset();
@@ -447,14 +447,9 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
 
     private unsafe IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        IntPtr hookHandle = IntPtr.Zero;
+        IntPtr hookHandle = Volatile.Read(ref _hookHandle);
         try
         {
-            lock (_sync)
-            {
-                hookHandle = _hookHandle;
-            }
-
             bool isKeyDown = wParam == Win32Helper.WM_KEYDOWN || wParam == Win32Helper.WM_SYSKEYDOWN;
             bool isKeyUp = wParam == Win32Helper.WM_KEYUP || wParam == Win32Helper.WM_SYSKEYUP;
             if (nCode >= 0 && lParam != IntPtr.Zero && (isKeyDown || isKeyUp))
@@ -465,6 +460,7 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
                 ClipboardChordObservation obs;
                 lock (_sync)
                 {
+                    hookHandle = _hookHandle;
                     if (!injected && isKeyDown &&
                         data.vkCode is ClipboardKeyboardChordStateMachine.VkC
                             or ClipboardKeyboardChordStateMachine.VkV

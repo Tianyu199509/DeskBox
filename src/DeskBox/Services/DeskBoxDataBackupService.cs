@@ -2457,7 +2457,10 @@ public sealed partial class DeskBoxDataBackupService
                 Path.Combine(stagingRoot, "data"),
                 archivePath,
                 _recoveryRootPath,
-                info.Manifest.Kind);
+                info.Manifest.Kind,
+                PreRestoreBackupDirectory,
+                LegacyAutomaticSnapshotDirectory,
+                ResolveAutomaticSnapshotTarget(probeWriteAccess: false).Directory);
             return info;
         }
     }

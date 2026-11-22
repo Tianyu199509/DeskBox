@@ -5,7 +5,7 @@ namespace DeskBox.Services;
 /// </summary>
 public static class StartupService
 {
-    private static IStartupService s_current = new DirectStartupService();
+    private static IStartupService s_current = StartupServiceFactory.Create(AppDistributionService.Current);
 
     public static event Action? StateChanged;
 

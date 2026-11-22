@@ -45,11 +45,36 @@
                 <ResourceDictionary.MergedDictionaries>
                     <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
                 </ResourceDictionary.MergedDictionaries>
+                <!-- Seamless single-canvas settings shell (Windows 11 Settings pattern):
+                     remove NavigationView's default LayerFillColorDefaultBrush content box,
+                     top-left corner radius, and seam borders so left navigation and right
+                     content share the same window backdrop. HighContrast stays system-owned. -->
+                <ResourceDictionary.ThemeDictionaries>
+                    <ResourceDictionary x:Key="Light">
+                        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                    </ResourceDictionary>
+                    <ResourceDictionary x:Key="Dark">
+                        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                    </ResourceDictionary>
+                    <ResourceDictionary x:Key="Default">
+                        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                    </ResourceDictionary>
+                    <ResourceDictionary x:Key="HighContrast">
+                        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                    </ResourceDictionary>
+                </ResourceDictionary.ThemeDictionaries>
             <x:Double x:Key="NavigationViewCompactPaneLength">48</x:Double>
             <x:Double x:Key="NavigationViewItemOnLeftMinHeight">40</x:Double>
             <x:Double x:Key="NavigationViewItemOnLeftIconBoxHeight">20</x:Double>
             <Thickness x:Key="NavigationViewItemOnLeftIconBoxMargin">0</Thickness>
             <Thickness x:Key="NavigationViewItemButtonMargin">4,1,4,1</Thickness>
+            <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+            <Thickness x:Key="NavigationViewMinimalContentGridBorderThickness">0</Thickness>
+            <CornerRadius x:Key="NavigationViewContentGridCornerRadius">0</CornerRadius>
 
             <!-- Shared settings-page metrics keep top-level and drill-down pages aligned. -->
             <controls:SettingsBoolToVisibilityConverter x:Key="SettingsBoolToVisibilityConverter" />

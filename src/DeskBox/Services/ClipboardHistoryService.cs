@@ -58,7 +58,6 @@ public sealed partial class ClipboardHistoryService : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _inFlightMediaFiles =
         new(StringComparer.OrdinalIgnoreCase);
     private volatile string? _lastExternalCapturedItemId;
-    private static readonly Lazy<HttpClient> s_safeTitleHttpClient = new(CreateSafeUrlTitleHttpClient);
     private int _capturePendingCount;
     private int _captureInFlight;
     private int _capturePendingAfterInFlight;
@@ -1869,6 +1868,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
             {
                 ClipboardHistoryItem? ingested = await IngestItemAsync(textItem, observedApp, fromExternalCapture: true).ConfigureAwait(false);
                 if (ingested is { SubKind: ClipboardTextSubKind.Url, IsSensitive: false } &&
+                    _settingsService.Settings.Clipboard.ClipboardFetchUrlTitles &&
                     string.IsNullOrWhiteSpace(ingested.UrlTitle))
                 {
                     _ = TryResolveUrlTitleInBackgroundAsync(ingested.Id, text.Trim());
@@ -2426,18 +2426,10 @@ public sealed partial class ClipboardHistoryService : IDisposable
 
     private async Task TryResolveUrlTitleInBackgroundAsync(string itemId, string rawUrl)
     {
-        if (_isDisposed || !Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? uri))
-        {
-            return;
-        }
-
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (!string.IsNullOrEmpty(uri.UserInfo) || IsDisallowedHostName(uri.Host))
+        if (_isDisposed ||
+            !_settingsService.Settings.Clipboard.ClipboardFetchUrlTitles ||
+            !ClipboardUrlTitleResolver.IsSafePublicPageCandidate(rawUrl, out Uri? uri) ||
+            uri is null)
         {
             return;
         }
@@ -2447,66 +2439,20 @@ public sealed partial class ClipboardHistoryService : IDisposable
             await _backgroundUrlTitleGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_isDisposed)
+                if (_isDisposed || !_settingsService.Settings.Clipboard.ClipboardFetchUrlTitles)
                 {
                     return;
                 }
 
-                using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(2600));
-                using HttpResponseMessage? resp = await SendUrlTitleGetWithValidatedRedirectsAsync(
-                    uri,
-                    maxRedirects: 3,
-                    cts.Token).ConfigureAwait(false);
-                if (resp is null || !resp.IsSuccessStatusCode)
+                string? pageTitle = await ClipboardUrlTitleResolver
+                    .TryFetchHtmlTitleAsync(uri)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(pageTitle))
                 {
                     return;
                 }
 
-                string? mediaType = resp.Content.Headers.ContentType?.MediaType;
-                if (!string.IsNullOrEmpty(mediaType) &&
-                    !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase) &&
-                    !mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-
-                await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
-                byte[] buf = System.Buffers.ArrayPool<byte>.Shared.Rent(32768);
-                string snippet;
-                try
-                {
-                    int total = 0;
-                    const int maxSnippetBytes = 32768;
-                    while (total < maxSnippetBytes)
-                    {
-                        int r = await stream.ReadAsync(buf.AsMemory(total, maxSnippetBytes - total), cts.Token).ConfigureAwait(false);
-                        if (r <= 0)
-                        {
-                            break;
-                        }
-
-                        total += r;
-                    }
-
-                    if (total <= 0)
-                    {
-                        return;
-                    }
-
-                    snippet = Encoding.UTF8.GetString(buf, 0, total);
-                }
-                finally
-                {
-                    System.Buffers.ArrayPool<byte>.Shared.Return(buf);
-                }
-
-                if (!ClipboardClassifier.TryExtractHtmlDocumentTitle(snippet, out string? pageTitle) ||
-                    string.IsNullOrWhiteSpace(pageTitle))
-                {
-                    return;
-                }
-
-                await _storeLock.WaitAsync(cts.Token).ConfigureAwait(false);
+                await _storeLock.WaitAsync().ConfigureAwait(false);
                 try
                 {
                     if (_isDisposed || _cachedDocument is null)
@@ -2539,92 +2485,6 @@ public sealed partial class ClipboardHistoryService : IDisposable
         {
             // Never surface transient network or non-HTML errors.
         }
-    }
-
-    private static async Task<HttpResponseMessage?> SendUrlTitleGetWithValidatedRedirectsAsync(
-        Uri initialUri,
-        int maxRedirects,
-        CancellationToken cancellationToken)
-    {
-        Uri currentUri = initialUri;
-        for (int hop = 0; ; hop++)
-        {
-            using var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
-            req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeskBox/1.0");
-            req.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1");
-
-            HttpResponseMessage resp = await s_safeTitleHttpClient.Value
-                .SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
-
-            int status = (int)resp.StatusCode;
-            if (status is 301 or 302 or 303 or 307 or 308 &&
-                resp.Headers.Location is { } location)
-            {
-                if (hop >= maxRedirects)
-                {
-                    resp.Dispose();
-                    return null;
-                }
-
-                Uri nextCandidate = location.IsAbsoluteUri
-                    ? location
-                    : new Uri(currentUri, location);
-                resp.Dispose();
-
-                if ((!string.Equals(nextCandidate.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-                     !string.Equals(nextCandidate.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) ||
-                    !string.IsNullOrEmpty(nextCandidate.UserInfo) ||
-                    IsDisallowedHostName(nextCandidate.IdnHost))
-                {
-                    return null;
-                }
-
-                currentUri = nextCandidate;
-                continue;
-            }
-
-            return resp;
-        }
-    }
-
-    private static HttpClient CreateSafeUrlTitleHttpClient()
-    {
-        var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
-            UseCookies = false,
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-            ConnectTimeout = TimeSpan.FromMilliseconds(1800),
-            ConnectCallback = CustomWidgetNetworkSecurity.ConnectToValidatedPublicIpAsync
-        };
-
-        return new HttpClient(handler, disposeHandler: true)
-        {
-            Timeout = TimeSpan.FromSeconds(3)
-        };
-    }
-
-    private static bool IsDisallowedHostName(string? host)
-    {
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            return true;
-        }
-
-        string trimmed = host.Trim().TrimEnd('.');
-        if (string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
-            trimmed.EndsWith(".internal", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return IPAddress.TryParse(trimmed, out IPAddress? ip) &&
-               (CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip) ||
-                CustomWidgetNetworkSecurity.IsBenchmarkTunIpAddress(ip));
     }
 
     private async Task TryCaptureAndPersistImageOnUiThreadAsync(

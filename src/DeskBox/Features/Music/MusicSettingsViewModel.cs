@@ -261,8 +261,23 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
     {
         _cachedDisplayModeNames = null;
         _cachedSpectrumStyleNames = null;
-        OnPropertyChanged(nameof(AvailableDisplayModeOptions));
-        OnPropertyChanged(nameof(AvailableSpectrumStyleOptions));
+        string prevDisplayMode = DisplayMode;
+        string prevSpectrumStyle = SpectrumStyle;
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableDisplayModeOptions));
+            OnPropertyChanged(nameof(AvailableSpectrumStyleOptions));
+            DisplayMode = prevDisplayMode;
+            SpectrumStyle = prevSpectrumStyle;
+            OnPropertyChanged(nameof(DisplayMode));
+            OnPropertyChanged(nameof(SpectrumStyle));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
+
         OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
     }
 }

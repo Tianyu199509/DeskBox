@@ -556,68 +556,40 @@ internal sealed class CustomWidgetScriptRuntimeCoordinator : IDisposable
             _ => WidgetFeedbackSeverity.Info
         };
 
-    internal static bool NodeTreeWhenReferencesComputed(CustomWidgetNodeSpec node)
-    {
-        if (!string.IsNullOrEmpty(node.When) &&
-            node.When.Contains("computed.", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (node.ItemTemplate is not null && NodeTreeWhenReferencesComputed(node.ItemTemplate))
-        {
-            return true;
-        }
-
-        for (int i = 0; i < node.HoverActions.Count; i++)
-        {
-            if (NodeTreeWhenReferencesComputed(node.HoverActions[i]))
-            {
-                return true;
-            }
-        }
-
-        for (int i = 0; i < node.Children.Count; i++)
-        {
-            if (NodeTreeWhenReferencesComputed(node.Children[i]))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    internal static bool NodeTreeWhenReferencesComputed(CustomWidgetNodeSpec node) =>
+        node.EnumerateAllNodes().Any(static n =>
+            !string.IsNullOrEmpty(n.When) &&
+            n.When.Contains("computed.", StringComparison.OrdinalIgnoreCase));
 
     private static bool NodeTreeTableReferencesComputed(
         CustomWidgetNodeSpec node,
         HashSet<string>? changedComputedKeys)
     {
-        if (string.Equals(node.Type, "Table", StringComparison.OrdinalIgnoreCase))
+        foreach (CustomWidgetNodeSpec current in node.EnumerateAllNodes())
         {
-            string? src = !string.IsNullOrWhiteSpace(node.Items) ? node.Items : node.Collection;
-            if (!string.IsNullOrWhiteSpace(src) &&
-                src.Contains("computed.", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(current.Type, "Table", StringComparison.OrdinalIgnoreCase))
             {
-                if (changedComputedKeys is null)
+                continue;
+            }
+
+            string? src = !string.IsNullOrWhiteSpace(current.Items) ? current.Items : current.Collection;
+            if (string.IsNullOrWhiteSpace(src) ||
+                !src.Contains("computed.", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (changedComputedKeys is null)
+            {
+                return true;
+            }
+
+            foreach (string key in changedComputedKeys)
+            {
+                if (src.Contains($"computed.{key}", StringComparison.Ordinal))
                 {
                     return true;
                 }
-
-                foreach (string key in changedComputedKeys)
-                {
-                    if (src.Contains($"computed.{key}", StringComparison.Ordinal))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        for (int i = 0; i < node.Children.Count; i++)
-        {
-            if (NodeTreeTableReferencesComputed(node.Children[i], changedComputedKeys))
-            {
-                return true;
             }
         }
 

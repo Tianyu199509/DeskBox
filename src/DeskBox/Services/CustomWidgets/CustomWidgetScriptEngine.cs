@@ -52,7 +52,10 @@ public sealed record CustomWidgetCompiledScript(
     string SourceSha256,
     IReadOnlySet<string> ExportedFunctions,
     IReadOnlySet<string> AllExports,
-    CustomWidgetScriptEnvFlags ReferencedEnvFlags = CustomWidgetScriptEnvFlags.All);
+    CustomWidgetScriptEnvFlags ReferencedEnvFlags = CustomWidgetScriptEnvFlags.All)
+{
+    internal DeviceStateQueryFields ReferencedDeviceFields { get; init; } = DeviceStateQueryFields.All;
+}
 
 public sealed record CustomWidgetScriptCompileResult(
     bool IsSuccess,
@@ -251,18 +254,93 @@ public static partial class CustomWidgetScriptEngine
             ComputeSourceSha256(sourceCode),
             exportedFunctions,
             allExports,
-            ComputeReferencedEnvFlags(sourceCode));
+            ComputeReferencedEnvFlags(sourceCode))
+        {
+            ReferencedDeviceFields = ComputeReferencedDeviceFields(sourceCode)
+        };
 
         return new CustomWidgetScriptCompileResult(true, CustomWidgetScriptStatus.Ok, compiled);
     }
 
-    private static CustomWidgetScriptEnvFlags ComputeReferencedEnvFlags(string sourceCode)
+    private static DeviceStateQueryFields ComputeReferencedDeviceFields(string sourceCode)
     {
+        if (!sourceCode.Contains("device", StringComparison.Ordinal))
+        {
+            return DeviceStateQueryFields.None;
+        }
+
         if (sourceCode.Contains("JSON.stringify", StringComparison.Ordinal) ||
             sourceCode.Contains("Object.keys", StringComparison.Ordinal) ||
             sourceCode.Contains("Object.entries", StringComparison.Ordinal) ||
             sourceCode.Contains("Object.values", StringComparison.Ordinal) ||
             sourceCode.Contains("Reflect.", StringComparison.Ordinal))
+        {
+            return DeviceStateQueryFields.All;
+        }
+
+        DeviceStateQueryFields fields = DeviceStateQueryFields.None;
+        if (sourceCode.Contains("volume", StringComparison.Ordinal) ||
+            sourceCode.Contains("audioVolume", StringComparison.Ordinal) ||
+            sourceCode.Contains("isMuted", StringComparison.Ordinal) ||
+            sourceCode.Contains("audioMuted", StringComparison.Ordinal) ||
+            sourceCode.Contains("muted", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.Volume;
+        }
+        if (sourceCode.Contains("audioDevice", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.AudioDevice;
+        }
+        if (sourceCode.Contains("brightness", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.Brightness;
+        }
+        if (sourceCode.Contains("wifi", StringComparison.Ordinal) ||
+            sourceCode.Contains("bluetooth", StringComparison.Ordinal) ||
+            sourceCode.Contains("networkConnected", StringComparison.Ordinal) ||
+            sourceCode.Contains("networkType", StringComparison.Ordinal) ||
+            sourceCode.Contains("online", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.Radios;
+        }
+        if (sourceCode.Contains("keepAwake", StringComparison.Ordinal) ||
+            sourceCode.Contains("caffeine", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.KeepAwake;
+        }
+        if (sourceCode.Contains("darkTheme", StringComparison.Ordinal) ||
+            sourceCode.Contains("isDark", StringComparison.Ordinal) ||
+            sourceCode.Contains("themeStatus", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.Theme;
+        }
+        if (sourceCode.Contains("media", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.Media;
+        }
+        if (sourceCode.Contains("recycleBin", StringComparison.Ordinal))
+        {
+            fields |= DeviceStateQueryFields.RecycleBin;
+        }
+
+        // Dynamic property access fallback (e.g., env.device[key]) when 'device' is referenced
+        // without any static sub-property name appearing in source.
+        if (fields == DeviceStateQueryFields.None)
+        {
+            return DeviceStateQueryFields.All;
+        }
+
+        return fields;
+    }
+
+    private static CustomWidgetScriptEnvFlags ComputeReferencedEnvFlags(string sourceCode)
+    {
+        if (sourceCode.Contains("env", StringComparison.Ordinal) &&
+            (sourceCode.Contains("JSON.stringify", StringComparison.Ordinal) ||
+             sourceCode.Contains("Object.keys", StringComparison.Ordinal) ||
+             sourceCode.Contains("Object.entries", StringComparison.Ordinal) ||
+             sourceCode.Contains("Object.values", StringComparison.Ordinal) ||
+             sourceCode.Contains("Reflect.", StringComparison.Ordinal)))
         {
             return CustomWidgetScriptEnvFlags.All;
         }
@@ -350,13 +428,14 @@ public static partial class CustomWidgetScriptEngine
         buffer.Clear();
         WritePayloadJson(buffer, input, compiled.ReferencedEnvFlags);
 
-        DeskBoxQjsNativeInvokeOutcome outcome = CustomWidgetQuickJsInterop.InvokeBytecode(
+        DeskBoxQjsNativeInvokeOutcome outcome = CustomWidgetQuickJsInterop.InvokeBytecodePooled(
             compiled.Bytecode,
             functionName,
             requireExport,
             buffer.WrittenSpan,
             input.TimeoutMs > 0 ? input.TimeoutMs : DefaultActionTimeoutMs,
-            input.MemoryLimitBytes > 0 ? input.MemoryLimitBytes : DefaultMemoryLimitBytes);
+            input.MemoryLimitBytes > 0 ? input.MemoryLimitBytes : DefaultMemoryLimitBytes,
+            out int resultByteLength);
 
         if (buffer.Capacity > MaxPooledPayloadBufferCapacity)
         {
@@ -367,23 +446,36 @@ public static partial class CustomWidgetScriptEngine
             buffer.Clear();
         }
 
-        CustomWidgetScriptStatus status = MapStatus(outcome.Status);
-        if (status != CustomWidgetScriptStatus.Ok)
+        try
         {
-            return new CustomWidgetScriptExecutionResult
+            CustomWidgetScriptStatus status = MapStatus(outcome.Status);
+            if (status != CustomWidgetScriptStatus.Ok)
             {
-                IsSuccess = false,
-                Invoked = false,
-                Status = status,
-                Computed = CloneComputedDictionary(input.Computed),
-                ErrorMessage = string.IsNullOrWhiteSpace(outcome.ErrorMessage)
-                    ? $"Script error in '{functionName}'."
-                    : outcome.ErrorMessage,
-                ErrorLine = ExtractLineNumber(outcome.ErrorMessage)
-            };
-        }
+                return new CustomWidgetScriptExecutionResult
+                {
+                    IsSuccess = false,
+                    Invoked = false,
+                    Status = status,
+                    Computed = CloneComputedDictionary(input.Computed),
+                    ErrorMessage = string.IsNullOrWhiteSpace(outcome.ErrorMessage)
+                        ? $"Script error in '{functionName}'."
+                        : outcome.ErrorMessage,
+                    ErrorLine = ExtractLineNumber(outcome.ErrorMessage)
+                };
+            }
 
-        return ParseExecutionResultJson(outcome.ResultJsonUtf8, input.Computed);
+            ReadOnlyMemory<byte> resultMem = resultByteLength > 0
+                ? outcome.ResultJsonUtf8.AsMemory(0, resultByteLength)
+                : ReadOnlyMemory<byte>.Empty;
+            return ParseExecutionResultJson(resultMem, input.Computed);
+        }
+        finally
+        {
+            if (outcome.ResultJsonUtf8.Length > 0)
+            {
+                ArrayPool<byte>.Shared.Return(outcome.ResultJsonUtf8);
+            }
+        }
     }
 
     public static string ResolveComputedToken(
@@ -1461,10 +1553,10 @@ public static partial class CustomWidgetScriptEngine
     }
 
     private static CustomWidgetScriptExecutionResult ParseExecutionResultJson(
-        byte[] resultJsonUtf8,
+        ReadOnlyMemory<byte> resultJsonUtf8,
         IReadOnlyDictionary<string, JsonElement> previousComputed)
     {
-        if (resultJsonUtf8 is not { Length: > 0 })
+        if (resultJsonUtf8.IsEmpty)
         {
             return new CustomWidgetScriptExecutionResult
             {

@@ -69,6 +69,11 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             if (group is not null)
             {
                 groupFound = true;
+                if (!string.IsNullOrWhiteSpace(change.Name))
+                {
+                    group.Name = change.Name.Trim();
+                }
+
                 if (change.NavigationStyle is not null)
                 {
                     group.NavigationStyle = change.NavigationStyle;
@@ -236,6 +241,53 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
     public async Task ClearPerWidgetBackgrounds()
     {
         await DeskBox.Platform.UiDispatch.RunAsync(ClearPerWidgetBackgroundsOnUi);
+    }
+
+    public async Task ResetWidgetChromeOverrides(bool interactive)
+    {
+        await DeskBox.Platform.UiDispatch.RunAsync(() => ResetWidgetChromeOverridesOnUi(interactive));
+    }
+
+    private Task ResetWidgetChromeOverridesOnUi(bool interactive)
+    {
+        WidgetChromeCategory targetCategory = interactive
+            ? WidgetChromeCategory.Interactive
+            : WidgetChromeCategory.Display;
+        var factory = new WidgetContentFactory(_localizationService);
+        int changed = 0;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            foreach (WidgetConfig widget in _settingsService.Settings.WidgetLayout.Widgets)
+            {
+                WidgetContentDescriptor descriptor;
+                try
+                {
+                    descriptor = factory.GetDescriptor(widget.WidgetKind);
+                }
+                catch (NotSupportedException)
+                {
+                    continue;
+                }
+
+                if (descriptor.ChromeCategory != targetCategory ||
+                    widget.Metadata is null ||
+                    !widget.Metadata.ContainsKey(WidgetChromeModeNames.MetadataKey))
+                {
+                    continue;
+                }
+
+                WidgetChromeModeNames.SetOverrideMode(widget, WidgetChromeMode.System);
+                changed++;
+            }
+        });
+
+        if (changed > 0)
+        {
+            _settingsService.RequestAppearancePreview();
+            _settingsService.SaveDebounced(notifySubscribers: true);
+        }
+
+        return Task.CompletedTask;
     }
 
     private Task<int> ClearPerWidgetBackgroundsOnUi()

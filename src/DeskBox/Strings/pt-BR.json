@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "Privacidade e Segurança",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "Respeitar marcadores de privacidade do sistema",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "Ignora automaticamente senhas marcadas por gerenciadores como confidenciais",
+  "Settings.Clipboard.FetchUrlTitles.Title": "Buscar títulos de páginas para links copiados",
+  "Settings.Clipboard.FetchUrlTitles.Description": "Quando ativado, consulta títulos de páginas públicas em segundo plano (links com parâmetros de login, verificação ou assinatura são ignorados)",
   "Settings.Clipboard.SecretProtection.Title": "Proteção de chaves de API e tokens",
   "Settings.Clipboard.SecretProtection.Description": "Como tratar textos semelhantes a chaves de API, tokens de acesso ou chaves privadas",
   "Settings.Clipboard.SecretProtection.Mask": "Ocultar prévia e permitir cópia",

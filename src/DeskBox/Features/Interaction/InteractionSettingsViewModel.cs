@@ -106,6 +106,11 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
         get => _layerMode;
         set
         {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+
             // The combo only offers canonical values and the coordinator
             // normalizes writes, so the editor stores the raw selection and
             // re-syncs from the normalized snapshot on the next broadcast.
@@ -152,6 +157,11 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
         get => _clickRaiseScope;
         set
         {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+
             if (!SetProperty(ref _clickRaiseScope, value))
             {
                 return;
@@ -199,7 +209,7 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
         get => _fileOpenMethod;
         set
         {
-            if (!SetProperty(ref _fileOpenMethod, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _fileOpenMethod, value))
             {
                 return;
             }
@@ -224,14 +234,13 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
         get => _showDesktopBehavior;
         set
         {
-            if (!SetProperty(ref _showDesktopBehavior, value))
+            if (string.IsNullOrEmpty(value) || !SetProperty(ref _showDesktopBehavior, value))
             {
                 return;
             }
 
             if (_isSyncingPresentation)
             {
-                OnPropertyChanged(nameof(IsDynamicLayerMode));
                 return;
             }
 
@@ -265,7 +274,6 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
 
             if (_isSyncingPresentation)
             {
-                OnPropertyChanged(nameof(IsDynamicLayerMode));
                 return;
             }
 
@@ -388,10 +396,22 @@ public sealed partial class InteractionSettingsViewModel : ObservableObject
     {
         _cachedLayerModeNames = null;
         _cachedClickRaiseScopeNames = null;
-        OnPropertyChanged(nameof(AvailableLayerModeOptions));
-        OnPropertyChanged(nameof(AvailableClickRaiseScopeOptions));
-        OnPropertyChanged(nameof(AvailableFileOpenMethodOptions));
-        OnPropertyChanged(nameof(AvailableShowDesktopBehaviorOptions));
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableLayerModeOptions));
+            OnPropertyChanged(nameof(AvailableClickRaiseScopeOptions));
+            OnPropertyChanged(nameof(AvailableFileOpenMethodOptions));
+            OnPropertyChanged(nameof(AvailableShowDesktopBehaviorOptions));
+            OnPropertyChanged(nameof(LayerMode));
+            OnPropertyChanged(nameof(ClickRaiseScope));
+            OnPropertyChanged(nameof(FileOpenMethod));
+            OnPropertyChanged(nameof(ShowDesktopBehavior));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
     }
 
     /// <summary>

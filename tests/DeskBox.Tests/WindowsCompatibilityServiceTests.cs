@@ -132,6 +132,23 @@ public sealed class WindowsCompatibilityServiceTests
     }
 
     [Theory]
+    [InlineData(true, false, "Mica")]
+    [InlineData(true, true, "Solid")]
+    [InlineData(false, false, "Solid")]
+    [InlineData(false, true, "Solid")]
+    public void ResolveSettingsBackdropKind_UsesMicaOnlyWhenSupportedOutsideHighContrast(
+        bool supportsMica,
+        bool isHighContrast,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            WindowsCompatibilityService.ResolveSettingsBackdropKind(
+                supportsMica,
+                isHighContrast));
+    }
+
+    [Theory]
     [InlineData(DeskBox.Platform.Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE, false, true)]
     [InlineData(DeskBox.Platform.Win32Helper.DWMWA_BORDER_COLOR, false, true)]
     [InlineData(DeskBox.Platform.Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, false, true)]
@@ -186,5 +203,19 @@ public sealed class WindowsCompatibilityServiceTests
             },
             DeskBox.ViewModels.SettingsViewModel.ResolveSupportedMaterialKinds(
                 isWindows11OrLater: true));
+    }
+
+    [Fact]
+    public void ResolveSolidSettingsFallbackColor_UsesSystemHighContrastBackgroundWhenHighContrastActive()
+    {
+        Assert.Equal(
+            Windows.UI.Color.FromArgb(255, 243, 243, 243),
+            WindowsCompatibilityService.ResolveSolidSettingsFallbackColor(isDark: false, isHighContrast: false));
+        Assert.Equal(
+            Windows.UI.Color.FromArgb(255, 32, 32, 32),
+            WindowsCompatibilityService.ResolveSolidSettingsFallbackColor(isDark: true, isHighContrast: false));
+        Assert.Equal(
+            WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark: false),
+            WindowsCompatibilityService.ResolveSolidSettingsFallbackColor(isDark: false, isHighContrast: true));
     }
 }

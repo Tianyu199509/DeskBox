@@ -863,7 +863,7 @@ settings.FocusClickedWidgetOnRaise = false;
                         {
                             AppSettings parsed = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
                                 ?? throw new InvalidDataException("DeskBox settings JSON is empty.");
-                            loadedJsonHadAutoStartDefaultApplied = AutoStartDefaultPolicy.HasAutoStartDefaultAppliedProperty(json);
+                            loadedJsonHadAutoStartDefaultApplied = parsed.Core.AutoStart || parsed.Core.AutoStartDefaultApplied || AutoStartDefaultPolicy.HasAutoStartDefaultAppliedProperty(json);
                             return parsed;
                         }
                         catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(json, out int rawVer) && rawVer > SettingsMigrationPipeline.CurrentSchemaVersion)
@@ -1510,6 +1510,7 @@ settings.FocusClickedWidgetOnRaise = false;
         clipboard.ClipboardHotkeyKey = ClipboardSettingsSlice.DefaultHotkeyKey;
         clipboard.ClipboardPopupPlacementMode = ClipboardSettingsSlice.PopupFollowCaret;
         clipboard.ClipboardDoubleCopyAction = ClipboardSettingsSlice.DoubleCopyNone;
+        clipboard.ClipboardFetchUrlTitles = false;
     }
 
     public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
@@ -2331,61 +2332,33 @@ settings.FocusClickedWidgetOnRaise = false;
     /// </summary>
     private static void PreserveMainOwnedState(AppSettings before, AppSettings parsed)
     {
-        // Runtime markers only this process authors would otherwise be
-        // rolled back by every settings-host commit that was loaded
-        // before the marker flip.
-        parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
+        // Runtime markers, auto-start, onboarding, layout, backup, managed-storage root/shortcut,
+        // Everything probe path, search popup custom bounds, and capsule placements are authored by
+        // the MAIN process; host-side snapshot commits carry stale-or-equal copies and must not rewind them.
+        parsed.LastUpdateCheckAt = before.LastUpdateCheckAt >= parsed.LastUpdateCheckAt
+            ? before.LastUpdateCheckAt
+            : (parsed.LastUpdateCheckAt ?? before.LastUpdateCheckAt);
         parsed.LastRunVersion = before.LastRunVersion;
         parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
-        // Auto-start registration and its persisted mirror/mode are owned by
-        // the MAIN process (mutated only via ISettingsAppActions IPC commands),
-        // so host-side snapshot commits must never rewind them.
         parsed.Core.AutoStart = before.Core.AutoStart;
         parsed.Core.AutoStartMode = before.Core.AutoStartMode;
         parsed.Core.AutoStartDefaultApplied = before.Core.AutoStartDefaultApplied;
-        parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
-            before.FullyElevatedNoticeAcknowledgedUtcTicks;
-        // Onboarding completion is authored by the MAIN process's
-        // onboarding window; a host snapshot serialized before the
-        // completion save would otherwise roll it back and force a
-        // second run on next launch (batch R6).
+        parsed.FullyElevatedNoticeAcknowledgedUtcTicks = before.FullyElevatedNoticeAcknowledgedUtcTicks;
         parsed.HasCompletedOnboarding = before.HasCompletedOnboarding;
         parsed.CompletedOnboardingVersion = before.CompletedOnboardingVersion;
         parsed.OnboardingStepIndex = before.OnboardingStepIndex;
-        // The widget-layout domain — widgets list, groups, deleted ids,
-        // topology, AND the feature-widget enabled dictionary — is
-        // authoritative in the MAIN process only: the host's in-memory
-        // copy drifts from the main process's (it reloads settings.json
-        // but never widget-layout.json), so accepting its snapshot here
-        // would rewind whatever the host has not seen. Feature switches
-        // travel as their own IPC command instead
-        // (ISettingsWidgetActions.SetFeatureWidgetEnabled).
         parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
-        // The backup domains are main-owned too, but for a different
-        // reason than the layout domain: every writer (the
-        // backup-settings coordinator on router commands, the
-        // cloud-backup runtime's LastSuccess/Failure/Unverified
-        // bookkeeping, restore path rebasing) runs in the MAIN process,
-        // and the settings host never writes them through its own
-        // graph — its UI reads and commands over the wire. A host
-        // snapshot therefore carries a stale-or-equal copy, and without
-        // this preserve a host commit racing a backup run or a
-        // just-commanded setting change (the reload push is skipped
-        // while the host has a pending debounced save) silently
-        // reverted main-side state (deep review R13).
         parsed.Backup.CopyFrom(before.Backup);
         parsed.CloudBackup.CopyFrom(before.CloudBackup);
-        // Deep review R15 (F2 audit): the managed-storage root is written
-        // only by the MAIN-process migration command; without preserving
-        // it, a host debounced commit racing the migration's disk write
-        // rolled the in-memory root back to the OLD path while widget
-        // MappedFolderPaths already pointed at the new one (orphan-detection
-        // and cleanup silently degraded). Same ownership argument as the
-        // backup domains above.
         parsed.FileWidget.DefaultManagedStorageRootPath = before.FileWidget.DefaultManagedStorageRootPath;
-        // Capsule bar order and free placements are desktop-surface
-        // drag state, owned by the main process; the settings tree never
-        // writes them.
+        parsed.FileWidget.ManagedStorageDesktopShortcutEnabled = before.FileWidget.ManagedStorageDesktopShortcutEnabled;
+        parsed.FileWidget.ManagedStorageDesktopShortcutPath = before.FileWidget.ManagedStorageDesktopShortcutPath;
+        parsed.Search.SearchEverythingExecutablePath = before.Search.SearchEverythingExecutablePath;
+        parsed.Search.SearchPopupCustomX = before.Search.SearchPopupCustomX;
+        parsed.Search.SearchPopupCustomY = before.Search.SearchPopupCustomY;
+        parsed.Search.SearchPopupCustomWidth = before.Search.SearchPopupCustomWidth;
+        parsed.Search.SearchPopupCustomHeight = before.Search.SearchPopupCustomHeight;
+        parsed.QuickCapture.LastQuickCaptureFileWidgetId = before.QuickCapture.LastQuickCaptureFileWidgetId;
         parsed.WidgetShell.WidgetCapsuleBarOrder = before.WidgetShell.WidgetCapsuleBarOrder;
         parsed.WidgetShell.WidgetCapsuleFreePlacements = before.WidgetShell.WidgetCapsuleFreePlacements;
     }

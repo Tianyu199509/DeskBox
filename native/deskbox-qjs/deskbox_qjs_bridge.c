@@ -686,6 +686,78 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "  };\n"
     "})()\n";
 
+static INIT_ONCE g_bootstrap_once = INIT_ONCE_STATIC_INIT;
+static uint8_t *g_bootstrap_bytecode = NULL;
+static size_t g_bootstrap_bytecode_len = 0;
+
+static BOOL CALLBACK compile_bootstrap_bytecode_once(
+    PINIT_ONCE init_once,
+    PVOID parameter,
+    PVOID *lp_context)
+{
+    (void)init_once;
+    (void)parameter;
+    (void)lp_context;
+
+    JSRuntime *rt = JS_NewRuntime();
+    if (!rt) {
+        return TRUE;
+    }
+
+    JSContext *ctx = JS_NewContext(rt);
+    if (!ctx) {
+        JS_FreeRuntime(rt);
+        return TRUE;
+    }
+
+    JSValue compiled_fn = JS_Eval(
+        ctx,
+        DESKBOX_BOOTSTRAP_SCRIPT,
+        sizeof(DESKBOX_BOOTSTRAP_SCRIPT) - 1,
+        "<deskbox-bootstrap>",
+        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (!JS_IsException(compiled_fn)) {
+        size_t bc_len = 0;
+        uint8_t *bc_buf = JS_WriteObject(
+            ctx,
+            &bc_len,
+            compiled_fn,
+            JS_WRITE_OBJ_BYTECODE | JS_WRITE_OBJ_STRIP_SOURCE);
+        if (bc_buf && bc_len > 0) {
+            alloc_copy_bytes(bc_buf, bc_len, &g_bootstrap_bytecode, &g_bootstrap_bytecode_len);
+            js_free(ctx, bc_buf);
+        }
+        JS_FreeValue(ctx, compiled_fn);
+    } else {
+        JSValue exc = JS_GetException(ctx);
+        JS_FreeValue(ctx, exc);
+    }
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+    return TRUE;
+}
+
+static JSValue evaluate_bootstrap_closure(JSContext *ctx)
+{
+    InitOnceExecuteOnce(&g_bootstrap_once, compile_bootstrap_bytecode_once, NULL, NULL);
+    if (g_bootstrap_bytecode && g_bootstrap_bytecode_len > 0) {
+        JSValue bc_obj = JS_ReadObject(ctx, g_bootstrap_bytecode, g_bootstrap_bytecode_len, JS_READ_OBJ_BYTECODE);
+        if (!JS_IsException(bc_obj)) {
+            return JS_EvalFunction(ctx, bc_obj); /* consumes bc_obj */
+        }
+        JSValue ignored = JS_GetException(ctx);
+        JS_FreeValue(ctx, ignored);
+    }
+
+    return JS_Eval(
+        ctx,
+        DESKBOX_BOOTSTRAP_SCRIPT,
+        sizeof(DESKBOX_BOOTSTRAP_SCRIPT) - 1,
+        "<deskbox-bootstrap>",
+        JS_EVAL_TYPE_GLOBAL);
+}
+
 DESKBOX_QJS_API uint32_t __cdecl deskbox_qjs_abi_version(void)
 {
     return DESKBOX_QJS_ABI_VERSION;
@@ -975,13 +1047,8 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
         return DESKBOX_QJS_OOM;
     }
 
-    /* 1. Compile pristine host bootstrap closure before user code can touch prototypes. */
-    JSValue prepare_fn = JS_Eval(
-        ctx,
-        DESKBOX_BOOTSTRAP_SCRIPT,
-        sizeof(DESKBOX_BOOTSTRAP_SCRIPT) - 1,
-        "<deskbox-bootstrap>",
-        JS_EVAL_TYPE_GLOBAL);
+    /* 1. Evaluate precompiled pristine host bootstrap closure before user code can touch prototypes. */
+    JSValue prepare_fn = evaluate_bootstrap_closure(ctx);
     if (JS_IsException(prepare_fn)) {
         int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);
         JS_FreeContext(ctx);
@@ -992,18 +1059,28 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
     /* 2. Parse input payload JSON before user module runs. */
     JSValue payload_val;
     if (payload_json_utf8 && payload_json_len > 0) {
-        char *nul_json = (char *)malloc(payload_json_len + 1);
-        if (!nul_json) {
-            JS_FreeValue(ctx, prepare_fn);
-            JS_FreeContext(ctx);
-            JS_FreeRuntime(rt);
-            set_error_text("Host out of memory copying input payload.", out_error_utf8, out_error_len);
-            return DESKBOX_QJS_OOM;
+        char stack_json[8192];
+        char *heap_json = NULL;
+        char *nul_json;
+        if (payload_json_len < sizeof(stack_json)) {
+            nul_json = stack_json;
+        } else {
+            heap_json = (char *)malloc(payload_json_len + 1);
+            if (!heap_json) {
+                JS_FreeValue(ctx, prepare_fn);
+                JS_FreeContext(ctx);
+                JS_FreeRuntime(rt);
+                set_error_text("Host out of memory copying input payload.", out_error_utf8, out_error_len);
+                return DESKBOX_QJS_OOM;
+            }
+            nul_json = heap_json;
         }
         memcpy(nul_json, payload_json_utf8, payload_json_len);
         nul_json[payload_json_len] = '\0';
         payload_val = JS_ParseJSON(ctx, nul_json, payload_json_len, "<payload>");
-        free(nul_json);
+        if (heap_json) {
+            free(heap_json);
+        }
         if (JS_IsException(payload_val)) {
             JS_FreeValue(ctx, prepare_fn);
             int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);

@@ -17,8 +17,7 @@ public static partial class CustomWidgetHealthAnalyzer
 
         if (string.Equals(root.Type, "Scroll", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(root.Type, "List", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(root.Type, "Table", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(root.Type, "DataTable", StringComparison.OrdinalIgnoreCase))
+            string.Equals(root.Type, "Table", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -58,8 +57,6 @@ public static partial class CustomWidgetHealthAnalyzer
         // Recurse only through transparent layout containers (explicitly excluding Card so nested static Cards still trigger overflow).
         if (string.IsNullOrWhiteSpace(root.Type) ||
             string.Equals(root.Type, "Stack", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(root.Type, "Column", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(root.Type, "Row", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(root.Type, "Box", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(root.Type, "Grid", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(root.Type, "Tab", StringComparison.OrdinalIgnoreCase) ||
@@ -309,8 +306,6 @@ public static partial class CustomWidgetHealthAnalyzer
         }
 
         if (string.Equals(type, "Sparkline", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "BarChart", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "LineChart", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "Heatmap", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "Canvas", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(type, "Image", StringComparison.OrdinalIgnoreCase))
@@ -488,10 +483,9 @@ public static partial class CustomWidgetHealthAnalyzer
             return Math.Max(node.MinHeight ?? 0, maxLayer + padT + padB) + marginV;
         }
 
-        // Stack / Column / Row / SplitView / unknown container
+        // Stack / SplitView / unknown container
         double containerInnerW = Math.Max(40, availableWidth - padL - padR);
-        bool horizontal = string.Equals(node.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase) ||
-                          string.Equals(type, "Row", StringComparison.OrdinalIgnoreCase);
+        bool horizontal = string.Equals(node.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase);
         double body = horizontal
             ? EstimateHorizontalChildrenHeight(node.Children, node.Spacing, containerInnerW, out tallestPath, manifest)
             : EstimateVerticalChildrenHeight(node.Children, node.Spacing, containerInnerW, 0, out tallestPath, manifest);
@@ -1048,13 +1042,10 @@ public static partial class CustomWidgetHealthAnalyzer
             return;
         }
 
-        if (string.Equals(type, "Stack", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "Row", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(type, "Column", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(type, "Stack", StringComparison.OrdinalIgnoreCase))
         {
             double innerW = Math.Max(0, nodeWidth - padL - padR);
-            bool horizontal = string.Equals(node.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(type, "Row", StringComparison.OrdinalIgnoreCase);
+            bool horizontal = string.Equals(node.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase);
             if (horizontal && node.Children.Count > 1)
             {
                 double gap = Math.Max(0, node.Spacing) * (node.Children.Count - 1);

@@ -369,6 +369,18 @@
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Clipboard.FetchUrlTitles.Description"
+                        svc:Localized.HeaderKey="Settings.Clipboard.FetchUrlTitles.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Clipboard.FetchUrlTitles.Title"
+                            x:Name="FetchUrlTitlesToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="FetchUrlTitlesToggle_Toggled" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
                         ContentAlignment="Vertical"
                         HorizontalContentAlignment="Stretch"
                         svc:Localized.DescriptionKey="Settings.Clipboard.ExcludedApps.Description"

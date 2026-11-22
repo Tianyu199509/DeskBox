@@ -17,14 +17,18 @@ screenshots/en-us/           English UI screenshots
 - Descriptive localized filenames are allowed when they match the corresponding settings section.
 - Remove replaced and throwaway captures once the current README assets are verified.
 
-## Current Assets (1.3.7 hero series)
+## Current Assets
 
 ```text
 brand/readme-hero-1-3-7-dark-en.png
 brand/readme-hero-1-3-7-dark-zh-cn.png
 brand/logo-200.png
-screenshots/zh-cn/… (one file per settings section)
-screenshots/en-us/… (one file per settings section)
+screenshots/zh-cn/studio-gallery.png, studio-stage.png
+screenshots/en-us/studio-gallery.png, studio-stage.png
+screenshots/zh-cn/settings-*.png   (1.6.0 Settings sections + Custom Widget hub)
+screenshots/en-us/settings-*.png   (1.6.0 Settings sections + Custom Widget hub)
+screenshots/zh-cn/云母材质.png, 亚克力材质.png
+screenshots/en-us/云母材质.png, 亚克力材质.png
 ```
 
 The `readme-hero-1-3-7-dark-*` banners are AI-generated brand illustrations and are not presented as literal UI screenshots. Files under `screenshots/` are captures from the running DeskBox build in both supported README languages. The five 1.3.4 hero candidates were removed on 2026-09-06 after the 1.3.7 banners were adopted; check git history if an old candidate is ever needed.

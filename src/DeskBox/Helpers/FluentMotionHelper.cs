@@ -54,20 +54,6 @@ public static class FluentMotionHelper
         fe.SizeChanged += OnFirstSizeChanged;
     }
 
-    public static TransitionCollection? CreateListTransitions()
-    {
-        if (!AreAnimationsEnabled)
-        {
-            return null;
-        }
-
-        return
-        [
-            new AddDeleteThemeTransition(),
-            new RepositionThemeTransition()
-        ];
-    }
-
     public static void PlayEntranceSlideAndFade(
         UIElement? element,
         float offsetX = 0f,

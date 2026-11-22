@@ -267,14 +267,19 @@ public sealed class CustomWidgetSandboxAndLifecycleRegressionTests
                 ResizeToDefault: false,
                 RawCallerManifestJson: manifestA));
 
-            bool consumed = CustomWidgetAgentStageStore.TryConsume(
+            bool consumed = CustomWidgetAgentStageStore.TryConsumeBundle(
                 stageId,
                 manifestA,
-                out string? consumedWidgetId,
+                hasCallerLogicJs: false,
+                callerLogicJs: null,
+                hasCallerLocales: false,
+                callerLocalesJson: null,
+                out AgentStageBundle? consumedBundle,
                 out string error);
             Assert.True(consumed, error);
-            Assert.Equal("w-1", consumedWidgetId);
+            Assert.Equal("w-1", consumedBundle?.WidgetId);
 
+            CustomWidgetAgentStageStore.CompleteCommit(stageId);
             CustomWidgetAgentStageStore.RecordCommitted(stageId, "w-1");
 
             Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out string? committedId, manifestA));

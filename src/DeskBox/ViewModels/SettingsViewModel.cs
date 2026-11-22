@@ -222,7 +222,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);
-        _appUpdateService = appUpdateService ?? new AppUpdateService();
+        _appUpdateService = appUpdateService ?? AppUpdateServiceFactory.Create(AppDistributionService.Current);
         // The service owns download state so a background auto-download is
         // visible here too; the mirror skips results this VM initiated.
         _appUpdateService.DownloadProgressChanged += OnServiceDownloadProgress;

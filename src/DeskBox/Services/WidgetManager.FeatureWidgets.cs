@@ -1708,9 +1708,17 @@ public sealed partial class WidgetManager
         string title,
         DateTimeOffset? dueDate,
         TodoPriority priority) =>
+        TryAddExternalTodoItemAsync(widgetId, title, dueDate, priority, explicitItemId: null);
+
+    internal Task<bool?> TryAddExternalTodoItemAsync(
+        string widgetId,
+        string title,
+        DateTimeOffset? dueDate,
+        TodoPriority priority,
+        string? explicitItemId) =>
         RunLiveTodoMutationOnUiAsync(
             widgetId,
-            adapter => adapter.AddExternalItemAsync(title, dueDate, priority),
+            adapter => adapter.AddExternalItemAsync(title, dueDate, priority, explicitItemId),
             result => result);
 
     internal Task<bool?> TryToggleExternalTodoItemAsync(string widgetId, string itemId) =>

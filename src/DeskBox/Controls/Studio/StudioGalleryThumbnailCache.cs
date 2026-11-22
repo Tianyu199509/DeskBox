@@ -235,13 +235,12 @@ internal static class StudioGalleryThumbnailCache
                     continue;
                 }
 
-                // Evict legacy v1 thumbnails (which suffered from AcrylicBrush transparent capture)
-                // and stray interrupted temp files older than 5 minutes.
-                bool isLegacyThumb = info.Extension.Equals(".png", StringComparison.OrdinalIgnoreCase) &&
+                // Evict stale cache-version thumbnails and stray interrupted temp files older than 5 minutes.
+                bool isStaleVersionThumb = info.Extension.Equals(".png", StringComparison.OrdinalIgnoreCase) &&
                     !info.Name.StartsWith(currentPrefix, StringComparison.OrdinalIgnoreCase);
                 bool isOrphanTmp = info.Name.Contains(".tmp-", StringComparison.OrdinalIgnoreCase) &&
                     (DateTime.UtcNow - info.LastWriteTimeUtc) > TimeSpan.FromMinutes(5);
-                if (isLegacyThumb || isOrphanTmp)
+                if (isStaleVersionThumb || isOrphanTmp)
                 {
                     if (TryDeleteQuietly(info.FullName))
                     {

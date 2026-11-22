@@ -404,11 +404,20 @@ public partial class App
 
         if (normalized.Length > 240)
         {
-            normalized = string.Concat(normalized.AsSpan(0, 240), "…");
+            int cut = 240;
+            if (char.IsHighSurrogate(normalized[cut - 1]))
+            {
+                cut--;
+            }
+
+            normalized = string.Concat(normalized.AsSpan(0, cut), "…");
         }
 
         WidgetConfig? todoConfig = SettingsService.Settings.WidgetLayout.Widgets
-            .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled);
+            .FirstOrDefault(w =>
+                w.WidgetKind == WidgetKind.Todo &&
+                !w.IsDisabled &&
+                !SettingsService.Settings.WidgetLayout.DeletedWidgetIds.Contains(w.Id, StringComparer.Ordinal));
         if (todoConfig is null)
         {
             ContentWidgetWindow createdWindow = await WidgetManager.CreateTodoWidgetAsync();
@@ -418,6 +427,20 @@ public partial class App
             {
                 return (false, null, null, string.Empty);
             }
+        }
+
+        string newItemId = Guid.NewGuid().ToString("N");
+        bool? liveAdded = await WidgetManager.TryAddExternalTodoItemAsync(
+            todoConfig.Id,
+            normalized,
+            dueDate: null,
+            DeskBox.ViewModels.TodoPriority.Normal,
+            newItemId);
+        if (liveAdded is not null)
+        {
+            return liveAdded.Value
+                ? (true, todoConfig.Id, newItemId, normalized)
+                : (false, null, null, string.Empty);
         }
 
         var store = new TodoWidgetStore(todoConfig.Id);
@@ -431,6 +454,7 @@ public partial class App
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var item = new TodoItem
         {
+            Id = newItemId,
             Text = normalized,
             SortOrder = sortOrder,
             CreatedAt = now,

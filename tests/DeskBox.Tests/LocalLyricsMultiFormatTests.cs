@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Text;
 using DeskBox.Services.Lyrics;
 
@@ -62,9 +64,9 @@ public sealed class LocalLyricsMultiFormatTests : IDisposable
             [31290,5808]you zhan zai ni jia de men kou
             """;
 
-        byte[] encryptedPrimary = LocalLyricsFormatDecoder.EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qrcXml));
-        byte[] encryptedTrans = LocalLyricsFormatDecoder.EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qmtsLrc));
-        byte[] encryptedRoma = LocalLyricsFormatDecoder.EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qmRomaQrc));
+        byte[] encryptedPrimary = EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qrcXml));
+        byte[] encryptedTrans = EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qmtsLrc));
+        byte[] encryptedRoma = EncryptLocalQmcQrcBytesForTesting(Encoding.UTF8.GetBytes(qmRomaQrc));
 
         await File.WriteAllBytesAsync(Path.Combine(qmDir, "孙燕姿 - 我不难过 - 320 - 未完成_qm.qrc"), encryptedPrimary);
         await File.WriteAllBytesAsync(Path.Combine(qmDir, "孙燕姿 - 我不难过 - 320 - 未完成_qmts.qrc"), encryptedTrans);
@@ -132,7 +134,7 @@ public sealed class LocalLyricsMultiFormatTests : IDisposable
             "[0,2000]<0,600,0>雨<600,600,0>爱\r\n" +
             "[16440,4200]<0,300,0>Kaze <300,400,0>ga <700,500,0>fuita\r\n";
 
-        byte[] encryptedKrc = LocalLyricsFormatDecoder.EncryptKrcBytesForTesting(Encoding.UTF8.GetBytes(plainKrc));
+        byte[] encryptedKrc = EncryptKrcBytesForTesting(Encoding.UTF8.GetBytes(plainKrc));
         string krcPath = Path.Combine(
             krcDir,
             "杨丞琳 - 雨爱-2592ffa57a2d8b1a16f18d991b7098cd-192391075-00000000.krc");
@@ -289,5 +291,74 @@ public sealed class LocalLyricsMultiFormatTests : IDisposable
         Assert.Equal(TimeSpan.FromMilliseconds(8400), srtDoc.Lines[0].Timestamp);
         Assert.Equal("Stay with me", srtDoc.Lines[0].PrimaryText);
         Assert.Equal("请留在我身边", srtDoc.Lines[0].SecondaryText);
+    }
+
+    private static byte[] EncryptKrcBytesForTesting(ReadOnlySpan<byte> utf8PlainBytes)
+    {
+        byte[] compressed;
+        using (var ms = new MemoryStream())
+        {
+            using (var zs = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+            {
+                zs.Write(utf8PlainBytes);
+            }
+
+            compressed = ms.ToArray();
+        }
+
+        ReadOnlySpan<byte> key = LocalLyricsFormatDecoder.KrcXorKey;
+        byte[] output = new byte[4 + compressed.Length];
+        LocalLyricsFormatDecoder.Krc1Magic.CopyTo(output);
+        for (int i = 0; i < compressed.Length; i++)
+        {
+            output[4 + i] = (byte)(compressed[i] ^ key[i & 0x0F]);
+        }
+
+        return output;
+    }
+
+    private static byte[] EncryptLocalQmcQrcBytesForTesting(ReadOnlySpan<byte> utf8PlainBytes)
+    {
+        byte[] compressed;
+        using (var ms = new MemoryStream())
+        {
+            using (var zs = new ZLibStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+            {
+                zs.Write(utf8PlainBytes);
+            }
+
+            compressed = ms.ToArray();
+        }
+
+        int paddedLen = (compressed.Length + 7) & ~7;
+        Array.Resize(ref compressed, paddedLen);
+
+        ulong[] k3Enc = LocalLyricsFormatDecoder.BuildQqDesSubkeys("!@#)(*$%"u8, encrypt: true);
+        ulong[] k2Dec = LocalLyricsFormatDecoder.BuildQqDesSubkeys("123ZXC!@"u8, encrypt: false);
+        ulong[] k1Enc = LocalLyricsFormatDecoder.BuildQqDesSubkeys("!@#)(NHL"u8, encrypt: true);
+
+        for (int offset = 0; offset < compressed.Length; offset += 8)
+        {
+            Span<byte> block = compressed.AsSpan(offset, 8);
+            ulong state = BinaryPrimitives.ReadUInt64LittleEndian(block);
+            state = LocalLyricsFormatDecoder.QqDesTransformBlock(state, k3Enc);
+            state = LocalLyricsFormatDecoder.QqDesTransformBlock(state, k2Dec);
+            state = LocalLyricsFormatDecoder.QqDesTransformBlock(state, k1Enc);
+            BinaryPrimitives.WriteUInt64LittleEndian(block, state);
+        }
+
+        ReadOnlySpan<byte> prefix = "[offset:0]\n"u8;
+        byte[] output = new byte[prefix.Length + compressed.Length];
+        prefix.CopyTo(output);
+        compressed.CopyTo(output.AsSpan(prefix.Length));
+
+        ReadOnlySpan<byte> qmcKey = LocalLyricsFormatDecoder.Qmc1StaticKey;
+        for (int i = 0; i < output.Length; i++)
+        {
+            int maskIndex = i > 0x7FFF ? ((i % 0x7FFF) & 0x7F) : (i & 0x7F);
+            output[i] ^= qmcKey[maskIndex];
+        }
+
+        return output;
     }
 }

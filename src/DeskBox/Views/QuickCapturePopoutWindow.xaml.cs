@@ -319,7 +319,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         if (initialLoad || !_hasUnsavedChanges)
         {
             _appearancePreset = found.AppearancePreset;
-            _contentFormat = _isEditing ? ResolvePreferredEditorFormat() : found.ContentFormat;
+            _contentFormat = found.ContentFormat;
             if (_isEditing)
             {
                 SetEditorText(found.Body);
@@ -651,7 +651,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
             return false;
         }
 
-        _contentFormat = ResolvePreferredEditorFormat();
+        _contentFormat = _item.ContentFormat;
         SetEditorText(_item.Body);
         _isEditing = true;
         RefreshAttachments();
@@ -1954,6 +1954,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         }
 
         PopoutMarkdownView.AttachmentOpenRequested -= PopoutMarkdownView_AttachmentOpenRequested;
+        PopoutMarkdownView.TaskToggleRequested -= PopoutMarkdownView_TaskToggleRequested;
         PopoutMarkdownView.AttachmentResolver = null;
         PopoutMarkdownView.ReleaseVisualHandlers();
 
@@ -1962,6 +1963,8 @@ public sealed partial class QuickCapturePopoutWindow : Window
         PopoutMarkdownEditor.CancelRequested -= PopoutMarkdownEditor_CancelRequested;
         PopoutMarkdownEditor.RichPasteRequested -= PopoutMarkdownEditor_RichPasteRequested;
         PopoutMarkdownEditor.ReleaseVisualHandlers();
+        PopoutAttachmentStrip.OpenRequested -= PopoutAttachmentStrip_OpenRequested;
+        PopoutAttachmentStrip.RemoveRequested -= PopoutAttachmentStrip_RemoveRequested;
         PopoutAttachmentStrip.ReleaseVisualHandlers();
         PrimaryImage.Source = null;
 
@@ -2014,22 +2017,5 @@ public sealed partial class QuickCapturePopoutWindow : Window
     {
         double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
         return Math.Max(1, (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 }

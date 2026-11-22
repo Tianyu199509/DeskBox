@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "Datenschutz & Sicherheit",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "System-Datenschutzmarkierungen beachten",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "Ignoriert automatisch Passwörter und Inhalte, die vom Verlauf ausgeschlossen sind",
+  "Settings.Clipboard.FetchUrlTitles.Title": "Webseitentitel für kopierte Links abrufen",
+  "Settings.Clipboard.FetchUrlTitles.Description": "Ruft bei Aktivierung Titel öffentlicher Webseiten im Hintergrund ab (Links mit Anmelde-, Bestätigungs- oder Signaturparametern werden übersprungen)",
   "Settings.Clipboard.SecretProtection.Title": "Schutz für API-Schlüssel und Tokens",
   "Settings.Clipboard.SecretProtection.Description": "Umgang mit erkannten API-Schlüsseln, Zugriffstokens oder privaten Schlüsseln",
   "Settings.Clipboard.SecretProtection.Mask": "Vorschau maskieren und Kopieren erlauben",

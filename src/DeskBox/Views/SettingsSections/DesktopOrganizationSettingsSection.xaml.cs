@@ -146,8 +146,6 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         }
     }
 
-    public void OpenRuleList(bool animate = true) => OpenAutoOrganizationSubPage(animate);
-
     public void CloseAutoOrganizationSubPage(bool animate = true)
     {
         if (!IsAutoOrganizationSubPageOpen)

@@ -945,12 +945,6 @@ internal static class ShellThumbnailProxy
             ? FailureRetryDelayMilliseconds
             : IconFailureRetryDelayMilliseconds;
 
-    internal static void RecordFailureForTesting(string path, ShellImageMode mode) =>
-        RecordFailure(BuildFailureKey(NormalizePath(path), mode));
-
-    internal static bool IsRecentFailureForTesting(string path, ShellImageMode mode) =>
-        IsRecentFailure(BuildFailureKey(NormalizePath(path), mode), mode);
-
     private static bool IsRecentFailure(string path, ShellImageMode mode)
     {
         if (!s_recentFailures.TryGetValue(path, out long failedAt))

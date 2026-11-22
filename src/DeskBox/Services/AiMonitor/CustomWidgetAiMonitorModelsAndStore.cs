@@ -1212,7 +1212,66 @@ public sealed class CustomWidgetAiMonitorSource
             ? LocalizationService.ResolveAmbientCultureName()
             : cultureName;
         string normalizedRegion = AiProviderCatalog.NormalizeRegion(entry.Region);
+        AiMonitorProviderPreference? prevPref = CustomWidgetAiMonitorPreferencesStore.Shared.Get(entry.ProviderId);
 
+        if (entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderClaude, StringComparison.OrdinalIgnoreCase) ||
+            entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderCodex, StringComparison.OrdinalIgnoreCase) ||
+            entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderGeminiCli, StringComparison.OrdinalIgnoreCase))
+        {
+            Interlocked.Increment(ref _configMutationGeneration);
+            Interlocked.Increment(ref _suppressCredentialEventCount);
+            try
+            {
+                CustomWidgetAiMonitorPreferencesStore.Shared.Upsert(new AiMonitorProviderPreference(
+                    ProviderId: entry.ProviderId,
+                    Enabled: entry.Enabled,
+                    PlanTier: entry.PlanTier,
+                    Region: normalizedRegion,
+                    ApiKey: string.IsNullOrWhiteSpace(entry.ApiKey) ? null : entry.ApiKey.Trim(),
+                    CustomEndpoint: string.IsNullOrWhiteSpace(entry.CustomEndpoint) ? null : entry.CustomEndpoint.Trim()));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _suppressCredentialEventCount);
+            }
+
+            await RefreshNowAsync(forceCloudRefresh: false, waitIfBusy: true);
+            CustomWidgetAiProviderSnapshot? localSnap = _latest.AllProviders.FirstOrDefault(
+                p => p.Id.Equals(entry.ProviderId, StringComparison.OrdinalIgnoreCase));
+            return (
+                true,
+                LocalizationService.TranslateForCulture(c, "CustomWidget.AiMonitor.LocalConfigUpdated"),
+                localSnap ?? CustomWidgetAiMonitorEngine.CreateUnconfiguredSnapshot(entry.ProviderId, DateTimeOffset.Now, c));
+        }
+
+        AiProviderCredentialEntry candidateEntry = entry with
+        {
+            Region = normalizedRegion,
+            ApiKey = string.IsNullOrWhiteSpace(entry.ApiKey)
+                ? (GetEffectiveCredential(entry.ProviderId)?.ApiKey ?? string.Empty)
+                : entry.ApiKey.Trim(),
+            CustomEndpoint = string.IsNullOrWhiteSpace(entry.CustomEndpoint)
+                ? (GetEffectiveCredential(entry.ProviderId)?.CustomEndpoint ?? string.Empty)
+                : entry.CustomEndpoint.Trim()
+        };
+
+        DateTimeOffset fetchedAt = DateTimeOffset.Now;
+        var (snap, rawBody) = await CustomWidgetAiMonitorEngine.FetchCloudProviderInternalAsync(
+            _httpClient,
+            candidateEntry,
+            fetchedAt,
+            cancellationToken,
+            c);
+
+        bool hasWorkingFallback = prevPref is null &&
+                                  CustomWidgetAiCredentialStore.Shared.Get(entry.ProviderId) is { ApiKey.Length: > 0 };
+        if (snap.ErrorMessage is not null && hasWorkingFallback)
+        {
+            // Do not persist a mistyped monitor override key that would permanently shadow a valid global key.
+            return (false, snap.ErrorMessage, snap);
+        }
+
+        Interlocked.Increment(ref _configMutationGeneration);
         Interlocked.Increment(ref _suppressCredentialEventCount);
         try
         {
@@ -1229,36 +1288,15 @@ public sealed class CustomWidgetAiMonitorSource
             Interlocked.Decrement(ref _suppressCredentialEventCount);
         }
 
-        if (entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderClaude, StringComparison.OrdinalIgnoreCase) ||
-            entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderCodex, StringComparison.OrdinalIgnoreCase) ||
-            entry.ProviderId.Equals(CustomWidgetAiMonitorEngine.ProviderGeminiCli, StringComparison.OrdinalIgnoreCase))
+        if (snap.ErrorMessage is null)
         {
-            await RefreshNowAsync(forceCloudRefresh: false);
-            CustomWidgetAiProviderSnapshot? localSnap = _latest.AllProviders.FirstOrDefault(
-                p => p.Id.Equals(entry.ProviderId, StringComparison.OrdinalIgnoreCase));
-            return (
-                true,
-                LocalizationService.TranslateForCulture(c, "CustomWidget.AiMonitor.LocalConfigUpdated"),
-                localSnap ?? CustomWidgetAiMonitorEngine.CreateUnconfiguredSnapshot(entry.ProviderId, DateTimeOffset.Now, c));
+            _cloudCache[entry.ProviderId] = snap;
+            if (!string.IsNullOrEmpty(rawBody))
+            {
+                _cloudRawBodyCache[entry.ProviderId] = (rawBody, candidateEntry.Region, fetchedAt);
+            }
         }
-
-        AiProviderCredentialEntry effectiveEntry = GetEffectiveCredential(entry.ProviderId)
-            ?? entry with { Region = normalizedRegion };
-
-        DateTimeOffset fetchedAt = DateTimeOffset.Now;
-        var (snap, rawBody) = await CustomWidgetAiMonitorEngine.FetchCloudProviderInternalAsync(
-            _httpClient,
-            effectiveEntry,
-            fetchedAt,
-            cancellationToken,
-            c);
-
-        _cloudCache[entry.ProviderId] = snap;
-        if (!string.IsNullOrEmpty(rawBody))
-        {
-            _cloudRawBodyCache[entry.ProviderId] = (rawBody, effectiveEntry.Region, fetchedAt);
-        }
-        await RefreshNowAsync(forceCloudRefresh: false);
+        await RefreshNowAsync(forceCloudRefresh: false, waitIfBusy: true);
 
         if (snap.ErrorMessage is not null)
         {
@@ -1277,8 +1315,11 @@ public sealed class CustomWidgetAiMonitorSource
         return (true, detail, snap);
     }
 
+    private long _configMutationGeneration;
+
     public async Task SetProviderMonitorEnabledAsync(string providerId, bool enabled)
     {
+        Interlocked.Increment(ref _configMutationGeneration);
         Interlocked.Increment(ref _suppressCredentialEventCount);
         try
         {
@@ -1295,11 +1336,12 @@ public sealed class CustomWidgetAiMonitorSource
             _cloudRawBodyCache.TryRemove(providerId, out _);
         }
 
-        await RefreshNowAsync(forceCloudRefresh: enabled);
+        await RefreshNowAsync(forceCloudRefresh: enabled, waitIfBusy: true);
     }
 
     public async Task RemoveCredentialAsync(string providerId)
     {
+        Interlocked.Increment(ref _configMutationGeneration);
         Interlocked.Increment(ref _suppressCredentialEventCount);
         try
         {
@@ -1313,12 +1355,19 @@ public sealed class CustomWidgetAiMonitorSource
         }
         _cloudCache.TryRemove(providerId, out _);
         _cloudRawBodyCache.TryRemove(providerId, out _);
-        await RefreshNowAsync(forceCloudRefresh: false);
+        await RefreshNowAsync(forceCloudRefresh: false, waitIfBusy: true);
     }
 
-    public async Task<CustomWidgetAiMonitorSnapshot> RefreshNowAsync(bool forceCloudRefresh = true)
+    public Task<CustomWidgetAiMonitorSnapshot> RefreshNowAsync(bool forceCloudRefresh = true) =>
+        RefreshNowAsync(forceCloudRefresh, waitIfBusy: forceCloudRefresh);
+
+    private async Task<CustomWidgetAiMonitorSnapshot> RefreshNowAsync(bool forceCloudRefresh, bool waitIfBusy)
     {
-        if (!await _refreshGate.WaitAsync(0))
+        if (waitIfBusy)
+        {
+            await _refreshGate.WaitAsync();
+        }
+        else if (!await _refreshGate.WaitAsync(0))
         {
             return _latest;
         }
@@ -1327,6 +1376,7 @@ public sealed class CustomWidgetAiMonitorSource
         {
             return await Task.Run(async () =>
             {
+                long startGen = Interlocked.Read(ref _configMutationGeneration);
                 DateTimeOffset now = DateTimeOffset.Now;
                 string culture = LocalizationService.ResolveAmbientCultureName();
                 bool cultureChanged = !string.Equals(_lastRefreshCulture, culture, StringComparison.OrdinalIgnoreCase);
@@ -1369,7 +1419,8 @@ public sealed class CustomWidgetAiMonitorSource
                     {
                         if (!shouldFetchCloud &&
                             !cultureChanged &&
-                            _cloudCache.TryGetValue(cid, out CustomWidgetAiProviderSnapshot? cachedSnap))
+                            _cloudCache.TryGetValue(cid, out CustomWidgetAiProviderSnapshot? cachedSnap) &&
+                            cachedSnap.ErrorMessage is null)
                         {
                             cloudTasks.Add(Task.FromResult(cachedSnap));
                         }
@@ -1396,10 +1447,14 @@ public sealed class CustomWidgetAiMonitorSource
                                     captured,
                                     now,
                                     cultureName: culture);
-                                _cloudCache[captured.ProviderId] = fetched;
-                                if (!string.IsNullOrEmpty(rawBody))
+                                if (Interlocked.Read(ref _configMutationGeneration) == startGen &&
+                                    fetched.ErrorMessage is null)
                                 {
-                                    _cloudRawBodyCache[captured.ProviderId] = (rawBody, captured.Region, now);
+                                    _cloudCache[captured.ProviderId] = fetched;
+                                    if (!string.IsNullOrEmpty(rawBody))
+                                    {
+                                        _cloudRawBodyCache[captured.ProviderId] = (rawBody, captured.Region, now);
+                                    }
                                 }
                                 return fetched;
                             }));
@@ -1436,7 +1491,8 @@ public sealed class CustomWidgetAiMonitorSource
                     culture);
 
                 CustomWidgetAiProviderSnapshot[] cloudResults = await Task.WhenAll(cloudTasks);
-                if (shouldFetchCloud)
+                if (shouldFetchCloud &&
+                    cloudResults.Any(static cp => cp.IsConfigured && cp.ErrorMessage is null))
                 {
                     _lastCloudFetchUtc = now;
                 }

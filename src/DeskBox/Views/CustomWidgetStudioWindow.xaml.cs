@@ -681,24 +681,6 @@ public sealed partial class CustomWidgetStudioWindow : Window
             locales,
             out CustomWidgetLocaleCatalog? effectiveLocales);
         string? effectiveLogicJs = logicJs;
-        if (string.IsNullOrWhiteSpace(effectiveLogicJs))
-        {
-            try
-            {
-                using JsonDocument inlineDoc = JsonDocument.Parse(manifestJson);
-                if (inlineDoc.RootElement.ValueKind == JsonValueKind.Object &&
-                    inlineDoc.RootElement.TryGetProperty("script", out JsonElement scriptEl) &&
-                    scriptEl.ValueKind == JsonValueKind.String &&
-                    !string.IsNullOrWhiteSpace(scriptEl.GetString()) &&
-                    !string.Equals(scriptEl.GetString(), CustomWidgetDataStore.LogicJsFileName, StringComparison.OrdinalIgnoreCase))
-                {
-                    effectiveLogicJs = scriptEl.GetString();
-                }
-            }
-            catch (JsonException)
-            {
-            }
-        }
         if (!string.IsNullOrWhiteSpace(effectiveLogicJs))
         {
             manifestJson = CustomWidgetTemplates.SyncManifestScriptPropertyJson(manifestJson, effectiveLogicJs);
@@ -1204,7 +1186,7 @@ public sealed partial class CustomWidgetStudioWindow : Window
         {
             try
             {
-                if (JsonNode.Parse(current) is not JsonObject rootObj ||
+                if (StudioWorkspaceEngine.ParsePermissiveJsonNode(current) is not JsonObject rootObj ||
                     !StudioManifestInspector.TryResolveJsonNodeByPath(rootObj, nodePath, out JsonObject? targetObj) ||
                     targetObj is null)
                 {

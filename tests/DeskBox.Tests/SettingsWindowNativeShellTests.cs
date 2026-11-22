@@ -154,6 +154,18 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         string dismissWindow = xaml[xaml.LastIndexOf("<Button", dismissPos, StringComparison.Ordinal)..xaml.IndexOf("/>", dismissPos, StringComparison.Ordinal)];
         Assert.Contains("svc:Localized.AutomationNameKey=\"Common.Close\"", dismissWindow, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.ToolTipKey=\"Common.Close\"", dismissWindow, StringComparison.Ordinal);
+
+        // Seamless single-canvas shell: right content pane shares the window backdrop
+        // without NavigationView's translucent rounded ContentGrid box or borders.
+        Assert.Contains("<SolidColorBrush x:Key=\"NavigationViewContentBackground\" Color=\"Transparent\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("<SolidColorBrush x:Key=\"NavigationViewContentGridBorderBrush\" Color=\"Transparent\" />", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Thickness x:Key=\"NavigationViewContentGridBorderThickness\">0</Thickness>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<Thickness x:Key=\"NavigationViewMinimalContentGridBorderThickness\">0</Thickness>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<CornerRadius x:Key=\"NavigationViewContentGridCornerRadius\">0</CornerRadius>", xaml, StringComparison.Ordinal);
+
+        string settingsWindowCode = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml.cs"));
+        Assert.Contains("WindowsCompatibilityService.ApplySettingsBackdrop(this);", settingsWindowCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowsCompatibilityService.ApplySafeBackdrop(this);", settingsWindowCode, StringComparison.Ordinal);
     }
 
     [Fact]

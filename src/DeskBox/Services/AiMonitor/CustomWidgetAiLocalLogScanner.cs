@@ -166,7 +166,7 @@ public static partial class CustomWidgetAiMonitorEngine
             try
             {
                 var rootDir = new DirectoryInfo(claudeProjectsDir);
-                foreach (FileInfo fi in rootDir.EnumerateFiles("*.jsonl", SearchOption.AllDirectories))
+                foreach (FileInfo fi in rootDir.EnumerateFiles("*.jsonl", new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
                 {
                     fileCount++;
                     string file = fi.FullName;
@@ -1477,7 +1477,7 @@ public static partial class CustomWidgetAiMonitorEngine
             try
             {
                 var rootDir = new DirectoryInfo(codexSessionsDir);
-                foreach (FileInfo fi in rootDir.EnumerateFiles("*.jsonl", SearchOption.AllDirectories))
+                foreach (FileInfo fi in rootDir.EnumerateFiles("*.jsonl", new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
                 {
                     fileCount++;
                     string file = fi.FullName;

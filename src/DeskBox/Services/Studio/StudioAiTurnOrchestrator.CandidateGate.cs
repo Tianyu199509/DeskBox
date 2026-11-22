@@ -28,10 +28,21 @@ internal sealed partial class StudioAiTurnOrchestrator
         {
             if (StudioWorkspaceEngine.ParsePermissiveJsonNode(rawManifestJson) is JsonObject rootObj &&
                 rootObj.TryGetPropertyValue("script", out JsonNode? scriptNode) &&
-                scriptNode is JsonValue val &&
-                val.TryGetValue<string>(out string? scriptStr))
+                scriptNode is not null)
             {
-                return !string.IsNullOrWhiteSpace(scriptStr);
+                if (scriptNode is JsonObject scriptObj)
+                {
+                    return scriptObj.TryGetPropertyValue("entry", out JsonNode? entryNode)
+                        ? entryNode is JsonValue entryVal &&
+                          entryVal.TryGetValue<string>(out string? entryStr) &&
+                          !string.IsNullOrWhiteSpace(entryStr)
+                        : scriptObj.Count > 0;
+                }
+
+                if (scriptNode is JsonValue val && val.TryGetValue<string>(out string? scriptStr))
+                {
+                    return !string.IsNullOrWhiteSpace(scriptStr);
+                }
             }
         }
         catch
@@ -516,7 +527,11 @@ internal sealed partial class StudioAiTurnOrchestrator
                 CustomWidgetHealthAnalyzer.EstimateManifestLayoutHeight(stepAManifest, out int remainingOverflow, out _);
                 if (remainingOverflow > 24 &&
                     StudioWorkspaceEngine.ParsePermissiveJsonNode(stepAJson) is JsonObject stepBObj &&
-                    stepBObj["view"] is JsonObject viewObj)
+                    stepBObj["root"] is JsonValue rootIdVal &&
+                    rootIdVal.TryGetValue<string>(out string? rootElemId) &&
+                    !string.IsNullOrWhiteSpace(rootElemId) &&
+                    stepBObj["elements"] is JsonObject elementsMap &&
+                    elementsMap[rootElemId.Trim()] is JsonObject viewObj)
                 {
                     string rootType = viewObj["type"]?.GetValue<string>() ?? "Stack";
                     string orientation = viewObj["orientation"]?.GetValue<string>() ?? "vertical";
@@ -527,9 +542,13 @@ internal sealed partial class StudioAiTurnOrchestrator
 
                     if (isVerticalStack && viewObj["children"] is JsonArray oldChildren && oldChildren.Count > 0)
                     {
-                        JsonNode? footerNode = null;
+                        string? footerElemId = null;
                         int scrollChildCount = oldChildren.Count;
-                        if (oldChildren.Count >= 2 && oldChildren[^1] is JsonObject lastObj)
+                        if (oldChildren.Count >= 2 &&
+                            oldChildren[^1] is JsonValue lastIdVal &&
+                            lastIdVal.TryGetValue<string>(out string? lastId) &&
+                            !string.IsNullOrWhiteSpace(lastId) &&
+                            elementsMap[lastId.Trim()] is JsonObject lastObj)
                         {
                             string lastType = lastObj["type"]?.GetValue<string>() ?? string.Empty;
                             bool isActionRow = string.Equals(lastType, "Button", StringComparison.OrdinalIgnoreCase) ||
@@ -538,11 +557,8 @@ internal sealed partial class StudioAiTurnOrchestrator
                                                 string.Equals(lastObj["orientation"]?.GetValue<string>(), "horizontal", StringComparison.OrdinalIgnoreCase));
                             if (isActionRow)
                             {
-                                footerNode = lastObj.DeepClone();
-                                if (footerNode is JsonObject footerObj)
-                                {
-                                    footerObj["row"] = 1;
-                                }
+                                footerElemId = lastId.Trim();
+                                lastObj["row"] = 1;
                                 scrollChildCount = oldChildren.Count - 1;
                             }
                         }
@@ -556,7 +572,14 @@ internal sealed partial class StudioAiTurnOrchestrator
                             }
                         }
 
-                        var scrollNode = new JsonObject
+                        string autoScrollId = "auto_scroll_body";
+                        int suffix = 1;
+                        while (elementsMap.ContainsKey(autoScrollId))
+                        {
+                            autoScrollId = $"auto_scroll_body_{++suffix}";
+                        }
+
+                        elementsMap[autoScrollId] = new JsonObject
                         {
                             ["type"] = "Scroll",
                             ["row"] = 0,
@@ -564,14 +587,14 @@ internal sealed partial class StudioAiTurnOrchestrator
                             ["children"] = scrollChildren
                         };
 
-                        var gridChildren = new JsonArray((JsonNode)scrollNode);
-                        if (footerNode is not null)
+                        var gridChildren = new JsonArray((JsonNode?)JsonValue.Create(autoScrollId));
+                        if (footerElemId is not null)
                         {
-                            gridChildren.Add((JsonNode)footerNode);
+                            gridChildren.Add((JsonNode?)JsonValue.Create(footerElemId));
                         }
 
                         viewObj["type"] = "Grid";
-                        viewObj["rows"] = footerNode is not null ? "*,Auto" : "*";
+                        viewObj["rows"] = footerElemId is not null ? "*,Auto" : "*";
                         viewObj.Remove("orientation");
                         viewObj["children"] = gridChildren;
 

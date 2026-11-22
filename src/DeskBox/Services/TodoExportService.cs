@@ -98,32 +98,56 @@ public static class TodoExportService
             return [];
         }
 
-        string? widgetId = await TryResolvePrimaryTodoWidgetIdAsync(dataDirectory, cancellationToken)
+        IReadOnlyList<string> widgetIds = await ResolveActiveTodoWidgetIdsAsync(dataDirectory, cancellationToken)
             .ConfigureAwait(false);
 
-        if (string.IsNullOrWhiteSpace(widgetId))
+        if (widgetIds.Count == 0)
         {
             // Fallback: locate the first widget directory that contains todo.json.
             foreach (string candidateDir in Directory.EnumerateDirectories(widgetsRoot))
             {
                 if (File.Exists(Path.Combine(candidateDir, "todo.json")))
                 {
-                    widgetId = Path.GetFileName(candidateDir);
-                    break;
+                    string candidateId = Path.GetFileName(candidateDir);
+                    if (!string.IsNullOrWhiteSpace(candidateId))
+                    {
+                        widgetIds = [candidateId];
+                        break;
+                    }
                 }
             }
         }
 
-        if (string.IsNullOrWhiteSpace(widgetId))
+        if (widgetIds.Count == 0)
         {
             return [];
         }
 
-        var store = new TodoWidgetStore(widgetsRoot, widgetId);
-        TodoWidgetData snapshot = await store.LoadReadOnlySnapshotAsync().ConfigureAwait(false);
-        return snapshot.Items
-            .Where(item => !item.IsDeleted)
-            .ToArray();
+        if (widgetIds.Count == 1)
+        {
+            var singleStore = new TodoWidgetStore(widgetsRoot, widgetIds[0]);
+            TodoWidgetData singleSnapshot = await singleStore.LoadReadOnlySnapshotAsync().ConfigureAwait(false);
+            return singleSnapshot.Items
+                .Where(static item => !item.IsDeleted)
+                .ToArray();
+        }
+
+        var merged = new List<TodoItem>();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string widgetId in widgetIds)
+        {
+            var store = new TodoWidgetStore(widgetsRoot, widgetId);
+            TodoWidgetData snapshot = await store.LoadReadOnlySnapshotAsync().ConfigureAwait(false);
+            foreach (TodoItem item in snapshot.Items)
+            {
+                if (!item.IsDeleted && seenIds.Add(item.Id))
+                {
+                    merged.Add(item);
+                }
+            }
+        }
+
+        return merged;
     }
 
     public static (DateOnly? Start, DateOnly? End) ResolveDateRange(
@@ -1472,7 +1496,7 @@ public static class TodoExportService
         return false;
     }
 
-    private static async Task<string?> TryResolvePrimaryTodoWidgetIdAsync(
+    private static async Task<IReadOnlyList<string>> ResolveActiveTodoWidgetIdsAsync(
         string dataDirectory,
         CancellationToken cancellationToken)
     {
@@ -1484,23 +1508,40 @@ public static class TodoExportService
             JsonArray? widgets = null;
             HashSet<string>? deletedIds = null;
 
+            static JsonNode? ParseJsonBytesStrippingBom(byte[] bytes)
+            {
+                ReadOnlySpan<byte> span = bytes;
+                if (span.StartsWith("\uFEFF"u8))
+                {
+                    span = span[3..];
+                }
+
+                return span.IsEmpty ? null : JsonNode.Parse(span);
+            }
+
+            static void CollectDeletedIds(JsonNode? arrayNode, ref HashSet<string>? target)
+            {
+                if (arrayNode is not JsonArray deletedArray)
+                {
+                    return;
+                }
+
+                target ??= new HashSet<string>(StringComparer.Ordinal);
+                foreach (JsonNode? entry in deletedArray)
+                {
+                    if (entry is JsonValue val && val.TryGetValue(out string? deletedId) && !string.IsNullOrEmpty(deletedId))
+                    {
+                        target.Add(deletedId);
+                    }
+                }
+            }
+
             if (File.Exists(settingsPath))
             {
                 byte[] settingsBytes = await File.ReadAllBytesAsync(settingsPath, cancellationToken)
                     .ConfigureAwait(false);
-                JsonNode? settingsNode = JsonNode.Parse(settingsBytes);
-                if (settingsNode?["deletedWidgetIds"] is JsonArray deletedArray)
-                {
-                    deletedIds = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (JsonNode? entry in deletedArray)
-                    {
-                        if (entry is JsonValue val && val.TryGetValue(out string? deletedId) && !string.IsNullOrEmpty(deletedId))
-                        {
-                            deletedIds.Add(deletedId);
-                        }
-                    }
-                }
-
+                JsonNode? settingsNode = ParseJsonBytesStrippingBom(settingsBytes);
+                CollectDeletedIds(settingsNode?["deletedWidgetIds"], ref deletedIds);
                 widgets = settingsNode?["widgets"] as JsonArray;
             }
 
@@ -1508,8 +1549,10 @@ public static class TodoExportService
             {
                 byte[] layoutBytes = await File.ReadAllBytesAsync(layoutPath, cancellationToken)
                     .ConfigureAwait(false);
-                JsonArray? layoutWidgets = JsonNode.Parse(layoutBytes)?["layout"]?["widgets"] as JsonArray;
-                if (layoutWidgets is not null)
+                JsonNode? layoutRoot = ParseJsonBytesStrippingBom(layoutBytes);
+                JsonNode? layoutNode = layoutRoot?["layout"] ?? layoutRoot;
+                CollectDeletedIds(layoutNode?["deletedWidgetIds"], ref deletedIds);
+                if (layoutNode?["widgets"] is JsonArray layoutWidgets)
                 {
                     widgets = layoutWidgets;
                 }
@@ -1517,16 +1560,19 @@ public static class TodoExportService
 
             if (widgets is null)
             {
-                return null;
+                return [];
             }
 
+            var resolved = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (JsonNode? node in widgets)
             {
                 if (node is not JsonObject obj ||
                     obj["id"] is not JsonValue idVal ||
                     !idVal.TryGetValue(out string? id) ||
                     string.IsNullOrWhiteSpace(id) ||
-                    (deletedIds is not null && deletedIds.Contains(id)))
+                    (deletedIds is not null && deletedIds.Contains(id)) ||
+                    (obj["isDisabled"] is JsonValue disVal && disVal.TryGetValue(out bool isDisabled) && isDisabled))
                 {
                     continue;
                 }
@@ -1537,16 +1583,21 @@ public static class TodoExportService
                          string.Equals(kindStr, nameof(WidgetKind.Todo), StringComparison.OrdinalIgnoreCase)) ||
                         (kindVal.TryGetValue(out int kindInt) && kindInt == (int)WidgetKind.Todo))
                     {
-                        return id;
+                        if (seen.Add(id))
+                        {
+                            resolved.Add(id);
+                        }
                     }
                 }
             }
+
+            return resolved;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            App.Log($"[TodoExport] Could not resolve primary Todo widget id: {ex.Message}");
+            App.Log($"[TodoExport] Could not resolve active Todo widget ids: {ex.Message}");
         }
 
-        return null;
+        return [];
     }
 }

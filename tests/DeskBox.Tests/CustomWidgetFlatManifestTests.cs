@@ -244,6 +244,25 @@ public sealed class CustomWidgetFlatManifestTests
         Assert.Contains(
             v2Res.Diagnostics,
             static d => d.IsError && d.Path == "$.schemaVersion" && d.Code == "UnsupportedSchemaVersion");
+
+        const string futureMinSchemaJson = """
+        {
+          "schemaVersion": 1,
+          "minSchemaVersion": 2,
+          "id": "custom.future-min-schema",
+          "name": "Future Min Schema",
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "Hello" }
+          }
+        }
+        """;
+
+        CustomWidgetParseResult futureMinSchemaRes = CustomWidgetManifestParser.Parse(futureMinSchemaJson);
+        Assert.False(futureMinSchemaRes.IsValid);
+        Assert.Contains(
+            futureMinSchemaRes.Diagnostics,
+            static d => d.IsError && d.Code == CustomWidgetDiagnosticCodes.IncompatibleSchemaVersion);
     }
 
     [Fact]

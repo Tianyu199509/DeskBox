@@ -55,6 +55,21 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
 
     private string ManifestPath(string stageId) => Path.Combine(_root, stageId, "manifest.json");
 
+    private static bool TryConsumeManifestOnly(string? stageId, string manifestJson, out string? widgetId, out string error)
+    {
+        bool ok = CustomWidgetAgentStageStore.TryConsumeBundle(
+            stageId,
+            manifestJson,
+            hasCallerLogicJs: false,
+            callerLogicJs: null,
+            hasCallerLocales: false,
+            callerLocalesJson: null,
+            out AgentStageBundle? bundle,
+            out error);
+        widgetId = bundle?.WidgetId;
+        return ok;
+    }
+
     [Fact]
     public void Stage_ThenConsume_WithSameManifest_SucceedsOnlyOnce()
     {
@@ -64,7 +79,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         Assert.Equal(32, stageId.Length);
         Assert.True(File.Exists(ManifestPath(stageId)));
 
-        bool ok = CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out string? widgetId, out string error);
+        bool ok = TryConsumeManifestOnly(stageId, manifest, out string? widgetId, out string error);
 
         Assert.True(ok, error);
         Assert.Equal("widget-1", widgetId);
@@ -73,7 +88,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         CustomWidgetAgentStageStore.CompleteCommit(stageId);
         Assert.False(Directory.Exists(Path.Combine(_root, stageId)));
 
-        bool second = CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out string secondError);
+        bool second = TryConsumeManifestOnly(stageId, manifest, out _, out string secondError);
         Assert.False(second);
         Assert.Contains("不存在或已被提交", secondError);
     }
@@ -85,12 +100,12 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         const string tampered = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"B\"}}}";
         string stageId = Stage(null, manifest);
 
-        bool ok = CustomWidgetAgentStageStore.TryConsume(stageId, tampered, out _, out string error);
+        bool ok = TryConsumeManifestOnly(stageId, tampered, out _, out string error);
         Assert.False(ok);
         Assert.Contains("不一致", error);
         Assert.True(File.Exists(MetaPath(stageId)));
 
-        bool retry = CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out string? widgetId, out _);
+        bool retry = TryConsumeManifestOnly(stageId, manifest, out string? widgetId, out _);
         Assert.True(retry);
         Assert.Null(widgetId);
     }
@@ -102,7 +117,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [InlineData("not-a-valid-stage-id")]
     public void Consume_RejectsMissingOrMalformedStageId(string? stageId)
     {
-        bool ok = CustomWidgetAgentStageStore.TryConsume(stageId, "{}", out _, out string error);
+        bool ok = TryConsumeManifestOnly(stageId, "{}", out _, out string error);
         Assert.False(ok);
         Assert.False(string.IsNullOrWhiteSpace(error));
     }
@@ -178,7 +193,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_root, stageId)));
         Assert.Empty(CustomWidgetAgentStageStore.ListPending());
         // 忽略不等于已提交：同一 stageId 不能再被拿来落盘。
-        Assert.False(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out string consumeError));
+        Assert.False(TryConsumeManifestOnly(stageId, manifest, out _, out string consumeError));
         Assert.Contains("不存在或已被提交", consumeError);
     }
 
@@ -202,7 +217,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
 
         Assert.False(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out _));
 
-        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out string error), error);
+        Assert.True(TryConsumeManifestOnly(stageId, manifest, out _, out string error), error);
         // Lease acquired but not yet committed: the tombstone appears only after
         // the workspace write completes.
         Assert.False(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out _));
@@ -211,7 +226,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         // 消费后应立即能查到幂等记录：重试提交走的是「已提交」而不是「stageId 不存在」。
         Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out string? committedWidgetId));
         Assert.Equal("widget-4b", committedWidgetId);
-        Assert.False(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out _));
+        Assert.False(TryConsumeManifestOnly(stageId, manifest, out _, out _));
     }
 
     [Fact]
@@ -220,9 +235,10 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         // 暂存时 widgetId 为空（新格子由 manifest.id 决定），提交后才知道真实 id。
         string stageId = Stage(null, manifest);
-        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out string? stagedWidgetId, out _));
+        Assert.True(TryConsumeManifestOnly(stageId, manifest, out string? stagedWidgetId, out _));
         Assert.Null(stagedWidgetId);
 
+        CustomWidgetAgentStageStore.CompleteCommit(stageId);
         CustomWidgetAgentStageStore.RecordCommitted(stageId, "custom.resolved");
 
         Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out string? resolved));
@@ -259,7 +275,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         try
         {
             string first = Stage("widget-5", "{}");
-            Assert.True(CustomWidgetAgentStageStore.TryConsume(first, "{}", out _, out _));
+            Assert.True(TryConsumeManifestOnly(first, "{}", out _, out _));
             // Completing the lease (directory delete + tombstone) notifies once.
             CustomWidgetAgentStageStore.CompleteCommit(first);
             string second = Stage("widget-6", "{}");
@@ -578,7 +594,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
             false,
             false,
             RawCallerManifestJson: rawCallerJson));
-        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId1, rawCallerJson, out string? w1, out string err1), err1);
+        Assert.True(TryConsumeManifestOnly(stageId1, rawCallerJson, out string? w1, out string err1), err1);
         Assert.Equal("w-norm-1", w1);
 
         string stageId2 = CustomWidgetAgentStageStore.Stage(new AgentStageRequest(
@@ -590,7 +606,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
             false,
             false,
             RawCallerManifestJson: rawCallerJson));
-        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId2, normalizedJson, out string? w2, out string err2), err2);
+        Assert.True(TryConsumeManifestOnly(stageId2, normalizedJson, out string? w2, out string err2), err2);
         Assert.Equal("w-norm-2", w2);
     }
 }

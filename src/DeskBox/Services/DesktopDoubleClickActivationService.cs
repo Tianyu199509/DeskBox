@@ -147,10 +147,10 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
             return false;
         }
 
-        _settingsService.Settings.DesktopDoubleClickEnabled = enabled;
+        _settingsService.MutateGraphUnderLock(() => _settingsService.Settings.Core.DesktopDoubleClickEnabled = enabled);
         if (enabled && !TryStart(out errorCode))
         {
-            _settingsService.Settings.DesktopDoubleClickEnabled = previous;
+            _settingsService.MutateGraphUnderLock(() => _settingsService.Settings.Core.DesktopDoubleClickEnabled = previous);
             return false;
         }
 
@@ -298,7 +298,7 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
             {
                 _thread = null;
                 _threadId = 0;
-                _hookHandle = IntPtr.Zero;
+                Volatile.Write(ref _hookHandle, IntPtr.Zero);
             }
         }
 
@@ -351,7 +351,7 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
                 if (!cancelled)
                 {
                     _threadId = threadId;
-                    _hookHandle = installedHook;
+                    Volatile.Write(ref _hookHandle, installedHook);
                     _startupError = startupError;
                     LastErrorCode = startupError;
                 }
@@ -393,7 +393,7 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
                 {
                     _thread = null;
                     _threadId = 0;
-                    _hookHandle = IntPtr.Zero;
+                    Volatile.Write(ref _hookHandle, IntPtr.Zero);
                 }
             }
             ResetInputState(generation);
@@ -406,17 +406,17 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
         // Any delivered callback proves the hook is still installed — Windows
         // removes timed-out low-level hooks without notification.
         Volatile.Write(ref _lastCallbackTicks, Environment.TickCount64);
+        if (nCode < 0 || lParam == IntPtr.Zero || wParam != (IntPtr)Win32Helper.WM_LBUTTONDOWN)
+        {
+            return Win32Helper.CallNextHookEx(Volatile.Read(ref _hookHandle), nCode, wParam, lParam);
+        }
+
         IntPtr hookHandle;
         long generation;
         lock (_sync)
         {
             hookHandle = _hookHandle;
             generation = _lifecycleGeneration;
-        }
-
-        if (nCode < 0 || lParam == IntPtr.Zero || wParam != (IntPtr)Win32Helper.WM_LBUTTONDOWN)
-        {
-            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
         }
 
         Win32Helper.MSLLHOOKSTRUCT data;

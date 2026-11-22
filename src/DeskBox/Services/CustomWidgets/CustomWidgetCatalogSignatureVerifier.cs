@@ -120,10 +120,6 @@ internal static class CustomWidgetCatalogSignatureVerifier
         {
             val = val["deskbox.".Length..];
         }
-        else if (val.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
-        {
-            val = val["starter.".Length..];
-        }
 
         return val.Trim().ToLowerInvariant();
     }

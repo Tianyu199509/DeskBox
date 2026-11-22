@@ -519,7 +519,8 @@ public sealed partial class TodoWidgetViewModel
     public async Task<bool> AddExternalItemAsync(
         string title,
         DateTimeOffset? dueDate,
-        TodoPriority priority)
+        TodoPriority priority,
+        string? explicitItemId = null)
     {
         string normalizedText = NormalizeText(title);
         if (string.IsNullOrWhiteSpace(normalizedText))
@@ -538,7 +539,7 @@ public sealed partial class TodoWidgetViewModel
 
         var item = new TodoItem
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = string.IsNullOrWhiteSpace(explicitItemId) ? Guid.NewGuid().ToString("N") : explicitItemId,
             Text = normalizedText,
             IsImportant = isImportant,
             ColorMarker = colorMarker,

@@ -38,9 +38,6 @@ public sealed partial class CustomWidgetNativeRenderer
         {
             "grid" => ("CustomWidget.Workshop.NodeType.Grid", "Grid"),
             "stack" => ("CustomWidget.Workshop.NodeType.Stack", "Stack"),
-            "row" => ("CustomWidget.Workshop.NodeType.Row", "Row"),
-            "column" => ("CustomWidget.Workshop.NodeType.Column", "Column"),
-            "box" => ("CustomWidget.Workshop.NodeType.Box", "Box"),
             "card" => ("CustomWidget.Workshop.NodeType.Card", "Card"),
             "text" => ("CustomWidget.Workshop.NodeType.Text", "Text"),
             "button" => ("CustomWidget.Workshop.NodeType.Button", "Button"),
@@ -57,7 +54,7 @@ public sealed partial class CustomWidgetNativeRenderer
             "progress" => ("CustomWidget.Workshop.NodeType.Progress", "Progress"),
             "chart" => ("CustomWidget.Workshop.NodeType.Chart", "Chart"),
             "donutchart" => ("CustomWidget.Workshop.NodeType.DonutChart", "DonutChart"),
-            "table" or "datatable" => ("CustomWidget.Workshop.NodeType.Table", "Table"),
+            "table" => ("CustomWidget.Workshop.NodeType.Table", "Table"),
             "heatmap" => ("CustomWidget.Workshop.NodeType.HeatMap", "HeatMap"),
             "barlist" => ("CustomWidget.Workshop.NodeType.BarList", "BarList"),
             "statcard" => ("CustomWidget.Workshop.NodeType.StatCard", "StatCard"),
@@ -388,6 +385,8 @@ public sealed partial class CustomWidgetNativeRenderer
             bool hasInspectableChildren =
                 spec.Children.Count > 0 ||
                 spec.ItemTemplate is not null ||
+                spec.Pane is not null ||
+                spec.ActionButton is not null ||
                 spec.HoverActions.Count > 0;
 
             if (!hasInspectableChildren)
@@ -2431,19 +2430,20 @@ public sealed partial class CustomWidgetNativeRenderer
         };
 
         string appliedSrc = "\0";
+        double appliedScale = 0;
         int loadGeneration = 0;
 
         double ResolveDecodeRasterScale() =>
             Math.Clamp(
                 img.XamlRoot?.RasterizationScale
                     ?? (_themeScope as UIElement)?.XamlRoot?.RasterizationScale
-                    ?? 2.0,
+                    ?? Math.Max(1.0, DeskBox.Platform.Win32Helper.GetDpiForSystem() / 96.0),
                 1.0,
                 4.0);
 
-        void ConfigureBitmapDecodeConstraint(Microsoft.UI.Xaml.Media.Imaging.BitmapImage bitmap)
+        void ConfigureBitmapDecodeConstraint(Microsoft.UI.Xaml.Media.Imaging.BitmapImage bitmap, double scale)
         {
-            double scale = ResolveDecodeRasterScale();
+            bitmap.DecodePixelType = Microsoft.UI.Xaml.Media.Imaging.DecodePixelType.Physical;
             if (explicitW is > 0)
             {
                 bitmap.DecodePixelWidth = Math.Clamp(
@@ -2487,12 +2487,14 @@ public sealed partial class CustomWidgetNativeRenderer
                 await System.IO.WindowsRuntimeStreamExtensions.AsStreamForWrite(ras).WriteAsync(imageBytes);
                 ras.Seek(0);
 
+                double liveScale = ResolveDecodeRasterScale();
                 var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                ConfigureBitmapDecodeConstraint(bitmap);
+                ConfigureBitmapDecodeConstraint(bitmap, liveScale);
                 await bitmap.SetSourceAsync(ras);
 
                 if (generation == loadGeneration)
                 {
+                    appliedScale = liveScale;
                     img.Source = bitmap;
                     img.Visibility = Visibility.Visible;
                     fallbackHost.Visibility = Visibility.Collapsed;
@@ -2509,14 +2511,18 @@ public sealed partial class CustomWidgetNativeRenderer
             }
         }
 
-        void ApplyImageSource(string candidate)
+        void ApplyImageSource(string candidate, bool forceScaleRefresh = false)
         {
             string trimmed = candidate.Trim();
-            if (string.Equals(trimmed, appliedSrc, StringComparison.Ordinal))
+            double currentScale = ResolveDecodeRasterScale();
+            if (!forceScaleRefresh &&
+                string.Equals(trimmed, appliedSrc, StringComparison.Ordinal) &&
+                Math.Abs(currentScale - appliedScale) <= 0.01)
             {
                 return;
             }
             appliedSrc = trimmed;
+            appliedScale = currentScale;
             int currentGen = ++loadGeneration;
 
             Uri? resolvedUri = null;
@@ -2553,11 +2559,29 @@ public sealed partial class CustomWidgetNativeRenderer
             try
             {
                 var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                ConfigureBitmapDecodeConstraint(bitmap);
-                bitmap.UriSource = resolvedUri;
-                img.Source = bitmap;
-                img.Visibility = Visibility.Visible;
-                fallbackHost.Visibility = Visibility.Collapsed;
+                ConfigureBitmapDecodeConstraint(bitmap, currentScale);
+                if (resolvedUri.IsAbsoluteUri && resolvedUri.IsFile)
+                {
+                    img.Source = bitmap;
+                    img.Visibility = Visibility.Visible;
+                    fallbackHost.Visibility = Visibility.Collapsed;
+                    WidgetImageStreamLoader.Fill(bitmap, resolvedUri.LocalPath, ok =>
+                    {
+                        if (!ok && currentGen == loadGeneration)
+                        {
+                            img.Source = null;
+                            img.Visibility = Visibility.Collapsed;
+                            fallbackHost.Visibility = Visibility.Visible;
+                        }
+                    });
+                }
+                else
+                {
+                    bitmap.UriSource = resolvedUri;
+                    img.Source = bitmap;
+                    img.Visibility = Visibility.Visible;
+                    fallbackHost.Visibility = Visibility.Collapsed;
+                }
             }
             catch
             {
@@ -2566,6 +2590,53 @@ public sealed partial class CustomWidgetNativeRenderer
                 fallbackHost.Visibility = Visibility.Visible;
             }
         }
+
+        Windows.Foundation.TypedEventHandler<XamlRoot, XamlRootChangedEventArgs>? xamlRootChangedHandler = null;
+        XamlRoot? subscribedXamlRoot = null;
+
+        void RefreshImageForScaleIfNeeded()
+        {
+            if (string.IsNullOrWhiteSpace(appliedSrc) || appliedSrc == "\0")
+            {
+                return;
+            }
+
+            if (Math.Abs(ResolveDecodeRasterScale() - appliedScale) > 0.01)
+            {
+                ApplyImageSource(appliedSrc, forceScaleRefresh: true);
+            }
+        }
+
+        img.Loaded += (_, _) =>
+        {
+            XamlRoot? root = img.XamlRoot;
+            if (!ReferenceEquals(subscribedXamlRoot, root))
+            {
+                if (subscribedXamlRoot is not null && xamlRootChangedHandler is not null)
+                {
+                    subscribedXamlRoot.Changed -= xamlRootChangedHandler;
+                }
+
+                subscribedXamlRoot = root;
+                if (root is not null)
+                {
+                    xamlRootChangedHandler ??= (_, _) => RefreshImageForScaleIfNeeded();
+                    root.Changed += xamlRootChangedHandler;
+                }
+            }
+
+            RefreshImageForScaleIfNeeded();
+        };
+
+        img.Unloaded += (_, _) =>
+        {
+            if (subscribedXamlRoot is not null && xamlRootChangedHandler is not null)
+            {
+                subscribedXamlRoot.Changed -= xamlRootChangedHandler;
+            }
+
+            subscribedXamlRoot = null;
+        };
 
         ApplyImageSource(initialSrc);
 
@@ -2846,8 +2917,7 @@ public sealed partial class CustomWidgetNativeRenderer
 
         bool hasAnyPaneContent = spec.Children.Any(c =>
             c.Children.Count > 0 ||
-            (!string.Equals(c.Type, "Stack", StringComparison.OrdinalIgnoreCase) &&
-             !string.Equals(c.Type, "Tab", StringComparison.OrdinalIgnoreCase)));
+            !string.Equals(c.Type, "Tab", StringComparison.OrdinalIgnoreCase));
 
         var rootStack = new StackPanel
         {

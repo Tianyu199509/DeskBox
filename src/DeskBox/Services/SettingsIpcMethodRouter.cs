@@ -488,6 +488,11 @@ public sealed class SettingsIpcMethodRouter
                 await _widget.ClearPerWidgetBackgrounds();
                 return (true, SerializeLayout(_settings), null);
 
+            case SettingsIpcMethods.AppearanceResetWidgetChromeOverrides:
+                if (_widget is null) return unavailable(method);
+                await _widget.ResetWidgetChromeOverrides(SettingsIpcPayload.DecodeBoolean(payload));
+                return (true, SerializeLayout(_settings), null);
+
             case SettingsIpcMethods.SettingsSnapshot:
                 if (_settings is null) return unavailable(method);
                 return (true, _settings.SerializeCurrentSettings(), null);
@@ -1026,11 +1031,11 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.BackupExport:
                 if (_backupCommands is null) return unavailable(method);
-                string exportPath = payload ?? string.Empty;
+                string exportPath = string.Empty;
                 bool exportIncludeClipboard = false;
-                if (exportPath.TrimStart().StartsWith('{'))
+                if (!string.IsNullOrWhiteSpace(payload))
                 {
-                    using JsonDocument exportArgs = JsonDocument.Parse(exportPath);
+                    using JsonDocument exportArgs = JsonDocument.Parse(payload);
                     exportPath = exportArgs.RootElement.TryGetProperty("path", out JsonElement pathEl)
                         ? pathEl.GetString() ?? string.Empty
                         : string.Empty;
@@ -1513,10 +1518,10 @@ public sealed class SettingsIpcMethodRouter
         string? payload,
         CancellationToken cancellationToken)
     {
-        string rawPath = payload ?? string.Empty;
+        string rawPath = string.Empty;
         string operationId;
-        if (rawPath.StartsWith('{') &&
-            SettingsIpcPayload.Decode(rawPath, SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest)
+        if (!string.IsNullOrWhiteSpace(payload) &&
+            SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest)
                 is { } previewReq)
         {
             rawPath = previewReq.Path ?? string.Empty;

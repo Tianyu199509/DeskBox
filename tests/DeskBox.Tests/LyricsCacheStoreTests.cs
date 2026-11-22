@@ -86,21 +86,21 @@ public sealed class LyricsCacheStoreTests : IDisposable
         byte[] gbBytes = gb18030.GetBytes("[00:28.90]故事的小黄花\r\n[00:32.10]从出生那年就飘着");
         await File.WriteAllBytesAsync(gbPath, gbBytes);
 
-        string? decodedGb = await LocalFileLyricsProvider.TryReadLocalLrcAsync(
+        LrcDocument? decodedGb = await LocalFileLyricsProvider.TryResolveLocalLyricsAsync(
             new LyricsQuery("晴天 (Live)", "周杰伦", string.Empty, TimeSpan.Zero),
             lrcDir);
 
         Assert.NotNull(decodedGb);
-        Assert.Contains("故事的小黄花", decodedGb, StringComparison.Ordinal);
+        Assert.Contains(decodedGb.Lines, static l => l.PrimaryText.Contains("故事的小黄花", StringComparison.Ordinal));
 
         string utf8Path = Path.Combine(lrcDir, "稻香.lrc");
         await File.WriteAllTextAsync(utf8Path, "[00:10.00]对这个世界如果你有太多的抱怨", new UTF8Encoding(false));
 
-        string? decodedUtf8 = await LocalFileLyricsProvider.TryReadLocalLrcAsync(
+        LrcDocument? decodedUtf8 = await LocalFileLyricsProvider.TryResolveLocalLyricsAsync(
             new LyricsQuery("稻香", "周杰伦", string.Empty, TimeSpan.Zero),
             lrcDir);
 
         Assert.NotNull(decodedUtf8);
-        Assert.Contains("对这个世界如果你有太多的抱怨", decodedUtf8, StringComparison.Ordinal);
+        Assert.Contains(decodedUtf8.Lines, static l => l.PrimaryText.Contains("对这个世界如果你有太多的抱怨", StringComparison.Ordinal));
     }
 }

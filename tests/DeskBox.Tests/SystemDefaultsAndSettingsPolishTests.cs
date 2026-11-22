@@ -90,12 +90,11 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
         editor.KeepCapsuleContentWarm = false;
         Assert.False(settings.Settings.Performance.KeepCapsuleContentWarm);
 
-        var legacyV17 = new AppSettings
+        var legacyV15 = new AppSettings
         {
-            SchemaVersion = 17,
-            KeepCapsuleContentWarm = false
+            SchemaVersion = 15
         };
-        var (migrated, anyApplied) = new SettingsMigrationPipeline().RunMigrationsOnCopy(legacyV17);
+        var (migrated, anyApplied) = new SettingsMigrationPipeline().RunMigrationsOnCopy(legacyV15);
         Assert.True(anyApplied);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, migrated.SchemaVersion);
         Assert.True(migrated.Performance.KeepCapsuleContentWarm);

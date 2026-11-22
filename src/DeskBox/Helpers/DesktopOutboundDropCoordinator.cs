@@ -289,40 +289,6 @@ internal static class DesktopOutboundDropCoordinator
         return done.Wait(timeoutMs) && Volatile.Read(ref result);
     }
 
-    internal static Task<bool> AreSourcePathsReachableAsync(
-        IReadOnlyList<string> sourcePaths,
-        int timeoutMs = 650)
-    {
-        if (sourcePaths.Count == 0)
-        {
-            return Task.FromResult(false);
-        }
-
-        string[] snapshot = sourcePaths
-            .Where(static path => !string.IsNullOrWhiteSpace(path))
-            .ToArray();
-        if (snapshot.Length == 0)
-        {
-            return Task.FromResult(false);
-        }
-
-        return Task.Run(() => RunBoundedStaProbe(
-            "DeskBox.SourcePathsReachabilityProbe",
-            timeoutMs,
-            () =>
-            {
-                foreach (string candidate in snapshot)
-                {
-                    if (!File.Exists(candidate) && !Directory.Exists(candidate))
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            }));
-    }
-
     internal static Task<bool> IsDestinationDirectoryReachableAsync(
         string? destinationFolder,
         int timeoutMs = 450)

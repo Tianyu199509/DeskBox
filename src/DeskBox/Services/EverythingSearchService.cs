@@ -472,7 +472,61 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             return 10;
         }
 
-        string normalizedQuery = normalizedSpan.ToString();
+        var prepared = new PreparedRankingQuery(query, normalizedSpan);
+        return ComputeRelevanceCore(fileName, in prepared, fullPath);
+    }
+
+    private readonly struct PreparedRankingQuery
+    {
+        public readonly bool IsEmpty;
+        public readonly string NormalizedQuery;
+        public readonly string? TrailingLeaf;
+        public readonly IReadOnlyList<string> Tokens;
+
+        public PreparedRankingQuery(string rawQuery)
+        {
+            ReadOnlySpan<char> normalizedSpan = UnwrapSingleOuterQuotes(rawQuery.AsSpan().Trim());
+            if (normalizedSpan.IsEmpty || normalizedSpan.IsWhiteSpace())
+            {
+                IsEmpty = true;
+                NormalizedQuery = string.Empty;
+                TrailingLeaf = null;
+                Tokens = [];
+                return;
+            }
+
+            this = new PreparedRankingQuery(rawQuery, normalizedSpan);
+        }
+
+        public PreparedRankingQuery(string rawQuery, ReadOnlySpan<char> normalizedSpan)
+        {
+            IsEmpty = false;
+            NormalizedQuery = normalizedSpan.ToString();
+            if (HasPathSeparator(NormalizedQuery))
+            {
+                ReadOnlySpan<char> leaf = ExtractTrailingPathLeaf(NormalizedQuery.AsSpan());
+                TrailingLeaf = !leaf.IsEmpty && !leaf.IsWhiteSpace() ? leaf.ToString() : null;
+            }
+            else
+            {
+                TrailingLeaf = null;
+            }
+
+            Tokens = ExtractLiteralTokens(rawQuery);
+        }
+    }
+
+    private static double ComputeRelevanceCore(
+        string fileName,
+        in PreparedRankingQuery prepared,
+        string? fullPath)
+    {
+        if (prepared.IsEmpty)
+        {
+            return 10;
+        }
+
+        string normalizedQuery = prepared.NormalizedQuery;
         if (!string.IsNullOrEmpty(fullPath) && PathsEqualNormalized(fullPath, normalizedQuery))
         {
             return 100;
@@ -484,20 +538,16 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             return directScore;
         }
 
-        if (HasPathSeparator(normalizedQuery))
+        if (prepared.TrailingLeaf is { } leaf)
         {
-            ReadOnlySpan<char> leaf = ExtractTrailingPathLeaf(normalizedQuery.AsSpan());
-            if (!leaf.IsEmpty && !leaf.IsWhiteSpace())
+            double leafScore = ScoreContiguousFileNameMatch(fileName, leaf);
+            if (leafScore > 10)
             {
-                double leafScore = ScoreContiguousFileNameMatch(fileName, leaf.ToString());
-                if (leafScore > 10)
-                {
-                    return Math.Min(leafScore, 95);
-                }
+                return Math.Min(leafScore, 95);
             }
         }
 
-        IReadOnlyList<string> tokens = ExtractLiteralTokens(query);
+        IReadOnlyList<string> tokens = prepared.Tokens;
         if (tokens.Count == 0)
         {
             return 10;
@@ -519,8 +569,9 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
         }
 
         int matchedInFileName = 0;
-        foreach (string token in tokens)
+        for (int i = 0; i < tokens.Count; i++)
         {
+            string token = tokens[i];
             ReadOnlySpan<char> candidate = HasPathSeparator(token)
                 ? ExtractTrailingPathLeaf(token.AsSpan())
                 : token.AsSpan();
@@ -546,8 +597,8 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             return 100;
         }
 
-        string stem = Path.GetFileNameWithoutExtension(fileName);
-        if (stem.Equals(query, StringComparison.OrdinalIgnoreCase))
+        ReadOnlySpan<char> stem = Path.GetFileNameWithoutExtension(fileName.AsSpan());
+        if (stem.Equals(query.AsSpan(), StringComparison.OrdinalIgnoreCase))
         {
             return 90;
         }
@@ -557,7 +608,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             return 80;
         }
 
-        if (stem.StartsWith(query, StringComparison.OrdinalIgnoreCase))
+        if (stem.StartsWith(query.AsSpan(), StringComparison.OrdinalIgnoreCase))
         {
             return 70;
         }
@@ -679,10 +730,11 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
             Math.Max(reply.Items.Count + (resultOffset == 0 ? SupplementaryTopHitBatchSize * 2 : 0), 1),
             MaximumInitialListCapacity));
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var preparedRanking = new PreparedRankingQuery(rankingQuery);
         int totalMatches = ClampToInt(reply.TotalResults);
         uint nativeCount = (uint)reply.Items.Count;
 
-        AppendQueryEntries(reply.Items, rankingQuery, seenPaths, results, cancellationToken);
+        AppendQueryEntries(reply.Items, in preparedRanking, seenPaths, results, cancellationToken);
 
         // When a broad query exceeds the first alphabetical page, supplement page 0 with
         // filename-prefix matches and recently modified matches so exact/prefix hits and
@@ -706,7 +758,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
                         searchFlags: 0,
                         sortType: EverythingNativeMethods.SortNameAscending))
                 {
-                    AppendQueryEntries(prefixReply.Items, rankingQuery, seenPaths, results, cancellationToken);
+                    AppendQueryEntries(prefixReply.Items, in preparedRanking, seenPaths, results, cancellationToken);
                 }
             }
 
@@ -726,7 +778,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
                         searchFlags: searchFlags,
                         sortType: EverythingNativeMethods.SortDateModifiedDescending))
                 {
-                    AppendQueryEntries(recentReply.Items, rankingQuery, seenPaths, results, cancellationToken);
+                    AppendQueryEntries(recentReply.Items, in preparedRanking, seenPaths, results, cancellationToken);
                 }
             }
         }
@@ -740,7 +792,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
 
     private static void AppendQueryEntries(
         IReadOnlyList<EverythingIpcResultEntry> entries,
-        string rankingQuery,
+        in PreparedRankingQuery preparedRanking,
         HashSet<string> seenPaths,
         List<SearchResultItem> results,
         CancellationToken cancellationToken)
@@ -780,7 +832,9 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
                 DetailPath = fullPath,
                 FileSize = entry.IsFolder ? null : entry.FileSize,
                 ModifiedAt = modified,
-                RelevanceScore = ComputeRelevance(entry.FileName, rankingQuery, fullPath)
+                RelevanceScore = entry.FileName.Length == 0
+                    ? 0
+                    : ComputeRelevanceCore(entry.FileName, in preparedRanking, fullPath)
             });
         }
     }

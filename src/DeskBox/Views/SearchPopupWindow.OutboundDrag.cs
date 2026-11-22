@@ -89,24 +89,6 @@ public sealed partial class SearchPopupWindow
         candidate.Row.ClearTransientPointerStates();
         if (!IsCurrentProcessElevatedForDrag())
         {
-            PointerDeviceType deviceType = e.Pointer.PointerDeviceType;
-            if (Services.DragDrop.OutboundDragRoutePolicy.ShouldUseWin10NativeShellForProcess(
-                    isElevatedOverride: false) &&
-                Services.DragDrop.OutboundDragRoutePolicy.ResolveDriverKind(
-                    isElevated: false,
-                    isWindows11OrLater: false,
-                    deviceType,
-                    forceWin10ShellDrag: true) == Services.DragDrop.OutboundDragDriverKind.Win10NativeShell)
-            {
-                candidate.Row.ReleasePointerCaptures();
-                Platform.DragDrop.Win10ShellDragOutDriver.ReleaseWin32InputCapture(_hwnd);
-                StartExternalDragFadeTimer();
-                _ = DispatcherQueue.TryEnqueue(
-                    Microsoft.UI.Dispatching.DispatcherQueuePriority.High,
-                    () => RunWin10NativeShellDragOut(candidate, draggedPaths));
-                return;
-            }
-
             UIElement dragSource = candidate.Row;
             _activeDragOutPaths = draggedPaths;
             dragSource.DragStarting += ResultsRow_DragStarting;
@@ -186,94 +168,6 @@ public sealed partial class SearchPopupWindow
             $"[SearchDragOut] completed drop={dropResult} items={draggedPaths.Length}");
 
         // Default auto-collapse after a successful file drag-out drop (hold Alt to keep open).
-        if (shouldAutoHide)
-        {
-            HidePopup();
-        }
-    }
-
-    private void RunWin10NativeShellDragOut(
-        SearchDragOutCandidate candidate,
-        string[] draggedPaths)
-    {
-        DataPackageOperation dropResult = DataPackageOperation.None;
-        bool shouldAutoHide = false;
-        bool shouldSuppressDesktop = false;
-        bool enteredPointerDragSession = false;
-        try
-        {
-            if (!Platform.DragDrop.Win10ShellDragOutDriver.IsPrimaryMouseButtonPhysicallyDown())
-            {
-                return;
-            }
-
-            string[] physicalPaths = draggedPaths
-                .Select(static path => Services.DragDrop.StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(path))
-                .ToArray();
-            bool hasAppAlias = FileItemDragPackage.ContainsAppExecutionAliasSource(draggedPaths);
-            bool isProtectedCopyOnly =
-                FileItemDragPackage.IsProtectedCopyOnlySource(draggedPaths) ||
-                FileItemDragPackage.IsProtectedCopyOnlySource(physicalPaths);
-            bool isDefaultCopySpecialMedia =
-                DriveMediaInterop.ContainsProtectedInboundCopySource(draggedPaths) ||
-                FileItemDragPackage.IsDefaultCopySpecialMediaSource(physicalPaths);
-
-            var request = new Services.DragDrop.FileDragOutRequest(
-                HostWindowHandle: _hwnd,
-                SourceWidgetId: "search-popup",
-                SourcePaths: draggedPaths,
-                DragOutAction: SettingsService.ManagedDropActionCopy,
-                IsProtectedCopyOnly: isProtectedCopyOnly,
-                IsDefaultCopySpecialMedia: isDefaultCopySpecialMedia,
-                HasAppExecutionAlias: hasAppAlias);
-            _hasEnteredPlatformDragLoop = true;
-            ActiveDeskBoxDragRegistry.BeginPointerDragSession();
-            enteredPointerDragSession = true;
-            BeginSearchOutboundVisualRefreshSession();
-            Services.DragDrop.FileDragOutResult dragOut =
-                Platform.DragDrop.Win10ShellDragOutDriver.Shared.ExecuteSync(request);
-            dropResult = dragOut.ToDataPackageOperation();
-
-            DropReleaseSnapshot releaseSnapshot = DesktopToastHudInterop.SampleDropReleaseState();
-            bool leftPopup = _externalDragLeftPopupOnce || IsCursorOutsidePopupWindow();
-            bool droppedOnShellSurface =
-                !releaseSnapshot.EscapePressed &&
-                leftPopup &&
-                releaseSnapshot.TargetKind is not (
-                    DropTargetWindowKind.NonExplorerWindow or
-                    DropTargetWindowKind.DeskBoxOwnWindow);
-            bool sourceMovedOut = dropResult == DataPackageOperation.None &&
-                                  !releaseSnapshot.EscapePressed &&
-                                  leftPopup &&
-                                  HasNonNetworkSourceDisappeared(draggedPaths);
-            shouldSuppressDesktop = dropResult != DataPackageOperation.None ||
-                                    droppedOnShellSurface;
-            shouldAutoHide = (dropResult != DataPackageOperation.None || sourceMovedOut) &&
-                             !Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Menu);
-        }
-        catch (Exception ex)
-        {
-            App.Log(
-                $"[SearchDragOut] Win10 SHDoDragDrop failed " +
-                $"hresult=0x{ex.HResult:X8} type={ex.GetType().Name} " +
-                $"item='{candidate.Item.DetailPath}'");
-        }
-        finally
-        {
-            if (enteredPointerDragSession)
-            {
-                ActiveDeskBoxDragRegistry.EndPointerDragSession();
-            }
-
-            StopExternalDragFadeTimer(restoreOpacity: !shouldAutoHide);
-            FileDragSourceGuardDataObject.ClearActiveManagedRoot();
-            candidate.Row.ClearTransientPointerStates();
-            ClearAllResultRowTransientStates();
-            _dragOutInProgress = false;
-            _activeDragOutPaths = null;
-        }
-
-        SuppressSearchDragOutDesktopArrivals(shouldSuppressDesktop, draggedPaths, "search-results");
         if (shouldAutoHide)
         {
             HidePopup();

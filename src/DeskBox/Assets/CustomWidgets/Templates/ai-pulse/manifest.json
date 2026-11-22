@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "deskbox.ai-pulse",
+  "origin": "official",
   "name": "${$i18n.widgetName}",
   "version": "4.1.0",
   "author": "DeskBox",

@@ -210,7 +210,14 @@ public partial class SettingsViewModel
 
         if (changed > 0)
         {
-            _settingsService.SaveDebounced();
+            if (_widgetActions.IsHostAvailable)
+            {
+                _ = _widgetActions.ResetWidgetChromeOverrides(category == WidgetChromeCategory.Interactive);
+            }
+            else
+            {
+                _settingsService.SaveDebounced();
+            }
             NotifyWidgetChromeOverrideCommandsChanged();
         }
 

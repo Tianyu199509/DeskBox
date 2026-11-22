@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "개인정보 및 보안",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "시스템 개인정보 클립보드 표시 존중",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "비밀번호 관리자 등에서 기록 제외로 표시한 민감 데이터를 자동으로 무시합니다",
+  "Settings.Clipboard.FetchUrlTitles.Title": "복사한 링크의 웹페이지 제목 가져오기",
+  "Settings.Clipboard.FetchUrlTitles.Description": "켜면 공개 웹페이지 제목을 백그라운드에서 조회합니다(로그인, 인증 또는 서명 매개변수가 포함된 링크는 건너뜀)",
   "Settings.Clipboard.SecretProtection.Title": "API 키 및 토큰 보호",
   "Settings.Clipboard.SecretProtection.Description": "API 키, 액세스 토큰 또는 개인 키로 의심되는 텍스트 감지 시 처리 방식",
   "Settings.Clipboard.SecretProtection.Mask": "마스킹 표시 후 복사 허용",

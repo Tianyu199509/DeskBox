@@ -587,7 +587,6 @@ public sealed partial class FileSurfaceContent
             listView.SelectedItems.OfType<WidgetItem>().ToArray(),
             Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift));
         TryArmElevatedItemPointerDrag(sender, item, e);
-        TryArmWin10ShellItemDrag(sender, item, e);
         // Keep pointer-down selection read-only. The native selector commits
         // its final state after ItemClick; changing SelectedItems here makes
         // the same click toggle twice and can leave a stale custom highlight.
@@ -2918,7 +2917,6 @@ public sealed partial class FileSurfaceContent
         border.Background =
             ResolveBrush("SubtleFillColorTertiaryBrush");
         TryArmElevatedStackPointerDrag(border, stack, e);
-        TryArmWin10ShellStackDrag(border, stack, e);
     }
 
     private void StackSurface_PointerReleased(
@@ -2926,7 +2924,6 @@ public sealed partial class FileSurfaceContent
         PointerRoutedEventArgs e)
     {
         DisarmElevatedPointerDragCandidate(e.Pointer.PointerId);
-        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
         if (sender is not Border border)
         {
             _pressedStack = null;

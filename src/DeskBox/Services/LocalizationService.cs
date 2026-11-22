@@ -242,15 +242,30 @@ public sealed class LocalizationService
 
     public static string ResolvePersistedOrAmbientCultureName()
     {
+        string dataSettingsPath = Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json");
+        string settingsPath = File.Exists(dataSettingsPath)
+            ? dataSettingsPath
+            : Path.Combine(DeskBoxDataPathService.Current.RootPath, "settings.json");
+        return TryReadPersistedCultureNameFromFile(settingsPath) ?? ResolveDefaultLanguage();
+    }
+
+    internal static string? TryReadPersistedCultureNameFromFile(string? settingsPath)
+    {
+        if (string.IsNullOrWhiteSpace(settingsPath))
+        {
+            return null;
+        }
+
         try
         {
-            string dataSettingsPath = Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json");
-            string settingsPath = File.Exists(dataSettingsPath)
-                ? dataSettingsPath
-                : Path.Combine(DeskBoxDataPathService.Current.RootPath, "settings.json");
             if (File.Exists(settingsPath))
             {
-                using JsonDocument doc = JsonDocument.Parse(File.ReadAllBytes(settingsPath));
+                byte[] rawBytes = File.ReadAllBytes(settingsPath);
+                ReadOnlyMemory<byte> utf8 = rawBytes.Length >= 3 &&
+                    rawBytes[0] == 0xEF && rawBytes[1] == 0xBB && rawBytes[2] == 0xBF
+                        ? rawBytes.AsMemory(3)
+                        : rawBytes.AsMemory();
+                using JsonDocument doc = JsonDocument.Parse(utf8);
                 JsonElement root = doc.RootElement;
                 if (root.ValueKind == JsonValueKind.Object &&
                     (root.TryGetProperty("language", out JsonElement langEl) ||
@@ -269,7 +284,7 @@ public sealed class LocalizationService
         {
         }
 
-        return ResolveDefaultLanguage();
+        return null;
     }
 
     public static string TranslateForCulture(string? cultureName, string key)

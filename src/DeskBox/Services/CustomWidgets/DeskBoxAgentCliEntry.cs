@@ -1009,11 +1009,7 @@ public static partial class DeskBoxAgentCliEntry
                                    argsEl.TryGetProperty("widgetId", out JsonElement wid) &&
                                    wid.ValueKind == JsonValueKind.String
                     ? wid.GetString()
-                    : (argsEl.ValueKind == JsonValueKind.Object &&
-                       argsEl.TryGetProperty("targetWidgetId", out JsonElement twid) &&
-                       twid.ValueKind == JsonValueKind.String
-                        ? twid.GetString()
-                        : null);
+                    : null;
                 JsonElement rz = default;
                 bool hasResize = argsEl.ValueKind == JsonValueKind.Object &&
                                  argsEl.TryGetProperty("resizeToDefault", out rz) &&
@@ -1235,8 +1231,7 @@ public static partial class DeskBoxAgentCliEntry
 
                 if (!rRoot.TryGetProperty("result", out JsonElement resObj) ||
                     resObj.ValueKind != JsonValueKind.Object ||
-                    (!resObj.TryGetProperty("base64Png", out JsonElement pngEl) &&
-                     !resObj.TryGetProperty("pngBase64", out pngEl)) ||
+                    !resObj.TryGetProperty("base64Png", out JsonElement pngEl) ||
                     pngEl.ValueKind != JsonValueKind.String)
                 {
                     return BuildMcpTextToolResult(idEl, "Capture response missing base64Png payload.", isError: true);
@@ -1948,8 +1943,7 @@ public static partial class DeskBoxAgentCliEntry
 
                 using JsonDocument doc = JsonDocument.Parse(resp);
                 JsonElement resEl = doc.RootElement.GetProperty("result");
-                string b64 = (resEl.TryGetProperty("base64Png", out JsonElement b64El) ||
-                              resEl.TryGetProperty("pngBase64", out b64El))
+                string b64 = resEl.TryGetProperty("base64Png", out JsonElement b64El)
                     ? b64El.GetString() ?? string.Empty
                     : string.Empty;
                 byte[] pngBytes = Convert.FromBase64String(b64);

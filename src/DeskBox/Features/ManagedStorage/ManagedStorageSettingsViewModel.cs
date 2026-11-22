@@ -309,10 +309,25 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
     public void RefreshLocalization()
     {
         _cachedDropActionNames = null;
-        OnPropertyChanged(nameof(AvailableDropActionOptions));
-        OnPropertyChanged(nameof(AvailableDragInBehaviorOptionItems));
-        OnPropertyChanged(nameof(AvailableDragOutActionOptions));
-        OnPropertyChanged(nameof(AvailableDragOutBehaviorOptionItems));
+        string prevDropAction = DropAction;
+        string prevDragOutAction = DragOutAction;
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailableDropActionOptions));
+            OnPropertyChanged(nameof(AvailableDragInBehaviorOptionItems));
+            OnPropertyChanged(nameof(AvailableDragOutActionOptions));
+            OnPropertyChanged(nameof(AvailableDragOutBehaviorOptionItems));
+            DropAction = prevDropAction;
+            DragOutAction = prevDragOutAction;
+            OnPropertyChanged(nameof(DropAction));
+            OnPropertyChanged(nameof(DragOutAction));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
+
         OnPropertyChanged(nameof(DragBehaviorSummaryText));
     }
 

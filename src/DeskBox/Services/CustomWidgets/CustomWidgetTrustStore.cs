@@ -91,7 +91,7 @@ public sealed class CustomWidgetTrustStore
 
     private sealed class StoredTrustEntry
     {
-        public bool TrustedLocalAuthoring { get; set; } = true;
+        public bool TrustedLocalAuthoring { get; set; }
         public Dictionary<string, bool> Overrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public string? ExecutableSurfaceHash { get; set; }
     }
@@ -165,22 +165,22 @@ public sealed class CustomWidgetTrustStore
 
         switch (rawKey.Trim().ToLowerInvariant())
         {
-            case "notifications" or "notification" or "toast":
+            case "notifications":
                 kind = CustomWidgetPermissionKind.Notifications;
                 return true;
-            case "publicnetwork" or "network" or "internet":
+            case "publicnetwork":
                 kind = CustomWidgetPermissionKind.PublicNetwork;
                 return true;
-            case "localnetwork" or "lan" or "localhost":
+            case "localnetwork":
                 kind = CustomWidgetPermissionKind.LocalNetwork;
                 return true;
-            case "systemandclipboard" or "clipboard" or "system":
+            case "systemandclipboard":
                 kind = CustomWidgetPermissionKind.SystemAndClipboard;
                 return true;
-            case "localfileaccess" or "file" or "files" or "localfile":
+            case "localfileaccess":
                 kind = CustomWidgetPermissionKind.LocalFileAccess;
                 return true;
-            case "commandexecution" or "command" or "shell":
+            case "commandexecution":
                 kind = CustomWidgetPermissionKind.CommandExecution;
                 return true;
             default:
@@ -459,7 +459,6 @@ public sealed class CustomWidgetTrustStore
                string.Equals(t, "ai.run", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(t, "system.control", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(t, "system.openSetting", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(t, "openUrl", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(t, "url.open", StringComparison.OrdinalIgnoreCase) ||
                t.StartsWith("launcher.", StringComparison.OrdinalIgnoreCase) ||
                t.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
@@ -1063,8 +1062,8 @@ public sealed class CustomWidgetTrustStore
                         continue;
                     }
 
-                    bool trusted = !prop.Value.TryGetProperty("trustedLocalAuthoring", out JsonElement tEl) ||
-                                   tEl.ValueKind != JsonValueKind.False;
+                    bool trusted = prop.Value.TryGetProperty("trustedLocalAuthoring", out JsonElement tEl) &&
+                                   tEl.ValueKind == JsonValueKind.True;
                     var overrides = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
                     if (prop.Value.TryGetProperty("overrides", out JsonElement ovEl) &&
                         ovEl.ValueKind == JsonValueKind.Object)

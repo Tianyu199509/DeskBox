@@ -14,48 +14,6 @@ internal readonly record struct NativeOleDragEffects(
     uint AllowedEffects,
     uint PreferredDropEffect);
 
-internal sealed record FileDragOutRequest(
-    IntPtr HostWindowHandle,
-    string SourceWidgetId,
-    string[] SourcePaths,
-    string? DragOutAction,
-    bool IsProtectedCopyOnly,
-    bool IsDefaultCopySpecialMedia,
-    bool HasAppExecutionAlias);
-
-internal readonly record struct FileDragOutResult(
-    uint PerformedEffect,
-    bool Completed,
-    bool Canceled,
-    bool WatchdogAborted,
-    int HResult)
-{
-    internal DataPackageOperation ToDataPackageOperation()
-    {
-        if (Canceled || !Completed || PerformedEffect == 0)
-        {
-            return DataPackageOperation.None;
-        }
-
-        if ((PerformedEffect & TargetAwareDropEffectPolicy.DropEffectMove) != 0)
-        {
-            return DataPackageOperation.Move;
-        }
-
-        if ((PerformedEffect & TargetAwareDropEffectPolicy.DropEffectLink) != 0)
-        {
-            return DataPackageOperation.Link;
-        }
-
-        if ((PerformedEffect & TargetAwareDropEffectPolicy.DropEffectCopy) != 0)
-        {
-            return DataPackageOperation.Copy;
-        }
-
-        return DataPackageOperation.None;
-    }
-}
-
 /// <summary>
 /// Pure routing and native OLE effect policy for outbound file drags across
 /// Windows 10, Windows 11, touch/pen, and elevated sessions.

@@ -466,11 +466,38 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
     /// </summary>
     public void RefreshLocalization()
     {
-        OnPropertyChanged(nameof(AvailablePerformanceModeOptions));
-        OnPropertyChanged(nameof(AvailableHiddenCacheCleanupDelayOptions));
-        OnPropertyChanged(nameof(AvailableVisibleIdleCacheCleanupDelayOptions));
-        OnPropertyChanged(nameof(AvailablePerformanceCacheBudgetOptions));
-        OnPropertyChanged(nameof(AvailableHiddenCacheCleanupScopeOptions));
+        string prevMode = SelectedPerformanceMode;
+        int prevHiddenDelay = SelectedHiddenCacheCleanupDelaySeconds;
+        int prevVisibleDelay = SelectedVisibleIdleCacheCleanupDelaySeconds;
+        string prevBudget = SelectedPerformanceCacheBudget;
+        string prevScope = SelectedHiddenCacheCleanupScope;
+
+        _isSyncingPresentation = true;
+        try
+        {
+            OnPropertyChanged(nameof(AvailablePerformanceModeOptions));
+            OnPropertyChanged(nameof(AvailableHiddenCacheCleanupDelayOptions));
+            OnPropertyChanged(nameof(AvailableVisibleIdleCacheCleanupDelayOptions));
+            OnPropertyChanged(nameof(AvailablePerformanceCacheBudgetOptions));
+            OnPropertyChanged(nameof(AvailableHiddenCacheCleanupScopeOptions));
+
+            SelectedPerformanceMode = prevMode;
+            SelectedHiddenCacheCleanupDelaySeconds = prevHiddenDelay;
+            SelectedVisibleIdleCacheCleanupDelaySeconds = prevVisibleDelay;
+            SelectedPerformanceCacheBudget = prevBudget;
+            SelectedHiddenCacheCleanupScope = prevScope;
+
+            OnPropertyChanged(nameof(SelectedPerformanceMode));
+            OnPropertyChanged(nameof(SelectedHiddenCacheCleanupDelaySeconds));
+            OnPropertyChanged(nameof(SelectedVisibleIdleCacheCleanupDelaySeconds));
+            OnPropertyChanged(nameof(SelectedPerformanceCacheBudget));
+            OnPropertyChanged(nameof(SelectedHiddenCacheCleanupScope));
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
+
         OnPropertyChanged(nameof(ContinuousDecorativeAnimationsSummaryText));
     }
 

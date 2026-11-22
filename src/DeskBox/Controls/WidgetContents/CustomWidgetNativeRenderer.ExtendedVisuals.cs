@@ -781,7 +781,8 @@ public sealed partial class CustomWidgetNativeRenderer
             id = $"inline-pop-{_popoverSpecsById.Count + 1}";
         }
 
-        if (!string.IsNullOrWhiteSpace(id))
+        if (!string.IsNullOrWhiteSpace(id) &&
+            (spec.Children.Count > 0 || !_popoverSpecsById.ContainsKey(id)))
         {
             _popoverSpecsById[id] = spec;
         }

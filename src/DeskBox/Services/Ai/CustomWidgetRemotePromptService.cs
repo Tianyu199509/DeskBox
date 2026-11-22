@@ -495,22 +495,6 @@ public sealed class CustomWidgetRemotePromptService
         return $"{skillMarkdown.TrimEnd()}\n\n## Additional Official Design Rules (OTA)\n{extraRules.Trim()}\n";
     }
 
-    private CustomWidgetRemotePromptDocument? EnsureSnapshotLoaded()
-    {
-        lock (_snapshotLock)
-        {
-            if (_diskSnapshotLoaded)
-            {
-                return _cachedRemoteDoc;
-            }
-
-            _diskSnapshotLoaded = true;
-            _cachedRemoteDoc = LoadDiskCachedDocument();
-            _cachedEffectivePack = null;
-            return _cachedRemoteDoc;
-        }
-    }
-
     private CustomWidgetRemotePromptDocument? LoadDiskCachedDocument()
     {
         try

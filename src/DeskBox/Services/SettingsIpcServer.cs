@@ -74,13 +74,17 @@ public sealed class SettingsIpcServer : IAsyncDisposable
         SettingsIpcMethods.WidgetApplyLayoutPreferences,
         SettingsIpcMethods.WidgetResetCapsuleOverrides,
         SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
+        SettingsIpcMethods.AppearanceResetWidgetChromeOverrides,
         SettingsIpcMethods.WidgetSyncFeatureEnabled,
         // Deep review R13-2 (D10 audit): the hotkey enable toggles are
         // same-key writes too — a fast double-flip could apply the second
         // dispatch before the first and leave the OLDER registration
         // standing (same disease C/F family as the layout writes).
         SettingsIpcMethods.HotkeySetEnabled,
+        SettingsIpcMethods.HotkeyDoubleClickSet,
         SettingsIpcMethods.SearchHotkeySetEnabled,
+        SettingsIpcMethods.ClipboardHotkeySetEnabled,
+        SettingsIpcMethods.ClipboardHotkeyRefreshRegistration,
         SettingsIpcMethods.BackupSettingsUpdate,
         SettingsIpcMethods.BackupSettingsSave,
         Studio.StudioIpcMethods.ReportWindowState,

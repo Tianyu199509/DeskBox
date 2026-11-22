@@ -34,10 +34,8 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Controls.WidgetTitleIcon TitleIcon,
         TextBlock TitleText,
         TextBlock DescriptionText,
-        Button? ResetButton,
         ToggleSwitch? Toggle,
         bool HasSettingsPage,
-        bool HasReset,
         bool HasToggle);
 
     internal const int DefaultWindowWidth = 1000;
@@ -278,7 +276,7 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.KeyDown += SettingsRoot_KeyDown;
         LogConstructionCheckpoint("bindings-and-responsive-tree");
 
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
+        WindowsCompatibilityService.ApplySettingsBackdrop(this);
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -339,6 +337,7 @@ public sealed partial class SettingsWindow : Window
         // also fire on an OS theme flip while RequestedTheme is Default,
         // and the handler touches _appWindow.TitleBar.
         SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;
+        WindowsCompatibilityService.HighContrastChanged += SettingsWindow_HighContrastChanged;
         Closed += SettingsWindow_Closed;
         constructionStopwatch.Stop();
         LogConstructionCheckpoint("complete");
@@ -627,7 +626,26 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        if (SystemBackdrop is null)
+        {
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+        }
+
         ApplyTitleBarButtonColors();
+    }
+
+    private void SettingsWindow_HighContrastChanged()
+    {
+        DispatcherQueue?.TryEnqueue(() =>
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+            ApplyTitleBarButtonColors();
+        });
     }
 
     private void SettingsWindow_Closed(object sender, WindowEventArgs args)
@@ -660,6 +678,7 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.Loaded -= SettingsRoot_Loaded;
         SettingsRoot.KeyDown -= SettingsRoot_KeyDown;
         SettingsRoot.ActualThemeChanged -= SettingsRoot_ActualThemeChanged;
+        WindowsCompatibilityService.HighContrastChanged -= SettingsWindow_HighContrastChanged;
         SettingsRoot.RemoveHandler(UIElement.PointerPressedEvent, _settingsRootPointerPressedHandler);
         SettingsRoot.RemoveHandler(UIElement.PointerReleasedEvent, _settingsRootPointerReleasedHandler);
         if (_cloudBackupCollectionChanged is not null)
@@ -1234,15 +1253,14 @@ public sealed partial class SettingsWindow : Window
     {
         if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            IntPtr result = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-            double scale = GetCurrentDpiScale();
-            unsafe
-            {
-                ref MinMaxInfo minMaxInfo = ref *(MinMaxInfo*)lParam;
-                minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
-                minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
-            }
-            return result;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                GetCurrentDpiScale(),
+                MinWindowWidth,
+                MinWindowHeight);
         }
 
         if (message == WmNcDestroy)
@@ -1267,23 +1285,6 @@ public sealed partial class SettingsWindow : Window
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 
     private sealed record SettingsSectionRoute(

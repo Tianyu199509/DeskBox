@@ -1088,6 +1088,7 @@ internal sealed class StudioSessionController
                 BriefMarkdown = BriefMarkdown,
                 PreviewSampleDataJson = PreviewSampleDataJson,
                 PinnedCapabilityIds = PinnedCapabilityIds.ToList(),
+                LoadedCapabilityPackIds = GetSortedLoadedCapabilityPackIds().ToList(),
                 Revisions = trimmed,
                 ChatMessages = ChatMessages.ToList()
             };
@@ -1156,8 +1157,7 @@ internal sealed class StudioSessionController
                             ? baseManifest.ForkedFromVersion
                             : forkedFromVersion;
                     }
-                    else if (baseManifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase) ||
-                             baseManifest.Id.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
+                    else if (baseManifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase))
                     {
                         forkedFromId = baseManifest.Id;
                         forkedFromVersion = baseManifest.Version;

@@ -435,31 +435,6 @@ internal static class CustomWidgetAgentStageStore
     }
 
     /// <summary>
-    /// 校验并消费一个暂存批次。成功时返回目标 widgetId 并删除整个批次目录，
-    /// 保证同一批次只能提交一次。
-    /// </summary>
-    internal static bool TryConsume(
-        string? stageId,
-        string manifestJson,
-        out string? widgetId,
-        out string error,
-        string? cultureName = null)
-    {
-        bool ok = TryConsumeBundle(
-            stageId,
-            manifestJson,
-            hasCallerLogicJs: false,
-            callerLogicJs: null,
-            hasCallerLocales: false,
-            callerLocalesJson: null,
-            out AgentStageBundle? bundle,
-            out error,
-            cultureName);
-        widgetId = bundle?.WidgetId;
-        return ok;
-    }
-
-    /// <summary>
     /// 校验并消费完整暂存包（含可选 manifestJson、可选 logicJs 与 locales 一致性校验；
     /// 当 manifestJson 为 null 时允许仅凭 stageId 直接消费已暂存包），返回完整已暂存内容供落盘回填。
     /// </summary>
@@ -551,12 +526,6 @@ internal static class CustomWidgetAgentStageStore
                     stagedResize,
                     created);
 
-                string recordedHash = !string.IsNullOrEmpty(hash)
-                    ? hash
-                    : ComputeManifestHash(stagedManifestJson);
-                string recordedCanonicalHash = !string.IsNullOrEmpty(canonicalHash)
-                    ? canonicalHash
-                    : ComputeCanonicalJsonHash(stagedManifestJson);
                 string? rawCallerHashForIdempotency = meta.TryGetValue("rawCallerManifestCanonicalSha256", out string? rch) && !string.IsNullOrEmpty(rch)
                     ? rch
                     : null;
@@ -566,8 +535,8 @@ internal static class CustomWidgetAgentStageStore
                     string callerHash = ComputeManifestHash(manifestJson);
                     string callerCanonicalHash = ComputeCanonicalJsonHash(manifestJson);
                     bool manifestMatches =
-                        string.Equals(callerHash, recordedHash, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(callerCanonicalHash, recordedCanonicalHash, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(callerHash, hash, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(callerCanonicalHash, canonicalHash, StringComparison.OrdinalIgnoreCase) ||
                         (!string.IsNullOrEmpty(rawCallerHashForIdempotency) &&
                          string.Equals(callerCanonicalHash, rawCallerHashForIdempotency, StringComparison.OrdinalIgnoreCase));
                     if (!manifestMatches)
@@ -578,17 +547,16 @@ internal static class CustomWidgetAgentStageStore
                     }
                 }
 
+                string effectiveLogicHash = stagedHasLogicJs && meta.TryGetValue("logicSha256", out string? slh)
+                    ? slh
+                    : string.Empty;
                 if (hasCallerLogicJs)
                 {
-                    string storedLogicHash = meta.TryGetValue("logicSha256", out string? slh) ? slh : string.Empty;
-                    string expectedLogicHash = stagedHasLogicJs
-                        ? (!string.IsNullOrEmpty(storedLogicHash) ? storedLogicHash : ComputeManifestHash(stagedLogicJs ?? string.Empty))
-                        : string.Empty;
                     string normalizedCallerLogic = !string.IsNullOrWhiteSpace(callerLogicJs) ? callerLogicJs : string.Empty;
                     string actualLogicHash = ComputeManifestHash(normalizedCallerLogic);
                     if (!stagedHasLogicJs
                         ? !string.IsNullOrWhiteSpace(callerLogicJs)
-                        : !string.Equals(actualLogicHash, expectedLogicHash, StringComparison.OrdinalIgnoreCase))
+                        : !string.Equals(actualLogicHash, effectiveLogicHash, StringComparison.OrdinalIgnoreCase))
                     {
                         bundle = null;
                         error = T(cultureName, "CustomWidget.AgentStage.Error.ContentMismatch");
@@ -596,33 +564,21 @@ internal static class CustomWidgetAgentStageStore
                     }
                 }
 
+                string effectiveLocalesHash = stagedHasLocales && meta.TryGetValue("localesSha256", out string? sloc)
+                    ? sloc
+                    : string.Empty;
                 if (hasCallerLocales)
                 {
-                    string storedLocalesHash = meta.TryGetValue("localesSha256", out string? sloc) ? sloc : string.Empty;
-                    string expectedLocalesHash = stagedHasLocales
-                        ? (!string.IsNullOrEmpty(storedLocalesHash) ? storedLocalesHash : ComputeCanonicalJsonHash(stagedLocalesJson))
-                        : string.Empty;
                     string actualLocalesHash = ComputeCanonicalJsonHash(callerLocalesJson);
                     if (!stagedHasLocales
                         ? !string.IsNullOrWhiteSpace(callerLocalesJson)
-                        : !string.Equals(actualLocalesHash, expectedLocalesHash, StringComparison.OrdinalIgnoreCase))
+                        : !string.Equals(actualLocalesHash, effectiveLocalesHash, StringComparison.OrdinalIgnoreCase))
                     {
                         bundle = null;
                         error = T(cultureName, "CustomWidget.AgentStage.Error.ContentMismatch");
                         return false;
                     }
                 }
-
-                string effectiveLogicHash = stagedHasLogicJs
-                    ? (meta.TryGetValue("logicSha256", out string? mlh) && !string.IsNullOrEmpty(mlh)
-                        ? mlh
-                        : ComputeManifestHash(stagedLogicJs ?? string.Empty))
-                    : string.Empty;
-                string effectiveLocalesHash = stagedHasLocales
-                    ? (meta.TryGetValue("localesSha256", out string? mloc) && !string.IsNullOrEmpty(mloc)
-                        ? mloc
-                        : ComputeCanonicalJsonHash(stagedLocalesJson))
-                    : string.Empty;
 
                 // Three-state commit lease: the stage directory and its idempotency
                 // tombstone are only consumed after the caller's workspace write
@@ -639,8 +595,8 @@ internal static class CustomWidgetAgentStageStore
                 s_pendingCommits[stageId] = new PendingStageCommit(
                     dir,
                     widgetId,
-                    recordedHash,
-                    recordedCanonicalHash,
+                    hash,
+                    canonicalHash,
                     rawCallerHashForIdempotency,
                     stagedHasLogicJs,
                     effectiveLogicHash,
@@ -733,6 +689,12 @@ internal static class CustomWidgetAgentStageStore
 
         lock (Gate)
         {
+            if (s_pendingCommits.ContainsKey(stageId!))
+            {
+                CompleteCommit(stageId!, widgetId);
+                return;
+            }
+
             RecordCommittedLocked(stageId!, widgetId, manifestSha256: null, manifestCanonicalSha256: null);
         }
     }
@@ -804,34 +766,19 @@ internal static class CustomWidgetAgentStageStore
             else if (File.Exists(MetaPath(stageId)))
             {
                 Dictionary<string, string> meta = ReadMeta(stageId);
-                if (string.IsNullOrEmpty(preservedHash) && meta.TryGetValue("manifestSha256", out string? mh))
-                {
-                    preservedHash = mh;
-                }
-                if (string.IsNullOrEmpty(preservedCanonicalHash) && meta.TryGetValue("manifestCanonicalSha256", out string? mch))
-                {
-                    preservedCanonicalHash = mch;
-                }
-                if (string.IsNullOrEmpty(preservedRawCallerHash) && meta.TryGetValue("rawCallerManifestCanonicalSha256", out string? mrch))
-                {
-                    preservedRawCallerHash = mrch;
-                }
+                preservedHash ??= meta.GetValueOrDefault("manifestSha256");
+                preservedCanonicalHash ??= meta.GetValueOrDefault("manifestCanonicalSha256");
+                preservedRawCallerHash ??= meta.GetValueOrDefault("rawCallerManifestCanonicalSha256");
                 if (preservedHasLogicJs is null && meta.TryGetValue("hasLogicJs", out string? mhl))
                 {
                     preservedHasLogicJs = mhl == "1";
                 }
-                if (string.IsNullOrEmpty(preservedLogicHash) && meta.TryGetValue("logicSha256", out string? mlh))
-                {
-                    preservedLogicHash = mlh;
-                }
+                preservedLogicHash ??= meta.GetValueOrDefault("logicSha256");
                 if (preservedHasLocales is null && meta.TryGetValue("hasLocales", out string? mhloc))
                 {
                     preservedHasLocales = mhloc == "1";
                 }
-                if (string.IsNullOrEmpty(preservedLocalesHash) && meta.TryGetValue("localesSha256", out string? mloch))
-                {
-                    preservedLocalesHash = mloch;
-                }
+                preservedLocalesHash ??= meta.GetValueOrDefault("localesSha256");
             }
 
             var lines = new List<string>(8)
@@ -894,13 +841,8 @@ internal static class CustomWidgetAgentStageStore
             try
             {
                 Dictionary<string, string> meta = ReadMeta(stageId!);
-                string stagedManifestJson = File.ReadAllText(manifestPath, Encoding.UTF8);
-                string recordedHash = meta.TryGetValue("manifestSha256", out string? h) && !string.IsNullOrEmpty(h)
-                    ? h
-                    : ComputeManifestHash(stagedManifestJson);
-                string recordedCanonicalHash = meta.TryGetValue("manifestCanonicalSha256", out string? ch) && !string.IsNullOrEmpty(ch)
-                    ? ch
-                    : ComputeCanonicalJsonHash(stagedManifestJson);
+                string? recordedHash = meta.GetValueOrDefault("manifestSha256");
+                string? recordedCanonicalHash = meta.GetValueOrDefault("manifestCanonicalSha256");
                 string? rawCallerHash = meta.TryGetValue("rawCallerManifestCanonicalSha256", out string? rch) && !string.IsNullOrEmpty(rch)
                     ? rch
                     : null;

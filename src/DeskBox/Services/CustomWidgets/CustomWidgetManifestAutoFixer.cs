@@ -486,10 +486,6 @@ public static partial class CustomWidgetManifestAutoFixer
                                 se.WriteTo(writer);
                             }
                         }
-                        else if (existingSourcesEl.ValueKind == JsonValueKind.Object)
-                        {
-                            existingSourcesEl.WriteTo(writer);
-                        }
                         foreach ((string srcType, int? interval) in missingSources)
                         {
                             WriteAutoSourceObject(writer, srcType, interval);

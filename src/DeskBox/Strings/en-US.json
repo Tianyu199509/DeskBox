@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "Privacy & Security",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "Respect system clipboard privacy markers",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "Automatically ignore passwords and secrets marked as excluded from clipboard history",
+  "Settings.Clipboard.FetchUrlTitles.Title": "Fetch web page titles for copied links",
+  "Settings.Clipboard.FetchUrlTitles.Description": "When enabled, query public web page titles in the background (links with login, verification, or signed parameters are skipped)",
   "Settings.Clipboard.SecretProtection.Title": "API key and token protection",
   "Settings.Clipboard.SecretProtection.Description": "Choose how DeskBox handles detected API keys, access tokens, or private keys",
   "Settings.Clipboard.SecretProtection.Mask": "Mask preview and allow copy",

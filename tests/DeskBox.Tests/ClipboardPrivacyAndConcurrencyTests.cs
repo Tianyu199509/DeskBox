@@ -290,4 +290,40 @@ public sealed class ClipboardPrivacyAndConcurrencyTests
             }
         }
     }
+
+    [Fact]
+    public void ClipboardUrlTitleResolver_DefaultsOff_SkipsSensitiveLinks_AndDecodesGbkAndBoundaryUtf8()
+    {
+        var defaults = new AppSettings();
+        Assert.False(defaults.Clipboard.ClipboardFetchUrlTitles);
+        Assert.False(defaults.ClipboardFetchUrlTitles);
+
+        // Clean public article URLs are eligible when the user opts in.
+        Assert.True(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://learn.microsoft.com/dotnet/whats-new/dotnet-10", out Uri? cleanUri));
+        Assert.NotNull(cleanUri);
+
+        // One-time magic/login/reset/verify/unsubscribe/presigned/local URLs must NEVER be prefetched.
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://app.example.com/auth/magic?id=123", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://app.example.com/account/verify-email?u=1", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://app.example.com/password/reset/abc", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://mail.example.com/unsubscribe?list=weekly", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://bucket.s3.amazonaws.com/report.html?X-Amz-Signature=deadbeef", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://portal.example.com/view?token=secret123", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("http://localhost:3000/docs", out _));
+        Assert.False(ClipboardUrlTitleResolver.IsSafePublicPageCandidate("https://intranet.local/wiki", out _));
+
+        // GBK/GB18030 <meta charset> decoding and incomplete trailing UTF-8 sequence trimming.
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        byte[] gbkHtml = System.Text.Encoding.GetEncoding("GB18030")
+            .GetBytes("<html><head><meta charset=\"gbk\"><title>中文网页标题</title></head></html>");
+        string decodedGbk = ClipboardUrlTitleResolver.DecodeHtmlSnippet(gbkHtml, headerCharset: null);
+        Assert.True(ClipboardClassifier.TryExtractHtmlDocumentTitle(decodedGbk, out string? gbkTitle));
+        Assert.Equal("中文网页标题", gbkTitle);
+
+        byte[] utf8WithTrailingSplit = [.. "<title>边界测试</title>"u8, 0xE4, 0xB8];
+        string decodedUtf8 = ClipboardUrlTitleResolver.DecodeHtmlSnippet(utf8WithTrailingSplit, "utf-8");
+        Assert.DoesNotContain('\uFFFD', decodedUtf8);
+        Assert.True(ClipboardClassifier.TryExtractHtmlDocumentTitle(decodedUtf8, out string? utf8Title));
+        Assert.Equal("边界测试", utf8Title);
+    }
 }

@@ -563,6 +563,7 @@ public sealed class CustomWidgetTests
             {
               "schemaVersion": 1,
               "id": "deskbox.sys-pulse",
+              "origin": "official",
               "name": "性能脉冲",
               "version": "1.0.0",
               "root": "main",
@@ -652,7 +653,7 @@ public sealed class CustomWidgetTests
             var store = new CustomWidgetDataStore("pomo-v2", tempRoot);
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "2.0.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "Stack", "children": [] } } }""");
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "2.0.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "Stack", "children": [] } } }""");
 
             string upgraded = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
             Assert.Contains("\"version\": \"8.0.0\"", upgraded, StringComparison.Ordinal);
@@ -661,7 +662,7 @@ public sealed class CustomWidgetTests
 
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "3.1.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "ModuleStack", "children": [] } } }""");
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "3.1.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "ModuleStack", "children": [] } } }""");
             string upgradedFrom31 = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
             Assert.Contains("\"version\": \"8.0.0\"", upgradedFrom31, StringComparison.Ordinal);
 

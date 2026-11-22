@@ -14,7 +14,8 @@ public sealed record GroupPresentationChange(
     GroupPresentationTriState WheelSwitch = GroupPresentationTriState.Unset,
     GroupPresentationTriState HoverSwitch = GroupPresentationTriState.Unset,
     string? CollapseBehavior = null,
-    string? ChromeMode = null);
+    string? ChromeMode = null,
+    string? Name = null);
 
 /// <summary>
 /// Tri-state for the nullable group presentation booleans: Unset leaves the

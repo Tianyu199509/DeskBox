@@ -1971,6 +1971,10 @@ public sealed class SearchEngineService : IDisposable
             return [];
         }
 
+        string[] queryTerms = browseTodos || browseNotes
+            ? []
+            : query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
         var results = new List<SearchResultItem>();
         foreach (DeskBoxSearchDocument document in snapshot)
         {
@@ -1995,18 +1999,6 @@ public sealed class SearchEngineService : IDisposable
                 bool bodyMatches = document.BodyText?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
                 bool auxiliaryMatches = document.AuxiliaryText?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
 
-                int pinyinOrSynonymScore = SettingsSearchMatcher.GetScore(
-                    query,
-                    document.Title,
-                    document.Subtitle,
-                    document.BodyText ?? document.AuxiliaryText ?? string.Empty);
-
-                if (!titleMatches && !bodyMatches && !auxiliaryMatches &&
-                    pinyinOrSynonymScore == SettingsSearchMatcher.NoMatch)
-                {
-                    continue;
-                }
-
                 score = 1;
                 if (titleMatches)
                 {
@@ -2020,6 +2012,25 @@ public sealed class SearchEngineService : IDisposable
                 {
                     score = Math.Max(score, ComputeTextRelevance(document.AuxiliaryText!, query) - 10);
                 }
+
+                // Skip Pinyin/synonym fallback when literal title match already achieves >= 85 relevance
+                // (since non-exact Pinyin/synonym relevance never exceeds 84).
+                int pinyinOrSynonymScore = SettingsSearchMatcher.NoMatch;
+                if (score < 85)
+                {
+                    pinyinOrSynonymScore = SettingsSearchMatcher.GetScore(
+                        queryTerms.AsSpan(),
+                        document.Title,
+                        document.Subtitle,
+                        document.BodyText ?? document.AuxiliaryText ?? string.Empty);
+                }
+
+                if (!titleMatches && !bodyMatches && !auxiliaryMatches &&
+                    pinyinOrSynonymScore == SettingsSearchMatcher.NoMatch)
+                {
+                    continue;
+                }
+
                 if (pinyinOrSynonymScore != SettingsSearchMatcher.NoMatch)
                 {
                     score = Math.Max(

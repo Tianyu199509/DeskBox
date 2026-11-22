@@ -131,8 +131,9 @@ public sealed class TodoWidgetContentAdapter :
     internal Task<bool> AddExternalItemAsync(
         string title,
         DateTimeOffset? dueDate,
-        TodoPriority priority) =>
-        ViewModel.AddExternalItemAsync(title, dueDate, priority);
+        TodoPriority priority,
+        string? explicitItemId = null) =>
+        ViewModel.AddExternalItemAsync(title, dueDate, priority, explicitItemId);
 
     internal Task<bool> ToggleExternalItemAsync(string itemId) =>
         ViewModel.ToggleExternalItemAsync(itemId);

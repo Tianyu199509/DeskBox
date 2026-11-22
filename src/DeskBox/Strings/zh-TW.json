@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "隱私與安全",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "遵循系統隱私剪貼簿標記",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "自動忽略密碼管理器等標記為禁止剪貼簿歷史記錄的私密內容",
+  "Settings.Clipboard.FetchUrlTitles.Title": "自動取得複製連結的網頁標題",
+  "Settings.Clipboard.FetchUrlTitles.Description": "開啟後在背景連線讀取公開網頁標題（自動略過含登入、驗證或簽章參數的連結）",
   "Settings.Clipboard.SecretProtection.Title": "API 金鑰與權杖保護",
   "Settings.Clipboard.SecretProtection.Description": "偵測到疑似 API 金鑰、存取權杖或私密金鑰時的保護方式",
   "Settings.Clipboard.SecretProtection.Mask": "遮罩顯示並允許複製",

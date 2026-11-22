@@ -212,6 +212,11 @@ public static partial class CustomWidgetManifestParser
             string? packageId = TryGetString(root, "packageId");
             string name = GetString(root, "name", DeskBox.Services.Localized.T("CustomWidget.DefaultName"));
             string version = GetString(root, "version", "1.0.0");
+            int? minSchemaVersion = root.TryGetProperty("minSchemaVersion", out JsonElement minSchemaEl) &&
+                                    minSchemaEl.ValueKind == JsonValueKind.Number &&
+                                    minSchemaEl.TryGetInt32(out int parsedMinSchema)
+                ? parsedMinSchema
+                : null;
             string? minAppVersion = TryGetString(root, "minAppVersion");
             string author = GetString(root, "author", "DeskBox");
             string description = GetString(root, "description", string.Empty);
@@ -232,6 +237,15 @@ public static partial class CustomWidgetManifestParser
                     $"Unsupported schemaVersion {schemaVersion}. DeskBox Custom Widgets require \"schemaVersion\": {CurrentSchemaVersion} with the canonical Flat Element Graph (top-level \"root\" and \"elements\" map).",
                     IsError: true,
                     Code: "UnsupportedSchemaVersion"));
+            }
+
+            if (minSchemaVersion is { } reqSchema && reqSchema > CurrentSchemaVersion)
+            {
+                diagnostics.Add(new(
+                    "$.minSchemaVersion",
+                    DeskBox.Services.Localized.Format("CustomWidget.ClientUpgrade.AppTooOld", $"Schema v{reqSchema}"),
+                    IsError: true,
+                    Code: CustomWidgetDiagnosticCodes.IncompatibleSchemaVersion));
             }
 
             if (RequiresNewerClient(null, minAppVersion, out string reqAppVerLabel))
@@ -411,7 +425,8 @@ public static partial class CustomWidgetManifestParser
                 OnDrop = onDrop,
                 Capsule = capsule,
                 Popovers = popovers,
-                View = view
+                View = view,
+                ParsedBodyDeviceFields = DeskBox.Services.DeviceStateCapabilityProvider.ScanDeviceTokensInManifestText(json)
             };
 
             return new(manifest, diagnostics);
@@ -2360,9 +2375,9 @@ public static partial class CustomWidgetManifestParser
                 elemJson,
                 $"#{trimmedId}",
                 diagnostics,
+                flatGraph,
                 depth,
                 settingOptionsByKey,
-                flatGraph,
                 implicitElementId: trimmedId);
         }
         finally
@@ -2616,11 +2631,6 @@ public static partial class CustomWidgetManifestParser
         if (scriptEl.ValueKind == JsonValueKind.False || scriptEl.ValueKind == JsonValueKind.Null)
         {
             return null;
-        }
-
-        if (scriptEl.ValueKind == JsonValueKind.True)
-        {
-            return new CustomWidgetScriptSpec("logic.js", 0);
         }
 
         if (scriptEl.ValueKind != JsonValueKind.Object)

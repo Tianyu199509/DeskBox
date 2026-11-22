@@ -39,7 +39,8 @@ internal static class PortableBackupProcessor
         string stagedDataDirectory,
         string archivePath,
         string recoveryRootPath,
-        string? manifestKind)
+        string? manifestKind,
+        params string?[] additionalTrustedLocalRoots)
     {
         if (!Directory.Exists(stagedDataDirectory))
         {
@@ -49,21 +50,47 @@ internal static class PortableBackupProcessor
         bool isLocalRecoveryKind =
             string.Equals(manifestKind, "automatic", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(manifestKind, "pre-restore", StringComparison.OrdinalIgnoreCase);
-        if (isLocalRecoveryKind &&
-            !string.IsNullOrWhiteSpace(archivePath) &&
-            !string.IsNullOrWhiteSpace(recoveryRootPath))
+        if (isLocalRecoveryKind && !string.IsNullOrWhiteSpace(archivePath))
         {
             string fullArchive = Path.GetFullPath(archivePath);
-            string fullRecoveryRoot = TrimSeparators(Path.GetFullPath(recoveryRootPath)) + Path.DirectorySeparatorChar;
-            if (fullArchive.StartsWith(fullRecoveryRoot, StringComparison.OrdinalIgnoreCase))
+            if (IsUnderTrustedRoot(fullArchive, recoveryRootPath))
             {
                 return;
+            }
+
+            if (additionalTrustedLocalRoots is { Length: > 0 })
+            {
+                for (int i = 0; i < additionalTrustedLocalRoots.Length; i++)
+                {
+                    if (IsUnderTrustedRoot(fullArchive, additionalTrustedLocalRoots[i]))
+                    {
+                        return;
+                    }
+                }
             }
         }
 
         foreach (string rel in MachineBoundSecretRelativePaths)
         {
             ClipboardStorageFileOps.TryDeleteFile(Path.Combine(stagedDataDirectory, rel));
+        }
+    }
+
+    private static bool IsUnderTrustedRoot(string fullArchivePath, string? candidateRoot)
+    {
+        if (string.IsNullOrWhiteSpace(candidateRoot))
+        {
+            return false;
+        }
+
+        try
+        {
+            string normalizedRoot = TrimSeparators(Path.GetFullPath(candidateRoot)) + Path.DirectorySeparatorChar;
+            return fullArchivePath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -233,129 +260,22 @@ internal static class PortableBackupProcessor
         ClipboardStorageFileOps.WriteTextAtomically(storePath, Encoding.UTF8.GetString(ms.ToArray()));
     }
 
-    public static async Task RebaseClipboardPathsAsync(
+    public static Task RebaseClipboardPathsAsync(
         string stagedDataDirectory,
         string? sourceDataPath,
         string targetDataDirectory,
         CancellationToken cancellationToken = default)
     {
-        string clipboardJson = Path.Combine(stagedDataDirectory, "clipboard", "clipboard.json");
-        if (File.Exists(clipboardJson))
-        {
-            await RebaseSingleClipboardFileAsync(
-                clipboardJson,
-                stagedDataDirectory,
-                sourceDataPath,
-                targetDataDirectory,
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        string backupJson = clipboardJson + ".bak";
-        if (File.Exists(backupJson))
-        {
-            try
-            {
-                await RebaseSingleClipboardFileAsync(
-                    backupJson,
-                    stagedDataDirectory,
-                    sourceDataPath,
-                    targetDataDirectory,
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch
-            {
-            }
-        }
-    }
-
-    private static async Task RebaseSingleClipboardFileAsync(
-        string jsonPath,
-        string stagedDataDirectory,
-        string? sourceDataPath,
-        string targetDataDirectory,
-        CancellationToken cancellationToken)
-    {
-        string raw = await File.ReadAllTextAsync(jsonPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
-        if (JsonNode.Parse(raw) is not JsonObject rootObj ||
-            rootObj["items"] is not JsonArray itemsArr)
-        {
-            return;
-        }
-
-        string? normalizedSourceData = !string.IsNullOrWhiteSpace(sourceDataPath)
-            ? TrimSeparators(sourceDataPath)
-            : null;
-        string normalizedTargetData = TrimSeparators(Path.GetFullPath(targetDataDirectory));
-        bool changed = false;
-
-        foreach (JsonNode? node in itemsArr)
-        {
-            if (node is not JsonObject itemObj || itemObj["filePaths"] is not JsonArray fpArr || fpArr.Count == 0)
-            {
-                continue;
-            }
-
-            bool itemChanged = false;
-            List<string> updatedPaths = new(fpArr.Count);
-            for (int i = 0; i < fpArr.Count; i++)
-            {
-                string? p = fpArr[i] is JsonValue v && v.TryGetValue(out string? s) ? s : null;
-                if (string.IsNullOrWhiteSpace(p))
-                {
-                    updatedPaths.Add(string.Empty);
-                    continue;
-                }
-
-                string? rebased = TryRebaseClipboardFilePath(p, stagedDataDirectory, normalizedSourceData, normalizedTargetData);
-                if (!string.IsNullOrWhiteSpace(rebased) && !string.Equals(rebased, p, StringComparison.Ordinal))
-                {
-                    fpArr[i] = rebased;
-                    updatedPaths.Add(rebased);
-                    itemChanged = true;
-                    changed = true;
-                }
-                else
-                {
-                    updatedPaths.Add(p);
-                }
-            }
-
-            if (itemChanged)
-            {
-                List<string> nonEmpty = updatedPaths.Where(static x => x.Length > 0).ToList();
-                if (nonEmpty.Count > 0)
-                {
-                    itemObj["contentHash"] = ClipboardContentHashing.ComputeFilesContentHash(nonEmpty, hmacKey: null);
-                }
-
-                string joinedPaths = string.Join(Environment.NewLine, nonEmpty);
-                if (!string.IsNullOrWhiteSpace(ReadString(itemObj, "textPayloadFileName")))
-                {
-                    itemObj["textContent"] = joinedPaths;
-                    itemObj["textPayloadFileName"] = null;
-                }
-                else
-                {
-                    string? existingText = ReadString(itemObj, "textContent");
-                    if (!string.IsNullOrEmpty(existingText) &&
-                        !existingText.StartsWith(ClipboardStore.DpapiPayloadPrefix, StringComparison.Ordinal))
-                    {
-                        itemObj["textContent"] = joinedPaths;
-                    }
-                }
-            }
-        }
-
-        if (changed)
-        {
-            using var ms = new MemoryStream();
-            await using (var writer = new Utf8JsonWriter(ms, CompactJsonOptions))
-            {
-                rootObj.WriteTo(writer);
-            }
-
-            ClipboardStorageFileOps.WriteTextAtomically(jsonPath, Encoding.UTF8.GetString(ms.ToArray()));
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        IReadOnlyList<string> oldPrefixes = string.IsNullOrWhiteSpace(sourceDataPath)
+            ? []
+            : [TrimSeparators(sourceDataPath) + Path.DirectorySeparatorChar];
+        StoreUserAssetMigrationFileOps.RebaseClipboardStoreFiles(
+            stagedDataDirectory,
+            targetDataDirectory,
+            oldPrefixes,
+            tryUseMigratedHmacKey: false);
+        return Task.CompletedTask;
     }
 
     public static async Task EnsureClipboardProtectedAtRestAsync(string dataDirectory)
@@ -374,50 +294,6 @@ internal static class PortableBackupProcessor
         {
             App.Log($"[DataBackup] Clipboard at-rest protection after restore skipped: {ex.Message}");
         }
-    }
-
-    private static string? TryRebaseClipboardFilePath(
-        string rawPath,
-        string stagedDataDirectory,
-        string? normalizedSourceData,
-        string normalizedTargetData)
-    {
-        string normalizedSlash = rawPath.Replace('\\', '/');
-        const string droppedMarker = "/clipboard/dropped/";
-        int idx = normalizedSlash.IndexOf(droppedMarker, StringComparison.OrdinalIgnoreCase);
-        if (idx >= 0)
-        {
-            string tail = normalizedSlash[(idx + droppedMarker.Length)..].TrimStart('/');
-            if (tail.Length > 0 && !tail.Split('/').Any(static seg => seg is "." or ".."))
-            {
-                string tailNative = tail.Replace('/', Path.DirectorySeparatorChar);
-                string stagedCandidate = Path.Combine(stagedDataDirectory, "clipboard", "dropped", tailNative);
-                if (File.Exists(stagedCandidate) || Directory.Exists(stagedCandidate))
-                {
-                    return Path.Combine(normalizedTargetData, "clipboard", "dropped", tailNative);
-                }
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedSourceData))
-        {
-            string prefixSlash = normalizedSourceData.Replace('\\', '/') + "/";
-            if (normalizedSlash.StartsWith(prefixSlash, StringComparison.OrdinalIgnoreCase))
-            {
-                string rel = normalizedSlash[prefixSlash.Length..].TrimStart('/');
-                if (rel.Length > 0 && !rel.Split('/').Any(static seg => seg is "." or ".."))
-                {
-                    string relNative = rel.Replace('/', Path.DirectorySeparatorChar);
-                    string stagedCandidate = Path.Combine(stagedDataDirectory, relNative);
-                    if (File.Exists(stagedCandidate) || Directory.Exists(stagedCandidate))
-                    {
-                        return Path.Combine(normalizedTargetData, relNative);
-                    }
-                }
-            }
-        }
-
-        return null;
     }
 
     private static bool TryUnprotectInlineField(JsonObject itemObj, string propertyName, out string? plainText)

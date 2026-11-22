@@ -579,13 +579,6 @@ internal static class ChannelCoexistenceService
             {
                 return NormalizeFolderKey(direct);
             }
-
-            if (TryGetObjectProperty(root, "fileWidget", "FileWidget", out JsonElement fileWidget) &&
-                TryGetStringProperty(fileWidget, "defaultManagedStorageRootPath", "DefaultManagedStorageRootPath", out string? sliced) &&
-                !string.IsNullOrWhiteSpace(sliced))
-            {
-                return NormalizeFolderKey(sliced);
-            }
         }
         catch
         {

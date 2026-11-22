@@ -2122,46 +2122,6 @@ public sealed partial class StudioWorkspaceEngine
             return true;
         }
 
-        var queue = new Queue<(JsonNode Node, JsonObject? PObj, string? PProp, JsonArray? PArr, string Path)>();
-        queue.Enqueue((root, null, null, null, "$"));
-
-        while (queue.Count > 0)
-        {
-            var (cur, pObj, pProp, pArr, path) = queue.Dequeue();
-            if (cur is JsonObject obj)
-            {
-                if (!ReferenceEquals(obj, root) &&
-                    TryGetObjectPropertyExactOrFolded(obj, "id", out _, out JsonNode? idNode) &&
-                    NodeScalarEquals(idNode, targetId))
-                {
-                    found = obj;
-                    parentObj = pObj;
-                    parentProp = pProp;
-                    parentArr = pArr;
-                    foundPath = path;
-                    return true;
-                }
-
-                foreach (KeyValuePair<string, JsonNode?> kv in obj)
-                {
-                    if (kv.Value is JsonObject or JsonArray)
-                    {
-                        queue.Enqueue((kv.Value, obj, kv.Key, null, $"{path}.{kv.Key}"));
-                    }
-                }
-            }
-            else if (cur is JsonArray arr)
-            {
-                for (int i = 0; i < arr.Count; i++)
-                {
-                    if (arr[i] is JsonObject or JsonArray)
-                    {
-                        queue.Enqueue((arr[i]!, null, null, arr, $"{path}[{i}]"));
-                    }
-                }
-            }
-        }
-
         found = null;
         parentObj = null;
         parentProp = null;

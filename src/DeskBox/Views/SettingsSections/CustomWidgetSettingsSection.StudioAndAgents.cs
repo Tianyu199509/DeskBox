@@ -12,9 +12,6 @@ public sealed partial class CustomWidgetSettingsSection
     public void OpenStudio() =>
         _ = OpenWidgetStudioWindowAsync(null, null);
 
-    public void TriggerQuickCreate() =>
-        OpenStudio();
-
     public void TriggerOpenApiDocs()
     {
         if (XamlRoot is null)

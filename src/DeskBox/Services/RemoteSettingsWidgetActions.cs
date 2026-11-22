@@ -70,6 +70,11 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
             string.Empty);
 
+    public Task ResetWidgetChromeOverrides(bool interactive) =>
+        SendLayoutWrite(
+            SettingsIpcMethods.AppearanceResetWidgetChromeOverrides,
+            SettingsIpcPayload.EncodeBoolean(interactive));
+
     /// <summary>
     /// Layout writes: the response carries the authoritative slice — merge
     /// it into the local mirror BEFORE returning so the caller's immediate

@@ -27,7 +27,7 @@ internal static partial class StudioStateBranchValidator
         "Stack",
         "Grid",
         "Card",
-        "ScrollViewer",
+        "Scroll",
         "ItemsGrid",
         "List",
         "BarList",
@@ -70,11 +70,6 @@ internal static partial class StudioStateBranchValidator
 
         if (!string.IsNullOrWhiteSpace(manifest.View.When))
         {
-            diagnostics.Add(new CustomWidgetValidationDiagnostic(
-                manifest.View.NodePath,
-                "Root $.view must not declare a conditional \"when\" expression because hiding $.view leaves the entire widget canvas blank; move \"when\" onto child branches inside $.view.",
-                IsError: false,
-                Code: CustomWidgetStrictAuthoringRules.RootViewConditionalWhen));
             return;
         }
 

@@ -707,6 +707,8 @@ public sealed partial class CustomWidgetNativeRenderer
             };
             StyleAccentCommitButton(saveBtn);
 
+            string boundTabId = activeTabId;
+
             async Task CommitApiKeySaveAsync()
             {
                 if (!saveBtn.IsEnabled)
@@ -729,14 +731,18 @@ public sealed partial class CustomWidgetNativeRenderer
                 saveBtn.Content = Tr("CustomWidget.Renderer.Ai.VerifyingButton", flyoutCulture);
                 try
                 {
-                    AiProviderCredentialEntry? latestExisting = CustomWidgetAiMonitorSource.Shared.GetEffectiveCredential(activeTabId);
+                    AiProviderCredentialEntry? latestExisting = CustomWidgetAiMonitorSource.Shared.GetEffectiveCredential(boundTabId);
                     string customEndpoint = endpointBox is not null
                         ? endpointBox.Text.Trim()
                         : (latestExisting?.CustomEndpoint ?? string.Empty);
                     AiProviderCredentialEntry updated = latestExisting is not null
                         ? latestExisting with { ApiKey = effectiveKey, Region = selectedRegion, CustomEndpoint = customEndpoint, Enabled = true }
-                        : new AiProviderCredentialEntry(activeTabId, effectiveKey, selectedRegion, "pro", Enabled: true, CustomEndpoint: customEndpoint);
+                        : new AiProviderCredentialEntry(boundTabId, effectiveKey, selectedRegion, "pro", Enabled: true, CustomEndpoint: customEndpoint);
                     var (ok, msg) = await _viewModel.SaveAndTestAiCredentialAsync(updated);
+                    if (!string.Equals(activeTabId, boundTabId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
 
                     feedbackTb.Text = msg;
                     feedbackTb.Foreground = ResolveForegroundBrush(ok ? "emerald" : "warning");
@@ -744,7 +750,7 @@ public sealed partial class CustomWidgetNativeRenderer
                     if (ok)
                     {
                         pwdBox.Password = string.Empty;
-                        existing = CustomWidgetAiMonitorSource.Shared.GetEffectiveCredential(activeTabId);
+                        existing = CustomWidgetAiMonitorSource.Shared.GetEffectiveCredential(boundTabId);
                         RebuildProviderBody();
                         return;
                     }
@@ -784,8 +790,11 @@ public sealed partial class CustomWidgetNativeRenderer
                 StyleStandardCommandButton(clearBtn, CornerMedium);
                 clearBtn.Click += (_, _) => FireAndForgetSafeUi(async () =>
                 {
-                    await _viewModel.RemoveAiCredentialAsync(activeTabId);
-                    RebuildProviderBody();
+                    await _viewModel.RemoveAiCredentialAsync(boundTabId);
+                    if (string.Equals(activeTabId, boundTabId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        RebuildProviderBody();
+                    }
                 });
                 Grid.SetColumn(clearBtn, 1);
                 actionGrid.Children.Add(clearBtn);
@@ -812,13 +821,16 @@ public sealed partial class CustomWidgetNativeRenderer
                     toggleCloudVisBtn.IsEnabled = false;
                     try
                     {
-                        await CustomWidgetAiMonitorSource.Shared.SetProviderMonitorEnabledAsync(activeTabId, !isCloudEnabled);
+                        await CustomWidgetAiMonitorSource.Shared.SetProviderMonitorEnabledAsync(boundTabId, !isCloudEnabled);
                     }
                     finally
                     {
                         toggleCloudVisBtn.IsEnabled = true;
                     }
-                    RebuildProviderBody();
+                    if (string.Equals(activeTabId, boundTabId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        RebuildProviderBody();
+                    }
                 });
                 bodyHost.Children.Add(toggleCloudVisBtn);
             }

@@ -128,6 +128,10 @@ public static class CustomWidgetCompilerPipeline
                 cultureName: cultureName,
                 logicJs: workingLogicJs);
 
+            string rootPath = string.IsNullOrWhiteSpace(validation.Manifest.View.Id)
+                ? "$.root"
+                : $"#{validation.Manifest.View.Id}";
+
             foreach (CustomWidgetHealthIssue issue in healthReport.Issues)
             {
                 string key = $"{issue.Code}|{issue.Message}";
@@ -136,7 +140,7 @@ public static class CustomWidgetCompilerPipeline
                     softDiagnostics.Add(new CustomWidgetCompilerDiagnostic(
                         Code: issue.Code,
                         Message: issue.Message,
-                        Path: "$.view",
+                        Path: rootPath,
                         SuggestedPrompt: issue.SuggestedPrompt,
                         IsBlocking: false));
                 }
@@ -150,7 +154,7 @@ public static class CustomWidgetCompilerPipeline
                     softDiagnostics.Add(new CustomWidgetCompilerDiagnostic(
                         Code: dead.Code,
                         Message: dead.Message,
-                        Path: "$.view",
+                        Path: rootPath,
                         SuggestedPrompt: dead.SuggestedPrompt,
                         IsBlocking: false));
                 }

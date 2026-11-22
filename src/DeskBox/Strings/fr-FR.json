@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "Confidentialité et sécurité",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "Respecter les marqueurs de confidentialité système",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "Ignore automatiquement les mots de passe marqués comme exclus de l’historique",
+  "Settings.Clipboard.FetchUrlTitles.Title": "Récupérer le titre des liens copiés",
+  "Settings.Clipboard.FetchUrlTitles.Description": "Lorsque cette option est activée, récupère en arrière-plan le titre des pages web publiques (les liens contenant des paramètres de connexion, de vérification ou signés sont ignorés)",
   "Settings.Clipboard.SecretProtection.Title": "Protection des clés API et jetons",
   "Settings.Clipboard.SecretProtection.Description": "Traitement appliqué aux textes ressemblant à des clés API, jetons ou clés privées",
   "Settings.Clipboard.SecretProtection.Mask": "Masquer l’aperçu et autoriser la copie",

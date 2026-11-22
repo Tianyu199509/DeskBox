@@ -582,18 +582,14 @@ public static class CustomWidgetManifestMetadataStamper
                 }
             }
 
-            if (doc.RootElement.TryGetProperty("origin", out JsonElement originEl) &&
-                originEl.ValueKind == JsonValueKind.String)
+            if (!doc.RootElement.TryGetProperty("origin", out JsonElement originEl) ||
+                originEl.ValueKind != JsonValueKind.String)
             {
-                string? origin = originEl.GetString()?.Trim();
-                if (!string.IsNullOrEmpty(origin) &&
-                    !string.Equals(origin, CustomWidgetOriginKinds.Official, StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
+                return false;
             }
 
-            return true;
+            string? origin = originEl.GetString()?.Trim();
+            return string.Equals(origin, CustomWidgetOriginKinds.Official, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

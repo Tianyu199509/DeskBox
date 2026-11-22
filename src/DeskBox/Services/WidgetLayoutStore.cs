@@ -110,8 +110,6 @@ public sealed class WidgetLayoutStore
     /// </summary>
     internal static WidgetLayoutDocument ParseLayoutDocument(string json)
     {
-        bool hasNewerSchema = ResilientJsonStore.TryReadSchemaVersion(json, out int rawSchemaVersion) &&
-            rawSchemaVersion > CurrentSchemaVersion;
         try
         {
             WidgetLayoutDocument? document = JsonSerializer.Deserialize(
@@ -122,18 +120,21 @@ public sealed class WidgetLayoutStore
                 return document;
             }
 
-            if (hasNewerSchema)
+            if (ResilientJsonStore.TryReadSchemaVersion(json, out int emptyRawSchemaVersion) &&
+                emptyRawSchemaVersion > CurrentSchemaVersion)
             {
                 return new WidgetLayoutDocument
                 {
-                    SchemaVersion = rawSchemaVersion,
+                    SchemaVersion = emptyRawSchemaVersion,
                     Layout = new WidgetLayoutSettingsSlice()
                 };
             }
 
             throw new InvalidDataException("widget-layout.json is structurally empty.");
         }
-        catch (JsonException) when (hasNewerSchema)
+        catch (JsonException) when (
+            ResilientJsonStore.TryReadSchemaVersion(json, out int rawSchemaVersion) &&
+            rawSchemaVersion > CurrentSchemaVersion)
         {
             // A future build may add new enum values (e.g. a new WidgetKind).
             // Return a read-only placeholder stamped with the future schemaVersion
@@ -194,7 +195,7 @@ public sealed class WidgetLayoutStore
                 // An older stamp is lifted to current on the next save; a
                 // NEWER one is left alone entirely (see CanWrite).
                 NeedsPersist = NormalizeStructure(layout) ||
-                             result.Value.SchemaVersion < CurrentSchemaVersion
+                               result.Value.SchemaVersion < CurrentSchemaVersion
             };
         }
 

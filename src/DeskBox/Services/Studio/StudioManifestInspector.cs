@@ -54,65 +54,67 @@ internal static class StudioManifestInspector
         return i18nKey.Length > 0;
     }
 
-    internal static bool TryGetParentNodePath(string? nodePath, out string parentPath)
+    internal static bool TryGetParentNodePath(JsonObject rootObj, string? nodePath, out string parentPath)
     {
         parentPath = string.Empty;
-        if (string.IsNullOrWhiteSpace(nodePath))
+        if (rootObj is null || string.IsNullOrWhiteSpace(nodePath))
         {
             return false;
         }
 
         string trimmed = nodePath.Trim();
-        if (string.Equals(trimmed, "$", StringComparison.Ordinal) ||
-            string.Equals(trimmed, "$.view", StringComparison.Ordinal))
+        if (trimmed.StartsWith('#') && trimmed.Length > 1)
         {
-            return false;
-        }
-
-        // Keep popover canvas rooted at its popover root ($.popovers.<key> or $.popovers[i])
-        if (trimmed.StartsWith("$.popovers", StringComparison.Ordinal))
-        {
-            string rest = trimmed["$.popovers".Length..];
-            int dotAfterPop = rest.IndexOf('.');
-            if (dotAfterPop < 0)
+            string targetId = trimmed[1..].Trim();
+            if (targetId.Length == 0 || rootObj["elements"] is not JsonObject elementsObj)
             {
                 return false;
             }
-        }
 
-        const string itemTplSuffix = ".itemTemplate";
-        if (trimmed.EndsWith(itemTplSuffix, StringComparison.Ordinal))
-        {
-            parentPath = trimmed[..^itemTplSuffix.Length];
-            return !string.IsNullOrEmpty(parentPath) && !string.Equals(parentPath, "$", StringComparison.Ordinal);
-        }
-
-        const string paneSuffix = ".pane";
-        if (trimmed.EndsWith(paneSuffix, StringComparison.Ordinal))
-        {
-            parentPath = trimmed[..^paneSuffix.Length];
-            return !string.IsNullOrEmpty(parentPath) && !string.Equals(parentPath, "$", StringComparison.Ordinal);
-        }
-
-        const string contentSuffix = ".content";
-        if (trimmed.EndsWith(contentSuffix, StringComparison.Ordinal))
-        {
-            parentPath = trimmed[..^contentSuffix.Length];
-            return !string.IsNullOrEmpty(parentPath) && !string.Equals(parentPath, "$", StringComparison.Ordinal);
-        }
-
-        if (trimmed.EndsWith(']'))
-        {
-            int openBracket = trimmed.LastIndexOf('[');
-            if (openBracket > 0)
+            foreach ((string candidateId, JsonNode? elemNode) in elementsObj)
             {
-                string beforeBracket = trimmed[..openBracket];
-                foreach (string arrayProp in new[] { ".children", ".hoverActions" })
+                if (elemNode is not JsonObject elemObj ||
+                    string.Equals(candidateId, targetId, StringComparison.Ordinal))
                 {
-                    if (beforeBracket.EndsWith(arrayProp, StringComparison.Ordinal))
+                    continue;
+                }
+
+                if (ElementDirectlyReferencesChild(elemObj, targetId))
+                {
+                    parentPath = "#" + candidateId;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
+    private static bool ElementDirectlyReferencesChild(JsonObject elemObj, string childId)
+    {
+        foreach (string singleSlot in new[] { "child", "itemTemplate", "pane", "actionButton" })
+        {
+            if (elemObj[singleSlot] is JsonValue sv &&
+                sv.TryGetValue(out string? refId) &&
+                string.Equals(refId?.Trim(), childId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        foreach (string arraySlot in new[] { "children", "hoverActions" })
+        {
+            if (elemObj[arraySlot] is JsonArray arr)
+            {
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    if (arr[i] is JsonValue av &&
+                        av.TryGetValue(out string? refId) &&
+                        string.Equals(refId?.Trim(), childId, StringComparison.Ordinal))
                     {
-                        parentPath = beforeBracket[..^arrayProp.Length];
-                        return !string.IsNullOrEmpty(parentPath) && !string.Equals(parentPath, "$", StringComparison.Ordinal);
+                        return true;
                     }
                 }
             }
@@ -130,6 +132,21 @@ internal static class StudioManifestInspector
         }
 
         string path = nodePath.Trim();
+        if (path.StartsWith('#') && path.Length > 1)
+        {
+            string elemId = path[1..].Trim();
+            if (elemId.Length > 0 &&
+                rootObj["elements"] is JsonObject elementsObj &&
+                elementsObj.TryGetPropertyValue(elemId, out JsonNode? elemNode) &&
+                elemNode is JsonObject elemObj)
+            {
+                targetObj = elemObj;
+                return true;
+            }
+
+            return false;
+        }
+
         if (!path.StartsWith("$.", StringComparison.Ordinal))
         {
             return false;

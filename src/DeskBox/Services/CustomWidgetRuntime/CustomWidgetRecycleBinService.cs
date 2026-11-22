@@ -92,6 +92,21 @@ internal sealed class CustomWidgetRecycleBinService
         }
     }
 
+    public bool TryGetLiveSubscribedItemCount(out long count)
+    {
+        lock (_gate)
+        {
+            if (_subscriptions.Count > 0 && _hasQueriedOnce)
+            {
+                count = _current.ItemCount;
+                return true;
+            }
+        }
+
+        count = 0;
+        return false;
+    }
+
     public IDisposable Subscribe(
         Action<CustomWidgetRecycleBinState> onStateChanged,
         DispatcherQueue? dispatcherQueue = null,

@@ -108,7 +108,7 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
     public bool IsMaskedSecret =>
         _model.Kind == ClipboardItemKind.Text &&
         _model.IsSensitive &&
-        !string.Equals(_secretProtectionMode, ClipboardSettingsSlice.SecretProtectionNone, StringComparison.OrdinalIgnoreCase) && !string.Equals(_secretProtectionMode, "Off", StringComparison.OrdinalIgnoreCase);
+        !string.Equals(_secretProtectionMode, ClipboardSettingsSlice.SecretProtectionNone, StringComparison.OrdinalIgnoreCase);
 
     public double TextSize => _textSize;
 
@@ -1071,22 +1071,6 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
         return $"{mb:0.0} MB";
     }
 
-    private static bool IsPreviewableImageExtension(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        string ext = Path.GetExtension(path);
-        return ext.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
-               ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
-               ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-               ext.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
-               ext.Equals(".gif", StringComparison.OrdinalIgnoreCase) ||
-               ext.Equals(".webp", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static SolidColorBrush? TryCreateColorBrush(string? normalizedArgbHex)
     {
         return TryParseColorHex(normalizedArgbHex, out Color color)
@@ -1187,7 +1171,6 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
     private CancellationTokenSource? _searchDebounceCts;
     private const int SearchInputDebounceMs = 35;
     private bool _isSearchOpen;
-    private bool _useShortFilterLabels;
     private bool _isInitialized;
     private bool _isViewAttached = true;
     private bool _isDirty;
@@ -1507,12 +1490,12 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
             ? 30
             : 0;
 
-    public string FilterAllText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.AllShort" : "Clipboard.Filter.All");
-    public string FilterTextText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.TextShort" : "Clipboard.Filter.Text");
-    public string FilterImagesText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.ImagesShort" : "Clipboard.Filter.Images");
-    public string FilterLinksText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.LinksShort" : "Clipboard.Filter.Links");
-    public string FilterFilesText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.FilesShort" : "Clipboard.Filter.Files");
-    public string FilterPinnedText => _localizationService.T(_useShortFilterLabels ? "Clipboard.Filter.PinnedShort" : "Clipboard.Filter.Pinned");
+    public string FilterAllText => _localizationService.T("Clipboard.Filter.All");
+    public string FilterTextText => _localizationService.T("Clipboard.Filter.Text");
+    public string FilterImagesText => _localizationService.T("Clipboard.Filter.Images");
+    public string FilterLinksText => _localizationService.T("Clipboard.Filter.Links");
+    public string FilterFilesText => _localizationService.T("Clipboard.Filter.Files");
+    public string FilterPinnedText => _localizationService.T("Clipboard.Filter.Pinned");
 
     public string FilterAllTooltip => _localizationService.T("Clipboard.Filter.All");
     public string FilterTextTooltip => _localizationService.T("Clipboard.Filter.Text");
@@ -1608,32 +1591,8 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         RebuildVisibleItems();
     }
 
-    public void SetCompactFilterLabels(bool useShortLabels)
-    {
-        if (_useShortFilterLabels == useShortLabels)
-        {
-            return;
-        }
-
-        _useShortFilterLabels = useShortLabels;
-        NotifyLocalizedStringsChanged();
-    }
-
-    public void UpdateResponsiveFilterChrome(double rootWidth)
-    {
-        if (rootWidth <= 0)
-        {
-            return;
-        }
-
-        // The Fluent 2 filter strip scrolls horizontally, so tabs never force-collapse
-        // based on width; user-chosen TabDisplayMode controls icon/text visibility.
-        if (_useShortFilterLabels)
-        {
-            _useShortFilterLabels = false;
-            NotifyLocalizedStringsChanged();
-        }
-    }
+    public void UpdateResponsiveFilterChrome(double rootWidth) =>
+        _ = rootWidth;
 
     public void SetTabDisplayMode(string tabDisplayMode)
     {
@@ -2269,7 +2228,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         ClipboardHistoryItem latest = items[0];
         string latestSummary;
         if (latest.IsSensitive &&
-            !string.Equals(_settingsService.Settings.Clipboard.ClipboardSensitiveProtectionMode, ClipboardSettingsSlice.SecretProtectionNone, StringComparison.OrdinalIgnoreCase) && !string.Equals(_settingsService.Settings.Clipboard.ClipboardSensitiveProtectionMode, "Off", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(_settingsService.Settings.Clipboard.ClipboardSensitiveProtectionMode, ClipboardSettingsSlice.SecretProtectionNone, StringComparison.OrdinalIgnoreCase))
         {
             latestSummary = ClipboardClassifier.MaskSecretForDisplay(latest.PlainText ?? latest.SummaryText);
         }
@@ -2340,9 +2299,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         bool isCompactView = IsCompactViewMode;
         string density = slice.ClipboardCardDensity;
         bool isCompactDensity = string.Equals(density, ClipboardSettingsSlice.DensityCompact, StringComparison.OrdinalIgnoreCase);
-        bool isComfortable =
-            string.Equals(density, ClipboardSettingsSlice.DensityRelaxed, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(density, "Comfortable", StringComparison.OrdinalIgnoreCase);
+        bool isComfortable = string.Equals(density, ClipboardSettingsSlice.DensityRelaxed, StringComparison.OrdinalIgnoreCase);
 
         int previewLines = isCompactView ? 1 : (isCompactDensity ? 1 : isComfortable ? 4 : 2);
         Thickness cardPadding = isCompactView
@@ -2541,56 +2498,110 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         ObservableCollection<ClipboardItemViewModel> target,
         IReadOnlyList<ClipboardItemViewModel> desired)
     {
-        if (target.Count == 0 && desired.Count == 0)
+        int tCount = target.Count;
+        int dCount = desired.Count;
+        if (tCount == 0 && dCount == 0)
         {
             return;
         }
 
-        if (desired.Count == 0)
+        if (dCount == 0)
         {
             target.Clear();
             return;
         }
 
-        // Fast common paths (prepend 1 item, bump 1 item to top, remove 1 item, or identical list)
-        if (target.Count == desired.Count)
+        if (tCount == 0)
         {
-            bool identical = true;
-            for (int i = 0; i < desired.Count; i++)
+            for (int i = 0; i < dCount; i++)
             {
-                if (!ReferenceEquals(target[i], desired[i]))
+                target.Add(desired[i]);
+            }
+
+            return;
+        }
+
+        // Skip unchanged leading prefix (including pinned items at indices 0..P-1).
+        int minCount = Math.Min(tCount, dCount);
+        int prefix = 0;
+        while (prefix < minCount && ReferenceEquals(target[prefix], desired[prefix]))
+        {
+            prefix++;
+        }
+
+        if (prefix == tCount && tCount == dCount)
+        {
+            return;
+        }
+
+        // Trim unchanged common suffix so single inserts, deletes, capacity evictions, and
+        // pin/unpin moves operate only on the minimal changed middle window [prefix..end).
+        int tEnd = tCount;
+        int dEnd = dCount;
+        while (tEnd > prefix && dEnd > prefix && ReferenceEquals(target[tEnd - 1], desired[dEnd - 1]))
+        {
+            tEnd--;
+            dEnd--;
+        }
+
+        // Single-item downward move (e.g. unpinned item returning to chronological order).
+        if (tEnd - prefix == dEnd - prefix && tEnd - prefix >= 2)
+        {
+            bool singleDownMove = ReferenceEquals(target[prefix], desired[dEnd - 1]);
+            for (int k = 0; singleDownMove && k < dEnd - 1 - prefix; k++)
+            {
+                if (!ReferenceEquals(target[prefix + 1 + k], desired[prefix + k]))
                 {
-                    identical = false;
-                    break;
+                    singleDownMove = false;
                 }
             }
 
-            if (identical)
+            if (singleDownMove)
             {
+                target.Move(prefix, dEnd - 1);
                 return;
             }
         }
 
-        if (Math.Abs(target.Count - desired.Count) > 8 || desired.Count > 120)
+        // Bulk reset when switching tabs/filters or applying large batch edits.
+        if (Math.Abs(tEnd - dEnd) > 8)
         {
-            target.Clear();
-            foreach (ClipboardItemViewModel item in desired)
-            {
-                target.Add(item);
-            }
-
+            ResetObservableCollection(target, desired);
             return;
         }
 
-        for (int i = target.Count - 1; i >= 0; i--)
+        var desiredWindow = new HashSet<ClipboardItemViewModel>(Math.Max(0, dEnd - prefix), ReferenceEqualityComparer.Instance);
+        for (int i = prefix; i < dEnd; i++)
         {
-            if (!desired.Contains(target[i]))
+            desiredWindow.Add(desired[i]);
+        }
+
+        int missingCount = 0;
+        for (int i = prefix; i < tEnd; i++)
+        {
+            if (!desiredWindow.Contains(target[i]))
             {
-                target.RemoveAt(i);
+                missingCount++;
+                if (missingCount > 12)
+                {
+                    ResetObservableCollection(target, desired);
+                    return;
+                }
             }
         }
 
-        for (int i = 0; i < desired.Count; i++)
+        if (missingCount > 0)
+        {
+            for (int i = tEnd - 1; i >= prefix; i--)
+            {
+                if (!desiredWindow.Contains(target[i]))
+                {
+                    target.RemoveAt(i);
+                }
+            }
+        }
+
+        for (int i = prefix; i < dEnd; i++)
         {
             ClipboardItemViewModel item = desired[i];
             if (i < target.Count && ReferenceEquals(target[i], item))
@@ -2598,7 +2609,16 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
                 continue;
             }
 
-            int existingIndex = target.IndexOf(item);
+            int existingIndex = -1;
+            for (int j = i + 1; j < target.Count - (tCount - tEnd); j++)
+            {
+                if (ReferenceEquals(target[j], item))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
             if (existingIndex >= 0)
             {
                 target.Move(existingIndex, i);
@@ -2607,6 +2627,17 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
             {
                 target.Insert(i, item);
             }
+        }
+    }
+
+    private static void ResetObservableCollection(
+        ObservableCollection<ClipboardItemViewModel> target,
+        IReadOnlyList<ClipboardItemViewModel> desired)
+    {
+        target.Clear();
+        for (int i = 0; i < desired.Count; i++)
+        {
+            target.Add(desired[i]);
         }
     }
 

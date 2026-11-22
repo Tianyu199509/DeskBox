@@ -83,7 +83,7 @@ $rpcPayload = @(
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}',
     '{"jsonrpc":"2.0","method":"notifications/initialized"}',
     '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
-    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"deskbox_validate_manifest","arguments":{"manifestJson":"{\"manifestVersion\":1,\"id\":\"custom.aot-smoke\",\"name\":\"AOT Smoke\",\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}"}}}'
+    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"deskbox_validate_manifest","arguments":{"manifestJson":"{\"schemaVersion\":1,\"id\":\"custom.aot-smoke\",\"name\":\"AOT Smoke\",\"root\":\"r\",\"elements\":{\"r\":{\"type\":\"Text\",\"text\":\"OK\"}}}"}}}'
 ) -join "`n"
 $rpcPayload += "`n"
 

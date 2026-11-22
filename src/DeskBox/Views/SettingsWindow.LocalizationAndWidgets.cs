@@ -178,7 +178,6 @@ public sealed partial class SettingsWindow
                 entries.Any(entry =>
                     !_featureWidgetRows.TryGetValue(entry.Kind, out var row) ||
                     row.HasSettingsPage != entry.HasSettingsPage ||
-                    row.HasReset ||
                     row.HasToggle != entry.ShowToggle);
 
             if (requiresRebuild)
@@ -268,8 +267,6 @@ public sealed partial class SettingsWindow
             Spacing = 8
         };
 
-        Button? resetButton = null;
-
         ToggleSwitch? toggle = null;
         if (entry.ShowToggle)
         {
@@ -298,10 +295,8 @@ public sealed partial class SettingsWindow
             titleIcon,
             titleText,
             descriptionText,
-            resetButton,
             toggle,
             entry.HasSettingsPage,
-            false,
             entry.ShowToggle);
     }
 
@@ -313,12 +308,6 @@ public sealed partial class SettingsWindow
         row.TitleIcon.Glyph = entry.Glyph;
         row.TitleIcon.IconKind = WidgetTitleIconKindNames.FromWidgetKind(entry.Kind);
         row.TitleIcon.LabelText = entry.Title;
-
-        if (row.ResetButton is not null)
-        {
-            row.ResetButton.Tag = entry.Kind;
-            ToolTipService.SetToolTip(row.ResetButton, _localizationService.T("Settings.FeatureWidgets.ResetTooltip"));
-        }
 
         if (row.Toggle is not null)
         {
@@ -336,11 +325,6 @@ public sealed partial class SettingsWindow
         {
             row.Card.Click -= FeatureWidgetSettingsButton_Click;
 
-            if (row.ResetButton is not null)
-            {
-                row.ResetButton.Click -= FeatureWidgetResetButton_Click;
-            }
-
             if (row.Toggle is not null)
             {
                 row.Toggle.Toggled -= FeatureWidgetToggle_Toggled;
@@ -356,28 +340,6 @@ public sealed partial class SettingsWindow
         if (sender is SettingsCard { Tag: string sectionTag })
         {
             NavigateToSettingsSection(sectionTag);
-        }
-    }
-
-    private async void FeatureWidgetResetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: WidgetKind kind } button)
-        {
-            if (!await ConfirmFeatureWidgetResetAsync(kind))
-            {
-                return;
-            }
-
-            button.IsEnabled = false;
-            try
-            {
-                await ViewModel.ResetFeatureWidgetAsync(kind);
-                RefreshFeatureWidgetList();
-            }
-            finally
-            {
-                button.IsEnabled = true;
-            }
         }
     }
 

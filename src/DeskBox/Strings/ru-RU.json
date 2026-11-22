@@ -3250,6 +3250,8 @@
   "Settings.Clipboard.Group.Privacy": "Конфиденциальность и защита",
   "Settings.Clipboard.IgnorePrivacyFormats.Title": "Учитывать системные метки приватности",
   "Settings.Clipboard.IgnorePrivacyFormats.Description": "Автоматически игнорировать пароли и данные менеджеров паролей, помеченные как приватные",
+  "Settings.Clipboard.FetchUrlTitles.Title": "Загружать заголовки страниц для скопированных ссылок",
+  "Settings.Clipboard.FetchUrlTitles.Description": "При включении запрашивает заголовки публичных веб-страниц в фоне (ссылки с параметрами входа, подтверждения или подписи пропускаются)",
   "Settings.Clipboard.SecretProtection.Title": "Защита API-ключей и токенов",
   "Settings.Clipboard.SecretProtection.Description": "Обработка текста, похожего на API-ключи, токены доступа или приватные ключи",
   "Settings.Clipboard.SecretProtection.Mask": "Маскировать предпросмотр и разрешать копирование",

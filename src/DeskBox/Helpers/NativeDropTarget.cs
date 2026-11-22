@@ -2484,15 +2484,6 @@ public sealed partial class NativeDropTarget : IDisposable
         }
     }
 
-    internal static IReadOnlyList<string> ExtractDeferredWorkerFiles(
-        NativeOleDataObject dataObject) =>
-        ExtractDeferredWorkerFilesWithOrigins(dataObject, out _);
-
-    internal static IReadOnlyList<string> ExtractDeferredWorkerFilesWithOrigins(
-        NativeOleDataObject dataObject,
-        out IReadOnlyList<DroppedItemOriginKind> itemOrigins) =>
-        ExtractDeferredWorkerFilesWithOrigins(dataObject, out itemOrigins, out _);
-
     internal static IReadOnlyList<string> ExtractDeferredWorkerFilesWithOrigins(
         NativeOleDataObject dataObject,
         out IReadOnlyList<DroppedItemOriginKind> itemOrigins,

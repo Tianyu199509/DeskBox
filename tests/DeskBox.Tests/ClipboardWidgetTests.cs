@@ -1255,9 +1255,8 @@ public sealed class ClipboardWidgetTests
             var settingsService = new SettingsService();
             Assert.False(settingsService.Settings.Clipboard.ClipboardMoveToTopOnReuse);
 
-            // Schema v15 -> v16 migration flips legacy default true -> false
+            // Schema v15 -> v18 upgrade preserves default ClipboardMoveToTopOnReuse == false
             var legacyV15 = new AppSettings { SchemaVersion = 15 };
-            legacyV15.Clipboard.ClipboardMoveToTopOnReuse = true;
             var (migrated, applied) = new SettingsMigrationPipeline().RunMigrationsOnCopy(legacyV15);
             Assert.True(applied);
             Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, migrated.SchemaVersion);

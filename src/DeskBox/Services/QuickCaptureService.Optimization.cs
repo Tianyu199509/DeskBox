@@ -573,4 +573,76 @@ public sealed partial class QuickCaptureService
 
         return offset == bytes.Length ? bytes : bytes[..offset];
     }
+
+    /// <summary>
+    /// Stateless 128-byte tail probe for startup legacy migration: <see cref="QuickCaptureStoreData"/>
+    /// always serializes <c>recentItems</c> as its final property (<c>..."recentItems":[]}</c>).
+    /// When the tail confirms an empty <c>recentItems</c> array, cold startup skips hydrating notes;
+    /// otherwise (including backups, WebDAV restores, or torn files) it falls back to full load.
+    /// </summary>
+    private async Task<bool> HasLegacyRecentItemsOnDiskAsync(CancellationToken cancellationToken)
+    {
+        string storePath = _store.StorePath;
+        if (!File.Exists(storePath))
+        {
+            return File.Exists(storePath + ".bak");
+        }
+
+        try
+        {
+            await using var fs = new FileStream(
+                storePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 256,
+                FileOptions.Asynchronous);
+
+            long length = fs.Length;
+            if (length <= 0)
+            {
+                return File.Exists(storePath + ".bak");
+            }
+
+            int tailSize = (int)Math.Min(128, length);
+            fs.Seek(length - tailSize, SeekOrigin.Begin);
+            byte[] tail = new byte[tailSize];
+            int read = await fs.ReadAtLeastAsync(tail, tailSize, throwOnEndOfStream: false, cancellationToken)
+                .ConfigureAwait(false);
+            return !TailEndsWithEmptyRecentItems(tail.AsSpan(0, read));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool TailEndsWithEmptyRecentItems(ReadOnlySpan<byte> tail)
+    {
+        // Trim trailing ASCII whitespace, then expect: '}' ']' '[' ':' '"recentItems"'
+        static ReadOnlySpan<byte> TrimEndWs(ReadOnlySpan<byte> s)
+        {
+            int end = s.Length;
+            while (end > 0 && s[end - 1] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')
+            {
+                end--;
+            }
+            return s[..end];
+        }
+
+        tail = TrimEndWs(tail);
+        if (tail.IsEmpty || tail[^1] != (byte)'}') return false;
+        tail = TrimEndWs(tail[..^1]);
+        if (tail.IsEmpty || tail[^1] != (byte)']') return false;
+        tail = TrimEndWs(tail[..^1]);
+        if (tail.IsEmpty || tail[^1] != (byte)'[') return false;
+        tail = TrimEndWs(tail[..^1]);
+        if (tail.IsEmpty || tail[^1] != (byte)':') return false;
+        tail = TrimEndWs(tail[..^1]);
+        return tail.EndsWith("\"recentItems\""u8);
+    }
 }

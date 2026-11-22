@@ -106,6 +106,21 @@ public sealed record CustomWidgetSystemControlOutcome(
     bool UsedSettingsFallback,
     string? FeedbackMessage);
 
+[Flags]
+internal enum DeviceStateQueryFields
+{
+    None = 0,
+    Volume = 1 << 0,
+    Brightness = 1 << 1,
+    AudioDevice = 1 << 2,
+    Radios = 1 << 3,
+    Media = 1 << 4,
+    RecycleBin = 1 << 5,
+    Theme = 1 << 6,
+    KeepAwake = 1 << 7,
+    All = Volume | Brightness | AudioDevice | Radios | Media | RecycleBin | Theme | KeepAwake
+}
+
 /// <summary>
 /// Safe, NativeAOT-compatible system control &amp; live device state bridge for Custom Widgets
 /// (<c>deviceState</c> source, <c>system.control</c>, and <c>system.openSetting</c> actions).
@@ -144,17 +159,35 @@ public sealed class CustomWidgetSystemControlService
             ["windowsupdate"] = "ms-settings:windowsupdate"
         };
 
+    private const long RadiosCacheTtlMs = 15_000L;
+    private const long EmptyMediaBackoffTtlMs = 15_000L;
+    private const long RecycleBinFallbackCacheTtlMs = 60_000L;
+
     private readonly MusicVolumeService _volumeService = new();
-    private readonly SettingsService? _settingsService;
+    private SettingsService? _settingsService;
+    private readonly object _subQueryCacheGate = new();
     private volatile bool _keepAwakeActive;
     private volatile bool _softwareMutedEstimate;
     private string _cachedAudioRenderId = string.Empty;
     private string _cachedAudioDeviceName = string.Empty;
+    private (bool WifiAvail, bool WifiOn, bool BtAvail, bool BtOn) _cachedRadios;
+    private long _cachedRadiosExpiresTick64;
+    private long _emptyMediaBackoffUntilTick64;
+    private long _cachedRecycleBinItems;
+    private long _cachedRecycleBinExpiresTick64;
     private CustomWidgetDeviceStateSnapshot _latest = CustomWidgetDeviceStateSnapshot.Empty;
 
     public CustomWidgetSystemControlService(SettingsService? settingsService = null)
     {
         _settingsService = settingsService;
+    }
+
+    internal void AttachFallbackSettingsService(SettingsService? settingsService)
+    {
+        if (settingsService is not null)
+        {
+            Interlocked.CompareExchange(ref _settingsService, settingsService, null);
+        }
     }
 
     public CustomWidgetDeviceStateSnapshot Latest => _latest;
@@ -166,74 +199,139 @@ public sealed class CustomWidgetSystemControlService
         (SafeSystemSettingsUris.ContainsKey(key.Trim()) ||
          string.Equals(key.Trim(), "taskmgr", StringComparison.OrdinalIgnoreCase));
 
-    public async Task<CustomWidgetDeviceStateSnapshot> RefreshSnapshotAsync(CancellationToken cancellationToken = default)
+    public Task<CustomWidgetDeviceStateSnapshot> RefreshSnapshotAsync(CancellationToken cancellationToken = default) =>
+        RefreshSnapshotAsync(DeviceStateQueryFields.All, forceUncached: false, cancellationToken);
+
+    internal async Task<CustomWidgetDeviceStateSnapshot> RefreshSnapshotAsync(
+        DeviceStateQueryFields fields,
+        bool forceUncached = false,
+        CancellationToken cancellationToken = default)
     {
-        double volRatio = 0.5;
-        try
+        cancellationToken.ThrowIfCancellationRequested();
+
+        int volPct = 50;
+        bool isMuted = false;
+        if ((fields & DeviceStateQueryFields.Volume) != 0)
         {
-            volRatio = await _volumeService.GetSystemMasterVolumeAsync().ConfigureAwait(false);
-        }
-        catch
-        {
+            double volRatio = _latest.VolumePercent / 100.0;
+            try
+            {
+                volRatio = await _volumeService.GetSystemMasterVolumeAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+
+            volPct = (int)Math.Clamp(Math.Round(volRatio * 100.0), 0, 100);
+            isMuted = _softwareMutedEstimate || volPct == 0;
         }
 
-        int volPct = (int)Math.Clamp(Math.Round(volRatio * 100.0), 0, 100);
-        bool brightnessOk = CustomWidgetSystemControlInterop.TryGetDisplayBrightnessPercent(out int brightnessPct);
-
-        bool netUp = false;
-        try
+        int queriedBrightness = 80;
+        bool brightnessOk = false;
+        if ((fields & DeviceStateQueryFields.Brightness) != 0)
         {
-            netUp = NetworkInterface.GetIsNetworkAvailable();
-        }
-        catch
-        {
+            (brightnessOk, queriedBrightness) = await Task.Run(() =>
+            {
+                bool ok = CustomWidgetSystemControlInterop.TryGetDisplayBrightnessPercent(
+                    out int pct,
+                    bypassCache: forceUncached);
+                return (ok, pct);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
-        string audioName = await QueryDefaultAudioDeviceNameSafeAsync().ConfigureAwait(false);
-        (bool wifiAvail, bool wifiOn, bool btAvail, bool btOn) = await QueryRadiosSafeAsync().ConfigureAwait(false);
-        (bool mediaPlaying, string mediaTitle, string mediaArtist, string mediaCover) =
-            await QueryMediaSessionSafeAsync().ConfigureAwait(false);
+        bool netUp = true;
+        bool wifiAvail = false;
+        bool wifiEnabled = false;
+        bool btAvail = false;
+        bool btOn = false;
+        if ((fields & DeviceStateQueryFields.Radios) != 0)
+        {
+            netUp = false;
+            try
+            {
+                netUp = NetworkInterface.GetIsNetworkAvailable();
+            }
+            catch
+            {
+            }
+
+            (wifiAvail, bool wifiOn, btAvail, btOn) = await QueryRadiosCachedAsync(forceUncached).ConfigureAwait(false);
+            wifiEnabled = wifiAvail ? wifiOn : netUp;
+        }
+
+        string audioName = string.Empty;
+        if ((fields & DeviceStateQueryFields.AudioDevice) != 0)
+        {
+            audioName = await QueryDefaultAudioDeviceNameSafeAsync().ConfigureAwait(false);
+        }
+
+        bool mediaPlaying = false;
+        string mediaTitle = string.Empty;
+        string mediaArtist = string.Empty;
+        string mediaCover = string.Empty;
+        if ((fields & DeviceStateQueryFields.Media) != 0)
+        {
+            (mediaPlaying, mediaTitle, mediaArtist, mediaCover) =
+                await QueryMediaSessionSafeAsync(forceUncached).ConfigureAwait(false);
+        }
 
         long binItems = 0;
-        ShellRecycleBinInterop.TryQueryTotalItemCount(out binItems);
+        if ((fields & DeviceStateQueryFields.RecycleBin) != 0)
+        {
+            binItems = await QueryRecycleBinCountCachedAsync(forceUncached, cancellationToken).ConfigureAwait(false);
+        }
 
         bool isDark = true;
-        try
+        if ((fields & DeviceStateQueryFields.Theme) != 0)
         {
-            string? themePref = _settingsService?.Settings.Core.Theme;
-            isDark = themePref switch
+            try
             {
-                "Light" => false,
-                "Dark" => true,
-                _ => Win32Helper.IsSystemDarkMode()
+                string? themePref = _settingsService?.Settings.Core.Theme;
+                isDark = themePref switch
+                {
+                    "Light" => false,
+                    "Dark" => true,
+                    _ => Win32Helper.IsSystemDarkMode()
+                };
+            }
+            catch
+            {
+            }
+        }
+
+        CustomWidgetDeviceStateSnapshot snapshot;
+        lock (_subQueryCacheGate)
+        {
+            CustomWidgetDeviceStateSnapshot latestNow = _latest;
+            snapshot = new CustomWidgetDeviceStateSnapshot
+            {
+                VolumePercent = (fields & DeviceStateQueryFields.Volume) != 0 ? volPct : latestNow.VolumePercent,
+                IsMuted = (fields & DeviceStateQueryFields.Volume) != 0 ? isMuted : latestNow.IsMuted,
+                BrightnessPercent = (fields & DeviceStateQueryFields.Brightness) != 0
+                    ? (brightnessOk ? queriedBrightness : latestNow.BrightnessPercent)
+                    : latestNow.BrightnessPercent,
+                BrightnessSupported = (fields & DeviceStateQueryFields.Brightness) != 0
+                    ? brightnessOk
+                    : latestNow.BrightnessSupported,
+                AudioDeviceName = (fields & DeviceStateQueryFields.AudioDevice) != 0 ? audioName : latestNow.AudioDeviceName,
+                WifiAvailable = (fields & DeviceStateQueryFields.Radios) != 0 ? wifiAvail : latestNow.WifiAvailable,
+                WifiEnabled = (fields & DeviceStateQueryFields.Radios) != 0 ? wifiEnabled : latestNow.WifiEnabled,
+                BluetoothAvailable = (fields & DeviceStateQueryFields.Radios) != 0 ? btAvail : latestNow.BluetoothAvailable,
+                BluetoothEnabled = (fields & DeviceStateQueryFields.Radios) != 0 ? btOn : latestNow.BluetoothEnabled,
+                NetworkConnected = (fields & DeviceStateQueryFields.Radios) != 0 ? netUp : latestNow.NetworkConnected,
+                KeepAwakeActive = _keepAwakeActive,
+                IsDarkTheme = (fields & DeviceStateQueryFields.Theme) != 0 ? isDark : latestNow.IsDarkTheme,
+                MediaPlaying = (fields & DeviceStateQueryFields.Media) != 0 ? mediaPlaying : latestNow.MediaPlaying,
+                MediaTitle = (fields & DeviceStateQueryFields.Media) != 0 ? mediaTitle : latestNow.MediaTitle,
+                MediaArtist = (fields & DeviceStateQueryFields.Media) != 0 ? mediaArtist : latestNow.MediaArtist,
+                MediaCoverPath = (fields & DeviceStateQueryFields.Media) != 0 ? mediaCover : latestNow.MediaCoverPath,
+                RecycleBinItems = (fields & DeviceStateQueryFields.RecycleBin) != 0
+                    ? Math.Max(0, binItems)
+                    : latestNow.RecycleBinItems
             };
-        }
-        catch
-        {
+            _latest = snapshot;
         }
 
-        var snapshot = new CustomWidgetDeviceStateSnapshot
-        {
-            VolumePercent = volPct,
-            IsMuted = _softwareMutedEstimate || volPct == 0,
-            BrightnessPercent = brightnessOk ? brightnessPct : _latest.BrightnessPercent,
-            BrightnessSupported = brightnessOk,
-            AudioDeviceName = audioName,
-            WifiAvailable = wifiAvail,
-            WifiEnabled = wifiAvail ? wifiOn : netUp,
-            BluetoothAvailable = btAvail,
-            BluetoothEnabled = btOn,
-            NetworkConnected = netUp,
-            KeepAwakeActive = _keepAwakeActive,
-            IsDarkTheme = isDark,
-            MediaPlaying = mediaPlaying,
-            MediaTitle = mediaTitle,
-            MediaArtist = mediaArtist,
-            MediaCoverPath = mediaCover,
-            RecycleBinItems = Math.Max(0, binItems)
-        };
-
-        _latest = snapshot;
         return snapshot;
     }
 
@@ -260,7 +358,7 @@ public sealed class CustomWidgetSystemControlService
                     double clamped = Math.Clamp(pct, 0, 100) / 100.0;
                     bool ok = await _volumeService.TrySetSystemMasterVolumeAsync(clamped).ConfigureAwait(false);
                     if (clamped > 0) _softwareMutedEstimate = false;
-                    await RefreshSnapshotAsync().ConfigureAwait(false);
+                    await RefreshSnapshotAsync(DeviceStateQueryFields.Volume, forceUncached: true).ConfigureAwait(false);
                     return new(ok, false, null);
                 }
                 return new(false, false, null);
@@ -275,7 +373,7 @@ public sealed class CustomWidgetSystemControlService
                 double next = Math.Clamp(cur + (deltaPct / 100.0), 0.0, 1.0);
                 bool ok = await _volumeService.TrySetSystemMasterVolumeAsync(next).ConfigureAwait(false);
                 if (next > 0) _softwareMutedEstimate = false;
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.Volume, forceUncached: true).ConfigureAwait(false);
                 return new(ok, false, $"{Math.Round(next * 100):0}%");
             }
 
@@ -284,7 +382,7 @@ public sealed class CustomWidgetSystemControlService
             {
                 SendVirtualKeyTap(VkVolumeMute);
                 _softwareMutedEstimate = !_softwareMutedEstimate;
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.Volume, forceUncached: true).ConfigureAwait(false);
                 return new(
                     true,
                     false,
@@ -301,7 +399,7 @@ public sealed class CustomWidgetSystemControlService
                     bool applied = await Task.Run(() => CustomWidgetSystemControlInterop.TrySetDisplayBrightnessPercent(target)).ConfigureAwait(false);
                     if (applied)
                     {
-                        await RefreshSnapshotAsync().ConfigureAwait(false);
+                        await RefreshSnapshotAsync(DeviceStateQueryFields.Brightness).ConfigureAwait(false);
                         return new(true, false, null);
                     }
 
@@ -322,7 +420,7 @@ public sealed class CustomWidgetSystemControlService
                 int fallbackBrightness = _latest.BrightnessPercent;
                 (bool applied, int target) = await Task.Run(() =>
                 {
-                    int cur = CustomWidgetSystemControlInterop.TryGetDisplayBrightnessPercent(out int queried)
+                    int cur = CustomWidgetSystemControlInterop.TryGetDisplayBrightnessPercent(out int queried, bypassCache: true)
                         ? queried
                         : fallbackBrightness;
                     int next = Math.Clamp(cur + delta, 0, 100);
@@ -330,7 +428,7 @@ public sealed class CustomWidgetSystemControlService
                 }).ConfigureAwait(false);
                 if (applied)
                 {
-                    await RefreshSnapshotAsync().ConfigureAwait(false);
+                    await RefreshSnapshotAsync(DeviceStateQueryFields.Brightness).ConfigureAwait(false);
                     return new(true, false, $"{target}%");
                 }
 
@@ -358,7 +456,7 @@ public sealed class CustomWidgetSystemControlService
                     SendVirtualKeyTap(VkMediaPlayPause);
                 }
                 await Task.Delay(120).ConfigureAwait(false);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.Media, forceUncached: true).ConfigureAwait(false);
                 return new(true, false, null);
             }
 
@@ -369,7 +467,7 @@ public sealed class CustomWidgetSystemControlService
                     SendVirtualKeyTap(VkMediaNextTrack);
                 }
                 await Task.Delay(120).ConfigureAwait(false);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.Media, forceUncached: true).ConfigureAwait(false);
                 return new(true, false, null);
             }
 
@@ -381,7 +479,7 @@ public sealed class CustomWidgetSystemControlService
                     SendVirtualKeyTap(VkMediaPrevTrack);
                 }
                 await Task.Delay(120).ConfigureAwait(false);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.Media, forceUncached: true).ConfigureAwait(false);
                 return new(true, false, null);
             }
 
@@ -389,7 +487,7 @@ public sealed class CustomWidgetSystemControlService
             case "power.caffeine":
             {
                 SetKeepAwake(!_keepAwakeActive);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.KeepAwake).ConfigureAwait(false);
                 return new(
                     true,
                     false,
@@ -400,7 +498,7 @@ public sealed class CustomWidgetSystemControlService
 
             case "power.keepawakeon":
                 SetKeepAwake(true);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.KeepAwake).ConfigureAwait(false);
                 return new(
                     true,
                     false,
@@ -408,7 +506,7 @@ public sealed class CustomWidgetSystemControlService
 
             case "power.keepawakeoff":
                 SetKeepAwake(false);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                await RefreshSnapshotAsync(DeviceStateQueryFields.KeepAwake).ConfigureAwait(false);
                 return new(
                     true,
                     false,
@@ -422,7 +520,8 @@ public sealed class CustomWidgetSystemControlService
             case "recyclebin.empty":
             {
                 bool ok = ShellRecycleBinInterop.TryEmptyAllBins(ownerHwnd);
-                await RefreshSnapshotAsync().ConfigureAwait(false);
+                CustomWidgetRecycleBinService.Shared.NotifyShellChanged();
+                await RefreshSnapshotAsync(DeviceStateQueryFields.RecycleBin, forceUncached: true).ConfigureAwait(false);
                 return new(ok, false, null);
             }
 
@@ -477,7 +576,11 @@ public sealed class CustomWidgetSystemControlService
         {
             try
             {
-                Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true });
+                using Process? proc = Process.Start(new ProcessStartInfo("taskmgr.exe")
+                {
+                    UseShellExecute = true,
+                    ErrorDialog = false
+                });
                 return true;
             }
             catch
@@ -566,7 +669,7 @@ public sealed class CustomWidgetSystemControlService
                     RadioAccessStatus setStatus = await target.SetStateAsync(desired).AsTask().ConfigureAwait(false);
                     if (setStatus == RadioAccessStatus.Allowed)
                     {
-                        await RefreshSnapshotAsync().ConfigureAwait(false);
+                        await RefreshSnapshotAsync(DeviceStateQueryFields.Radios, forceUncached: true).ConfigureAwait(false);
                         string label = kind == RadioKind.WiFi ? "Wi-Fi" : LocalizationService.TranslateForCulture(culture, "CustomWidget.SysCtrl.Bluetooth");
                         string stateWord = desired == RadioState.On
                             ? LocalizationService.TranslateForCulture(culture, "CustomWidget.SysCtrl.On")
@@ -594,6 +697,71 @@ public sealed class CustomWidgetSystemControlService
             LocalizationService.TranslateForCulture(culture, "CustomWidget.SysCtrl.ToastHardwareSwitch"));
     }
 
+    private async Task<(bool WifiAvail, bool WifiOn, bool BtAvail, bool BtOn)> QueryRadiosCachedAsync(bool forceUncached)
+    {
+        long nowTick = Environment.TickCount64;
+        if (!forceUncached)
+        {
+            lock (_subQueryCacheGate)
+            {
+                if (nowTick < _cachedRadiosExpiresTick64)
+                {
+                    return _cachedRadios;
+                }
+            }
+        }
+
+        (bool WifiAvail, bool WifiOn, bool BtAvail, bool BtOn) queried = await QueryRadiosSafeAsync().ConfigureAwait(false);
+        lock (_subQueryCacheGate)
+        {
+            _cachedRadios = queried;
+            _cachedRadiosExpiresTick64 = Environment.TickCount64 + RadiosCacheTtlMs;
+        }
+
+        return queried;
+    }
+
+    private async Task<long> QueryRecycleBinCountCachedAsync(bool forceUncached, CancellationToken cancellationToken)
+    {
+        if (!forceUncached && CustomWidgetRecycleBinService.Shared.TryGetLiveSubscribedItemCount(out long liveCount))
+        {
+            lock (_subQueryCacheGate)
+            {
+                _cachedRecycleBinItems = liveCount;
+                _cachedRecycleBinExpiresTick64 = Environment.TickCount64 + RecycleBinFallbackCacheTtlMs;
+            }
+
+            return liveCount;
+        }
+
+        long nowTick = Environment.TickCount64;
+        if (!forceUncached)
+        {
+            lock (_subQueryCacheGate)
+            {
+                if (nowTick < _cachedRecycleBinExpiresTick64)
+                {
+                    return _cachedRecycleBinItems;
+                }
+            }
+        }
+
+        long queried = await Task.Run(() =>
+        {
+            long count = 0;
+            ShellRecycleBinInterop.TryQueryTotalItemCount(out count);
+            return Math.Max(0, count);
+        }, cancellationToken).ConfigureAwait(false);
+
+        lock (_subQueryCacheGate)
+        {
+            _cachedRecycleBinItems = queried;
+            _cachedRecycleBinExpiresTick64 = Environment.TickCount64 + RecycleBinFallbackCacheTtlMs;
+        }
+
+        return queried;
+    }
+
     private static async Task<(bool WifiAvail, bool WifiOn, bool BtAvail, bool BtOn)> QueryRadiosSafeAsync()
     {
         try
@@ -613,15 +781,38 @@ public sealed class CustomWidgetSystemControlService
         }
     }
 
-    private static async Task<(bool Playing, string Title, string Artist, string CoverPath)> QueryMediaSessionSafeAsync()
+    private async Task<(bool Playing, string Title, string Artist, string CoverPath)> QueryMediaSessionSafeAsync(bool forceUncached)
     {
         try
         {
+            bool hasLiveSessionOwner = CustomWidgetHostSnapshotService.HasActiveSharedMusicSession ||
+                                       MusicSessionService.SharedManagerReferenceCount > 0;
+            if (!forceUncached && !hasLiveSessionOwner)
+            {
+                lock (_subQueryCacheGate)
+                {
+                    if (Environment.TickCount64 < _emptyMediaBackoffUntilTick64)
+                    {
+                        return (false, string.Empty, string.Empty, string.Empty);
+                    }
+                }
+            }
+
             CustomWidgetMusicSnapshot snap =
                 await CustomWidgetHostSnapshotService.CaptureMusicSnapshotAsync().ConfigureAwait(false);
             if (!snap.HasSession)
             {
+                lock (_subQueryCacheGate)
+                {
+                    _emptyMediaBackoffUntilTick64 = Environment.TickCount64 + EmptyMediaBackoffTtlMs;
+                }
+
                 return (false, string.Empty, string.Empty, string.Empty);
+            }
+
+            lock (_subQueryCacheGate)
+            {
+                _emptyMediaBackoffUntilTick64 = 0;
             }
 
             return (snap.IsPlaying, snap.Title, snap.Artist, snap.CoverPath);

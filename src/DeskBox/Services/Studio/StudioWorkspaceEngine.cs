@@ -94,7 +94,7 @@ public sealed partial class StudioWorkspaceEngine
 
     private static readonly FrozenSet<string> ChildContainerKeys = new[]
     {
-        "children", "items", "tabs", "content", "header", "footer", "itemTemplate"
+        "children", "child", "items", "tabs", "itemTemplate", "pane", "actionButton"
     }.ToFrozenSet(StringComparer.Ordinal);
 
     [GeneratedRegex(@"^\s*(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")]
@@ -2326,7 +2326,7 @@ public sealed partial class StudioWorkspaceEngine
                 baselineRoot: baselineRoot);
         }
 
-        foreach (string refKey in (ReadOnlySpan<string>)["pane", "actionButton", "content", "header", "footer"])
+        foreach (string refKey in (ReadOnlySpan<string>)["child", "pane", "actionButton"])
         {
             if (elemObj[refKey] is JsonValue rv &&
                 rv.TryGetValue(out string? refId) &&

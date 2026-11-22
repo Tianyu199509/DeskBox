@@ -57,14 +57,32 @@ internal static class ChannelMigrationService
             return ChannelMigrationOutcome.None;
         }
 
-        string effectiveCulture = string.IsNullOrWhiteSpace(cultureName)
-            ? LocalizationService.ResolvePersistedOrAmbientCultureName()
-            : cultureName;
-        bool isRtl = CustomWidgetLocaleCatalog.IsRightToLeftCulture(effectiveCulture);
+        string storeDurableRoot = currentChannel == AppDistributionChannel.MicrosoftStore
+            ? dataPaths.RootPath
+            : ChannelCoexistenceService.GetStoreDurableDataRoot(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        string primarySettingsPath = currentChannel == AppDistributionChannel.MicrosoftStore
+            ? Path.Combine(dataPaths.RootPath, "data", "settings.json")
+            : Path.Combine(storeDurableRoot, "data", "settings.json");
+        string fallbackSettingsPath = currentChannel == AppDistributionChannel.MicrosoftStore
+            ? Path.Combine(dataPaths.LegacyLocalAppDataRoot, "data", "settings.json")
+            : Path.Combine(dataPaths.RootPath, "data", "settings.json");
+
+        string? lazyEffectiveCulture = string.IsNullOrWhiteSpace(cultureName) ? null : cultureName;
+        string ResolveEffectiveCulture() =>
+            lazyEffectiveCulture ??= ResolveMigrationCulture(null, primarySettingsPath, fallbackSettingsPath);
         Func<string, string, bool> prompt = confirmPrompt ??
-            ((title, message) => SingleInstanceAndActivationInterop.ShowPreUiConfirmation(title, message, yesNo: true, isRtl: isRtl));
+            ((title, message) => SingleInstanceAndActivationInterop.ShowPreUiConfirmation(
+                title,
+                message,
+                yesNo: true,
+                isRtl: CustomWidgetLocaleCatalog.IsRightToLeftCulture(ResolveEffectiveCulture())));
         Action<string, string> notice = infoNotice ??
-            ((title, message) => SingleInstanceAndActivationInterop.ShowPreUiConfirmation(title, message, yesNo: false, isRtl: isRtl));
+            ((title, message) => SingleInstanceAndActivationInterop.ShowPreUiConfirmation(
+                title,
+                message,
+                yesNo: false,
+                isRtl: CustomWidgetLocaleCatalog.IsRightToLeftCulture(ResolveEffectiveCulture())));
         Func<string, string?> resolveFinalPath = physicalPathResolver ?? TryResolvePhysicalPath;
 
         return currentChannel == AppDistributionChannel.MicrosoftStore
@@ -74,7 +92,7 @@ internal static class ChannelMigrationService
                 dataPaths.LegacyRecoveryRoot,
                 dataPaths.RecoveryDirectory,
                 isInteractiveLaunch,
-                effectiveCulture,
+                lazyEffectiveCulture,
                 prompt,
                 otherChannelInstalledProbe ?? (() => ChannelCoexistenceService.DetectOtherChannelInstalled(isCurrentMicrosoftStore: true).OtherChannelInstalled),
                 resolveFinalPath,
@@ -83,10 +101,9 @@ internal static class ChannelMigrationService
                 maxSupportedSchemaVersion)
             : RunDirectStartupImportFromStore(
                 dataPaths.RootPath,
-                ChannelCoexistenceService.GetStoreDurableDataRoot(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)),
+                storeDurableRoot,
                 isInteractiveLaunch,
-                effectiveCulture,
+                lazyEffectiveCulture,
                 prompt,
                 otherChannelInstalledProbe ?? (() => ChannelCoexistenceService.DetectOtherChannelInstalled(isCurrentMicrosoftStore: false).OtherChannelInstalled),
                 log,
@@ -100,7 +117,7 @@ internal static class ChannelMigrationService
         string legacyRecoveryRoot,
         string storeRecoveryRoot,
         bool isInteractiveLaunch,
-        string cultureName,
+        string? cultureName,
         Func<string, string, bool> confirmPrompt,
         Func<bool> otherChannelInstalledProbe,
         Func<string, string?> resolveFinalPath,
@@ -135,7 +152,8 @@ internal static class ChannelMigrationService
                 bool notified = false;
                 if (isInteractiveLaunch && infoNotice is not null)
                 {
-                    NotifyNewerSchemaSkipped(cultureName, AppDistributionChannel.Direct, infoNotice);
+                    string noticeCulture = ResolveMigrationCulture(cultureName, storeSettingsPath, legacySettingsPath);
+                    NotifyNewerSchemaSkipped(noticeCulture, AppDistributionChannel.Direct, infoNotice);
                     notified = true;
                 }
 
@@ -225,9 +243,10 @@ internal static class ChannelMigrationService
             return ChannelMigrationOutcome.None;
         }
 
+        string effectiveCulture = ResolveMigrationCulture(cultureName, storeSettingsPath, legacySettingsPath);
         string formattedTime = latestDirectUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-        string title = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.DirectNewerPrompt.Title");
-        string bodyTemplate = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.DirectNewerPrompt.Body");
+        string title = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.DirectNewerPrompt.Title");
+        string bodyTemplate = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.DirectNewerPrompt.Body");
         string body = string.Format(CultureInfo.CurrentCulture, bodyTemplate, formattedTime);
 
         if (!confirmPrompt(title, body))
@@ -267,15 +286,7 @@ internal static class ChannelMigrationService
             overwriteExisting: true);
         if (copiedCleanly)
         {
-            // When importing an older Direct v1.5.x profile that predates widget-layout.json,
-            // remove any stale Store widget-layout.json so it does not shadow the imported settings.
-            string sourceLayoutPath = Path.Combine(legacyDataDir, "widget-layout.json");
-            if (!File.Exists(sourceLayoutPath))
-            {
-                string staleStoreLayout = Path.Combine(storeDataDir, "widget-layout.json");
-                StoreUserAssetMigrationFileOps.TryDeleteFileQuietly(staleStoreLayout);
-                StoreUserAssetMigrationFileOps.TryDeleteFileQuietly(staleStoreLayout + ".bak");
-            }
+            RemoveStaleSplitStoreFilesWhenSourcePredatesSplit(legacyDataDir, storeDataDir);
         }
 
         StoreUserAssetMigrationFileOps.RebaseMigratedJsonStorePaths(legacyDataDir, storeDataDir);
@@ -298,7 +309,7 @@ internal static class ChannelMigrationService
         string directRoot,
         string storeDurableRoot,
         bool isInteractiveLaunch,
-        string cultureName,
+        string? cultureName,
         Func<string, string, bool> confirmPrompt,
         Func<bool> otherChannelInstalledProbe,
         Action<string>? log = null,
@@ -334,7 +345,8 @@ internal static class ChannelMigrationService
             bool notified = false;
             if (isInteractiveLaunch && infoNotice is not null)
             {
-                NotifyNewerSchemaSkipped(cultureName, AppDistributionChannel.MicrosoftStore, infoNotice);
+                string noticeCulture = ResolveMigrationCulture(cultureName, storeSettingsPath, directSettingsPath);
+                NotifyNewerSchemaSkipped(noticeCulture, AppDistributionChannel.MicrosoftStore, infoNotice);
                 notified = true;
                 StoreUserAssetMigrationFileOps.TryDeleteFileQuietly(deferredMarker);
             }
@@ -360,8 +372,9 @@ internal static class ChannelMigrationService
             return ChannelMigrationOutcome.None;
         }
 
-        string title = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.StoreImportPrompt.Title");
-        string body = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.StoreImportPrompt.Body");
+        string effectiveCulture = ResolveMigrationCulture(cultureName, storeSettingsPath, directSettingsPath);
+        string title = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.StoreImportPrompt.Title");
+        string body = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.StoreImportPrompt.Body");
         if (!confirmPrompt(title, body))
         {
             try
@@ -424,18 +437,58 @@ internal static class ChannelMigrationService
         return null;
     }
 
+    private static string ResolveCultureOrDefault(string? cultureName) =>
+        string.IsNullOrWhiteSpace(cultureName)
+            ? LocalizationService.ResolvePersistedOrAmbientCultureName()
+            : cultureName;
+
+    private static string ResolveMigrationCulture(
+        string? explicitCulture,
+        string primarySettingsPath,
+        string fallbackSettingsPath)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitCulture))
+        {
+            return explicitCulture;
+        }
+
+        return LocalizationService.TryReadPersistedCultureNameFromFile(primarySettingsPath)
+               ?? LocalizationService.TryReadPersistedCultureNameFromFile(fallbackSettingsPath)
+               ?? LocalizationService.ResolvePersistedOrAmbientCultureName();
+    }
+
+    private static void RemoveStaleSplitStoreFilesWhenSourcePredatesSplit(
+        string sourceDataDir,
+        string targetDataDir)
+    {
+        // When importing an older profile that predates widget-layout.json or
+        // desktop-organization-history.json, remove any stale split files in the
+        // destination so they do not shadow the imported settings.json keys.
+        foreach (string splitFileName in new[] { "widget-layout.json", "desktop-organization-history.json" })
+        {
+            string sourcePath = Path.Combine(sourceDataDir, splitFileName);
+            if (!File.Exists(sourcePath))
+            {
+                string staleTargetPath = Path.Combine(targetDataDir, splitFileName);
+                StoreUserAssetMigrationFileOps.TryDeleteFileQuietly(staleTargetPath);
+                StoreUserAssetMigrationFileOps.TryDeleteFileQuietly(staleTargetPath + ".bak");
+            }
+        }
+    }
+
     private static void NotifyNewerSchemaSkipped(
-        string cultureName,
+        string? cultureName,
         AppDistributionChannel sourceChannel,
         Action<string, string> infoNotice)
     {
+        string effectiveCulture = ResolveCultureOrDefault(cultureName);
         string sourceLabel = LocalizationService.TranslateForCulture(
-            cultureName,
+            effectiveCulture,
             sourceChannel == AppDistributionChannel.MicrosoftStore
                 ? "ChannelCoexistence.ChannelName.Store"
                 : "ChannelCoexistence.ChannelName.Direct");
-        string title = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.NewerSchemaSkipped.Title");
-        string bodyTemplate = LocalizationService.TranslateForCulture(cultureName, "ChannelCoexistence.NewerSchemaSkipped.Body");
+        string title = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.NewerSchemaSkipped.Title");
+        string bodyTemplate = LocalizationService.TranslateForCulture(effectiveCulture, "ChannelCoexistence.NewerSchemaSkipped.Body");
         string body = string.Format(CultureInfo.CurrentCulture, bodyTemplate, sourceLabel);
         infoNotice(title, body);
     }

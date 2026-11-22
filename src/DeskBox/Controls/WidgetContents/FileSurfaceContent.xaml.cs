@@ -269,7 +269,6 @@ public sealed partial class FileSurfaceContent :
             TransferSessions_StateChanged;
         InitializeStackPopoverLifecycle();
         InitializeElevatedPointerDrag();
-        InitializeWin10ShellDrag();
         ActualThemeChanged += FileSurfaceContent_ActualThemeChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -1080,15 +1079,6 @@ public sealed partial class FileSurfaceContent :
             args.ItemContainer.CanDrag = false;
             LogDragAffordanceDisabledOnce();
             return;
-        }
-
-        // On Win10 non-elevated, disable WinUI's container CanDrag recognizer so
-        // mouse drags route cleanly through our 6-DIP pointer threshold into
-        // native SHDoDragDrop (avoiding Win10's #32768 menu) while keeping
-        // DragStarting/DropCompleted wired for Touch/Pen StartDragAsync fallback.
-        if (ShouldUseWin10NativeShellMouseDrag())
-        {
-            args.ItemContainer.CanDrag = false;
         }
 
         // DragStarting/DropCompleted are not routed events in WinUI 3: a drag
@@ -5124,7 +5114,7 @@ public sealed partial class FileSurfaceContent :
             }
         }
 
-        if (_isSurfaceReorderDragActive || (_stackPopoverDragActive && !_win10ShellDragInFlight))
+        if (_isSurfaceReorderDragActive || _stackPopoverDragActive)
         {
             return;
         }
@@ -6533,7 +6523,7 @@ public sealed partial class FileSurfaceContent :
         IReadOnlyList<string> pathHints,
         Windows.Foundation.Point position)
     {
-        if (_isSurfaceReorderDragActive || (_stackPopoverDragActive && !_win10ShellDragInFlight))
+        if (_isSurfaceReorderDragActive || _stackPopoverDragActive)
         {
             return;
         }
@@ -8329,7 +8319,6 @@ public sealed partial class FileSurfaceContent :
         DisposeStackSurfacePropertyChanges();
         DisposeStackPopoverLifecycle();
         DisposeElevatedPointerDrag();
-        DisposeWin10ShellDrag();
 
         _isDisposed = true;
         _isReadyForReuse = false;

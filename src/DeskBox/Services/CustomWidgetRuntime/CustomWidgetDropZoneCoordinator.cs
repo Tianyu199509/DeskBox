@@ -636,87 +636,38 @@ internal sealed class CustomWidgetDropZoneCoordinator
         }
     }
 
-    internal static string? FindFirstDropZoneStorageMode(CustomWidgetNodeSpec node)
-    {
-        if (string.Equals(node.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(node.StorageMode))
-        {
-            return node.StorageMode;
-        }
+    internal static string? FindFirstDropZoneStorageMode(CustomWidgetNodeSpec node) =>
+        node.EnumerateAllNodes()
+            .FirstOrDefault(static n =>
+                string.Equals(n.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(n.StorageMode))
+            ?.StorageMode;
 
-        foreach (CustomWidgetNodeSpec child in node.Children)
-        {
-            string? found = FindFirstDropZoneStorageMode(child);
-            if (!string.IsNullOrWhiteSpace(found))
-            {
-                return found;
-            }
-        }
+    internal static IReadOnlyList<CustomWidgetActionSpec> FindFirstDropZoneActions(CustomWidgetNodeSpec node) =>
+        node.EnumerateAllNodes()
+            .FirstOrDefault(static n =>
+                string.Equals(n.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
+                n.OnDropActions.Count > 0)
+            ?.OnDropActions ?? [];
 
-        return null;
-    }
-
-    internal static IReadOnlyList<CustomWidgetActionSpec> FindFirstDropZoneActions(CustomWidgetNodeSpec node)
-    {
-        if (string.Equals(node.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
-            node.OnDropActions.Count > 0)
-        {
-            return node.OnDropActions;
-        }
-
-        foreach (CustomWidgetNodeSpec child in node.Children)
-        {
-            IReadOnlyList<CustomWidgetActionSpec> found = FindFirstDropZoneActions(child);
-            if (found.Count > 0)
-            {
-                return found;
-            }
-        }
-
-        return [];
-    }
-
-    internal static string? FindFirstDropZoneAccept(CustomWidgetNodeSpec node)
-    {
-        if (string.Equals(node.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(node.Accept))
-        {
-            return node.Accept;
-        }
-
-        foreach (CustomWidgetNodeSpec child in node.Children)
-        {
-            string? found = FindFirstDropZoneAccept(child);
-            if (!string.IsNullOrWhiteSpace(found))
-            {
-                return found;
-            }
-        }
-
-        return null;
-    }
+    internal static string? FindFirstDropZoneAccept(CustomWidgetNodeSpec node) =>
+        node.EnumerateAllNodes()
+            .FirstOrDefault(static n =>
+                string.Equals(n.Type, "DropZone", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(n.Accept))
+            ?.Accept;
 
     internal static bool AnyDropZoneAllowsFiles(CustomWidgetNodeSpec node, string? rootAccept)
     {
-        if (string.Equals(node.Type, "DropZone", StringComparison.OrdinalIgnoreCase))
+        foreach (CustomWidgetNodeSpec candidate in node.EnumerateAllNodes())
         {
-            string? effectiveAccept = !string.IsNullOrWhiteSpace(node.Accept) ? node.Accept : rootAccept;
-            if (CustomWidgetDropAcceptHelper.AllowsFiles(effectiveAccept))
+            if (string.Equals(candidate.Type, "DropZone", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
-            }
-        }
-
-        if (node.ItemTemplate is not null && AnyDropZoneAllowsFiles(node.ItemTemplate, rootAccept))
-        {
-            return true;
-        }
-
-        foreach (CustomWidgetNodeSpec child in node.Children)
-        {
-            if (AnyDropZoneAllowsFiles(child, rootAccept))
-            {
-                return true;
+                string? effectiveAccept = !string.IsNullOrWhiteSpace(candidate.Accept) ? candidate.Accept : rootAccept;
+                if (CustomWidgetDropAcceptHelper.AllowsFiles(effectiveAccept))
+                {
+                    return true;
+                }
             }
         }
 

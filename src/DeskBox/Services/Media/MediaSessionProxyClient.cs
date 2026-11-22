@@ -451,7 +451,10 @@ internal sealed class MediaSessionProxyClient
         }
         catch (TimeoutException)
         {
-            App.Log($"[MediaSessionProxy] Timed out waiting {timeout.TotalMilliseconds:F0}ms for op={command.Op}");
+            App.Log($"[MediaSessionProxy] Timed out waiting {timeout.TotalMilliseconds:F0}ms for op={command.Op}; terminating hung child.");
+            string stderrTail = proc.ErrorTail;
+            proc.Dispose(intentional: false);
+            OnProcessUnexpectedExit(proc, -1, $"rpc timeout op={command.Op}; {stderrTail}");
             return null;
         }
         catch (Exception ex)
@@ -864,8 +867,17 @@ internal sealed class MediaSessionProxyClient
                         return null;
                     }
 
-                    await _process.StandardInput.WriteLineAsync(jsonLine).WaitAsync(timeout).ConfigureAwait(false);
-                    await _process.StandardInput.FlushAsync().WaitAsync(timeout).ConfigureAwait(false);
+                    using var writeCts = new CancellationTokenSource(timeout);
+                    try
+                    {
+                        await _process.StandardInput.WriteLineAsync(jsonLine.AsMemory(), writeCts.Token).ConfigureAwait(false);
+                        await _process.StandardInput.FlushAsync(writeCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (writeCts.IsCancellationRequested)
+                    {
+                        Dispose(intentional: false);
+                        throw new TimeoutException("Timed out writing SMTC proxy request.");
+                    }
                 }
                 finally
                 {

@@ -90,6 +90,12 @@ public interface ISettingsWidgetActions
     Task ClearPerWidgetBackgrounds();
 
     /// <summary>
+    /// Clears per-widget chrome-mode overrides for either interactive or display
+    /// widgets on the main process's authoritative layout.
+    /// </summary>
+    Task ResetWidgetChromeOverrides(bool interactive) => Task.CompletedTask;
+
+    /// <summary>
     /// The feature-widget switch write: records the enabled dictionary (the
     /// MAIN process owns it — snapshots never carry it) and applies the
     /// change through the live manager. One command so the dictionary write

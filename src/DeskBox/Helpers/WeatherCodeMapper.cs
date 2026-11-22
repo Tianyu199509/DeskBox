@@ -276,9 +276,6 @@ public static class WeatherCodeMapper
         };
     }
 
-    public static string GetWeatherGlyph(int code, bool isDay = true) =>
-        GetGlyph(code, isDay);
-
     /// <summary>
     /// Returns the localization resource key for the given WMO weather
     /// interpretation code ("Weather.Condition.*" in Strings/{lang}.json).

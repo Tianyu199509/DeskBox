@@ -17,11 +17,15 @@ namespace DeskBox.Controls.WidgetContents;
 /// </summary>
 public sealed partial class WeatherWidgetContent : UserControl, IDisposable
 {
+#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
     private static readonly bool s_keepAllLayoutsLoadedForAotSmoke =
         string.Equals(
             Environment.GetEnvironmentVariable("DESKBOX_AOT_MANAGED_UI_SMOKE"),
             "WeatherSurfacePersistenceRestart",
             StringComparison.Ordinal);
+#else
+    private const bool s_keepAllLayoutsLoadedForAotSmoke = false;
+#endif
 
     private readonly WeatherWidgetViewModel _viewModel;
     private Storyboard? _refreshRotationStoryboard;

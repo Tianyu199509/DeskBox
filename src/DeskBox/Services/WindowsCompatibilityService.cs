@@ -74,6 +74,13 @@ public static class WindowsCompatibilityService
     /// </summary>
     public static event Action? AdvancedEffectsEnabledChanged;
 
+    /// <summary>
+    /// Raised when Windows High Contrast mode is toggled on or off. Callbacks
+    /// may arrive off the UI thread; visual consumers must marshal back to
+    /// their window's dispatcher before mutating XAML or backdrop state.
+    /// </summary>
+    public static event Action? HighContrastChanged;
+
     public static int OsBuild => s_osBuild.Value;
 
     public static bool IsWindows11OrLater => OsBuild >= Windows11Build;
@@ -192,6 +199,53 @@ public static class WindowsCompatibilityService
         return "Solid";
     }
 
+    /// <summary>
+    /// Applies the unified settings-shell backdrop: standard <see cref="MicaKind.Base"/>
+    /// on Windows 11 (matching Windows Settings so cards sit directly on the base
+    /// Mica canvas without a secondary content layer), falling back directly to the
+    /// themed solid surface (<c>#F3F3F3</c>/<c>#202020</c> or system contrast color)
+    /// when Mica is unavailable (Windows 10) or high contrast is active.
+    /// </summary>
+    public static string ApplySettingsBackdrop(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        string kind = ResolveSettingsBackdropKind(SupportsMica, IsHighContrast);
+        if (kind == "Mica")
+        {
+            try
+            {
+                if (window.SystemBackdrop is not MicaBackdrop)
+                {
+                    window.SystemBackdrop = new MicaBackdrop { Kind = MicaKind.Base };
+                }
+
+                if (window.Content is Panel micaRoot)
+                {
+                    micaRoot.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                }
+
+                return "Mica";
+            }
+            catch (Exception ex)
+            {
+                App.LogVerbose($"[Backdrop] Settings Mica unavailable: {ex.Message}");
+            }
+        }
+
+        window.SystemBackdrop = null;
+        if (window.Content is Panel rootPanel)
+        {
+            rootPanel.Background = CreateSolidThemeBackgroundBrush(rootPanel);
+        }
+
+        return "Solid";
+    }
+
+    internal static string ResolveSettingsBackdropKind(
+        bool supportsMica,
+        bool isHighContrast) =>
+        supportsMica && !isHighContrast ? "Mica" : "Solid";
+
     private static void ApplySolidRootSurfaceFallback(Window window)
     {
         try
@@ -208,12 +262,12 @@ public static class WindowsCompatibilityService
                 return;
             }
 
-            ApplySolidThemeBackground(rootPanel);
+            rootPanel.Background = CreateSolidThemeBackgroundBrush(rootPanel);
             Windows.Foundation.TypedEventHandler<FrameworkElement, object> themeChangedHandler = static (sender, _) =>
             {
                 if (sender is Panel panel)
                 {
-                    ApplySolidThemeBackground(panel);
+                    panel.Background = CreateSolidThemeBackgroundBrush(panel);
                 }
             };
             rootPanel.ActualThemeChanged += themeChangedHandler;
@@ -235,24 +289,19 @@ public static class WindowsCompatibilityService
         }
     }
 
-    private static void ApplySolidThemeBackground(Panel rootPanel)
-    {
-        if (IsHighContrast)
-        {
-            rootPanel.Background =
-                NeutralInteractionBrush.ResolveThemedResource("SolidBackgroundFillColorBaseBrush", rootPanel) ??
-                new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(
-                    Windows.UI.ViewManagement.UIColorType.Background));
-            return;
-        }
-
-        bool isDark = NeutralInteractionBrush.IsDarkTheme(rootPanel);
-        Windows.UI.Color fallbackColor = IsHighContrast
+    internal static Windows.UI.Color ResolveSolidSettingsFallbackColor(
+        bool isDark,
+        bool isHighContrast) =>
+        isHighContrast
             ? ResolveHighContrastBackgroundColor(isDark)
             : isDark
                 ? Windows.UI.Color.FromArgb(255, 32, 32, 32)
                 : Windows.UI.Color.FromArgb(255, 243, 243, 243);
-        rootPanel.Background = new SolidColorBrush(fallbackColor);
+
+    private static SolidColorBrush CreateSolidThemeBackgroundBrush(Panel rootPanel)
+    {
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(rootPanel);
+        return new SolidColorBrush(ResolveSolidSettingsFallbackColor(isDark, IsHighContrast));
     }
 
     /// <summary>
@@ -533,8 +582,11 @@ public static class WindowsCompatibilityService
 
     private static void AccessibilitySettings_Changed(
         AccessibilitySettings sender,
-        object args) =>
+        object args)
+    {
         InvalidateAnimationCapabilityCache();
+        HighContrastChanged?.Invoke();
+    }
 
     private static void InvalidateAnimationCapabilityCache() =>
         Volatile.Write(ref s_cachedShouldAnimate, -1);

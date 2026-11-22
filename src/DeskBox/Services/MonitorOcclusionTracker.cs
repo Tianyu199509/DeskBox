@@ -48,6 +48,9 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly Func<IntPtr, bool> _isDeskBoxWindow;
     private readonly TimeSpan _debounceInterval;
+    private readonly Dictionary<IntPtr, MonitorBounds> _monitorsScratch = new(4);
+    private readonly List<WindowOcclusionCandidate> _candidatesScratch = new(32);
+    private readonly EnumContext _enumContext;
     private DispatcherQueueTimer? _debounceTimer;
     private IntPtr _foregroundHook;
     private IntPtr _minimizeHook;
@@ -69,6 +72,7 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
         _isDeskBoxWindow = isDeskBoxWindow ?? throw new ArgumentNullException(nameof(isDeskBoxWindow));
         _debounceInterval = debounceInterval ?? DefaultDebounceInterval;
+        _enumContext = new EnumContext(this, _monitorsScratch, _candidatesScratch);
     }
 
     public IReadOnlySet<IntPtr> OccludedMonitors => _occludedMonitors;
@@ -188,6 +192,19 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
                 return;
             }
 
+            // LocationChange fires heavily for hidden/offscreen HWNDs and non-root child controls
+            // during normal app scrolling or layout. Only visible root windows can occlude monitors.
+            // Never apply live HWND checks to Destroy/Hide/Cloak events where HWND may already be gone.
+            if (eventType == EventObjectLocationChange)
+            {
+                if (hwnd == IntPtr.Zero ||
+                    IsWindowVisible(hwnd) == 0 ||
+                    Win32Helper.GetAncestor(hwnd, Win32Helper.GA_ROOT) != hwnd)
+                {
+                    return;
+                }
+            }
+
             MonitorOcclusionTracker? instance = Volatile.Read(ref s_activeInstance);
             instance?.ScheduleDebouncedEvaluation();
         }
@@ -261,7 +278,6 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
     {
         IntPtr foregroundHwnd = Win32Helper.GetForegroundWindow();
         bool isForegroundDeskBox = false;
-        string foregroundClassName = string.Empty;
         IntPtr foregroundMonitor = IntPtr.Zero;
 
         if (foregroundHwnd != IntPtr.Zero)
@@ -278,8 +294,12 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
                 return [];
             }
 
-            foregroundClassName = ReadWindowClassName(foregroundRoot);
-            if (IsDesktopShellClassName(foregroundClassName))
+            char* fgClassBuffer = stackalloc char[128];
+            int fgClassLength = GetClassNameW(foregroundRoot, fgClassBuffer, 128);
+            ReadOnlySpan<char> fgClassSpan = fgClassLength > 0
+                ? new ReadOnlySpan<char>(fgClassBuffer, fgClassLength)
+                : ReadOnlySpan<char>.Empty;
+            if (IsDesktopShellClassNameSpan(fgClassSpan))
             {
                 return [];
             }
@@ -287,10 +307,12 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             foregroundMonitor = MonitorFromWindow(foregroundRoot, MonitorDefaultToNull);
         }
 
-        var monitors = new Dictionary<IntPtr, MonitorBounds>(4);
-        var candidates = new List<WindowOcclusionCandidate>(32);
-        var context = new EnumContext(this, monitors, candidates);
-        GCHandle handle = GCHandle.Alloc(context);
+        Dictionary<IntPtr, MonitorBounds> monitors = _monitorsScratch;
+        List<WindowOcclusionCandidate> candidates = _candidatesScratch;
+        monitors.Clear();
+        candidates.Clear();
+
+        GCHandle handle = GCHandle.Alloc(_enumContext);
         try
         {
             EnumWindows(&EnumTopLevelWindowCallback, GCHandle.ToIntPtr(handle));
@@ -312,7 +334,7 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         return EvaluateOccludedMonitors(
             monitors,
             candidates,
-            foregroundClassName,
+            string.Empty,
             isForegroundDeskBox,
             isFullscreenActive,
             foregroundMonitor);
@@ -393,10 +415,17 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             return 1;
         }
 
-        string className = ReadWindowClassName(hwnd);
-        if (!isDeskBoxWindow && IsExcludedShellClassName(className))
+        if (!isDeskBoxWindow)
         {
-            return 1;
+            char* classBuffer = stackalloc char[128];
+            int classLength = GetClassNameW(hwnd, classBuffer, 128);
+            ReadOnlySpan<char> classSpan = classLength > 0
+                ? new ReadOnlySpan<char>(classBuffer, classLength)
+                : ReadOnlySpan<char>.Empty;
+            if (IsExcludedShellClassNameSpan(classSpan))
+            {
+                return 1;
+            }
         }
 
         if (!TryGetWindowBounds(hwnd, out NativeRect rect))
@@ -434,7 +463,7 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             IsZoomed: IsZoomed(hwnd) != 0,
             IsDeskBoxWindow: isDeskBoxWindow,
             IsToolOverlay: false,
-            className,
+            string.Empty,
             rect.Left,
             rect.Top,
             rect.Right,
@@ -577,16 +606,22 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
     }
 
     internal static bool IsDesktopShellClassName(string? className) =>
-        string.Equals(className, "Progman", StringComparison.Ordinal) ||
-        string.Equals(className, "WorkerW", StringComparison.Ordinal);
+        className is not null && IsDesktopShellClassNameSpan(className.AsSpan());
 
     internal static bool IsExcludedShellClassName(string? className) =>
-        IsDesktopShellClassName(className) ||
-        string.Equals(className, "Shell_TrayWnd", StringComparison.Ordinal) ||
-        string.Equals(className, "Shell_SecondaryTrayWnd", StringComparison.Ordinal) ||
-        string.Equals(className, "NotifyIconOverflowWindow", StringComparison.Ordinal) ||
-        string.Equals(className, "Windows.UI.Core.CoreWindow", StringComparison.Ordinal) ||
-        string.Equals(className, "XamlExplorerHostIslandWindow", StringComparison.Ordinal);
+        className is not null && IsExcludedShellClassNameSpan(className.AsSpan());
+
+    private static bool IsDesktopShellClassNameSpan(ReadOnlySpan<char> className) =>
+        className.SequenceEqual("Progman") ||
+        className.SequenceEqual("WorkerW");
+
+    private static bool IsExcludedShellClassNameSpan(ReadOnlySpan<char> className) =>
+        IsDesktopShellClassNameSpan(className) ||
+        className.SequenceEqual("Shell_TrayWnd") ||
+        className.SequenceEqual("Shell_SecondaryTrayWnd") ||
+        className.SequenceEqual("NotifyIconOverflowWindow") ||
+        className.SequenceEqual("Windows.UI.Core.CoreWindow") ||
+        className.SequenceEqual("XamlExplorerHostIslandWindow");
 
     private static long ComputeIntersectionArea(
         int leftA,

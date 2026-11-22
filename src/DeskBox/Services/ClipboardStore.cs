@@ -684,28 +684,28 @@ public sealed class ClipboardStore
                                     continue;
                                 }
 
-                                if (reader.ValueTextEquals("appPath"u8) || reader.ValueTextEquals("AppPath"u8))
+                                if (reader.ValueTextEquals("appPath"u8))
                                 {
                                     if (reader.Read() && reader.TokenType == JsonTokenType.String)
                                     {
                                         appPath = reader.GetString() ?? string.Empty;
                                     }
                                 }
-                                else if (reader.ValueTextEquals("appName"u8) || reader.ValueTextEquals("AppName"u8))
+                                else if (reader.ValueTextEquals("appName"u8))
                                 {
                                     if (reader.Read() && reader.TokenType == JsonTokenType.String)
                                     {
                                         appName = reader.GetString() ?? string.Empty;
                                     }
                                 }
-                                else if (reader.ValueTextEquals("iconFileName"u8) || reader.ValueTextEquals("IconFileName"u8))
+                                else if (reader.ValueTextEquals("iconFileName"u8))
                                 {
                                     if (reader.Read() && reader.TokenType == JsonTokenType.String)
                                     {
                                         iconFileName = reader.GetString();
                                     }
                                 }
-                                else if (reader.ValueTextEquals("lastSeenUtcTicks"u8) || reader.ValueTextEquals("LastSeenUtcTicks"u8))
+                                else if (reader.ValueTextEquals("lastSeenUtcTicks"u8))
                                 {
                                     if (reader.Read() && reader.TokenType == JsonTokenType.Number)
                                     {

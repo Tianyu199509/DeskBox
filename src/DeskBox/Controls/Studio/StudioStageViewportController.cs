@@ -883,28 +883,6 @@ internal sealed partial class StudioStageViewportController : IDisposable
             }
         }
 
-        return FindInlinePopoverNode(manifest.View, popoverId);
-    }
-
-    private static CustomWidgetNodeSpec? FindInlinePopoverNode(CustomWidgetNodeSpec node, string popoverId)
-    {
-        if (string.Equals(node.Type, "Popover", StringComparison.OrdinalIgnoreCase))
-        {
-            string id = !string.IsNullOrWhiteSpace(node.PopoverId) ? node.PopoverId! : (node.Id ?? string.Empty);
-            if (string.Equals(id.Trim(), popoverId, StringComparison.OrdinalIgnoreCase))
-            {
-                return node;
-            }
-        }
-
-        foreach (CustomWidgetNodeSpec child in node.Children)
-        {
-            if (FindInlinePopoverNode(child, popoverId) is { } m)
-            {
-                return m;
-            }
-        }
-
         return null;
     }
 
@@ -1229,9 +1207,9 @@ internal sealed partial class StudioStageViewportController : IDisposable
             _session.SelectedTargetNode is null &&
             !_session.IsCapsulePreviewMode &&
             _previewContent is not null &&
-            effectiveManifest?.View is not null)
+            effectiveManifest is not null)
         {
-            string? flashNodePath = TryFindFirstChangedNodePath(effectiveManifest.View, highlightDiffPills);
+            string? flashNodePath = TryFindFirstChangedNodePath(effectiveManifest, highlightDiffPills);
             if (!string.IsNullOrWhiteSpace(flashNodePath))
             {
                 _ = FlashChangedNodeBrieflyAsync(flashNodePath!);
@@ -1239,7 +1217,7 @@ internal sealed partial class StudioStageViewportController : IDisposable
         }
     }
 
-    private static string? TryFindFirstChangedNodePath(CustomWidgetNodeSpec root, IReadOnlyList<string> pills)
+    private static string? TryFindFirstChangedNodePath(CustomWidgetManifest manifest, IReadOnlyList<string> pills)
     {
         foreach (string pill in pills)
         {
@@ -1254,29 +1232,13 @@ internal sealed partial class StudioStageViewportController : IDisposable
                 if (end > hashIdx + 1)
                 {
                     string id = pill[(hashIdx + 1)..end];
-                    if (FindNodePathById(root, "root", id) is { } matched)
+                    if (StudioManifestInspector.FindMatchingNodePath(
+                            manifest,
+                            node => string.Equals(node.Id, id, StringComparison.OrdinalIgnoreCase)) is { } matched)
                     {
                         return matched;
                     }
                 }
-            }
-        }
-
-        return null;
-    }
-
-    private static string? FindNodePathById(CustomWidgetNodeSpec node, string path, string targetId)
-    {
-        if (string.Equals(node.Id, targetId, StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        for (int i = 0; i < node.Children.Count; i++)
-        {
-            if (FindNodePathById(node.Children[i], $"{path}/children[{i}]", targetId) is { } child)
-            {
-                return child;
             }
         }
 

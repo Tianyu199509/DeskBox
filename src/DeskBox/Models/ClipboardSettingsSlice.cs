@@ -314,4 +314,6 @@ public sealed class ClipboardSettingsSlice
     public string ClipboardPopupPlacementMode { get; set; } = PopupFollowCaret;
 
     public string ClipboardDoubleCopyAction { get; set; } = DoubleCopyNone;
+
+    public bool ClipboardFetchUrlTitles { get; set; }
 }

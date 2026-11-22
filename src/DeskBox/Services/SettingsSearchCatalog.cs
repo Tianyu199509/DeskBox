@@ -250,6 +250,7 @@ internal static class SettingsSearchCatalog
         new("ClipboardSettings", "Clipboard.Settings.Group.Privacy", "Clipboard.Settings.Group.Privacy.Description"),
         new("ClipboardSettings", "Settings.Clipboard.IgnorePrivacyFormats.Title", "Settings.Clipboard.IgnorePrivacyFormats.Description"),
         new("ClipboardSettings", "Settings.Clipboard.SecretProtection.Title", "Settings.Clipboard.SecretProtection.Description"),
+        new("ClipboardSettings", "Settings.Clipboard.FetchUrlTitles.Title", "Settings.Clipboard.FetchUrlTitles.Description"),
         new("ClipboardSettings", "Settings.Clipboard.ExcludedApps.Title", "Settings.Clipboard.ExcludedApps.Description"),
         new("ClipboardSettings", "Settings.Clipboard.ExcludedApps.ObservedTitle", "Settings.Clipboard.ExcludedApps.ObservedDescription"),
         new("ClipboardSettings", "Clipboard.Settings.Group.Storage", "Clipboard.Settings.Group.Storage.Description"),

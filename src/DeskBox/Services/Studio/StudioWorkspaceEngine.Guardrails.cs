@@ -757,7 +757,7 @@ public sealed partial class StudioWorkspaceEngine
                 }
             }
 
-            foreach (string refKey in (ReadOnlySpan<string>)["itemTemplate", "pane", "actionButton", "content", "header", "footer"])
+            foreach (string refKey in (ReadOnlySpan<string>)["child", "itemTemplate", "pane", "actionButton"])
             {
                 if (elem[refKey] is JsonValue rv && rv.TryGetValue(out string? rid) && !string.IsNullOrWhiteSpace(rid))
                 {
@@ -800,176 +800,48 @@ public sealed partial class StudioWorkspaceEngine
         for (int i = 0; i < lockTokens.Count - 1; i++)
         {
             SelectorToken tok = lockTokens[i];
-            if (tok.Kind == SelectorTokenKind.Property)
+            if (tok.Kind != SelectorTokenKind.Property)
             {
-                string prop = tok.Name ?? string.Empty;
-                if (baseCur is not JsonObject baseObj ||
-                    !TryGetObjectPropertyExactOrFolded(baseObj, prop, out _, out JsonNode? nextBase) ||
-                    candCur is not JsonObject candObj ||
-                    !TryGetObjectPropertyExactOrFolded(candObj, prop, out string actualCandKey, out JsonNode? nextCand) ||
-                    nextBase is null ||
-                    nextCand is null)
-                {
-                    rejectionReason = $"Structural spine segment '.{prop}' leading to '{_lockedCanonicalPath}' was removed or incompatible in replacement manifest. Modify only '{_lockedCanonicalPath}' or use edit_manifest.";
-                    return false;
-                }
-
-                // Protect non-spine child containers on intermediate spine nodes
-                string spinePropNext = lockTokens[i + 1].Kind == SelectorTokenKind.Property
-                    ? (lockTokens[i + 1].Name ?? string.Empty)
-                    : string.Empty;
-                foreach (string protectedObjProp in (ReadOnlySpan<string>)["header", "footer", "itemTemplate", "actionButton", "content", "pane"])
-                {
-                    if (!string.Equals(protectedObjProp, spinePropNext, StringComparison.OrdinalIgnoreCase) &&
-                        baseCur is JsonObject bParent &&
-                        bParent.TryGetPropertyValue(protectedObjProp, out JsonNode? bSub) &&
-                        bSub is not null &&
-                        candCur is JsonObject cParent)
-                    {
-                        cParent[protectedObjProp] = bSub.DeepClone();
-                        preservedBranchCount++;
-                    }
-                }
-
-                baseCur = nextBase;
-                candCur = nextCand;
-                _ = actualCandKey;
+                return true;
             }
-            else if (tok.Kind == SelectorTokenKind.ArrayIndex)
+
+            string prop = tok.Name ?? string.Empty;
+            if (baseCur is not JsonObject baseObj ||
+                !TryGetObjectPropertyExactOrFolded(baseObj, prop, out _, out JsonNode? nextBase) ||
+                candCur is not JsonObject candObj ||
+                !TryGetObjectPropertyExactOrFolded(candObj, prop, out string actualCandKey, out JsonNode? nextCand) ||
+                nextBase is null ||
+                nextCand is null)
             {
-                if (baseCur is not JsonArray baseArr ||
-                    candCur is not JsonArray candArr ||
-                    tok.Index < 0 ||
-                    tok.Index >= baseArr.Count)
-                {
-                    rejectionReason = $"Structural array spine [{tok.Index}] leading to '{_lockedCanonicalPath}' is missing in replacement manifest.";
-                    return false;
-                }
-
-                int branchIdx = tok.Index;
-                string? expectedId = (baseArr[branchIdx] as JsonObject)?["id"]?.GetValue<string?>();
-                JsonNode? matchedCandChild = branchIdx < candArr.Count ? candArr[branchIdx] : null;
-
-                if (candArr.Count <= branchIdx && !string.IsNullOrWhiteSpace(expectedId))
-                {
-                    for (int k = 0; k < candArr.Count; k++)
-                    {
-                        if (candArr[k] is JsonObject co &&
-                            string.Equals(co["id"]?.GetValue<string?>(), expectedId, StringComparison.Ordinal))
-                        {
-                            matchedCandChild = co;
-                            break;
-                        }
-                    }
-                }
-
-                if (matchedCandChild is null)
-                {
-                    rejectionReason = $"Required branch [{branchIdx}] along spine to '{_lockedCanonicalPath}' was deleted in replacement manifest.";
-                    return false;
-                }
-
-                // Inverse graft untouched sibling branches [j != branchIdx] from baseline
-                var grafted = new JsonArray();
-                for (int j = 0; j < baseArr.Count; j++)
-                {
-                    if (j == branchIdx)
-                    {
-                        grafted.Add(matchedCandChild.DeepClone());
-                    }
-                    else
-                    {
-                        grafted.Add(baseArr[j]?.DeepClone());
-                        preservedBranchCount++;
-                    }
-                }
-
-                candArr.Clear();
-                foreach (JsonNode? item in grafted)
-                {
-                    candArr.Add(item);
-                }
-
-                baseCur = baseArr[branchIdx];
-                candCur = candArr[branchIdx];
-            }
-        }
-
-        // 3. Final segment: check final target or direct parent siblings
-        SelectorToken finalTok = lockTokens[^1];
-        if (finalTok.Kind == SelectorTokenKind.ArrayIndex)
-        {
-            if (baseCur is not JsonArray baseArr || candCur is not JsonArray candArr || finalTok.Index < 0 || finalTok.Index >= baseArr.Count)
-            {
-                rejectionReason = $"Target container array for '{_lockedCanonicalPath}' is missing or incompatible in replacement manifest.";
+                rejectionReason = $"Structural spine segment '.{prop}' leading to '{_lockedCanonicalPath}' was removed or incompatible in replacement manifest. Modify only '{_lockedCanonicalPath}' or use edit_manifest.";
                 return false;
             }
 
-            int lockedIdx = finalTok.Index;
-            string? lockedId = (baseArr[lockedIdx] as JsonObject)?["id"]?.GetValue<string?>();
-            JsonNode? updatedTarget = null;
-            var extraAppended = new List<JsonNode?>();
-
-            if (lockedIdx < candArr.Count &&
-                (string.IsNullOrWhiteSpace(lockedId) ||
-                 candArr.Count >= baseArr.Count ||
-                 string.Equals((candArr[lockedIdx] as JsonObject)?["id"]?.GetValue<string?>(), lockedId, StringComparison.Ordinal)))
+            // Protect non-spine child containers on intermediate spine nodes
+            string spinePropNext = lockTokens[i + 1].Kind == SelectorTokenKind.Property
+                ? (lockTokens[i + 1].Name ?? string.Empty)
+                : string.Empty;
+            foreach (string protectedObjProp in (ReadOnlySpan<string>)["child", "itemTemplate", "pane", "actionButton"])
             {
-                updatedTarget = candArr[lockedIdx];
-                for (int j = baseArr.Count; j < candArr.Count; j++)
+                if (!string.Equals(protectedObjProp, spinePropNext, StringComparison.OrdinalIgnoreCase) &&
+                    baseCur is JsonObject bParent &&
+                    bParent.TryGetPropertyValue(protectedObjProp, out JsonNode? bSub) &&
+                    bSub is not null &&
+                    candCur is JsonObject cParent)
                 {
-                    extraAppended.Add(candArr[j]);
-                }
-            }
-            else if (!string.IsNullOrWhiteSpace(lockedId))
-            {
-                for (int j = 0; j < candArr.Count; j++)
-                {
-                    if (candArr[j] is JsonObject co &&
-                        string.Equals(co["id"]?.GetValue<string?>(), lockedId, StringComparison.Ordinal))
-                    {
-                        updatedTarget = co;
-                        break;
-                    }
-                }
-            }
-            else if (candArr.Count == 1)
-            {
-                updatedTarget = candArr[0];
-            }
-
-            if (updatedTarget is null)
-            {
-                rejectionReason = $"Locked target '{_lockedCanonicalPath}' could not be located inside replacement manifest.";
-                return false;
-            }
-
-            var graftedItems = new List<JsonNode?>(baseArr.Count + extraAppended.Count);
-            for (int j = 0; j < baseArr.Count; j++)
-            {
-                if (j == lockedIdx)
-                {
-                    graftedItems.Add(updatedTarget.DeepClone());
-                }
-                else
-                {
-                    graftedItems.Add(baseArr[j]?.DeepClone());
+                    cParent[protectedObjProp] = bSub.DeepClone();
                     preservedBranchCount++;
                 }
             }
 
-            foreach (JsonNode? extra in extraAppended)
-            {
-                graftedItems.Add(extra?.DeepClone());
-            }
-
-            candArr.Clear();
-            foreach (JsonNode? item in graftedItems)
-            {
-                candArr.Add(item);
-            }
+            baseCur = nextBase;
+            candCur = nextCand;
+            _ = actualCandKey;
         }
-        else if (finalTok.Kind == SelectorTokenKind.Property)
+
+        // 3. Final segment: check final target or direct parent siblings
+        SelectorToken finalTok = lockTokens[^1];
+        if (finalTok.Kind == SelectorTokenKind.Property)
         {
             string finalProp = finalTok.Name ?? string.Empty;
             if (baseCur is JsonObject baseObj && candCur is JsonObject candObj)

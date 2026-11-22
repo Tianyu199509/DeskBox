@@ -1,4 +1,9 @@
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using DeskBox.Features.Clipboard;
+using DeskBox.Helpers;
+using DeskBox.Services;
 
 namespace DeskBox.Platform;
 
@@ -224,6 +229,243 @@ internal static class StoreUserAssetMigrationFileOps
                 RewriteJsonPathPrefixesIfPresent(todoJson, oldPrefixes, newPrefix);
             }
         }
+
+        string customWidgetsDir = Path.Combine(durableDataDir, "custom-widgets");
+        if (Directory.Exists(customWidgetsDir))
+        {
+            foreach (string storeJson in Directory.EnumerateFiles(customWidgetsDir, "store.json*", SearchOption.AllDirectories))
+            {
+                RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
+            }
+        }
+
+        RebaseClipboardStoreFiles(durableDataDir, durableDataDir, oldPrefixes, tryUseMigratedHmacKey: true);
+    }
+
+    internal static void RebaseClipboardStoreFiles(
+        string stagedDataDirectory,
+        string targetDataDirectory,
+        IReadOnlyList<string> oldPrefixes,
+        bool tryUseMigratedHmacKey)
+    {
+        string clipboardDir = Path.Combine(stagedDataDirectory, "clipboard");
+        string clipboardJson = Path.Combine(clipboardDir, "clipboard.json");
+        bool hasPrimary = File.Exists(clipboardJson);
+        bool hasBackup = File.Exists(clipboardJson + ".bak");
+        if (!hasPrimary && !hasBackup)
+        {
+            return;
+        }
+
+        byte[]? hmacKey = tryUseMigratedHmacKey ? TryLoadMigratedClipboardHmacKey(clipboardDir) : null;
+        string normalizedStagedData = TrimTrailingSeparators(Path.GetFullPath(stagedDataDirectory));
+        string normalizedTargetData = TrimTrailingSeparators(Path.GetFullPath(targetDataDirectory));
+
+        if (hasPrimary)
+        {
+            TryRebaseSingleClipboardFile(clipboardJson, normalizedStagedData, normalizedTargetData, oldPrefixes, hmacKey);
+        }
+
+        if (hasBackup)
+        {
+            TryRebaseSingleClipboardFile(clipboardJson + ".bak", normalizedStagedData, normalizedTargetData, oldPrefixes, hmacKey);
+        }
+    }
+
+    private static byte[]? TryLoadMigratedClipboardHmacKey(string clipboardDir)
+    {
+        try
+        {
+            string keyPath = Path.Combine(clipboardDir, "hmac-key.bin");
+            if (!File.Exists(keyPath))
+            {
+                return null;
+            }
+
+            string plainBase64 = DpapiSecretProtector.UnprotectBase64ToUtf8(File.ReadAllText(keyPath, Encoding.UTF8));
+            if (string.IsNullOrEmpty(plainBase64))
+            {
+                return null;
+            }
+
+            byte[] restored = Convert.FromBase64String(plainBase64);
+            return restored.Length == 32 ? restored : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void TryRebaseSingleClipboardFile(
+        string jsonPath,
+        string normalizedStagedData,
+        string normalizedTargetData,
+        IReadOnlyList<string> oldPrefixes,
+        byte[]? hmacKey)
+    {
+        try
+        {
+            string raw = File.ReadAllText(jsonPath, Encoding.UTF8);
+            if (JsonNode.Parse(raw) is not JsonObject rootObj ||
+                rootObj["items"] is not JsonArray itemsArr)
+            {
+                return;
+            }
+
+            bool changed = false;
+            List<string>? migratedPayloadFilesToDelete = null;
+            foreach (JsonNode? node in itemsArr)
+            {
+                if (node is not JsonObject itemObj ||
+                    itemObj["filePaths"] is not JsonArray fpArr ||
+                    fpArr.Count == 0)
+                {
+                    continue;
+                }
+
+                bool itemChanged = false;
+                var updatedPaths = new List<string>(fpArr.Count);
+                for (int i = 0; i < fpArr.Count; i++)
+                {
+                    string? path = fpArr[i] is JsonValue v && v.TryGetValue(out string? s) ? s : null;
+                    if (string.IsNullOrWhiteSpace(path))
+                    {
+                        updatedPaths.Add(string.Empty);
+                        continue;
+                    }
+
+                    string? rebased = TryRebaseMigratedClipboardFilePath(path, normalizedStagedData, normalizedTargetData, oldPrefixes);
+                    if (!string.IsNullOrWhiteSpace(rebased) && !string.Equals(rebased, path, StringComparison.Ordinal))
+                    {
+                        fpArr[i] = rebased;
+                        updatedPaths.Add(rebased);
+                        itemChanged = true;
+                        changed = true;
+                    }
+                    else
+                    {
+                        updatedPaths.Add(path);
+                    }
+                }
+
+                if (!itemChanged)
+                {
+                    continue;
+                }
+
+                List<string> nonEmpty = updatedPaths.Where(static x => x.Length > 0).ToList();
+                if (nonEmpty.Count > 0)
+                {
+                    string? existingHash = itemObj["contentHash"] is JsonValue hv && hv.TryGetValue(out string? hs) ? hs : null;
+                    bool useHmac = hmacKey is not null &&
+                                   (string.IsNullOrEmpty(existingHash) || existingHash.StartsWith("files:h1:", StringComparison.Ordinal));
+                    itemObj["contentHash"] = ClipboardContentHashing.ComputeFilesContentHash(nonEmpty, useHmac ? hmacKey : null);
+                }
+
+                string joinedPaths = string.Join(Environment.NewLine, nonEmpty);
+                bool isSensitive = itemObj["isSensitive"] is JsonValue sv && sv.TryGetValue(out bool sb) && sb;
+                string? payloadLeaf = itemObj["textPayloadFileName"] is JsonValue pv && pv.TryGetValue(out string? ps) ? ps : null;
+                if (!string.IsNullOrWhiteSpace(payloadLeaf))
+                {
+                    itemObj["textContent"] = isSensitive
+                        ? ClipboardStore.DpapiPayloadPrefix + DpapiSecretProtector.ProtectUtf8ToBase64(joinedPaths)
+                        : joinedPaths;
+                    itemObj["textPayloadFileName"] = null;
+                    string safeLeaf = Path.GetFileName(payloadLeaf);
+                    if (!string.IsNullOrWhiteSpace(safeLeaf) &&
+                        Path.GetDirectoryName(jsonPath) is { Length: > 0 } clipboardDir)
+                    {
+                        migratedPayloadFilesToDelete ??= [];
+                        migratedPayloadFilesToDelete.Add(Path.Combine(clipboardDir, "payloads", safeLeaf));
+                    }
+                }
+                else if (itemObj["textContent"] is JsonValue tv && tv.TryGetValue(out string? existingText) &&
+                         !string.IsNullOrEmpty(existingText))
+                {
+                    if (isSensitive || existingText.StartsWith(ClipboardStore.DpapiPayloadPrefix, StringComparison.Ordinal))
+                    {
+                        itemObj["textContent"] = ClipboardStore.DpapiPayloadPrefix +
+                                                 DpapiSecretProtector.ProtectUtf8ToBase64(joinedPaths);
+                    }
+                    else
+                    {
+                        itemObj["textContent"] = joinedPaths;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                using var ms = new MemoryStream();
+                using (var writer = new Utf8JsonWriter(ms))
+                {
+                    rootObj.WriteTo(writer);
+                }
+
+                WriteTextAtomically(jsonPath, Encoding.UTF8.GetString(ms.ToArray()));
+                if (migratedPayloadFilesToDelete is not null)
+                {
+                    foreach (string stalePayloadPath in migratedPayloadFilesToDelete)
+                    {
+                        ClipboardStorageFileOps.TryDeleteFile(stalePayloadPath);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort clipboard rebase; preserve existing JSON if malformed.
+        }
+    }
+
+    private static string? TryRebaseMigratedClipboardFilePath(
+        string rawPath,
+        string normalizedStagedData,
+        string normalizedTargetData,
+        IReadOnlyList<string> oldPrefixes)
+    {
+        string normalizedSlash = rawPath.Replace('\\', '/');
+        const string droppedMarker = "/clipboard/dropped/";
+        int idx = normalizedSlash.IndexOf(droppedMarker, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            string tail = normalizedSlash[(idx + droppedMarker.Length)..].TrimStart('/');
+            if (tail.Length > 0 && !tail.Split('/').Any(static seg => seg is "." or ".."))
+            {
+                string tailNative = tail.Replace('/', Path.DirectorySeparatorChar);
+                string stagedCandidate = Path.Combine(normalizedStagedData, "clipboard", "dropped", tailNative);
+                if (File.Exists(stagedCandidate) || Directory.Exists(stagedCandidate))
+                {
+                    return Path.Combine(normalizedTargetData, "clipboard", "dropped", tailNative);
+                }
+            }
+        }
+
+        foreach (string oldPrefix in oldPrefixes)
+        {
+            string prefixSlash = oldPrefix.Replace('\\', '/');
+            if (!prefixSlash.EndsWith('/'))
+            {
+                prefixSlash += "/";
+            }
+
+            if (normalizedSlash.StartsWith(prefixSlash, StringComparison.OrdinalIgnoreCase))
+            {
+                string rel = normalizedSlash[prefixSlash.Length..].TrimStart('/');
+                if (rel.Length > 0 && !rel.Split('/').Any(static seg => seg is "." or ".."))
+                {
+                    string relNative = rel.Replace('/', Path.DirectorySeparatorChar);
+                    string stagedCandidate = Path.Combine(normalizedStagedData, relNative);
+                    if (File.Exists(stagedCandidate) || Directory.Exists(stagedCandidate))
+                    {
+                        return Path.Combine(normalizedTargetData, relNative);
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void WriteTextAtomically(string filePath, string updated)

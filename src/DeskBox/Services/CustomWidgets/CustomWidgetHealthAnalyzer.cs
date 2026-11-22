@@ -968,7 +968,6 @@ public static partial class CustomWidgetHealthAnalyzer
 
             bool isHorizontalComposerRow =
                 string.Equals(node.Type, "Grid", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(node.Type, "Row", StringComparison.OrdinalIgnoreCase) ||
                 (string.Equals(node.Type, "Stack", StringComparison.OrdinalIgnoreCase) &&
                  string.Equals(node.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase));
             if (isHorizontalComposerRow && node.Children.Count >= 2)

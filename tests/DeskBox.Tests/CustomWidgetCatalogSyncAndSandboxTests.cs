@@ -973,7 +973,7 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
               "widgets": [
                 {
                   "id": "hydration",
-                  "manifestId": "starter.hydration",
+                  "manifestId": "deskbox.hydration",
                   "name": "hydration",
                   "version": "999.0.0",
                   "deprecated": true
