@@ -27,7 +27,6 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          PUSH_COMMIT_COUNT: ${{ github.event_name == 'push' && github.event.commits && length(github.event.commits) || 1 }}
           TRIGGER_USER: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login || github.actor }}
           ALLOWED_LOGIN: Tianyu199509
           ALLOWED_AUTHOR_NAMES: Simon;Tianyu199509
@@ -57,8 +56,14 @@ jobs:
               $rangeArgs = @("origin/main..$head")
             } else {
               $count = 1
-              [void][int]::TryParse($env:PUSH_COMMIT_COUNT, [ref]$count)
-              if ($count -lt 1) { $count = 1 }
+              if ($env:GITHUB_EVENT_PATH -and (Test-Path -LiteralPath $env:GITHUB_EVENT_PATH)) {
+                try {
+                  $ev = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+                  if ($ev.commits -and @($ev.commits).Count -gt 0) {
+                    $count = @($ev.commits).Count
+                  }
+                } catch {}
+              }
               $rangeArgs = @("-$count", $head)
             }
           }
