@@ -726,7 +726,7 @@ public sealed class CustomWidgetAudioService : IDisposable
 
     private bool TryAttachAndStartMediaPlayer(TrackSlot slot, string rawSource, string? widgetDirectory)
     {
-        InMemoryRandomAccessStream? memStream = null;
+        IRandomAccessStream? memStream = null;
         MediaSource? mediaSource = null;
         MediaPlayer? player = null;
 
@@ -754,7 +754,7 @@ public sealed class CustomWidgetAudioService : IDisposable
             }
             else if (TryResolveMediaUri(rawSource, widgetDirectory) is { } uri)
             {
-                mediaSource = MediaSource.CreateFromUri(uri);
+                mediaSource = DeskBox.Platform.ClipboardStorageFileOps.CreateMediaSourceFromUri(uri, out memStream);
             }
 
             if (mediaSource is null)

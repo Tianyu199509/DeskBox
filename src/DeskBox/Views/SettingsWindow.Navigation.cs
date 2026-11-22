@@ -123,16 +123,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (string.Equals(invokedTag, "Appearance", StringComparison.Ordinal) &&
-            string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection appearanceSection &&
-            appearanceSection.TryNavigateBack())
-        {
-            CloseTransientNavigationOverlayIfNeeded();
-            return;
-        }
-
         if (string.Equals(invokedTag, "Interaction", StringComparison.Ordinal) &&
             string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
             TryCloseCapsuleModeSubPage())
@@ -201,6 +191,16 @@ public sealed partial class SettingsWindow
         }
 
         results.AddRange(CreateSettingItemSearchResults());
+        if (TryGetSectionRoute("About", out SettingsSectionRoute aboutRoute))
+        {
+            results.Add(new SettingsSearchResult(
+                "About",
+                _localizationService.T("Settings.About.PrivacyPolicy"),
+                BuildSettingsRouteBreadcrumb(aboutRoute),
+                string.Empty,
+                "About",
+                null));
+        }
 
         _settingsSearchResults = results;
 
@@ -836,14 +836,6 @@ public sealed partial class SettingsWindow
             return true;
         }
 
-        if (string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection appearanceSection &&
-            appearanceSection.TryNavigateBack())
-        {
-            return true;
-        }
-
         if (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
             TryCloseCapsuleModeSubPage())
         {
@@ -1149,7 +1141,7 @@ public sealed partial class SettingsWindow
         {
             DisplaysSection.Refresh();
         }
-        if (sectionTag == "WidgetGroups")
+        if (sectionTag is "WidgetGroups" or "Interaction")
         {
             ViewModel.RefreshWidgetGroupSettings();
         }
@@ -1403,21 +1395,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (string.Equals(route.Tag, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true })
-        {
-            SettingsBreadcrumbBar.ItemsSource = new object[]
-            {
-                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
-                new SettingsBreadcrumbItem("Appearance:__material__", _localizationService.T("Settings.Material.Title"), 1.0)
-            };
-            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
-            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
-            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
-            return;
-        }
-
         if (string.Equals(route.Tag, "Interaction", StringComparison.Ordinal) &&
             _isCapsuleModeSubPageOpen)
         {
@@ -1524,7 +1501,6 @@ public sealed partial class SettingsWindow
     private void NavigateFromSettingsBreadcrumbItem(SettingsBreadcrumbItem item)
     {
         if (string.Equals(item.SectionTag, "CustomWidgetSettings:__detail__", StringComparison.Ordinal) ||
-            string.Equals(item.SectionTag, "Appearance:__material__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "Interaction:__capsule__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "AppearanceDetail:__filedisplay__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "AppearanceDetail:__autoorganize__", StringComparison.Ordinal) ||
@@ -1539,15 +1515,6 @@ public sealed partial class SettingsWindow
             _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
             customEl is CustomWidgetSettingsSection customSection &&
             customSection.TryNavigateBackToStudio())
-        {
-            return;
-        }
-
-        if (string.Equals(item.SectionTag, "Appearance", StringComparison.Ordinal) &&
-            string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection appearanceSection &&
-            appearanceSection.TryNavigateBack())
         {
             return;
         }
@@ -1729,13 +1696,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (string.Equals(previousSectionTag, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? prevAppearanceEl) &&
-            prevAppearanceEl is AppearanceSettingsSection prevAppearanceSection)
-        {
-            prevAppearanceSection.CloseMaterialSubPage(animate: false);
-        }
-
         if (string.Equals(previousSectionTag, "Interaction", StringComparison.Ordinal))
         {
             CloseCapsuleModeSubPage(animate: false);
@@ -1763,18 +1723,11 @@ public sealed partial class SettingsWindow
     {
         switch (rawSectionTag)
         {
-            case "Appearance":
-                if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceRootEl) &&
-                    appearanceRootEl is AppearanceSettingsSection appearanceRootSection)
-                {
-                    appearanceRootSection.CloseMaterialSubPage(animate: false);
-                }
-                break;
             case "AppearanceMaterialSettings":
                 if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
                     appearanceEl is AppearanceSettingsSection appearanceSection)
                 {
-                    appearanceSection.OpenMaterialSubPage(animate: false);
+                    appearanceSection.ExpandMaterialSection();
                 }
                 break;
             case "Interaction":
@@ -1823,16 +1776,6 @@ public sealed partial class SettingsWindow
 
     private void RevealContainingSettingsSubPage(string targetSectionTag, FrameworkElement target)
     {
-        if (string.Equals(targetSectionTag, "Appearance", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection appearanceSection &&
-            appearanceSection.FindName("MaterialSubPagePanel") is DependencyObject materialPanel &&
-            IsDescendantOf(target, materialPanel))
-        {
-            appearanceSection.OpenMaterialSubPage(animate: false);
-            return;
-        }
-
         if (string.Equals(targetSectionTag, "Interaction", StringComparison.Ordinal) &&
             CapsuleModeSubPagePanel is { } capsulePanel &&
             IsDescendantOf(target, capsulePanel))
@@ -1921,9 +1864,6 @@ public sealed partial class SettingsWindow
         }
 
         bool isSubPageOpen =
-            (string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
-             _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appEl) &&
-             appEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true }) ||
             (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
              _isCapsuleModeSubPageOpen) ||
             (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&

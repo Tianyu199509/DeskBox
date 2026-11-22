@@ -17,9 +17,7 @@ internal static class GlanceImageStreamLoader
         try
         {
             using Windows.Storage.Streams.IRandomAccessStream stream =
-                await Windows.Storage.Streams.FileRandomAccessStream.OpenAsync(
-                    path,
-                    Windows.Storage.FileAccessMode.Read);
+                DeskBox.Platform.ClipboardStorageFileOps.OpenPlainUnvirtualizedReadStream(path);
             await bitmap.SetSourceAsync(stream);
         }
         catch (Exception ex)

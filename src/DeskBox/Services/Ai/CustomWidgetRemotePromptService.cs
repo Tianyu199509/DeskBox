@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Models;
 using DeskBox.Platform;
+using DeskBox.Services.CustomWidgets;
 
 namespace DeskBox.Services;
 
@@ -34,6 +35,8 @@ public sealed class CustomWidgetRemotePromptDocument
     public string? ExtraDesignRules { get; set; }
     public string? SkillMarkdown { get; set; }
     public List<CustomWidgetCapabilityPatchDto>? CapabilityPatches { get; set; }
+    public string? ContentSha256 { get; set; }
+    public string? Signature { get; set; }
 }
 
 public sealed class CustomWidgetRemotePromptCacheMeta
@@ -100,6 +103,7 @@ public sealed class CustomWidgetRemotePromptService
     public const string MirrorPromptUrl = "https://raw.githubusercontent.com/Tianyu199509/DeskBox/main/catalog/prompts.v1.json";
 
     private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromHours(6);
+    private static readonly TimeSpan OfflineRetryBackoff = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private const int MaxRemotePromptBytes = 256 * 1024;
 
@@ -110,6 +114,7 @@ public sealed class CustomWidgetRemotePromptService
     private readonly string _metaCachePath;
     private readonly HttpClient _httpClient;
     private readonly Version? _currentAppVersionOverride;
+    private readonly Func<CustomWidgetRemotePromptDocument, bool> _signatureVerifier;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _snapshotLock = new();
     private CustomWidgetRemotePromptDocument? _cachedRemoteDoc;
@@ -123,6 +128,15 @@ public sealed class CustomWidgetRemotePromptService
         string? cacheDirectory = null,
         HttpMessageHandler? httpMessageHandler = null,
         Version? currentAppVersionOverride = null)
+        : this(cacheDirectory, httpMessageHandler, currentAppVersionOverride, signatureVerifier: null)
+    {
+    }
+
+    internal CustomWidgetRemotePromptService(
+        string? cacheDirectory,
+        HttpMessageHandler? httpMessageHandler,
+        Version? currentAppVersionOverride,
+        Func<CustomWidgetRemotePromptDocument, bool>? signatureVerifier)
     {
         _cacheDirectory = string.IsNullOrWhiteSpace(cacheDirectory)
             ? Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "cache", "widget-prompts")
@@ -130,11 +144,15 @@ public sealed class CustomWidgetRemotePromptService
         _promptCachePath = Path.Combine(_cacheDirectory, "prompts.v1.json");
         _metaCachePath = Path.Combine(_cacheDirectory, "meta.json");
         _currentAppVersionOverride = currentAppVersionOverride;
+        _signatureVerifier = signatureVerifier ?? VerifyPromptDefault;
 
         _httpClient = httpMessageHandler is not null
             ? new HttpClient(httpMessageHandler, disposeHandler: false) { Timeout = RequestTimeout }
             : CreateDefaultHttpClient();
     }
+
+    private static bool VerifyPromptDefault(CustomWidgetRemotePromptDocument doc) =>
+        CustomWidgetCatalogSignatureVerifier.VerifyPromptDocument(doc);
 
     private static HttpClient CreateDefaultHttpClient()
     {
@@ -325,6 +343,9 @@ public sealed class CustomWidgetRemotePromptService
                 }
             }
 
+            Interlocked.Exchange(
+                ref _lastRefreshAttemptUtcTicks,
+                nowTicks - RefreshMinInterval.Ticks + OfflineRetryBackoff.Ticks);
             return false;
         }
         catch (OperationCanceledException)
@@ -342,11 +363,15 @@ public sealed class CustomWidgetRemotePromptService
         }
     }
 
-    public bool IsValidCompatibleOverride(CustomWidgetRemotePromptDocument? doc)
+    public bool IsValidCompatibleOverride(CustomWidgetRemotePromptDocument? doc) =>
+        IsValidCompatibleOverrideCore(doc, signatureAlreadyVerified: false);
+
+    private bool IsValidCompatibleOverrideCore(CustomWidgetRemotePromptDocument? doc, bool signatureAlreadyVerified)
     {
         if (doc is null ||
             doc.SchemaVersion != CurrentPromptSchemaVersion ||
-            doc.PromptVersion <= BuiltInPromptVersion)
+            doc.PromptVersion <= BuiltInPromptVersion ||
+            (!signatureAlreadyVerified && !_signatureVerifier(doc)))
         {
             return false;
         }
@@ -692,19 +717,24 @@ public sealed class CustomWidgetRemotePromptService
                 rawJson,
                 CustomWidgetRemotePromptJsonContext.Default.CustomWidgetRemotePromptDocument);
             string? etag = resp.Headers.ETag?.Tag;
-            if (!IsValidCompatibleOverride(doc))
+            if (doc is null ||
+                doc.SchemaVersion != CurrentPromptSchemaVersion ||
+                doc.PromptVersion < 0 ||
+                !_signatureVerifier(doc))
             {
-                if (doc is { SchemaVersion: CurrentPromptSchemaVersion, PromptVersion: > 0 } &&
-                    ValidateSkillMarkdown(doc.SkillMarkdown) &&
-                    ValidateCapabilityPatches(doc.CapabilityPatches))
-                {
-                    return new FetchOutcome(FetchOutcomeKind.NoOverrideNeeded, ETag: etag);
-                }
-
                 return new FetchOutcome(FetchOutcomeKind.Failed);
             }
 
-            return new FetchOutcome(FetchOutcomeKind.Updated, doc, rawJson, etag);
+            if (doc.PromptVersion <= BuiltInPromptVersion)
+            {
+                return ValidateSkillMarkdown(doc.SkillMarkdown) && ValidateCapabilityPatches(doc.CapabilityPatches)
+                    ? new FetchOutcome(FetchOutcomeKind.NoOverrideNeeded, ETag: etag)
+                    : new FetchOutcome(FetchOutcomeKind.Failed);
+            }
+
+            return IsValidCompatibleOverrideCore(doc, signatureAlreadyVerified: true)
+                ? new FetchOutcome(FetchOutcomeKind.Updated, doc, rawJson, etag)
+                : new FetchOutcome(FetchOutcomeKind.Failed);
         }
         catch (OperationCanceledException)
         {

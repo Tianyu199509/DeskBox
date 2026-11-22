@@ -128,11 +128,6 @@ public sealed partial class SettingsWindow
         {
             clipboardSection.RefreshFromSettings();
         }
-        if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearance) &&
-            appearance is DeskBox.Views.SettingsSections.AppearanceSettingsSection appearanceSection)
-        {
-            appearanceSection.SyncMaterialEntryCard(reloadOptions: true);
-        }
         SyncCapsuleModeEntryCard(reloadOptions: true);
         SyncMaintenanceEntryCards();
         RefreshAiSettingsEntrySummary();

@@ -109,18 +109,112 @@ public sealed class CustomWidgetAgentCommitGateTests : IDisposable
         store.RecordExecutableSurfaceAfterWrite(widgetId, manifestV2, logicV2, trustedLocalAuthoring: true);
         Assert.True(store.GetProfile(widgetId).IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
 
-        // External (Agent/OTA) overwrite with a changed surface revokes only positive privileged overrides.
+        // External (Agent/OTA) overwrite with a changed surface revokes positive privileged overrides
+        // across all external/host permission domains (including SystemAndClipboard and PublicNetwork)
+        // and downgrades TrustedLocalAuthoring.
         store.SetPermissionOverride(widgetId, CustomWidgetPermissionKind.CommandExecution, enabled: true);
+        store.SetPermissionOverride(widgetId, CustomWidgetPermissionKind.SystemAndClipboard, enabled: true);
+        store.SetPermissionOverride(widgetId, CustomWidgetPermissionKind.PublicNetwork, enabled: true);
         store.RecordExecutableSurfaceAfterWrite(widgetId, manifestV1, logicV1, trustedLocalAuthoring: false);
-        Assert.False(store.GetProfile(widgetId).IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
-        Assert.False(store.GetProfile(widgetId).IsPermissionGranted(CustomWidgetPermissionKind.LocalFileAccess));
+        CustomWidgetTrustProfile afterExternal = store.GetProfile(widgetId);
+        Assert.False(afterExternal.TrustedLocalAuthoring);
+        Assert.False(afterExternal.IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
+        Assert.False(afterExternal.IsPermissionGranted(CustomWidgetPermissionKind.LocalFileAccess));
+        Assert.False(afterExternal.IsPermissionGranted(CustomWidgetPermissionKind.SystemAndClipboard));
+        Assert.False(afterExternal.IsPermissionGranted(CustomWidgetPermissionKind.PublicNetwork, isReadOnlyPublicGet: false));
         // Non-privileged grants survive.
-        Assert.True(store.GetProfile(widgetId).IsPermissionGranted(CustomWidgetPermissionKind.Notifications));
+        Assert.True(afterExternal.IsPermissionGranted(CustomWidgetPermissionKind.Notifications));
 
         // External write with an UNCHANGED surface keeps grants (no re-prompt on idempotent writes).
         store.SetPermissionOverride(widgetId, CustomWidgetPermissionKind.CommandExecution, enabled: true);
         store.RecordExecutableSurfaceAfterWrite(widgetId, manifestV1, logicV1, trustedLocalAuthoring: false);
         Assert.True(store.GetProfile(widgetId).IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
+
+        // Declarative source-path change (with null/unchanged script) also alters the surface hash and revokes grants.
+        const string sourceManifestSafe =
+            "{\"id\":\"custom.fingerprint-w\",\"schemaVersion\":1,\"sources\":[{\"id\":\"s\",\"type\":\"fileText\",\"path\":\"C:\\\\safe\\\\notes.txt\"}],\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"x\"}}}";
+        const string sourceManifestEvil =
+            "{\"id\":\"custom.fingerprint-w\",\"schemaVersion\":1,\"sources\":[{\"id\":\"s\",\"type\":\"fileText\",\"path\":\"C:\\\\secret\\\\id_rsa\"}],\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"x\"}}}";
+        Assert.NotEqual(
+            CustomWidgetTrustStore.ComputeExecutableSurfaceHash(sourceManifestSafe, null),
+            CustomWidgetTrustStore.ComputeExecutableSurfaceHash(sourceManifestEvil, null));
+
+        // Legacy entry without a recorded ExecutableSurfaceHash revokes positive overrides on first external overwrite.
+        const string legacyWidgetId = "custom.legacy-no-hash";
+        store.SetPermissionOverride(legacyWidgetId, CustomWidgetPermissionKind.LocalFileAccess, enabled: true);
+        store.RecordExecutableSurfaceAfterWrite(legacyWidgetId, sourceManifestEvil, null, trustedLocalAuthoring: false);
+        Assert.False(store.GetProfile(legacyWidgetId).IsPermissionGranted(CustomWidgetPermissionKind.LocalFileAccess));
+    }
+
+    [Fact]
+    public async Task BridgeUpsert_UndeclaredAstPrivilegedCommit_StillTriggersApproval_AndInlineCommitEditsAreRejected()
+    {
+        string sandbox = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", "AgentCommitAstGate", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(sandbox);
+        try
+        {
+            // Manifest intentionally omits "capabilities", but reads $clipboard.* and uses http.request.
+            const string undeclaredPrivilegedManifest =
+                "{\"id\":\"custom.ast-priv\",\"schemaVersion\":1,\"name\":\"Clipboard Exfil\",\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Button\",\"text\":\"${$clipboard.preview}\",\"onClick\":{\"type\":\"http.request\",\"url\":\"https://example.com/hook\"}}}}";
+            string stageId = CustomWidgetAgentStageStore.Stage(new AgentStageRequest(
+                WidgetId: "w-ast-priv",
+                ManifestJson: undeclaredPrivilegedManifest,
+                LogicJs: null,
+                HasLogicJs: false,
+                LocalesJson: null,
+                HasLocales: false,
+                ResizeToDefault: false));
+
+            var settings = new SettingsService(Path.Combine(sandbox, "settings"));
+            await settings.LoadAsync();
+            settings.Settings.WidgetLayout.Widgets.Add(new DeskBox.Models.WidgetConfig
+            {
+                Id = "w-gate-priv",
+                Name = "Gate Priv",
+                WidgetKind = DeskBox.Models.WidgetKind.Custom,
+            });
+            var fileService = new FileService();
+            var manager = new WidgetManager(
+                settings,
+                fileService,
+                TestOrganizerServices.Create(settings, fileService),
+                new ThemeService(settings),
+                new QuickCaptureService(new QuickCaptureStore(Path.Combine(sandbox, "notes"))),
+                () => Path.Combine(sandbox, "desktop"),
+                recycleManagedFolderDeletes: false);
+
+            AgentCommitApprovalRequest? seenRequest = null;
+            await using var bridge = new DeskBoxAgentBridgeServer(
+                "DeskBox_AstApprovalGate_" + Guid.NewGuid().ToString("N"),
+                () => manager,
+                commitApprovalProvider: request =>
+                {
+                    seenRequest = request;
+                    return Task.FromResult(false);
+                });
+
+            // 1. Attempting to smuggle unstaged inline edits during commit=true is rejected outright.
+            string smugglePayload =
+                "{\"op\":\"upsert\",\"commit\":true,\"stageId\":\"" + stageId + "\",\"upsertElements\":{\"root\":{\"type\":\"Text\",\"text\":\"smuggled\"}}}";
+            using (JsonDocument smuggleResp = JsonDocument.Parse(await bridge.DispatchRequestJsonAsync(smugglePayload)))
+            {
+                Assert.False(smuggleResp.RootElement.GetProperty("ok").GetBoolean());
+            }
+
+            // 2. Committing the undeclared privileged AST bundle hits the host approval gate.
+            string commitPayload = "{\"op\":\"upsert\",\"commit\":true,\"stageId\":\"" + stageId + "\"}";
+            using JsonDocument response = JsonDocument.Parse(
+                await bridge.DispatchRequestJsonAsync(commitPayload));
+            Assert.True(response.RootElement.GetProperty("ok").GetBoolean());
+            Assert.False(response.RootElement.GetProperty("result").GetProperty("committed").GetBoolean());
+            Assert.NotNull(seenRequest);
+            Assert.True(seenRequest!.DeclaresPrivilegedCapabilities);
+            Assert.Equal("Clipboard Exfil", seenRequest.WidgetName);
+        }
+        finally
+        {
+            try { Directory.Delete(sandbox, recursive: true); } catch { }
+        }
     }
 
     [Fact]
@@ -143,6 +237,12 @@ public sealed class CustomWidgetAgentCommitGateTests : IDisposable
 
             var settings = new SettingsService(Path.Combine(sandbox, "settings"));
             await settings.LoadAsync();
+            settings.Settings.WidgetLayout.Widgets.Add(new DeskBox.Models.WidgetConfig
+            {
+                Id = "w-gate-priv",
+                Name = "Gate Priv",
+                WidgetKind = DeskBox.Models.WidgetKind.Custom,
+            });
             var fileService = new FileService();
             var manager = new WidgetManager(
                 settings,
@@ -178,6 +278,53 @@ public sealed class CustomWidgetAgentCommitGateTests : IDisposable
 
             // A denied commit leaves the staged bundle unconsumed and retryable.
             Assert.Contains(CustomWidgetAgentStageStore.ListPending(), s => s.StageId == stageId);
+
+            // External stage_commit also goes through commitApprovalProvider AND holds the lease while awaiting approval
+            // so concurrent retries cannot pop duplicate approval windows.
+            var modalGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            int approvalInvocations = 0;
+            await using var raceBridge = new DeskBoxAgentBridgeServer(
+                "DeskBox_ApprovalRace_" + Guid.NewGuid().ToString("N"),
+                () => manager,
+                commitApprovalProvider: _ =>
+                {
+                    Interlocked.Increment(ref approvalInvocations);
+                    return modalGate.Task;
+                });
+
+            Task<string> firstExternalStageCommit = raceBridge.DispatchRequestJsonAsync(
+                "{\"op\":\"stage_commit\",\"stageId\":\"" + stageId + "\"}");
+            for (int spin = 0; spin < 50 && Volatile.Read(ref approvalInvocations) == 0; spin++)
+            {
+                await Task.Delay(5);
+            }
+            Assert.Equal(1, Volatile.Read(ref approvalInvocations));
+
+            using (JsonDocument concurrentResp = JsonDocument.Parse(
+                       await raceBridge.DispatchRequestJsonAsync("{\"op\":\"stage_commit\",\"stageId\":\"" + stageId + "\"}")))
+            {
+                Assert.False(concurrentResp.RootElement.GetProperty("ok").GetBoolean());
+                Assert.Equal(1, Volatile.Read(ref approvalInvocations));
+            }
+
+            modalGate.SetResult(false);
+            using (JsonDocument declinedStageCommitResp = JsonDocument.Parse(await firstExternalStageCommit))
+            {
+                Assert.True(declinedStageCommitResp.RootElement.GetProperty("ok").GetBoolean());
+                Assert.False(declinedStageCommitResp.RootElement.GetProperty("result").GetProperty("committed").GetBoolean());
+                Assert.True(declinedStageCommitResp.RootElement.GetProperty("result").GetProperty("requiresHostApproval").GetBoolean());
+            }
+            Assert.Contains(CustomWidgetAgentStageStore.ListPending(), s => s.StageId == stageId);
+
+            // Committing via DeskBox Workshop's own host UI (DispatchHostUiRequestJsonAsync) bypasses external approval
+            // and commits the staged bundle directly.
+            seenRequest = null;
+            using JsonDocument hostUiResponse = JsonDocument.Parse(
+                await bridge.DispatchHostUiRequestJsonAsync("{\"op\":\"stage_commit\",\"stageId\":\"" + stageId + "\"}"));
+            Assert.Null(seenRequest);
+            Assert.True(hostUiResponse.RootElement.GetProperty("ok").GetBoolean(), hostUiResponse.RootElement.GetRawText());
+            Assert.True(hostUiResponse.RootElement.GetProperty("result").GetProperty("committed").GetBoolean());
+            Assert.DoesNotContain(CustomWidgetAgentStageStore.ListPending(), s => s.StageId == stageId);
         }
         finally
         {

@@ -373,6 +373,11 @@ public sealed partial class SettingsWindow
         Services.ShellLaunchService.FireAndForgetOpenPath(ViewModel.OfficialWebsiteLink);
     }
 
+    private void OpenPrivacyPolicyButton_Click(object sender, RoutedEventArgs e)
+    {
+        Services.ShellLaunchService.FireAndForgetOpenPath("https://deskbox.fun/privacy/");
+    }
+
     private async void ShowStoreSupportDialogButton_Click(object sender, RoutedEventArgs e)
     {
         if (SettingsRoot.XamlRoot is null ||

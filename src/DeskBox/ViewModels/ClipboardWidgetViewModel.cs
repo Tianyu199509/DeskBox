@@ -790,7 +790,17 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
 
                 if (canLoad)
                 {
-                    BitmapImage? loaded = await _thumbnailLoader(previewPath, 320).ConfigureAwait(true);
+                    bool isProtected = _model.Kind == ClipboardItemKind.Image &&
+                        _model.IsSensitive &&
+                        await Task.Run(() => DeskBox.Platform.ClipboardStorageFileOps.IsDpapiProtectedMediaFile(previewPath)).ConfigureAwait(true);
+                    if (generation != _visualAssetGeneration)
+                    {
+                        return;
+                    }
+
+                    BitmapImage? loaded = isProtected
+                        ? await TryDecodeProtectedBitmapAsync(previewPath, 320).ConfigureAwait(true)
+                        : await _thumbnailLoader(previewPath, 320).ConfigureAwait(true);
                     if (generation != _visualAssetGeneration)
                     {
                         return;
@@ -837,6 +847,41 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
                     OnPropertyChanged(nameof(MetaVisibility));
                 }
             }
+        }
+    }
+
+    internal static async Task<BitmapImage?> TryDecodeProtectedBitmapAsync(string path, int decodePixelWidth)
+    {
+        byte[]? plainBytes = await Task.Run(() =>
+            DeskBox.Platform.ClipboardStorageFileOps.TryReadMediaBytes(path, out byte[] bytes) ? bytes : null)
+            .ConfigureAwait(true);
+        if (plainBytes is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        try
+        {
+            using var memStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            using (var writer = new Windows.Storage.Streams.DataWriter(memStream.GetOutputStreamAt(0)))
+            {
+                writer.WriteBytes(plainBytes);
+                await writer.StoreAsync();
+                await writer.FlushAsync();
+                writer.DetachStream();
+            }
+
+            memStream.Seek(0);
+            var bitmap = new BitmapImage
+            {
+                DecodePixelWidth = decodePixelWidth
+            };
+            await bitmap.SetSourceAsync(memStream);
+            return bitmap;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -2084,8 +2129,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
 
     public string? ResolveThumbnailPath(ClipboardHistoryItem item)
     {
-        return _service?.GetAbsolutePath(item.ThumbnailRelativePath)
-            ?? _service?.GetAbsolutePath(item.ImageRelativePath);
+        return _service?.ResolveThumbnailPath(item);
     }
 
     public void SetViewAttached(bool isAttached)

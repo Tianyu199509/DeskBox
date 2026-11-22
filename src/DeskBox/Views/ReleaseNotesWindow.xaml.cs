@@ -82,7 +82,6 @@ public sealed partial class ReleaseNotesWindow : Window
         _themeService.TrackWindow(this);
         _localizationService.LanguageChanged += OnLanguageChanged;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged += AppTitleBar_ActualThemeChanged;
         Closed += ReleaseNotesWindow_Closed;
 
         ResizeAndCenter(windowId);
@@ -302,7 +301,10 @@ public sealed partial class ReleaseNotesWindow : Window
 
         OpenOnlineButton.Content = _localizationService.T("Settings.ReleaseNotes.OpenOnline");
         CloseButton.Content = _localizationService.T("Settings.ReleaseNotes.Close");
-        OpenOnlineButton.Visibility = AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl)
+        bool isStoreOrPackaged = AppDistributionService.Current.IsMicrosoftStore ||
+                                 AppDistributionService.Current.IsPackaged;
+        OpenOnlineButton.Visibility = !isStoreOrPackaged &&
+                                      AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl)
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -537,7 +539,9 @@ public sealed partial class ReleaseNotesWindow : Window
 
     private void OpenOnlineButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_manifest is not { } manifest)
+        if (Services.AppDistributionService.Current.IsMicrosoftStore ||
+            Services.AppDistributionService.Current.IsPackaged ||
+            _manifest is not { } manifest)
         {
             return;
         }
@@ -578,8 +582,6 @@ public sealed partial class ReleaseNotesWindow : Window
             _ = _manifest is null ? LoadManifestAsync() : LoadReleaseNotesAsync();
         }
     }
-
-    private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args) => ApplyTitleBarColors();
 
     private void ApplyTitleBarColors()
     {
@@ -676,7 +678,6 @@ public sealed partial class ReleaseNotesWindow : Window
         _manifestLoadCts = null;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         RootGrid.ActualThemeChanged -= RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= ReleaseNotesWindow_Closed;
         RemoveMinimumSizeHook();
         RootGrid.Children.Clear();
@@ -696,22 +697,5 @@ public sealed partial class ReleaseNotesWindow : Window
     {
         double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
         return Math.Max(1, (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 }

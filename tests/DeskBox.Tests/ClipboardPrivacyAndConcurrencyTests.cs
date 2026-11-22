@@ -141,4 +141,153 @@ public sealed class ClipboardPrivacyAndConcurrencyTests
             }
         }
     }
+
+    [Fact]
+    public async Task SpilledLegacyText_MigratesToFullPayloadHmacHash_NotTruncatedPreview()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", "ClipboardPrivacy", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new ClipboardStore(tempRoot);
+            string fullText = new string('A', 2400) + "-tail-marker-9876";
+            string legacyHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(fullText);
+
+            await store.SaveAsync(new ClipboardStoreDocument
+            {
+                Items =
+                {
+                    new ClipboardHistoryItem
+                    {
+                        Id = "spilled-legacy",
+                        Kind = ClipboardItemKind.Text,
+                        ContentHash = legacyHash,
+                        TextContent = fullText,
+                        Summary = "spilled"
+                    }
+                }
+            });
+
+            ClipboardStoreDocument loaded = await new ClipboardStore(tempRoot).LoadAsync();
+            ClipboardHistoryItem migrated = Assert.Single(loaded.Items);
+            Assert.False(string.IsNullOrWhiteSpace(migrated.TextPayloadFileName));
+
+            byte[] hmacKey = store.GetOrCreateContentHashKey();
+            string expectedFullHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(fullText, hmacKey);
+            string wrongTruncatedHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(fullText.AsSpan(0, 2048), hmacKey);
+            Assert.NotEqual(wrongTruncatedHash, expectedFullHash);
+            Assert.Equal(expectedFullHash, migrated.ContentHash);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SensitiveImage_EncryptsMediaFilesAtRestWithDpapi_PreservesDimensionsSummary_AndExportsDecryptedPng()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", "ClipboardPrivacy", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new ClipboardStore(tempRoot);
+            byte[] key = store.GetOrCreateContentHashKey();
+            string hash = ClipboardContentHashing.ComputeImageContentHash(OnePixelPng, key);
+            string leaf = ClipboardContentHashing.MediaFileNameFromContentHash(hash);
+
+            Directory.CreateDirectory(store.ImageDirectory);
+            Directory.CreateDirectory(store.ThumbnailDirectory);
+            string imgPath = Path.Combine(store.ImageDirectory, leaf);
+            string thumbPath = Path.Combine(store.ThumbnailDirectory, leaf);
+            await File.WriteAllBytesAsync(imgPath, OnePixelPng);
+            await File.WriteAllBytesAsync(thumbPath, OnePixelPng);
+
+            await store.SaveAsync(new ClipboardStoreDocument
+            {
+                Items =
+                {
+                    new ClipboardHistoryItem
+                    {
+                        Id = "secret-shot",
+                        Kind = ClipboardItemKind.Image,
+                        ContentHash = hash,
+                        ImageFileName = leaf,
+                        ThumbnailFileName = leaf,
+                        ImageWidth = 1920,
+                        ImageHeight = 1080,
+                        Summary = "1920 × 1080",
+                        OcrText = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD",
+                        IsSensitive = true
+                    }
+                }
+            });
+
+            Assert.True(DeskBox.Platform.ClipboardStorageFileOps.IsDpapiProtectedMediaFile(imgPath));
+            Assert.True(DeskBox.Platform.ClipboardStorageFileOps.IsDpapiProtectedMediaFile(thumbPath));
+            byte[] rawOnDisk = await File.ReadAllBytesAsync(imgPath);
+            Assert.NotEqual(OnePixelPng, rawOnDisk);
+
+            string rawJson = await File.ReadAllTextAsync(store.StorePath);
+            Assert.Contains("1920 \\u00D7 1080", rawJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ghp_1234567890", rawJson, StringComparison.Ordinal);
+
+            Assert.True(DeskBox.Platform.ClipboardStorageFileOps.TryReadMediaBytes(imgPath, out byte[] decrypted));
+            Assert.Equal(OnePixelPng, decrypted);
+
+            string exportedPath = Path.Combine(tempRoot, "exported.png");
+            DeskBox.Platform.ClipboardStorageFileOps.CopyFileOverwrite(imgPath, exportedPath);
+            Assert.Equal(OnePixelPng, await File.ReadAllBytesAsync(exportedPath));
+
+            ClipboardStoreDocument reloaded = await new ClipboardStore(tempRoot).LoadAsync();
+            ClipboardHistoryItem hydrated = Assert.Single(reloaded.Items);
+            Assert.Equal("1920 × 1080", hydrated.Summary);
+            Assert.Equal("ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD", hydrated.OcrText);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InFlightMediaRefCount_PreservesSharedPngUntilLastConcurrentCaptureReleases()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", "ClipboardPrivacy", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new ClipboardStore(tempRoot);
+            var settings = new SettingsService(Path.Combine(tempRoot, "settings.json"));
+            using var service = new ClipboardHistoryService(store, settings);
+
+            Directory.CreateDirectory(store.ImageDirectory);
+            string sharedLeaf = "shared_capture.png";
+            string imgPath = Path.Combine(store.ImageDirectory, sharedLeaf);
+            await File.WriteAllBytesAsync(imgPath, OnePixelPng);
+
+            service.AcquireInFlightMediaLease(sharedLeaf);
+            service.AcquireInFlightMediaLease(sharedLeaf);
+            service.ReleaseInFlightMediaLease(sharedLeaf);
+
+            // One capture is still in flight: orphan sweep must preserve the file.
+            _ = await service.ClearUnpinnedAsync();
+            Assert.True(File.Exists(imgPath));
+
+            // Final capture releases its lease: subsequent orphan sweep deletes unreferenced media.
+            service.ReleaseInFlightMediaLease(sharedLeaf);
+            _ = await service.ClearUnpinnedAsync();
+            Assert.False(File.Exists(imgPath));
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
 }

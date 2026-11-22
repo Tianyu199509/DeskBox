@@ -52,13 +52,23 @@ internal static class ResilientJsonStore
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("schemaVersion", out System.Text.Json.JsonElement prop) &&
-                prop.ValueKind == System.Text.Json.JsonValueKind.Number &&
-                prop.TryGetInt32(out int parsed))
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
             {
-                schemaVersion = parsed;
-                return true;
+                if (doc.RootElement.TryGetProperty("schemaVersion", out System.Text.Json.JsonElement prop) &&
+                    prop.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                    prop.TryGetInt32(out int parsed))
+                {
+                    schemaVersion = parsed;
+                    return true;
+                }
+
+                if (doc.RootElement.TryGetProperty("version", out System.Text.Json.JsonElement verProp) &&
+                    verProp.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                    verProp.TryGetInt32(out int parsedVer))
+                {
+                    schemaVersion = parsedVer;
+                    return true;
+                }
             }
         }
         catch
@@ -66,6 +76,94 @@ internal static class ResilientJsonStore
         }
 
         return false;
+    }
+
+    internal static bool HasFutureSchemaOnDisk(string storePath, int maxSupportedVersion, out int foundVersion)
+    {
+        foundVersion = 0;
+        if (string.IsNullOrWhiteSpace(storePath) || !File.Exists(storePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                storePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            string json = reader.ReadToEnd();
+            return TryReadSchemaVersion(json, out foundVersion) && foundVersion > maxSupportedVersion;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static void PreserveFutureSchemaCopyIfMissing(string storePath, string rawJson, int rawVersion)
+    {
+        if (string.IsNullOrWhiteSpace(storePath) || string.IsNullOrEmpty(rawJson))
+        {
+            return;
+        }
+
+        string archivePath = $"{storePath}.future-v{rawVersion}.bak";
+        if (File.Exists(archivePath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                archivePath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None);
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(rawJson);
+            stream.Write(utf8, 0, utf8.Length);
+        }
+        catch
+        {
+        }
+    }
+
+    internal static T DeserializeWithFutureSchemaFallback<T>(
+        string storePath,
+        string json,
+        int currentVersion,
+        Func<string, T?> deserialize,
+        Func<T, int> getVersion,
+        Func<T?, T> normalize,
+        Func<int, T> createUnparseableFallback,
+        out bool hasUnparseableFutureSchema)
+        where T : class
+    {
+        hasUnparseableFutureSchema = false;
+        try
+        {
+            T? rawParsed = deserialize(json);
+            if (rawParsed is not null)
+            {
+                int parsedVer = getVersion(rawParsed);
+                if (parsedVer > currentVersion)
+                {
+                    PreserveFutureSchemaCopyIfMissing(storePath, json, parsedVer);
+                }
+            }
+
+            return normalize(rawParsed);
+        }
+        catch (System.Text.Json.JsonException) when (
+            TryReadSchemaVersion(json, out int rawVer) && rawVer > currentVersion)
+        {
+            PreserveFutureSchemaCopyIfMissing(storePath, json, rawVer);
+            hasUnparseableFutureSchema = true;
+            return createUnparseableFallback(rawVer);
+        }
     }
 
     public static async Task<T> LoadAsync<T>(

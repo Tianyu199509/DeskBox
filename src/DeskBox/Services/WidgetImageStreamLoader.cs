@@ -40,9 +40,7 @@ internal static class WidgetImageStreamLoader
         bool succeeded = false;
         try
         {
-            using IRandomAccessStream stream = await FileRandomAccessStream.OpenAsync(
-                filePath,
-                FileAccessMode.Read);
+            using IRandomAccessStream stream = DeskBox.Platform.ClipboardStorageFileOps.OpenPlainUnvirtualizedReadStream(filePath);
             switch (source)
             {
                 case BitmapImage bitmap:

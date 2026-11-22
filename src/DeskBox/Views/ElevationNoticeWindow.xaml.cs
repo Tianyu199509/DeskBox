@@ -111,11 +111,34 @@ public sealed partial class ElevationNoticeWindow : Window
 
     public ElevationNoticeWindow(
         LocalizationService localizationService,
-        StartupElevationAssessment assessment)
+        StartupElevationAssessment assessment,
+        ThemeService? themeService = null)
     {
         InitializeComponent();
 
+        _hWnd = WindowNative.GetWindowHandle(this);
+        if (themeService is not null)
+        {
+            themeService.TrackWindow(this);
+        }
+        else
+        {
+            bool isDark = Win32Helper.IsSystemDarkMode();
+            if (Content is FrameworkElement root)
+            {
+                root.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
+            }
+
+            Win32Helper.SetWindowTheme(_hWnd, isDark);
+        }
+
         WindowsCompatibilityService.ApplySafeBackdrop(this);
+        if (Content is FrameworkElement flowRoot)
+        {
+            flowRoot.FlowDirection = Models.CustomWidgetLocaleCatalog.IsRightToLeftCulture(localizationService.CurrentCultureName)
+                ? FlowDirection.RightToLeft
+                : FlowDirection.LeftToRight;
+        }
 
         Title = localizationService.T("Startup.ElevationNotice.Title");
         TitleText.Text = localizationService.T("Startup.ElevationNotice.Title");
@@ -145,7 +168,6 @@ public sealed partial class ElevationNoticeWindow : Window
             }
         }
 
-        _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         AppBranding.ApplyWindowIcon(_appWindow);
@@ -158,6 +180,7 @@ public sealed partial class ElevationNoticeWindow : Window
         }
 
         ResizeAndCenterForDisplay(windowId);
+        Closed += (_, _) => SystemBackdrop = null;
     }
 
     private void ConfigureFullyElevated(

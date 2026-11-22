@@ -149,7 +149,6 @@ public sealed class TrayContextMenuResilienceTests
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
-                onCreateAiWidget: () => Task.CompletedTask,
                 onOpenGlobalSearch: () =>
                 {
                     searchInvoked = true;

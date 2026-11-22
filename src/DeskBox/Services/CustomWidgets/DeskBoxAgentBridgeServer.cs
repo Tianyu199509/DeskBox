@@ -20,7 +20,8 @@ public sealed record AgentCommitApprovalRequest(
     string WidgetId,
     bool OverwritesExisting,
     bool ClearsExistingData,
-    bool DeclaresPrivilegedCapabilities);
+    bool DeclaresPrivilegedCapabilities,
+    string? WidgetName = null);
 
 /// <summary>
 /// Per-user, session-scoped Named Pipe bridge allowing external AI Agents (<c>DeskBox.exe --mcp</c>
@@ -104,33 +105,22 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         _acceptLoop = Task.Run(AcceptLoopAsync);
     }
 
-    private static PipeSecurity? TryCreateCurrentUserPipeSecurity()
+    private static bool HasCurrentUserSid()
     {
         try
         {
             using WindowsIdentity currentIdentity = WindowsIdentity.GetCurrent();
-            SecurityIdentifier? sid = currentIdentity.User;
-            if (sid is null)
-            {
-                return null;
-            }
-
-            var security = new PipeSecurity();
-            security.AddAccessRule(new PipeAccessRule(
-                sid,
-                PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
-                AccessControlType.Allow));
-            return security;
+            return currentIdentity.User is not null;
         }
         catch
         {
-            return null;
+            return false;
         }
     }
 
     private async Task AcceptLoopAsync()
     {
-        if (TryCreateCurrentUserPipeSecurity() is null)
+        if (!HasCurrentUserSid())
         {
             App.Log("[AgentBridge] Refusing to start named-pipe server without current-user ACL.");
             return;
@@ -268,7 +258,16 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         }
     }
 
-    public async Task<string> DispatchRequestJsonAsync(string requestJson, CancellationToken cancellationToken = default)
+    public Task<string> DispatchRequestJsonAsync(string requestJson, CancellationToken cancellationToken = default) =>
+        DispatchRequestJsonCoreAsync(requestJson, trustedHostUiInitiated: false, cancellationToken);
+
+    internal Task<string> DispatchHostUiRequestJsonAsync(string requestJson, CancellationToken cancellationToken = default) =>
+        DispatchRequestJsonCoreAsync(requestJson, trustedHostUiInitiated: true, cancellationToken);
+
+    private async Task<string> DispatchRequestJsonCoreAsync(
+        string requestJson,
+        bool trustedHostUiInitiated,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -333,10 +332,10 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
                 "validate" => HandleValidate(root),
                 "list" => await HandleListAsync(),
                 "get" => await HandleGetAsync(root),
-                "upsert" => await HandleUpsertAsync(root),
+                "upsert" => await HandleUpsertAsync(root, trustedHostUiInitiated),
                 "stage_list" => HandleStageList(),
                 "stage_get" => HandleStageGet(root),
-                "stage_commit" => await HandleStageCommitAsync(root),
+                "stage_commit" => await HandleStageCommitAsync(root, trustedHostUiInitiated),
                 "stage_discard" => HandleStageDiscard(root),
                 "push_data" => await HandlePushDataAsync(root),
                 "capture_preview" => await HandleCapturePreviewAsync(root),
@@ -1037,66 +1036,33 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
     /// 用户确认入口：从暂存区读回完整内容，构造一次带 commit=true 的 upsert，
     /// 复用同一条校验 / stageId 消费 / 落盘路径，避免两套提交语义。
     /// </summary>
-    private async Task<string> HandleStageCommitAsync(JsonElement root)
+    private async Task<string> HandleStageCommitAsync(JsonElement root, bool trustedHostUiInitiated = false)
     {
         string? stageId = ReadStageId(root);
-        string? culture = _widgetManagerProvider()?.ActiveCultureName;
-        if (!CustomWidgetAgentStageStore.TryReadBundle(stageId, out AgentStageBundle? bundle, out string error, culture) ||
-            bundle is null)
+        if (string.IsNullOrWhiteSpace(stageId))
         {
-            if (CustomWidgetAgentStageStore.TryGetCommitted(stageId, out string? committedWidgetId))
-            {
-                return BuildSuccessJson(writer =>
-                {
-                    writer.WriteString("widgetId", committedWidgetId ?? string.Empty);
-                    writer.WriteBoolean("committed", true);
-                    writer.WriteBoolean("staged", false);
-                    writer.WriteBoolean("idempotent", true);
-                    writer.WriteString("note", "This stageId was already committed; duplicate commit treated as idempotent no-op.");
-                });
-            }
-
-            return BuildErrorJson(error);
+            string? culture = _widgetManagerProvider()?.ActiveCultureName;
+            return BuildErrorJson(LocalizationService.TranslateForCulture(
+                culture ?? LocalizationService.ResolveAmbientCultureName(),
+                "CustomWidget.AgentStage.Error.InvalidId"));
         }
 
-        using var buffer = new MemoryStream();
+        bool callerConfirmDataLoss = trustedHostUiInitiated ||
+            (root.TryGetProperty("confirmDataLoss", out JsonElement cdlEl) && cdlEl.ValueKind == JsonValueKind.True);
+
+        using var buffer = new MemoryStream(128);
         using (var writer = new Utf8JsonWriter(buffer))
         {
             writer.WriteStartObject();
             writer.WriteString("op", "upsert");
             writer.WriteBoolean("commit", true);
-            writer.WriteBoolean("confirmDataLoss", true);
-            writer.WriteString("stageId", bundle.StageId);
-            if (!string.IsNullOrWhiteSpace(bundle.WidgetId))
-            {
-                writer.WriteString("widgetId", bundle.WidgetId);
-            }
-            writer.WriteString("manifestJson", bundle.ManifestJson);
-            if (bundle.HasLogicJs)
-            {
-                writer.WriteString("logicJs", bundle.LogicJs ?? string.Empty);
-            }
-            if (bundle.HasLocales)
-            {
-                if (bundle.LocalesJson is null)
-                {
-                    writer.WriteNull("locales");
-                }
-                else
-                {
-                    writer.WritePropertyName("locales");
-                    writer.WriteRawValue(bundle.LocalesJson, skipInputValidation: true);
-                }
-            }
-            if (bundle.ResizeToDefault)
-            {
-                writer.WriteBoolean("resizeToDefault", true);
-            }
+            writer.WriteBoolean("confirmDataLoss", callerConfirmDataLoss);
+            writer.WriteString("stageId", stageId);
             writer.WriteEndObject();
         }
 
         using JsonDocument doc = JsonDocument.Parse(buffer.ToArray());
-        return await HandleUpsertAsync(doc.RootElement);
+        return await HandleUpsertAsync(doc.RootElement, trustedHostUiInitiated);
     }
 
     /// <summary>用户拒绝一份外部暂存：只丢弃批次，绝不写桌面。</summary>
@@ -1115,13 +1081,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         });
     }
 
-    private static bool DeclaresPrivilegedCapabilities(IReadOnlyList<string>? capabilities) =>
-        capabilities is { Count: > 0 } &&
-        capabilities.Any(c =>
-            string.Equals(c, "local-files-and-commands", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(c, "network-and-feeds", StringComparison.OrdinalIgnoreCase));
-
-    private async Task<string> HandleUpsertAsync(JsonElement root)
+    private async Task<string> HandleUpsertAsync(JsonElement root, bool trustedHostUiInitiated = false)
     {
         WidgetManager? manager = _widgetManagerProvider();
         if (manager is null)
@@ -1214,10 +1174,13 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
                     manifestJson = stagedPreview.ManifestJson;
                 }
 
-                if (string.IsNullOrWhiteSpace(widgetId) && !string.IsNullOrWhiteSpace(stagedPreview.WidgetId))
+                if (!string.IsNullOrWhiteSpace(widgetId) &&
+                    !string.Equals(widgetId, stagedPreview.WidgetId ?? string.Empty, StringComparison.OrdinalIgnoreCase))
                 {
-                    widgetId = stagedPreview.WidgetId;
+                    return BuildErrorJson("widgetId does not match the target bound to this stageId.");
                 }
+
+                widgetId = stagedPreview.WidgetId;
 
                 if (!hasCallerLogicJs && stagedPreview.HasLogicJs)
                 {
@@ -1279,11 +1242,20 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
                 widgetId = prevCommittedId;
             }
         }
-        else if (commit && string.IsNullOrWhiteSpace(stageId) && !hasCallerManifest)
+        else if (commit && string.IsNullOrWhiteSpace(stageId))
         {
             return BuildErrorJson(LocalizationService.TranslateForCulture(
                 activeCulture,
                 "CustomWidget.AgentStage.Error.MissingStageIdForCommit"));
+        }
+
+        bool hasScriptHunks = root.TryGetProperty("scriptHunks", out JsonElement shEl) &&
+                              shEl.ValueKind == JsonValueKind.Array &&
+                              shEl.GetArrayLength() > 0;
+        if (commit && (hasInlineManifestEdits || hasScriptHunks))
+        {
+            return BuildErrorJson(
+                "Inline manifest edits (upsertElements/removeElements/patchRoot/removeRootKeys) and scriptHunks cannot be applied during commit=true; stage a fresh preview first.");
         }
 
         StudioFlatManifestEditRequest? flatManifestEdit = null;
@@ -1297,9 +1269,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         }
 
         List<StudioScriptPatchHunk>? scriptHunks = null;
-        if (root.TryGetProperty("scriptHunks", out JsonElement shEl) &&
-            shEl.ValueKind == JsonValueKind.Array &&
-            shEl.GetArrayLength() > 0)
+        if (hasScriptHunks)
         {
             if (!StudioToolTransport.TryParsePatchScriptArgs(shEl.GetRawText(), out List<StudioScriptPatchHunk> parsedHunks, out string? hunksErr))
             {
@@ -1484,41 +1454,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
             });
         }
 
-        // Host-side approval gate: an external Agent commit that overwrites an existing
-        // widget, drops its data, or declares privileged capabilities must be approved in
-        // DeskBox's own UI. "Confirm with the user" in the tool response is prompt text,
-        // not consent.
-        if (commit && !string.IsNullOrWhiteSpace(stageId) && _commitApprovalProvider is not null)
-        {
-            string approvalWidgetId = !string.IsNullOrWhiteSpace(widgetId) ? widgetId! : compiled.Manifest.Id;
-            bool overwritesExisting = manager.GetCustomWidgetInstances().Any(instance =>
-                string.Equals(instance.Id, approvalWidgetId, StringComparison.OrdinalIgnoreCase));
-            bool clearsExistingData = dataSafetyReport?.HasDataLossRisk == true;
-            bool declaresPrivileged = DeclaresPrivilegedCapabilities(compiled.Manifest.Capabilities);
-            if (overwritesExisting || clearsExistingData || declaresPrivileged)
-            {
-                bool approved = await _commitApprovalProvider(new AgentCommitApprovalRequest(
-                    approvalWidgetId,
-                    overwritesExisting,
-                    clearsExistingData,
-                    declaresPrivileged)).ConfigureAwait(false);
-                if (!approved)
-                {
-                    return BuildSuccessJson(writer =>
-                    {
-                        writer.WriteBoolean("committed", false);
-                        writer.WriteBoolean("staged", true);
-                        writer.WriteBoolean("requiresHostApproval", true);
-                        writer.WriteString("stageId", stageId);
-                        writer.WriteString("widgetId", approvalWidgetId);
-                        writer.WriteString("next",
-                            "The user declined this commit in DeskBox (or the approval prompt timed out). The staged bundle is preserved; do not retry without a fresh explicit user request.");
-                    });
-                }
-            }
-        }
-
-        // P2 提交路径：stageId 必须来自此前一次暂存；若调用方同时传了 manifestJson 则按规范化 JSON 摘要校验一致性。
+        // P2 提交路径：先抢占三态提交租约（s_pendingCommits），避免审批弹窗等待期间客户端重试触发重复弹窗或并发提交。
         if (!CustomWidgetAgentStageStore.TryConsumeBundle(
                 stageId,
                 callerManifestJson,
@@ -1554,6 +1490,69 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
             }
 
             return BuildErrorJson(stageError);
+        }
+
+        // Host-side approval gate: an external Agent commit that overwrites an existing
+        // widget, drops its data, or uses scripts / host-access capabilities must be
+        // approved in DeskBox's own UI. Commits initiated directly by the user inside
+        // DeskBox Workshop (trustedHostUiInitiated) already reflect explicit user action.
+        if (!trustedHostUiInitiated &&
+            commit &&
+            !string.IsNullOrWhiteSpace(stageId) &&
+            _commitApprovalProvider is not null)
+        {
+            string approvalWidgetId = existingTarget?.Id
+                ?? (!string.IsNullOrWhiteSpace(widgetId) ? widgetId! : compiled.Manifest.Id);
+            string approvalWidgetName = compiled.Manifest.ResolveLocalizedName(activeCulture);
+            if (string.IsNullOrWhiteSpace(approvalWidgetName))
+            {
+                approvalWidgetName = existingTarget?.Name ?? approvalWidgetId;
+            }
+
+            bool overwritesExisting = existingTarget is not null;
+            bool clearsExistingData = dataSafetyReport?.HasDataLossRisk == true;
+            bool declaresPrivileged = CustomWidgetTrustStore.HasPrivilegedSurfaceInManifestOrScript(
+                compiled.Manifest,
+                !string.IsNullOrWhiteSpace(compiled.NormalizedManifestJson) ? compiled.NormalizedManifestJson : effectiveManifestJson,
+                validationLogicJs);
+            if (overwritesExisting || clearsExistingData || declaresPrivileged)
+            {
+                bool approved;
+                try
+                {
+                    approved = await _commitApprovalProvider(new AgentCommitApprovalRequest(
+                        approvalWidgetId,
+                        overwritesExisting,
+                        clearsExistingData,
+                        declaresPrivileged,
+                        approvalWidgetName)).ConfigureAwait(false);
+                }
+                catch
+                {
+                    CustomWidgetAgentStageStore.AbortCommit(stageId!);
+                    throw;
+                }
+
+                if (!approved)
+                {
+                    CustomWidgetAgentStageStore.AbortCommit(stageId!);
+                    return BuildSuccessJson(writer =>
+                    {
+                        writer.WriteBoolean("committed", false);
+                        writer.WriteBoolean("staged", true);
+                        writer.WriteBoolean("requiresHostApproval", true);
+                        writer.WriteString("stageId", stageId);
+                        writer.WriteString("widgetId", approvalWidgetId);
+                        writer.WriteString("next",
+                            "The user declined this commit in DeskBox (or the approval prompt timed out). The staged bundle is preserved; do not retry without a fresh explicit user request.");
+                    });
+                }
+
+                if (!CustomWidgetAgentStageStore.HasPendingCommitLease(stageId!))
+                {
+                    return BuildErrorJson("Staged commit was cancelled while awaiting approval.");
+                }
+            }
         }
 
         if (consumedBundle is not null)
@@ -1612,9 +1611,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         }
 
         CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(info.Id);
-        CustomWidgetAgentStageStore.CompleteCommit(stageId!);
-        // 用真实落盘 id 覆写幂等记录：暂存时 widgetId 可能为空，最终 id 由 manifest.id 决定。
-        CustomWidgetAgentStageStore.RecordCommitted(stageId, info.Id);
+        CustomWidgetAgentStageStore.CompleteCommit(stageId!, info.Id);
 
         return BuildSuccessJson(writer =>
         {
@@ -1980,6 +1977,7 @@ public static class DeskBoxAgentBridgeClient
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous);
             await client.ConnectAsync(connectTimeoutMs, cancellationToken);
+            _ = DeskBox.Platform.Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
 
             await using var streamWriter = new StreamWriter(
                 client,

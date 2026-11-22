@@ -192,7 +192,26 @@
                 svc:Localized.HeaderKey="Settings.DragBehavior.Win10Note.Title"
                 svc:Localized.DescriptionKey="Settings.DragBehavior.Win10Note.Description" />
 
-            <!-- Row 3: 文件与图标显示 -->
+            <!-- Row 3: 文件叠放 -->
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                HorizontalContentAlignment="Right"
+                IsClickEnabled="True"
+                Tag="FileStackSettings"
+                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
+                svc:Localized.HeaderKey="Settings.FileStacks.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE81E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    svc:Localized.AutomationNameKey="Settings.FileStacks.OpenMode.Title"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    ItemsSource="{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}"
+                    controls:SettingsComboBox.Value="{x:Bind FileStack.OpenMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <!-- Row 4: 文件与图标显示 -->
             <toolkit:SettingsCard
                 x:Name="FileDisplayEntryCard"
                 Click="FileDisplayEntryCard_Click"
@@ -205,66 +224,56 @@
                 </toolkit:SettingsCard.HeaderIcon>
             </toolkit:SettingsCard>
 
-            <!-- Row 4: 文件叠放 -->
-            <toolkit:SettingsCard
-                Click="NestedSettingsButton_Click"
-                HorizontalContentAlignment="Right"
-                IsClickEnabled="True"
-                Tag="FileStackSettings"
-                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
-                svc:Localized.HeaderKey="Settings.FileStacks.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE81E;" />
-                </toolkit:SettingsCard.HeaderIcon>
-            </toolkit:SettingsCard>
-
-            <!-- Row 5: 打开方式与右键菜单 -->
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.OpenMethod.Description"
-                svc:Localized.HeaderKey="Settings.OpenMethod.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+            <!-- Row 5: 打开与右键菜单 -->
+            <toolkit:SettingsExpander
+                x:Name="FileOpenAndMenuExpander"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.FileWidget.OpenAndMenu.Description"
+                svc:Localized.HeaderKey="Settings.FileWidget.OpenAndMenu.Title">
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE8B0;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
-                    svc:Localized.AutomationNameKey="Settings.OpenMethod.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{x:Bind Interaction.AvailableFileOpenMethodOptions, Mode=OneWay}"
-                    controls:SettingsComboBox.Value="{x:Bind Interaction.FileOpenMethod, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.OpenMethod.Description"
+                        svc:Localized.HeaderKey="Settings.OpenMethod.Title">
+                        <ComboBox
+                            svc:Localized.AutomationNameKey="Settings.OpenMethod.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{x:Bind Interaction.AvailableFileOpenMethodOptions, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind Interaction.FileOpenMethod, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.FileWidget.FolderOpenBehavior.Description"
-                svc:Localized.HeaderKey="Settings.FileWidget.FolderOpenBehavior.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE838;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
-                    svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
-                    controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.FileWidget.FolderOpenBehavior.Description"
+                        svc:Localized.HeaderKey="Settings.FileWidget.FolderOpenBehavior.Title">
+                        <ComboBox
+                            svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.FileItemContextMenu.Description"
-                svc:Localized.HeaderKey="Settings.FileItemContextMenu.Title"
-                svc:InfoTip.TitleKey="Settings.FileWidget.SystemContextMenu.InfoTip.Title"
-                svc:InfoTip.BodyKey="Settings.FileWidget.SystemContextMenu.InfoTip.Description">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE712;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileItemContextMenu.Title"
-                    MinWidth="0"
-                    VerticalAlignment="Center"
-                    OnContent=""
-                    OffContent=""
-                    IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.FileItemContextMenu.Description"
+                        svc:Localized.HeaderKey="Settings.FileItemContextMenu.Title"
+                        svc:InfoTip.TitleKey="Settings.FileWidget.SystemContextMenu.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.FileWidget.SystemContextMenu.InfoTip.Description">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileItemContextMenu.Title"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            OnContent=""
+                            OffContent=""
+                            IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
         </StackPanel>
 
         <!-- Sub-page: 文件与整理 > 文件与图标显示 -->

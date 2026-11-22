@@ -2383,8 +2383,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         string primaryImagePath = _detailPrimaryImagePath!;
         try
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(primaryImagePath);
-            using var stream = await file.OpenReadAsync();
+            using var stream = DeskBox.Platform.ClipboardStorageFileOps.OpenReadRandomAccessStream(primaryImagePath);
             var bitmap = new BitmapImage
             {
                 DecodePixelWidth = DetailImageDecodePixelWidth

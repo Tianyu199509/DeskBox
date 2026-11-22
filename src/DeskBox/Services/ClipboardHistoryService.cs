@@ -54,7 +54,8 @@ public sealed partial class ClipboardHistoryService : IDisposable
     private volatile IReadOnlyList<ClipboardHistoryItem> _itemsSnapshot = Array.Empty<ClipboardHistoryItem>();
     private volatile IReadOnlyList<ClipboardObservedApp> _observedAppsSnapshot = Array.Empty<ClipboardObservedApp>();
     private volatile string? _currentClipboardContentHash;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _inFlightMediaFiles =
+    private readonly object _inFlightMediaGate = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _inFlightMediaFiles =
         new(StringComparer.OrdinalIgnoreCase);
     private volatile string? _lastExternalCapturedItemId;
     private static readonly Lazy<HttpClient> s_safeTitleHttpClient = new(CreateSafeUrlTitleHttpClient);
@@ -774,14 +775,34 @@ public sealed partial class ClipboardHistoryService : IDisposable
             ClipboardHistoryItem? target = doc.Items.FirstOrDefault(x => string.Equals(x.Id, itemId, StringComparison.Ordinal));
             if (target is not null && !string.Equals(target.OcrText, extracted, StringComparison.Ordinal))
             {
-                target.OcrText = extracted;
                 // OCR can surface secrets (API tokens, private keys) from screenshots that
-                // were not sensitive at capture; reclassify so at-rest encryption applies.
+                // were not sensitive at capture; honor SecretProtectionSkip or encrypt at rest.
                 if (!target.IsSensitive && ClipboardClassifier.IsHighConfidenceSecret(extracted))
                 {
+                    if (!target.IsPinned &&
+                        string.Equals(
+                            _settingsService.Settings.Clipboard.ClipboardSensitiveProtectionMode,
+                            ClipboardSettingsSlice.SecretProtectionSkip,
+                            StringComparison.Ordinal))
+                    {
+                        doc.Items.Remove(target);
+                        CleanupOrphanedMediaLocked(doc);
+                        await FlushSaveLockedAsync(doc).ConfigureAwait(false);
+                        RemoveFromPasteQueue([itemId]);
+                        RaiseHistoryChanged();
+                        return null;
+                    }
+
+                    target.OcrText = extracted;
                     target.IsSensitive = true;
+                    // Complete atomic media + metadata persistence without UI flyout cancellation aborting halfway.
+                    _ = await _store.ProtectSensitiveItemMediaAsync(target, CancellationToken.None).ConfigureAwait(false);
+                    await FlushSaveLockedAsync(doc).ConfigureAwait(false);
+                    RaiseHistoryChanged();
+                    return extracted;
                 }
 
+                target.OcrText = extracted;
                 ScheduleSave();
                 RaiseHistoryChanged();
             }
@@ -1262,19 +1283,17 @@ public sealed partial class ClipboardHistoryService : IDisposable
                         }
 
                         var pkg = new DataPackage();
-                        try
+                        if (ClipboardStorageFileOps.IsDpapiProtectedMediaFile(imgPath))
                         {
-                            string resolvedImgPath = Win32Helper.ResolveUnvirtualizedPhysicalPath(imgPath);
-                            StorageFile file = await StorageFile.GetFileFromPathAsync(resolvedImgPath);
-                            pkg.SetBitmap(RandomAccessStreamReference.CreateFromFile(file));
-                        }
-                        catch
-                        {
-                            byte[] bytes = await File.ReadAllBytesAsync(imgPath).ConfigureAwait(false);
+                            if (!ClipboardStorageFileOps.TryReadMediaBytes(imgPath, out byte[] plainBytes))
+                            {
+                                return false;
+                            }
+
                             var memStream = new InMemoryRandomAccessStream();
                             using (var writer = new DataWriter(memStream.GetOutputStreamAt(0)))
                             {
-                                writer.WriteBytes(bytes);
+                                writer.WriteBytes(plainBytes);
                                 await writer.StoreAsync();
                                 await writer.FlushAsync();
                                 writer.DetachStream();
@@ -1283,8 +1302,36 @@ public sealed partial class ClipboardHistoryService : IDisposable
                             memStream.Seek(0);
                             pkg.SetBitmap(RandomAccessStreamReference.CreateFromStream(memStream));
                         }
+                        else
+                        {
+                            try
+                            {
+                                string resolvedImgPath = Win32Helper.ResolveUnvirtualizedPhysicalPath(imgPath);
+                                StorageFile file = await StorageFile.GetFileFromPathAsync(resolvedImgPath);
+                                pkg.SetBitmap(RandomAccessStreamReference.CreateFromFile(file));
+                            }
+                            catch
+                            {
+                                if (!ClipboardStorageFileOps.TryReadMediaBytes(imgPath, out byte[] bytes))
+                                {
+                                    return false;
+                                }
 
-                        string? exportPath = await PrepareExportImagePathAsync(item);
+                                var memStream = new InMemoryRandomAccessStream();
+                                using (var writer = new DataWriter(memStream.GetOutputStreamAt(0)))
+                                {
+                                    writer.WriteBytes(bytes);
+                                    await writer.StoreAsync();
+                                    await writer.FlushAsync();
+                                    writer.DetachStream();
+                                }
+
+                                memStream.Seek(0);
+                                pkg.SetBitmap(RandomAccessStreamReference.CreateFromStream(memStream));
+                            }
+                        }
+
+                        string? exportPath = item.IsSensitive ? null : await PrepareExportImagePathAsync(item);
                         if (!string.IsNullOrWhiteSpace(exportPath) && File.Exists(exportPath))
                         {
                             string effectiveExportPath = exportPath;
@@ -2705,11 +2752,12 @@ public sealed partial class ClipboardHistoryService : IDisposable
             return;
         }
 
+        await EnsureLoadedAsync().ConfigureAwait(false);
         string fileName = ClipboardContentHashing.MediaFileNameFromContentHash(contentHash);
         string imagePath = Path.Combine(_store.ImageDirectory, fileName);
         // Media hits disk before IngestItemAsync registers it under _storeLock;
-        // keep the leaf whitelisted so a concurrent orphan sweep cannot delete it.
-        _inFlightMediaFiles[fileName] = 0;
+        // refcount the leaf so overlapping captures of the same PNG never un-whitelist early.
+        AcquireInFlightMediaLease(fileName);
         try
         {
             await ClipboardStorageFileOps.WriteBytesIfMissingAsync(imagePath, pngBytes, token).ConfigureAwait(false);
@@ -2752,7 +2800,30 @@ public sealed partial class ClipboardHistoryService : IDisposable
         }
         finally
         {
-            _inFlightMediaFiles.TryRemove(fileName, out _);
+            ReleaseInFlightMediaLease(fileName);
+        }
+    }
+
+    internal void AcquireInFlightMediaLease(string fileName)
+    {
+        lock (_inFlightMediaGate)
+        {
+            _inFlightMediaFiles[fileName] = _inFlightMediaFiles.TryGetValue(fileName, out int count) ? count + 1 : 1;
+        }
+    }
+
+    internal void ReleaseInFlightMediaLease(string fileName)
+    {
+        lock (_inFlightMediaGate)
+        {
+            if (_inFlightMediaFiles.TryGetValue(fileName, out int count) && count > 1)
+            {
+                _inFlightMediaFiles[fileName] = count - 1;
+            }
+            else
+            {
+                _inFlightMediaFiles.TryRemove(fileName, out _);
+            }
         }
     }
 
@@ -2922,6 +2993,11 @@ public sealed partial class ClipboardHistoryService : IDisposable
 
     private void CleanupOrphanedMediaLocked(ClipboardStoreDocument doc)
     {
+        if (doc.Version > ClipboardStore.CurrentVersion)
+        {
+            return;
+        }
+
         var referencedImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var referencedThumbs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var referencedPayloads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

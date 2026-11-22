@@ -4,6 +4,7 @@ using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
 
 namespace DeskBox.Helpers;
 
@@ -139,9 +140,29 @@ internal static class WindowShellState
     /// (normal, inactive, hover, and pressed states) so caption glyphs never
     /// lose contrast when the app's explicit theme differs from the OS theme.
     /// </summary>
-    public static void TryApplyExtendedTitleBarButtonColors(AppWindow? appWindow, bool isDark)
+    public static void TryApplyExtendedTitleBarButtonColors(
+        AppWindow? appWindow,
+        bool isDark,
+        bool syncProcessWideWin10Resources = true)
     {
-        if (appWindow is null || !AppWindowTitleBar.IsCustomizationSupported())
+        if (appWindow is null)
+        {
+            return;
+        }
+
+        if (!WindowsCompatibilityService.IsWindows11OrLater && syncProcessWideWin10Resources)
+        {
+            if (WindowsCompatibilityService.IsHighContrast)
+            {
+                TryClearWin10XamlCaptionResources();
+            }
+            else
+            {
+                TryUpdateWin10XamlCaptionResources(isDark);
+            }
+        }
+
+        if (!AppWindowTitleBar.IsCustomizationSupported())
         {
             return;
         }
@@ -176,6 +197,65 @@ internal static class WindowShellState
             titleBar.ButtonPressedBackgroundColor = isDark
                 ? Windows.UI.Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)
                 : Windows.UI.Color.FromArgb(0x18, 0x00, 0x00, 0x00);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryClearWin10XamlCaptionResources()
+    {
+        try
+        {
+            ResourceDictionary? res = Application.Current?.Resources;
+            if (res is null)
+            {
+                return;
+            }
+
+            res.Remove("WindowCaptionForeground");
+            res.Remove("WindowCaptionForegroundDisabled");
+            res.Remove("WindowCaptionBackground");
+            res.Remove("WindowCaptionBackgroundDisabled");
+            res.Remove("WindowCaptionButtonBackgroundPointerOver");
+            res.Remove("WindowCaptionButtonBackgroundPressed");
+            res.Remove("WindowCaptionButtonStrokePointerOver");
+            res.Remove("WindowCaptionButtonStrokePressed");
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryUpdateWin10XamlCaptionResources(bool isDark)
+    {
+        try
+        {
+            ResourceDictionary? res = Application.Current?.Resources;
+            if (res is null)
+            {
+                return;
+            }
+
+            Windows.UI.Color fg = isDark ? Colors.White : Colors.Black;
+            Windows.UI.Color fgDisabled = isDark
+                ? Windows.UI.Color.FromArgb(0x88, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x88, 0x10, 0x10, 0x10);
+            Windows.UI.Color hoverBg = isDark
+                ? Windows.UI.Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x10, 0x00, 0x00, 0x00);
+            Windows.UI.Color pressedBg = isDark
+                ? Windows.UI.Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x18, 0x00, 0x00, 0x00);
+
+            res["WindowCaptionForeground"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(fg);
+            res["WindowCaptionForegroundDisabled"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(fgDisabled);
+            res["WindowCaptionBackground"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Colors.Transparent);
+            res["WindowCaptionBackgroundDisabled"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(Colors.Transparent);
+            res["WindowCaptionButtonBackgroundPointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(hoverBg);
+            res["WindowCaptionButtonBackgroundPressed"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(pressedBg);
+            res["WindowCaptionButtonStrokePointerOver"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(fg);
+            res["WindowCaptionButtonStrokePressed"] = new Microsoft.UI.Xaml.Media.SolidColorBrush(fg);
         }
         catch
         {

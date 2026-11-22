@@ -468,13 +468,14 @@ public sealed class CustomWidgetDataStore
                             CustomWidgetLocaleCatalog.WriteOrDeleteDirectoryAtomically(remoteOtaBundle.Locales, _localesDirectory);
                             WriteOrDeleteSidecarNoLock(_logicJsPath, remoteOtaBundle.LogicJs, MaxLogicJsBytes, "logic.js");
 
-                            // OTA is an external channel: a changed executable surface must
-                            // revoke privileged grants so the new script re-asks the user.
+                            // Signed Official OTA preserves official baseline trust while revoking
+                            // any explicit privileged overrides (e.g. CommandExecution) if surface changed.
                             CustomWidgetTrustStore.Shared.RecordExecutableSurfaceAfterWrite(
                                 WidgetId,
                                 stampedRemote,
                                 remoteOtaBundle.LogicJs,
-                                trustedLocalAuthoring: false);
+                                trustedLocalAuthoring: false,
+                                preserveTrustedAuthoringOnExternalWrite: true);
 
                             return stampedRemote;
                         }

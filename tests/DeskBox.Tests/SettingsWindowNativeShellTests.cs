@@ -258,25 +258,25 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
             generalSlice);
         Assert.DoesNotContain("Settings.Performance.MoreSettings", generalSlice, StringComparison.Ordinal);
 
-        // 2. Appearance -> MaterialEntryCard drills into MaterialSubPagePanel (Effect + WidgetBackground),
-        // WidgetTitleIcon is a standalone top-level card, while Accent, CornerAndBorder, Density, Animation
-        // remain L2 expanders without nested expanders
+        // 2. Appearance -> Theme, Material, CornerAndBorder, Density, and Animation are all
+        // overview L2 expanders without nested expanders or a Material sub-page hop.
         Assert.DoesNotContain("Settings.Material.MoreSettings", appearanceXaml, StringComparison.Ordinal);
-        Assert.Matches(
-            new Regex("<toolkit:SettingsCard(?:(?!>).)*?x:Name=\"MaterialEntryCard\"(?:(?!>).)*?svc:Localized\\.HeaderKey=\"Settings\\.Material\\.Title\"", RegexOptions.Singleline),
-            appearanceXaml);
+        Assert.DoesNotContain("x:Name=\"MaterialEntryCard\"", appearanceXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"MaterialSubPagePanel\"", appearanceXaml, StringComparison.Ordinal);
         Assert.Matches(
             new Regex("<toolkit:SettingsCard(?:(?!>).)*?svc:Localized\\.HeaderKey=\"Settings\\.WidgetTitleIcon\\.Title\"", RegexOptions.Singleline),
+            appearanceXaml);
+        Assert.Matches(
+            new Regex("<toolkit:SettingsCard(?:(?!>).)*?svc:Localized\\.HeaderKey=\"Settings\\.Accent\\.Title\"", RegexOptions.Singleline),
             appearanceXaml);
         Assert.DoesNotContain("Settings.Group.AppVisual.Title", appearanceXaml, StringComparison.Ordinal);
         foreach (string headerKey in new[]
                  {
-                     "Settings.Accent.Title",
+                     "Settings.Theme.Title",
+                     "Settings.Material.Title",
                      "Settings.CornerAndBorder.Title",
                      "Settings.Density.Title",
-                     "Settings.Group.Animation.Title",
-                     "Settings.Material.Group.Effect",
-                     "Settings.Material.Group.WidgetBackground"
+                     "Settings.Group.Animation.Title"
                  })
         {
             Assert.Matches(

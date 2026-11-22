@@ -914,82 +914,11 @@
                                     x:Name="GlobalHotkeyReservedWarning"
                                     IsClosable="False"
                                     IsOpen="{Binding CanShowHotkeyWarning, Mode=OneWay}"
+                                    Visibility="{Binding CanShowHotkeyWarning, Mode=OneWay, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
                                     Message="{Binding HotkeyWarningText}"
                                     Severity="Warning"
                                     Title="{Binding HotkeyText}" />
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.DesktopDoubleClick.Description"
-                                    svc:Localized.HeaderKey="Settings.DesktopDoubleClick.Title"
-                                    svc:InfoTip.TitleKey="Settings.DesktopDoubleClick.InfoTip.Title"
-                                    svc:InfoTip.BodyKey="Settings.DesktopDoubleClick.InfoTip.Description">
-                                    <toolkit:SettingsCard.HeaderIcon>
-                                        <FontIcon Glyph="&#xE8B0;" />
-                                    </toolkit:SettingsCard.HeaderIcon>
-                                    <ToggleSwitch svc:Localized.AutomationNameKey="Settings.DesktopDoubleClick.Title"
-                                        x:Name="DesktopDoubleClickToggle"
-                                        MinWidth="0"
-                                        OffContent=""
-                                        OnContent=""
-                                        Toggled="DesktopDoubleClickToggle_Toggled" />
-                                </toolkit:SettingsCard>
-                            </StackPanel>
-
-                            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
-                                <TextBlock Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2" svc:Localized.Key="Settings.Interaction.Group.Layout" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <toolkit:SettingsCard
-                                    x:Name="CapsuleModeEntryCard"
-                                    Click="CapsuleModeEntryCard_Click"
-                                    HorizontalContentAlignment="Right"
-                                    IsClickEnabled="True"
-                                    svc:Localized.HeaderKey="Settings.Section.CapsuleMode">
-                                    <toolkit:SettingsCard.HeaderIcon>
-                                        <FontIcon Glyph="&#xE73F;" />
-                                    </toolkit:SettingsCard.HeaderIcon>
-                                    <ComboBox
-                                        x:Name="CapsuleModeEntryComboBox"
-                                        DisplayMemberPath="DisplayName"
-                                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                                        SelectionChanged="CapsuleModeEntryComboBox_SelectionChanged"
-                                        svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title" />
-                                </toolkit:SettingsCard>
-
-                                <toolkit:SettingsCard
-                                    Click="NestedSettingsButton_Click"
-                                    Description="{x:Bind WidgetGroupsEntrySummary, Mode=OneWay}"
-                                    HorizontalContentAlignment="Right"
-                                    IsClickEnabled="True"
-                                    Tag="WidgetGroups"
-                                    svc:Localized.HeaderKey="Settings.Section.WidgetGroups">
-                                    <toolkit:SettingsCard.HeaderIcon>
-                                        <FontIcon Glyph="&#xE8A1;" />
-                                    </toolkit:SettingsCard.HeaderIcon>
-                                </toolkit:SettingsCard>
-
-                                <toolkit:SettingsCard
-                                    x:Name="DisplaysEntryCard"
-                                    Click="NestedSettingsButton_Click"
-                                    HorizontalContentAlignment="Right"
-                                    IsClickEnabled="True"
-                                    Tag="Displays"
-                                    svc:Localized.DescriptionKey="Settings.Displays.Description"
-                                    svc:Localized.HeaderKey="Settings.Displays.Title">
-                                    <toolkit:SettingsCard.HeaderIcon>
-                                        <FontIcon Glyph="&#xE7F4;" />
-                                    </toolkit:SettingsCard.HeaderIcon>
-                                </toolkit:SettingsCard>
-                            </StackPanel>
-
-                            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
-                                <TextBlock Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2" svc:Localized.Key="Settings.Interaction.Group.WindowBehavior" />
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
                                 <toolkit:SettingsExpander
                                     HorizontalContentAlignment="Stretch"
                                     IsExpanded="False"
@@ -1028,9 +957,85 @@
                                                 ItemsSource="{Binding AvailableShowDesktopBehaviorOptions}"
                                                 controls:SettingsComboBox.Value="{Binding ShowDesktopBehavior, Mode=TwoWay}" />
                                         </toolkit:SettingsCard>
+
+                                        <toolkit:SettingsCard
+                                            HorizontalContentAlignment="Right"
+                                            svc:Localized.DescriptionKey="Settings.DesktopDoubleClick.Description"
+                                            svc:Localized.HeaderKey="Settings.DesktopDoubleClick.Title"
+                                            svc:InfoTip.TitleKey="Settings.DesktopDoubleClick.InfoTip.Title"
+                                            svc:InfoTip.BodyKey="Settings.DesktopDoubleClick.InfoTip.Description">
+                                            <ToggleSwitch svc:Localized.AutomationNameKey="Settings.DesktopDoubleClick.Title"
+                                                x:Name="DesktopDoubleClickToggle"
+                                                MinWidth="0"
+                                                OffContent=""
+                                                OnContent=""
+                                                Toggled="DesktopDoubleClickToggle_Toggled" />
+                                        </toolkit:SettingsCard>
                                     </toolkit:SettingsExpander.Items>
                                 </toolkit:SettingsExpander>
+                            </StackPanel>
 
+                            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                                <TextBlock Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2" svc:Localized.Key="Settings.Interaction.Group.Layout" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <toolkit:SettingsCard
+                                    x:Name="CapsuleModeEntryCard"
+                                    Click="CapsuleModeEntryCard_Click"
+                                    HorizontalContentAlignment="Right"
+                                    IsClickEnabled="True"
+                                    svc:Localized.HeaderKey="Settings.Section.CapsuleMode">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE73F;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <ComboBox
+                                        x:Name="CapsuleModeEntryComboBox"
+                                        DisplayMemberPath="DisplayName"
+                                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                                        SelectionChanged="CapsuleModeEntryComboBox_SelectionChanged"
+                                        svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title" />
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    Click="NestedSettingsButton_Click"
+                                    Description="{x:Bind WidgetGroupsEntrySummary, Mode=OneWay}"
+                                    HorizontalContentAlignment="Right"
+                                    IsClickEnabled="True"
+                                    Tag="WidgetGroups"
+                                    svc:Localized.HeaderKey="Settings.Section.WidgetGroups">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE8A1;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <ComboBox
+                                        x:Name="WidgetGroupsEntryComboBox"
+                                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                                        ItemsSource="{Binding AvailableNavigationStyleOptions}"
+                                        controls:SettingsComboBox.Value="{Binding DefaultNavigationStyle, Mode=TwoWay}"
+                                        svc:Localized.AutomationNameKey="Settings.WidgetGroupNavigation.Title" />
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    x:Name="DisplaysEntryCard"
+                                    Click="NestedSettingsButton_Click"
+                                    HorizontalContentAlignment="Right"
+                                    IsClickEnabled="True"
+                                    Tag="Displays"
+                                    svc:Localized.DescriptionKey="Settings.Displays.Description"
+                                    svc:Localized.HeaderKey="Settings.Displays.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE7F4;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                </toolkit:SettingsCard>
+                            </StackPanel>
+
+                            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                                <TextBlock Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2" svc:Localized.Key="Settings.Interaction.Group.WindowBehavior" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
                                 <toolkit:SettingsExpander
                                     HorizontalContentAlignment="Stretch"
                                     IsExpanded="False"
@@ -1236,7 +1241,7 @@
                                     Spacing="4" />
                             </StackPanel>
 
-                            <StackPanel x:Name="CustomWidgetHostPanel" Margin="0,8,0,0" />
+                            <StackPanel x:Name="CustomWidgetHostPanel" Margin="0,6,0,0" />
                         </StackPanel>
                     </DataTemplate>
                     <DataTemplate x:Key="QuickCaptureSettingsSectionTemplate" x:DataType="quickCapture:QuickCaptureSettingsViewModel">
@@ -2916,7 +2921,7 @@
                                                     x:Name="AboutRightPanel"
                                                     Grid.Column="2"
                                                     HorizontalAlignment="Right"
-                                                    MaxWidth="300"
+                                                    MaxWidth="480"
                                                     Spacing="6"
                                                     VerticalAlignment="Center">
                                                     <StackPanel
@@ -2944,6 +2949,16 @@
                                                                 <TextBlock svc:Localized.Key="Settings.About.Website" />
                                                             </StackPanel>
                                                         </Button>
+                                                        <Button
+                                                            x:Name="AboutPrivacyPolicyButton"
+                                                            Click="OpenPrivacyPolicyButton_Click"
+                                                            Style="{StaticResource ActionButtonStyle}"
+                                                            ToolTipService.ToolTip="https://deskbox.fun/privacy/">
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <FontIcon FontSize="16" Glyph="&#xEA18;" />
+                                                                <TextBlock svc:Localized.Key="Settings.About.PrivacyPolicy" />
+                                                            </StackPanel>
+                                                        </Button>
                                                     </StackPanel>
                                                 </StackPanel>
                                             </Grid>
@@ -2954,7 +2969,7 @@
                                     Description="{Binding UpdateStatusText}"
                                     HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch"
-                                    IsExpanded="False"
+                                    IsExpanded="True"
                                     svc:Localized.HeaderKey="Settings.Update.Title">
                                     <toolkit:SettingsExpander.HeaderIcon>
                                         <FontIcon Glyph="&#xE895;" />
@@ -3540,6 +3555,12 @@
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE945;" />
                             </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                x:Name="AiSettingsEntryComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                                SelectionChanged="AiSettingsEntryComboBox_SelectionChanged"
+                                svc:Localized.AutomationNameKey="CustomWidget.Studio.Direct.ProviderTitle" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard

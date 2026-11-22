@@ -30,53 +30,59 @@
                 x:Name="Windows10CompatibilityInfoBar"
                 IsClosable="False"
                 IsOpen="{Binding Windows10Compatibility}"
+                Visibility="{Binding Windows10Compatibility, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
                 Message="{Binding Windows10CompatibilityMessage}"
                 Severity="Informational"
                 Title="{Binding Windows10CompatibilityTitle}" />
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
+            <toolkit:SettingsExpander
+                x:Name="ThemeExpander"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
                 svc:Localized.DescriptionKey="Settings.Theme.Description"
                 svc:Localized.HeaderKey="Settings.Theme.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE790;" />
-                </toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Theme.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableThemeOptions}"
                     controls:SettingsComboBox.Value="{Binding Theme, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.TrayIcon.Description"
-                svc:Localized.HeaderKey="Settings.TrayIcon.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7E7;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.TrayIcon.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{Binding AvailableTrayIconStyleOptions}"
-                    controls:SettingsComboBox.Value="{Binding TrayIconStyle, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsExpander
-                x:Name="AccentColorExpander"
-                HorizontalContentAlignment="Stretch"
-                IsExpanded="False"
-                Description="{Binding AccentColorDescription}"
-                svc:Localized.HeaderKey="Settings.Accent.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE771;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.Accent.Source.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{Binding AvailableAccentColorSourceOptions}"
-                    controls:SettingsComboBox.Value="{Binding AccentColorSource, Mode=TwoWay}" />
                 <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.TrayIcon.Description"
+                        svc:Localized.HeaderKey="Settings.TrayIcon.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.TrayIcon.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{Binding AvailableTrayIconStyleOptions}"
+                            controls:SettingsComboBox.Value="{Binding TrayIconStyle, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.WidgetTitleIcon.Description"
+                        svc:Localized.HeaderKey="Settings.WidgetTitleIcon.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetTitleIcon.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{Binding AvailableTitleIconModeOptions}"
+                            controls:SettingsComboBox.Value="{Binding TitleIconMode, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Description="{Binding AccentColorDescription}"
+                        svc:Localized.HeaderKey="Settings.Accent.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.Accent.Source.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{Binding AvailableAccentColorSourceOptions}"
+                            controls:SettingsComboBox.Value="{Binding AccentColorSource, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
                     <toolkit:SettingsCard
                         HorizontalContentAlignment="Right"
                         IsEnabled="{Binding CanEditCustomAccent}"
@@ -113,23 +119,176 @@
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
 
-            <toolkit:SettingsCard
-                x:Name="MaterialEntryCard"
-                Click="MaterialEntryCard_Click"
-                HorizontalContentAlignment="Right"
-                IsClickEnabled="True"
+            <toolkit:SettingsExpander
+                x:Name="MaterialExpander"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
+                Description="{Binding MaterialSummaryText}"
                 svc:Localized.HeaderKey="Settings.Material.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE81E;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
-                    x:Name="MaterialEntryComboBox"
-                    DisplayMemberPath="DisplayName"
+                </toolkit:SettingsExpander.HeaderIcon>
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Material.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    SelectionChanged="MaterialEntryComboBox_SelectionChanged"
-                    svc:Localized.AutomationNameKey="Settings.Material.Title" />
-            </toolkit:SettingsCard>
+                    ItemsSource="{Binding AvailableMaterialTypeOptions}"
+                    controls:SettingsComboBox.Value="{Binding MaterialType, Mode=TwoWay}" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        IsEnabled="{Binding ShowOpacitySlider}"
+                        svc:Localized.DescriptionKey="Settings.Opacity.Description"
+                        svc:Localized.HeaderKey="Settings.Opacity.Title"
+                        svc:InfoTip.TitleKey="Settings.Opacity.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.Opacity.InfoTip.Description">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetOpacityValueText}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.Opacity.Title"
+                                Maximum="1"
+                                Minimum="0"
+                                StepFrequency="0.02"
+                                ManipulationMode="TranslateX"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{Binding WidgetTransparency, Mode=TwoWay}"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                ValueChanged="AppearanceSlider_ValueChanged"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        IsEnabled="{Binding ShowMaterialIntensitySlider}"
+                        svc:Localized.DescriptionKey="Settings.MaterialIntensity.Description"
+                        svc:Localized.HeaderKey="Settings.MaterialIntensity.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding MaterialIntensityValueText}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.MaterialIntensity.Title"
+                                Maximum="1"
+                                Minimum="0"
+                                StepFrequency="0.02"
+                                ManipulationMode="TranslateX"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{Binding MaterialIntensity, Mode=TwoWay}"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                ValueChanged="AppearanceSlider_ValueChanged"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Visibility="{Binding ShowSystemTransparencyWarning, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                        svc:Localized.DescriptionKey="Settings.SystemTransparency.Description"
+                        svc:Localized.HeaderKey="Settings.SystemTransparency.Title">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Style="{StaticResource SettingDescriptionTextStyle}"
+                                Text="{Binding SystemTransparencyStatusText}" />
+                            <Button
+                                Click="OpenSystemTransparencySettingsButton_Click"
+                                Style="{StaticResource ActionButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon FontSize="16" Glyph="&#xE713;" />
+                                    <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.WidgetBackground.Description"
+                        svc:Localized.HeaderKey="Settings.WidgetBackground.Title"
+                        svc:InfoTip.TitleKey="Settings.WidgetBackground.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.WidgetBackground.InfoTip.Description">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetBackground.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{Binding AvailableWidgetBackgroundModeOptions}"
+                            controls:SettingsComboBox.Value="{Binding WidgetBackgroundMode, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        Description="{Binding BackgroundImageDescriptionText}"
+                        HorizontalContentAlignment="Right"
+                        Visibility="{Binding ShowImageBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                        svc:Localized.HeaderKey="Settings.WidgetBackground.Image.Title"
+                        svc:InfoTip.TitleKey="Settings.WidgetBackground.Image.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.WidgetBackground.Image.InfoTip.Description">
+                        <controls:WrapFlowPanel HorizontalSpacing="8" VerticalSpacing="8">
+                            <Button
+                                Click="ClearWidgetBackgroundImage_Click"
+                                Style="{StaticResource ActionButtonStyle}"
+                                Visibility="{Binding HasCurrentBackgroundImage, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                                svc:Localized.Key="Settings.WidgetBackground.Image.Clear" />
+                            <Button
+                                Click="ChooseWidgetBackgroundImage_Click"
+                                Style="{StaticResource ActionButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE8E5;" FontSize="16" />
+                                    <TextBlock svc:Localized.Key="Widget.CustomBackground.ChooseImage" />
+                                </StackPanel>
+                            </Button>
+                        </controls:WrapFlowPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Visibility="{Binding ShowUnifiedBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                        svc:Localized.HeaderKey="Settings.WidgetBackground.Fit.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetBackground.Fit.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{Binding AvailableWidgetBackgroundUnifiedFitOptions}"
+                            controls:SettingsComboBox.Value="{Binding WidgetBackgroundUnifiedFit, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Visibility="{Binding ShowImageBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                        svc:Localized.HeaderKey="Settings.WidgetBackground.Dim.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetBackgroundDimValueText}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.WidgetBackground.Dim.Title"
+                                Maximum="100"
+                                Minimum="0"
+                                StepFrequency="5"
+                                ManipulationMode="TranslateX"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{Binding WidgetBackgroundDimPercent, Mode=TwoWay}"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                ValueChanged="AppearanceSlider_ValueChanged"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Visibility="{Binding HasPerWidgetBackgroundOverrides, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                        svc:Localized.DescriptionKey="Settings.WidgetBackground.PerWidget.Description"
+                        svc:Localized.HeaderKey="Settings.WidgetBackground.PerWidget.Title">
+                        <Button
+                            Click="ClearPerWidgetBackgroundsButton_Click"
+                            Style="{StaticResource DangerActionButtonStyle}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE74D;" FontSize="16" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                <TextBlock svc:Localized.Key="Settings.WidgetBackground.PerWidget.Clear" />
+                            </StackPanel>
+                        </Button>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
 
             <toolkit:SettingsExpander
                 HorizontalContentAlignment="Stretch"
@@ -268,20 +427,6 @@
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.WidgetTitleIcon.Description"
-                svc:Localized.HeaderKey="Settings.WidgetTitleIcon.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xECAA;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetTitleIcon.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{Binding AvailableTitleIconModeOptions}"
-                    controls:SettingsComboBox.Value="{Binding TitleIconMode, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
-
             <toolkit:SettingsExpander
                 HorizontalContentAlignment="Stretch"
                 IsExpanded="False"
@@ -344,199 +489,6 @@
                             OffContent=""
                             OnContent=""
                             IsOn="{Binding AnimationStaggerEnabled, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
-        </StackPanel>
-
-        <!-- Sub-page: 外观 > 窗口材质与背景 -->
-        <StackPanel
-            x:Name="MaterialSubPagePanel"
-            Visibility="Collapsed"
-            Margin="0,8,0,0"
-            Spacing="4">
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                Description="{Binding MaterialSummaryText}"
-                svc:Localized.HeaderKey="Settings.Material.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE81E;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.Material.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                    ItemsSource="{Binding AvailableMaterialTypeOptions}"
-                    controls:SettingsComboBox.Value="{Binding MaterialType, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsExpander
-                IsExpanded="True"
-                svc:Localized.HeaderKey="Settings.Material.Group.Effect">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE790;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        IsEnabled="{Binding ShowOpacitySlider}"
-                        svc:Localized.DescriptionKey="Settings.Opacity.Description"
-                        svc:Localized.HeaderKey="Settings.Opacity.Title"
-                        svc:InfoTip.TitleKey="Settings.Opacity.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.Opacity.InfoTip.Description">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetOpacityValueText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.Opacity.Title"
-                                Maximum="1"
-                                Minimum="0"
-                                StepFrequency="0.02"
-                                ManipulationMode="TranslateX"
-                                Style="{StaticResource InlineMetricSliderStyle}"
-                                Value="{Binding WidgetTransparency, Mode=TwoWay}"
-                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
-                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
-                                ValueChanged="AppearanceSlider_ValueChanged"
-                                PointerPressed="AppearanceSlider_PointerPressed"
-                                PointerReleased="AppearanceSlider_PointerReleased"
-                                LostFocus="AppearanceSlider_LostFocus" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        IsEnabled="{Binding ShowMaterialIntensitySlider}"
-                        svc:Localized.DescriptionKey="Settings.MaterialIntensity.Description"
-                        svc:Localized.HeaderKey="Settings.MaterialIntensity.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding MaterialIntensityValueText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.MaterialIntensity.Title"
-                                Maximum="1"
-                                Minimum="0"
-                                StepFrequency="0.02"
-                                ManipulationMode="TranslateX"
-                                Style="{StaticResource InlineMetricSliderStyle}"
-                                Value="{Binding MaterialIntensity, Mode=TwoWay}"
-                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
-                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
-                                ValueChanged="AppearanceSlider_ValueChanged"
-                                PointerPressed="AppearanceSlider_PointerPressed"
-                                PointerReleased="AppearanceSlider_PointerReleased"
-                                LostFocus="AppearanceSlider_LostFocus" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding ShowSystemTransparencyWarning, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.DescriptionKey="Settings.SystemTransparency.Description"
-                        svc:Localized.HeaderKey="Settings.SystemTransparency.Title">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SettingDescriptionTextStyle}"
-                                Text="{Binding SystemTransparencyStatusText}" />
-                            <Button
-                                Click="OpenSystemTransparencySettingsButton_Click"
-                                Style="{StaticResource ActionButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="16" Glyph="&#xE713;" />
-                                    <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
-
-            <toolkit:SettingsExpander
-                IsExpanded="True"
-                svc:Localized.HeaderKey="Settings.Material.Group.WidgetBackground">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xEB9F;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.WidgetBackground.Description"
-                        svc:Localized.HeaderKey="Settings.WidgetBackground.Title"
-                        svc:InfoTip.TitleKey="Settings.WidgetBackground.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.WidgetBackground.InfoTip.Description">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetBackground.Title"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            ItemsSource="{Binding AvailableWidgetBackgroundModeOptions}"
-                            controls:SettingsComboBox.Value="{Binding WidgetBackgroundMode, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        Description="{Binding BackgroundImageDescriptionText}"
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding ShowImageBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.HeaderKey="Settings.WidgetBackground.Image.Title"
-                        svc:InfoTip.TitleKey="Settings.WidgetBackground.Image.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.WidgetBackground.Image.InfoTip.Description">
-                        <controls:WrapFlowPanel HorizontalSpacing="8" VerticalSpacing="8">
-                            <Button
-                                Click="ClearWidgetBackgroundImage_Click"
-                                Style="{StaticResource ActionButtonStyle}"
-                                Visibility="{Binding HasCurrentBackgroundImage, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                                svc:Localized.Key="Settings.WidgetBackground.Image.Clear" />
-                            <Button
-                                Click="ChooseWidgetBackgroundImage_Click"
-                                Style="{StaticResource ActionButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE8E5;" FontSize="16" />
-                                    <TextBlock svc:Localized.Key="Widget.CustomBackground.ChooseImage" />
-                                </StackPanel>
-                            </Button>
-                        </controls:WrapFlowPanel>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding ShowUnifiedBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.HeaderKey="Settings.WidgetBackground.Fit.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.WidgetBackground.Fit.Title"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            ItemsSource="{Binding AvailableWidgetBackgroundUnifiedFitOptions}"
-                            controls:SettingsComboBox.Value="{Binding WidgetBackgroundUnifiedFit, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding ShowImageBackgroundOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.HeaderKey="Settings.WidgetBackground.Dim.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetBackgroundDimValueText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.WidgetBackground.Dim.Title"
-                                Maximum="100"
-                                Minimum="0"
-                                StepFrequency="5"
-                                ManipulationMode="TranslateX"
-                                Style="{StaticResource InlineMetricSliderStyle}"
-                                Value="{Binding WidgetBackgroundDimPercent, Mode=TwoWay}"
-                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
-                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
-                                ValueChanged="AppearanceSlider_ValueChanged"
-                                PointerPressed="AppearanceSlider_PointerPressed"
-                                PointerReleased="AppearanceSlider_PointerReleased"
-                                LostFocus="AppearanceSlider_LostFocus" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding HasPerWidgetBackgroundOverrides, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.DescriptionKey="Settings.WidgetBackground.PerWidget.Description"
-                        svc:Localized.HeaderKey="Settings.WidgetBackground.PerWidget.Title">
-                        <Button
-                            Click="ClearPerWidgetBackgroundsButton_Click"
-                            Style="{StaticResource DangerActionButtonStyle}">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <FontIcon Glyph="&#xE74D;" FontSize="16" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                <TextBlock svc:Localized.Key="Settings.WidgetBackground.PerWidget.Clear" />
-                            </StackPanel>
-                        </Button>
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>

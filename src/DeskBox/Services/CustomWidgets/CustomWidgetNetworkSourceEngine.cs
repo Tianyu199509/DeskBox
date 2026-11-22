@@ -252,12 +252,40 @@ public sealed partial class CustomWidgetNetworkSourceEngine
             return;
         }
 
+        bool isLoopbackProxyEligible = !_customHandlerProvided &&
+            TryGetLoopbackSystemProxy(targetUri, out _);
+        if (isLoopbackProxyEligible)
+        {
+            CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoff(
+                targetUri,
+                requirePublicIpOnly: !allowLocalAndHttp);
+        }
+
         using var dnsCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         dnsCts.CancelAfter(DnsValidationTimeout);
 
-        IPAddress[] addresses = await _dnsResolver(host, dnsCts.Token).ConfigureAwait(false);
+        IPAddress[]? addresses;
+        try
+        {
+            addresses = await _dnsResolver(host, dnsCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (
+            isLoopbackProxyEligible &&
+            !cancellationToken.IsCancellationRequested &&
+            (ex is SocketException || ex is OperationCanceledException))
+        {
+            // Local OS DNS timed out or returned NXDOMAIN under ISP blocking while a loopback
+            // proxy (e.g. 127.0.0.1:7890) is configured to resolve CONNECT remotely.
+            return;
+        }
+
         if (addresses is null || addresses.Length == 0)
         {
+            if (isLoopbackProxyEligible)
+            {
+                return;
+            }
+
             throw new SocketException((int)SocketError.HostNotFound);
         }
 
@@ -401,10 +429,11 @@ public sealed partial class CustomWidgetNetworkSourceEngine
             throw new SocketException((int)SocketError.HostNotFound);
         }
 
-        // Reject DNS rebinding if ANY resolved IP points to loopback / RFC1918 / link-local / metadata
+        // Reject DNS rebinding if ANY resolved IP points to loopback / RFC1918 / link-local / metadata / forbidden Fake-IP
         foreach (IPAddress ip in addresses)
         {
-            if (CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip))
+            if (CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip) ||
+                CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(ip))
             {
                 throw new InvalidOperationException(
                     $"Blocked connection to non-public IP address '{ip}' resolved for '{host}'.");
@@ -916,19 +945,18 @@ public sealed partial class CustomWidgetNetworkSourceEngine
         CancellationToken ct,
         bool useLocalClient = false,
         HttpMethod? method = null,
-        string? body = null)
+        string? body = null,
+        bool allowLocalAndHttp = false)
     {
         if (!useLocalClient &&
             TryGetLoopbackSystemProxy(targetUri, out _) &&
             _loopbackProxyHttpClient is not null)
         {
-            // The loopback proxy client has no SSRF-hardened ConnectCallback; re-validate
-            // the target (including TUN-aware fake-IP gating) right before the handoff.
-            await CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
+            // ValidateTargetHostDnsAsync already validated the hop's DNS above; enforce
+            // synchronous URI/host policy right before proxy handoff while honoring allowLocalAndHttp.
+            CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoff(
                 targetUri,
-                requirePublicIpOnly: true,
-                ct,
-                _dnsResolver).ConfigureAwait(false);
+                requirePublicIpOnly: !allowLocalAndHttp);
             try
             {
                 using HttpRequestMessage proxyRequest = BuildHopRequest(
@@ -1015,7 +1043,8 @@ public sealed partial class CustomWidgetNetworkSourceEngine
                         includeConditionalHeaders: redirectCount == 0,
                         customHeaders: isSameOrigin ? resolvedHeaders : null,
                         ct,
-                        useLocalClient: currentUsesLocalClient).ConfigureAwait(false);
+                        useLocalClient: currentUsesLocalClient,
+                        allowLocalAndHttp: allowLocalAndHttp).ConfigureAwait(false);
 
                     if (IsRedirectStatusCode(response.StatusCode) &&
                         response.Headers.Location is { } location)
@@ -1962,7 +1991,8 @@ public sealed partial class CustomWidgetNetworkSourceEngine
                     includeConditionalHeaders: false,
                     customHeaders: isSameOrigin ? resolvedHeaders : null,
                     probeCts.Token,
-                    useLocalClient: currentUsesLocalClient).ConfigureAwait(false);
+                    useLocalClient: currentUsesLocalClient,
+                    allowLocalAndHttp: allowLocalAndHttp).ConfigureAwait(false);
 
                 if (IsRedirectStatusCode(response.StatusCode) &&
                     response.Headers.Location is { } location)
@@ -2277,7 +2307,8 @@ public sealed partial class CustomWidgetNetworkSourceEngine
                     reqCts.Token,
                     useLocalClient: currentUsesLocalClient,
                     method: currentMethod,
-                    body: currentBody).ConfigureAwait(false);
+                    body: currentBody,
+                    allowLocalAndHttp: allowLocalAndHttp).ConfigureAwait(false);
 
                 if (IsRedirectStatusCode(response.StatusCode) &&
                     response.Headers.Location is { } location)

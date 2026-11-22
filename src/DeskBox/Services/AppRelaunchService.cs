@@ -13,7 +13,8 @@ public static class AppRelaunchService
 
     public static AppRelaunchScheduleResult ScheduleAfterCurrentProcessExit()
     {
-        if (AppDistributionService.Current.IsMicrosoftStore)
+        if (AppDistributionService.Current.IsMicrosoftStore ||
+            AppDistributionService.Current.IsPackaged)
         {
             PendingOsRestartOnShutdown = true;
             return AppRelaunchScheduleResult.StartedSuccessfully;

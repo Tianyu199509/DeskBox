@@ -609,7 +609,8 @@ public sealed partial class DeskBoxDataBackupService
                 archiveInfo.Manifest.Kind, "pre-restore", StringComparison.Ordinal);
             ValidateRestoreData(
                 stagedDataDirectory,
-                requireSettings: !allowMissingSettings);
+                requireSettings: !allowMissingSettings,
+                allowNewerVersionFallback: IsBackupFromNewerApp(archiveInfo.Manifest.AppVersion));
 
             var marker = new PendingRestoreMarker(
                 stagingRoot,
@@ -749,11 +750,8 @@ public sealed partial class DeskBoxDataBackupService
                             StringComparer.Ordinal)
                     : null;
             await RebaseManagedAttachmentPathsAsync(
-                stagedDataDirectory,
-                archiveInfo.Manifest.SourceDataPath,
-                todoWidgetIdRemaps,
-                cancellationToken);
-            ValidateScopedRestoreData(stagedDataDirectory, appliedScope);
+                stagedDataDirectory, archiveInfo.Manifest.SourceDataPath, todoWidgetIdRemaps, cancellationToken);
+            ValidateScopedRestoreData(stagedDataDirectory, appliedScope, IsBackupFromNewerApp(archiveInfo.Manifest.AppVersion));
             IReadOnlyList<DeskBoxDomainItemCount> domainItemCounts =
                 CountStagedDomainItems(stagedDataDirectory, appliedScope);
             int attachmentReferences =
@@ -809,20 +807,17 @@ public sealed partial class DeskBoxDataBackupService
     /// </summary>
     private static void ValidateScopedRestoreData(
         string stagedDataDirectory,
-        CloudBackupDomain appliedScope)
+        CloudBackupDomain appliedScope,
+        bool allowNewerVersionFallback = false)
     {
         foreach (CloudBackupDomain domain in CloudBackupDomains.FileDomains)
         {
-            if (!appliedScope.HasFlag(domain))
-            {
-                continue;
-            }
-
-            if (domain == CloudBackupDomain.QuickCaptureData)
+            if (appliedScope.HasFlag(domain) && domain == CloudBackupDomain.QuickCaptureData)
             {
                 ValidateJsonFileIfPresent<QuickCaptureStoreData>(
                     Path.Combine(stagedDataDirectory, "quick-capture", "quick-capture.json"),
-                    s_quickCaptureDataJsonContext.StoreData);
+                    s_quickCaptureDataJsonContext.StoreData,
+                    allowNewerVersionFallback);
             }
         }
 
@@ -832,25 +827,18 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         string widgetsDirectory = Path.Combine(stagedDataDirectory, "widgets");
-        if (appliedScope.HasFlag(CloudBackupDomain.TodoData) &&
-            Directory.Exists(widgetsDirectory))
+        if (appliedScope.HasFlag(CloudBackupDomain.TodoData) && Directory.Exists(widgetsDirectory))
         {
-            foreach (string todoPath in Directory.EnumerateFiles(
-                         widgetsDirectory,
-                         "todo.json",
-                         SearchOption.AllDirectories))
+            foreach (string todoPath in Directory.EnumerateFiles(widgetsDirectory, "todo.json", SearchOption.AllDirectories))
             {
-                ValidateJsonFileIfPresent<TodoWidgetData>(
-                    todoPath,
-                    s_todoDataJsonContext.StoreData);
+                ValidateJsonFileIfPresent<TodoWidgetData>(todoPath, s_todoDataJsonContext.StoreData, allowNewerVersionFallback);
             }
         }
 
         string customWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
-        if (appliedScope.HasFlag(CloudBackupDomain.CustomWidgets) &&
-            Directory.Exists(customWidgetsDirectory))
+        if (appliedScope.HasFlag(CloudBackupDomain.CustomWidgets) && Directory.Exists(customWidgetsDirectory))
         {
-            ValidateCustomWidgetsDirectory(customWidgetsDirectory);
+            ValidateCustomWidgetsDirectory(customWidgetsDirectory, allowNewerVersionFallback);
         }
     }
 
@@ -1425,7 +1413,8 @@ public sealed partial class DeskBoxDataBackupService
             string stagedDataDirectory = Path.Combine(stagingRoot, "data");
             ValidateRestoreData(
                 stagedDataDirectory,
-                requireSettings: !marker.AllowMissingSettings);
+                requireSettings: !marker.AllowMissingSettings,
+                allowNewerVersionFallback: IsBackupFromNewerApp(marker.AppVersion));
 
             marker = await EnsurePreRestoreSafetyBackupAsync(marker, cancellationToken);
 
@@ -1450,6 +1439,8 @@ public sealed partial class DeskBoxDataBackupService
 
                 throw;
             }
+
+            await Backup.PortableBackupProcessor.EnsureClipboardProtectedAtRestAsync(DataDirectory).ConfigureAwait(false);
 
             TryDeleteFile(PendingRestoreMarkerPath);
             TryDeleteDirectory(stagingRoot);
@@ -2461,7 +2452,13 @@ public sealed partial class DeskBoxDataBackupService
 
         using (archive)
         {
-            return await ExtractAndValidateManifestAsync(archive, stagingRoot, cancellationToken);
+            RestoreArchiveInfo info = await ExtractAndValidateManifestAsync(archive, stagingRoot, cancellationToken);
+            Backup.PortableBackupProcessor.StripMachineBoundSecretsIfUntrustedRestore(
+                Path.Combine(stagingRoot, "data"),
+                archivePath,
+                _recoveryRootPath,
+                info.Manifest.Kind);
+            return info;
         }
     }
 
@@ -2684,10 +2681,7 @@ public sealed partial class DeskBoxDataBackupService
             ValidateIntegrityManifest(manifest.Files, extractedFiles);
         }
 
-        // widget-style.json bypasses Files (root-level, not data-relative)
-        // but is covered by its own manifest field. Verify when declared —
-        // archives written before the field existed legitimately lack it;
-        // a declared entry with no matching archive entry is corruption.
+        // Verify root-level widget-style.json integrity when declared in the manifest.
         if (manifest.WidgetStyleFile is { } expectedStyle)
         {
             if (extractedWidgetStyle is null ||
@@ -2707,13 +2701,17 @@ public sealed partial class DeskBoxDataBackupService
             ValidateRestoreData(
                 Path.Combine(stagingRoot, "data"),
                 requireSettings: !string.Equals(
-                    manifest.Kind, "pre-restore", StringComparison.Ordinal));
+                    manifest.Kind, "pre-restore", StringComparison.Ordinal),
+                allowNewerVersionFallback: IsBackupFromNewerApp(manifest.AppVersion));
         }
 
         return new RestoreArchiveInfo(manifest, fileCount, totalUncompressedBytes);
     }
 
-    private static void ValidateRestoreData(string dataDirectory, bool requireSettings = true)
+    private static void ValidateRestoreData(
+        string dataDirectory,
+        bool requireSettings = true,
+        bool allowNewerVersionFallback = false)
     {
         if (!Directory.Exists(dataDirectory) ||
             !Directory.EnumerateFiles(dataDirectory, "*", SearchOption.AllDirectories).Any())
@@ -2727,59 +2725,38 @@ public sealed partial class DeskBoxDataBackupService
             throw new InvalidDataException("The backup is missing settings.json.");
         }
 
-        ValidateJsonFileIfPresent<AppSettings>(
-            settingsPath,
-            s_settingsDataJsonContext.AppSettings);
-        ValidateJsonFileIfPresent<QuickCaptureStoreData>(
-            Path.Combine(dataDirectory, "quick-capture", "quick-capture.json"),
-            s_quickCaptureDataJsonContext.StoreData);
-        ValidateJsonFileIfPresent<DesktopOrganizationHistoryData>(
-            Path.Combine(dataDirectory, "desktop-organization-history.json"),
-            DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData);
-        ValidateJsonFileIfPresent<WidgetLayoutDocument>(
-            Path.Combine(dataDirectory, "widget-layout.json"),
-            WidgetLayoutJsonContext.Default.WidgetLayoutDocument);
-        ValidateJsonFileIfPresent<ClipboardStoreDocument>(
-            Path.Combine(dataDirectory, "clipboard", "clipboard.json"),
-            ClipboardJsonContext.Default.ClipboardStoreDocument);
+        ValidateJsonFileIfPresent<AppSettings>(settingsPath, s_settingsDataJsonContext.AppSettings, allowNewerVersionFallback);
+        ValidateJsonFileIfPresent<QuickCaptureStoreData>(Path.Combine(dataDirectory, "quick-capture", "quick-capture.json"), s_quickCaptureDataJsonContext.StoreData, allowNewerVersionFallback);
+        ValidateJsonFileIfPresent<DesktopOrganizationHistoryData>(Path.Combine(dataDirectory, "desktop-organization-history.json"), DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData, allowNewerVersionFallback);
+        ValidateJsonFileIfPresent<WidgetLayoutDocument>(Path.Combine(dataDirectory, "widget-layout.json"), WidgetLayoutJsonContext.Default.WidgetLayoutDocument, allowNewerVersionFallback);
+        ValidateJsonFileIfPresent<ClipboardStoreDocument>(Path.Combine(dataDirectory, "clipboard", "clipboard.json"), ClipboardJsonContext.Default.ClipboardStoreDocument, allowNewerVersionFallback);
 
         string glanceWidgetsDirectory = Path.Combine(dataDirectory, "glance", "widgets");
         if (Directory.Exists(glanceWidgetsDirectory))
         {
-            foreach (string glancePath in Directory.EnumerateFiles(
-                         glanceWidgetsDirectory,
-                         "*.json",
-                         SearchOption.TopDirectoryOnly))
+            foreach (string glancePath in Directory.EnumerateFiles(glanceWidgetsDirectory, "*.json", SearchOption.TopDirectoryOnly))
             {
-                ValidateJsonFileIfPresent<GlanceWidgetData>(
-                    glancePath,
-                    GlancePreferencesJsonContext.Default.Preferences);
+                ValidateJsonFileIfPresent<GlanceWidgetData>(glancePath, GlancePreferencesJsonContext.Default.Preferences, allowNewerVersionFallback);
             }
         }
 
         string widgetsDirectory = Path.Combine(dataDirectory, "widgets");
         if (Directory.Exists(widgetsDirectory))
         {
-            foreach (string todoPath in Directory.EnumerateFiles(
-                         widgetsDirectory,
-                         "todo.json",
-                         SearchOption.AllDirectories))
+            foreach (string todoPath in Directory.EnumerateFiles(widgetsDirectory, "todo.json", SearchOption.AllDirectories))
             {
-                ValidateJsonFileIfPresent<TodoWidgetData>(
-                    todoPath,
-                    s_todoDataJsonContext.StoreData);
+                ValidateJsonFileIfPresent<TodoWidgetData>(todoPath, s_todoDataJsonContext.StoreData, allowNewerVersionFallback);
             }
-
         }
 
         string customWidgetsDirectory = Path.Combine(dataDirectory, CustomWidgetDataStore.SubdirectoryName);
         if (Directory.Exists(customWidgetsDirectory))
         {
-            ValidateCustomWidgetsDirectory(customWidgetsDirectory);
+            ValidateCustomWidgetsDirectory(customWidgetsDirectory, allowNewerVersionFallback);
         }
     }
 
-    private static void ValidateCustomWidgetsDirectory(string widgetsDirectory)
+    private static void ValidateCustomWidgetsDirectory(string widgetsDirectory, bool allowNewerVersionFallback = false)
     {
         foreach (string widgetDir in Directory.EnumerateDirectories(widgetsDirectory))
         {
@@ -2812,7 +2789,8 @@ public sealed partial class DeskBoxDataBackupService
             {
                 ValidateJsonFileIfPresent<CustomWidgetStorePayload>(
                     storePath,
-                    CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload);
+                    CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload,
+                    allowNewerVersionFallback);
             }
 
             string localesDir = Path.Combine(widgetDir, CustomWidgetDataStore.LocalesDirectoryName);
@@ -2859,28 +2837,49 @@ public sealed partial class DeskBoxDataBackupService
 
     private static void ValidateJsonFileIfPresent<T>(
         string path,
-        JsonTypeInfo<T> jsonTypeInfo)
+        JsonTypeInfo<T> jsonTypeInfo,
+        bool allowNewerVersionFallback = false)
     {
         if (!File.Exists(path))
         {
             return;
         }
 
+        string json = File.ReadAllText(path);
         try
         {
-            string json = File.ReadAllText(path);
             if (JsonSerializer.Deserialize(json, jsonTypeInfo) is null)
             {
                 throw new JsonException("The JSON document contains null.");
             }
         }
+        catch (JsonException) when (allowNewerVersionFallback ||
+            (ResilientJsonStore.TryReadSchemaVersion(json, out int rawVer) && rawVer > GetMaxCurrentSchemaVersion(typeof(T))))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidDataException($"Backup data file '{Path.GetFileName(path)}' is invalid.");
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException($"Backup data file '{Path.GetFileName(path)}' is invalid.", ex);
+            }
+        }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            throw new InvalidDataException(
-                $"Backup data file '{Path.GetFileName(path)}' is invalid.",
-                ex);
+            throw new InvalidDataException($"Backup data file '{Path.GetFileName(path)}' is invalid.", ex);
         }
     }
+
+    private static int GetMaxCurrentSchemaVersion(Type type) =>
+        type == typeof(AppSettings) ? SettingsMigrationPipeline.CurrentSchemaVersion :
+        type == typeof(QuickCaptureStoreData) || type == typeof(TodoWidgetData) ? 4 :
+        type == typeof(GlanceWidgetData) ? GlanceWidgetData.CurrentVersion :
+        type == typeof(WidgetLayoutDocument) ? WidgetLayoutStore.CurrentSchemaVersion : 1;
 
     private async Task RebaseManagedAttachmentPathsAsync(
         string stagedDataDirectory,
@@ -3018,6 +3017,8 @@ public sealed partial class DeskBoxDataBackupService
                 }
             }
         }
+
+        await Backup.PortableBackupProcessor.RebaseClipboardPathsAsync(stagedDataDirectory, sourceDataPath, DataDirectory, cancellationToken);
     }
 
     private bool TryGetCrossProfileRebaseRoots(
@@ -3063,10 +3064,21 @@ public sealed partial class DeskBoxDataBackupService
         string targetProfileRoot,
         CancellationToken cancellationToken)
     {
-        GlanceWidgetData data = JsonSerializer.Deserialize(
-                                    await File.ReadAllTextAsync(path, cancellationToken),
-                                    GlancePreferencesJsonContext.Default.Preferences) ??
-                                throw new InvalidDataException("Glance backup data is invalid.");
+        string rawGlance = await File.ReadAllTextAsync(path, cancellationToken);
+        GlanceWidgetData? data;
+        try
+        {
+            data = JsonSerializer.Deserialize(rawGlance, GlancePreferencesJsonContext.Default.Preferences);
+        }
+        catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(rawGlance, out int v) && v > GlanceWidgetData.CurrentVersion)
+        {
+            return;
+        }
+
+        if (data is null)
+        {
+            throw new InvalidDataException("Glance backup data is invalid.");
+        }
         bool changed = false;
         if (RestoreMachineLocalPathRebase.TryRebaseProfilePath(
                 data.LocalFolderPath,
@@ -3252,10 +3264,12 @@ public sealed partial class DeskBoxDataBackupService
         string? sourceDataPath,
         CancellationToken cancellationToken)
     {
-        QuickCaptureStoreData data = JsonSerializer.Deserialize(
-                                         await File.ReadAllTextAsync(path, cancellationToken),
-                                         s_quickCaptureDataJsonContext.StoreData) ??
-                                     throw new InvalidDataException("Quick Capture backup data is invalid.");
+        string rawQc = await File.ReadAllTextAsync(path, cancellationToken);
+        QuickCaptureStoreData? data;
+        try { data = JsonSerializer.Deserialize(rawQc, s_quickCaptureDataJsonContext.StoreData); }
+        catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(rawQc, out int v) && v > 4) { return; }
+        if (data is null) throw new InvalidDataException("Quick Capture backup data is invalid.");
+        bool changed = false;
         foreach (QuickCaptureItem item in (data.Items ?? []).Concat(data.RecentItems ?? []))
         {
             var rebasedPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -3267,10 +3281,11 @@ public sealed partial class DeskBoxDataBackupService
                     sourceDataPath,
                     stagedDataDirectory,
                     ["quick-capture"]);
-                if (rebasedPath is not null)
+                if (rebasedPath is not null && !string.Equals(rebasedPath, attachment.FilePath, StringComparison.Ordinal))
                 {
                     rebasedPaths[attachment.FilePath] = rebasedPath;
                     attachment.FilePath = rebasedPath;
+                    changed = true;
                 }
             }
 
@@ -3279,14 +3294,13 @@ public sealed partial class DeskBoxDataBackupService
                 if (rebasedPaths.TryGetValue(item.ImagePath, out string? rebasedImagePath))
                 {
                     item.ImagePath = rebasedImagePath;
+                    changed = true;
                 }
-                else
+                else if (TryRebaseManagedPath(item.ImagePath, sourceDataPath, stagedDataDirectory, ["quick-capture"]) is { } nextImg &&
+                         !string.Equals(nextImg, item.ImagePath, StringComparison.Ordinal))
                 {
-                    item.ImagePath = TryRebaseManagedPath(
-                        item.ImagePath,
-                        sourceDataPath,
-                        stagedDataDirectory,
-                        ["quick-capture"]) ?? item.ImagePath;
+                    item.ImagePath = nextImg;
+                    changed = true;
                 }
             }
         }
@@ -3304,12 +3318,13 @@ public sealed partial class DeskBoxDataBackupService
             data.MirrorFolderPath = !string.IsNullOrWhiteSpace(parentDir) && Directory.Exists(parentDir)
                 ? rebasedMirrorPath
                 : null;
+            changed = true;
         }
 
-        await File.WriteAllTextAsync(
-            path,
-            JsonSerializer.Serialize(data, s_quickCaptureDataJsonContext.StoreData),
-            cancellationToken);
+        if (changed)
+        {
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(data, s_quickCaptureDataJsonContext.StoreData), cancellationToken);
+        }
     }
 
     private async Task RebaseTodoFileAsync(
@@ -3319,15 +3334,11 @@ public sealed partial class DeskBoxDataBackupService
         IReadOnlyDictionary<string, string>? widgetIdRemaps,
         CancellationToken cancellationToken)
     {
-        TodoWidgetData data = JsonSerializer.Deserialize(
-                                  await File.ReadAllTextAsync(path, cancellationToken),
-                                  s_todoDataJsonContext.StoreData) ??
-                              throw new InvalidDataException("Todo backup data is invalid.");
-        // The store dir may already have been moved to a remapped target id —
-        // embedded FilePaths still carry the SOURCE id, so the store-relative
-        // fallback lookup must use the source id while the final rewrite
-        // (inside TryRebaseManagedPath) points at the target. A merge target
-        // collects several source ids — every one is a fallback candidate.
+        string rawTodo = await File.ReadAllTextAsync(path, cancellationToken);
+        TodoWidgetData? data;
+        try { data = JsonSerializer.Deserialize(rawTodo, s_todoDataJsonContext.StoreData); }
+        catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(rawTodo, out int v) && v > 4) { return; }
+        if (data is null) throw new InvalidDataException("Todo backup data is invalid.");
         string currentWidgetId = Path.GetFileName(Path.GetDirectoryName(path)!);
         var storeRelativePaths = new List<string>
         {
@@ -3346,23 +3357,23 @@ public sealed partial class DeskBoxDataBackupService
             }
         }
 
+        bool changed = false;
         foreach (TodoAttachment attachment in (data.Items ?? [])
                      .SelectMany(item => item.Attachments ?? [])
                      .Where(attachment => attachment is not null && attachment.IsManagedCopy))
         {
-            attachment.FilePath = TryRebaseManagedPath(
-                                      attachment.FilePath,
-                                      sourceDataPath,
-                                      stagedDataDirectory,
-                                      storeRelativePaths,
-                                      widgetIdRemaps) ??
-                                  attachment.FilePath;
+            if (TryRebaseManagedPath(attachment.FilePath, sourceDataPath, stagedDataDirectory, storeRelativePaths, widgetIdRemaps) is { } nextPath &&
+                !string.Equals(nextPath, attachment.FilePath, StringComparison.Ordinal))
+            {
+                attachment.FilePath = nextPath;
+                changed = true;
+            }
         }
 
-        await File.WriteAllTextAsync(
-            path,
-            JsonSerializer.Serialize(data, s_todoDataJsonContext.StoreData),
-            cancellationToken);
+        if (changed)
+        {
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(data, s_todoDataJsonContext.StoreData), cancellationToken);
+        }
     }
 
     private string? TryRebaseManagedPath(
@@ -3929,7 +3940,7 @@ public sealed partial class DeskBoxDataBackupService
                 SourcePath: path,
                 RelativePath: Path.GetRelativePath(DataDirectory, path)
                     .Replace(Path.DirectorySeparatorChar, '/')))
-            .Where(file => ShouldIncludeInBackup(file.RelativePath, includeClipboard))
+            .Where(file => ShouldIncludeInBackup(file.RelativePath, includeClipboard, backupKind))
             .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -3942,8 +3953,6 @@ public sealed partial class DeskBoxDataBackupService
         foreach ((string sourcePath, string relativePath) in sourceFiles)
         {
             if (metadataSet.Contains(relativePath)) continue;
-            // A multi-gigabyte snapshot legitimately runs longer than the
-            // startup watchdog's stall window; each file proves progress.
             App.MarkStartupProgress();
             cancellationToken.ThrowIfCancellationRequested();
             string destinationPath = Path.Combine(
@@ -3951,6 +3960,11 @@ public sealed partial class DeskBoxDataBackupService
                 relativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             await CopyStableSnapshotFileAsync(sourcePath, destinationPath, cancellationToken);
+        }
+
+        if (string.Equals(backupKind, "manual", StringComparison.OrdinalIgnoreCase) && includeClipboard)
+        {
+            await Backup.PortableBackupProcessor.MaterializePortableClipboardSnapshotAsync(snapshotDataDirectory, cancellationToken);
         }
     }
 
@@ -4312,34 +4326,30 @@ public sealed partial class DeskBoxDataBackupService
     /// </summary>
     private static bool IsInternalStoreRecoveryArtifact(string relativePath) =>
         relativePath.EndsWith(".json.bak", StringComparison.OrdinalIgnoreCase) ||
+        relativePath.Contains(".future-v", StringComparison.OrdinalIgnoreCase) ||
         relativePath.Contains(".json.corrupt-", StringComparison.OrdinalIgnoreCase);
 
-    private static bool ShouldIncludeInBackup(string relativePath, bool includeClipboard = true)
+    private static bool ShouldIncludeInBackup(
+        string relativePath,
+        bool includeClipboard = true,
+        string backupKind = "automatic")
     {
-        // Manual exports leave the machine: clipboard history (passwords, tokens,
-        // screenshots) is opt-in there. On-device automatic/pre-restore snapshots
-        // keep it so local recovery stays complete.
-        if (!includeClipboard &&
-            relativePath.StartsWith("clipboard/", StringComparison.OrdinalIgnoreCase))
+        bool isManualExport = string.Equals(backupKind, "manual", StringComparison.OrdinalIgnoreCase);
+        if (isManualExport &&
+            (string.Equals(relativePath, "widget-permissions.key", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(relativePath, "widget-permissions.json", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(relativePath, "widget-secrets.json", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(relativePath, "ai-credentials.json", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(relativePath, "clipboard/hmac-key.bin", StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
-        // DeskBox-managed disposable subtrees first: nothing under them is
-        // user data, and they can never contain a managed-attachments dir.
-        // cache/ (widget image caches) and weather-cache.json regenerate on
-        // next use; quick-capture exports/thumbnails are derived artifacts.
-        //
-        // device.id is excluded deliberately: it is installation-local
-        // identity, not user data. Carrying it into a backup would clone the
-        // device identity onto every machine that restores it — silently
-        // misattributing sync-layer provenance. DeviceIdentity.GetOrCreate
-        // regenerates a fresh ID on first use after a restore.
-        //
-        // sync/ is excluded deliberately too: it is device-local protocol
-        // state (outbox queue, pull cursors, revision map, conflict log).
-        // Restoring it onto another machine would replay stale cursors and
-        // push intents against data the restore also rewrote — the sync
-        // contract assigns it no backup semantics at all.
+
+        if (!includeClipboard && relativePath.StartsWith("clipboard/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        // Exclude disposable caches, derived thumbnails/exports, device.id, and device-local sync cursors.
         if (relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("clipboard/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
@@ -4366,21 +4376,7 @@ public sealed partial class DeskBoxDataBackupService
             return true;
         }
 
-        // .tmp files and ResilientJsonStore sidecars are machine-local
-        // recovery artifacts, not user data: a stale recovery .bak inside a
-        // backup would resurrect a ghost pending journal on the restore
-        // machine, and .corrupt-* quarantines are dead forensics. The store
-        // regenerates its .bak on the next save anyway. The artifact check
-        // is scoped to the ResilientJsonStore naming convention itself
-        // ("<store>.json.bak" / "<store>.json.corrupt-*").
-        // The style-restore journal is in-flight transaction state, not user
-        // data: carrying pending/committed/orig files into a backup would
-        // land a half-applied restore on the target machine and let a stale
-        // journal fire the first time a style restore runs there.
-        // The wipe-recovery offer marker is machine-local session state for
-        // an in-flight decision: restoring it onto a machine (or back onto
-        // this one through an old archive) would re-offer a restore right
-        // after the user finished one. Detection rewrites it when warranted.
+        // Exclude .tmp files, ResilientJsonStore sidecars, style-restore journals, and session offer markers.
         if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
             relativePath.Contains(".style-restore.", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, RecoveryOfferStore.MarkerFileName, StringComparison.OrdinalIgnoreCase) ||

@@ -90,21 +90,38 @@ public sealed class TodoWidgetStore
             return Normalize(new TodoWidgetData());
         }
 
+        bool unparseableFuture = false;
         TodoWidgetData loaded = await ResilientJsonStore.LoadAsync(
             _storePath,
-            json => Normalize(JsonSerializer.Deserialize(
+            json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                _storePath,
                 json,
-                TodoJsonContext.Default.StoreData)),
+                currentVersion: 4,
+                raw => JsonSerializer.Deserialize(raw, TodoJsonContext.Default.StoreData),
+                static d => d.Version,
+                Normalize,
+                static ver => new TodoWidgetData { Version = ver },
+                out unparseableFuture),
             () => Normalize(new TodoWidgetData()),
             nameof(TodoWidgetStore)).ConfigureAwait(false);
+        _hasUnparseableFutureSchema = unparseableFuture;
 
         UpdateSnapshotCacheAfterLoad(_storePath, loaded);
         return loaded;
     }
 
+    private bool _hasUnparseableFutureSchema;
+
     public async Task SaveAsync(TodoWidgetData data)
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[TodoWidgetStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+            return;
+        }
+
         data = Normalize(data);
+        data.Version = 4;
         // Stream the UTF-8 directly into the temp file instead of paying the
         // transient whole-document string on every save.
         await ResilientJsonStore.SaveAsync(

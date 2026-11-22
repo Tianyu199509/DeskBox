@@ -82,7 +82,8 @@ public static class CustomWidgetAgentConnectorService
     public static string ResolveMcpCommandExecutable(
         string? overrideExePath = null,
         bool? isPackagedOverride = null,
-        string? currentProcessPathOverride = null)
+        string? currentProcessPathOverride = null,
+        string? localAppDataOverride = null)
     {
         if (!string.IsNullOrWhiteSpace(overrideExePath))
         {
@@ -92,6 +93,18 @@ public static class CustomWidgetAgentConnectorService
         bool isPackaged = isPackagedOverride ?? AppDistributionService.Current.IsPackaged;
         if (isPackaged)
         {
+            string localAppData = !string.IsNullOrWhiteSpace(localAppDataOverride)
+                ? localAppDataOverride.Trim()
+                : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                string aliasPath = Path.Combine(localAppData, "Microsoft", "WindowsApps", StoreExecutionAlias);
+                if (File.Exists(aliasPath))
+                {
+                    return aliasPath;
+                }
+            }
+
             return StoreExecutionAlias;
         }
 
@@ -119,6 +132,10 @@ public static class CustomWidgetAgentConnectorService
                     return aliasPath;
                 }
             }
+
+            // Never fall back to C:\Program Files\WindowsApps\<PFN>\DeskBox.exe:
+            // external unpackaged processes cannot execute inside WindowsApps directly.
+            return null;
         }
 
         string exePath = ResolveDeskBoxExecutablePath(
@@ -130,9 +147,14 @@ public static class CustomWidgetAgentConnectorService
     public static string FormatMcpCommandLine(
         string? overrideExePath = null,
         bool? isPackagedOverride = null,
-        string? currentProcessPathOverride = null)
+        string? currentProcessPathOverride = null,
+        string? localAppDataOverride = null)
     {
-        string exe = ResolveMcpCommandExecutable(overrideExePath, isPackagedOverride, currentProcessPathOverride);
+        string exe = ResolveMcpCommandExecutable(
+            overrideExePath,
+            isPackagedOverride,
+            currentProcessPathOverride,
+            localAppDataOverride);
         if (string.Equals(exe, StoreExecutionAlias, StringComparison.OrdinalIgnoreCase))
         {
             return $"{StoreExecutionAlias} --mcp";
@@ -293,11 +315,14 @@ public static class CustomWidgetAgentConnectorService
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            using (ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope())
             {
-                FileName = uri,
-                UseShellExecute = true
-            });
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = uri,
+                    UseShellExecute = true
+                });
+            }
             return true;
         }
         catch
@@ -984,10 +1009,12 @@ public static class CustomWidgetAgentConnectorService
         string args = File.Exists(manifestFile)
             ? $"\"{workspaceDirectory}\" \"{manifestFile}\""
             : $"\"{workspaceDirectory}\"";
+        using IDisposable? _ = ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
         Process.Start(new ProcessStartInfo
         {
             FileName = exePath,
             Arguments = args,
+            WorkingDirectory = Directory.Exists(workspaceDirectory) ? workspaceDirectory : string.Empty,
             UseShellExecute = false
         });
     }

@@ -56,20 +56,38 @@ public sealed class QuickCaptureStore
 
     internal string AttachmentDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "attachments");
 
+    private bool _hasUnparseableFutureSchema;
+
     public async Task<QuickCaptureStoreData> LoadAsync()
     {
-        return await ResilientJsonStore.LoadAsync(
+        bool unparseableFuture = false;
+        QuickCaptureStoreData loaded = await ResilientJsonStore.LoadAsync(
             _storePath,
-            json => Normalize(JsonSerializer.Deserialize(
+            json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                _storePath,
                 json,
-                QuickCaptureJsonContext.Default.StoreData)),
+                CurrentVersion,
+                raw => JsonSerializer.Deserialize(raw, QuickCaptureJsonContext.Default.StoreData),
+                static d => d.Version,
+                Normalize,
+                static ver => new QuickCaptureStoreData { Version = ver },
+                out unparseableFuture),
             () => new QuickCaptureStoreData(),
             nameof(QuickCaptureStore));
+        _hasUnparseableFutureSchema = unparseableFuture;
+        return loaded;
     }
 
     public Task SaveAsync(QuickCaptureStoreData data)
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[QuickCaptureStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+            return Task.CompletedTask;
+        }
+
         data = Normalize(data);
+        data.Version = CurrentVersion;
         // Stream the UTF-8 directly into the temp file: materializing the
         // whole document as a string first doubles the transient footprint
         // on every save, and quick-capture autosave fires while the user

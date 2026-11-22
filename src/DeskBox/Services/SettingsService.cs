@@ -550,34 +550,20 @@ public const int DefaultSearchMaxResults = 100;
         settings.TrayIconStyle = "Colorful";
         settings.AccentColorMode = "System";
         settings.PerformanceMode = PerformanceSettingsPolicy.DefaultMode;
-        settings.HiddenCacheCleanupDelaySeconds =
-            PerformanceSettingsPolicy.DefaultHiddenCacheCleanupDelaySeconds;
-        settings.HiddenCacheCleanupScope =
-            PerformanceSettingsPolicy.DefaultHiddenCacheCleanupScope;
-        settings.VisibleIdleCacheCleanupDelaySeconds =
-            PerformanceSettingsPolicy.DefaultVisibleIdleCacheCleanupDelaySeconds;
-        settings.TransientWindowReleaseDelaySeconds =
-            PerformanceSettingsPolicy.DefaultTransientWindowReleaseDelaySeconds;
-        settings.IdleWorkingSetTrimEnabled =
-            PerformanceSettingsPolicy.DefaultIdleWorkingSetTrimEnabled;
-        settings.ImmediateHiddenWorkingSetTrimEnabled =
-            PerformanceSettingsPolicy.DefaultImmediateHiddenWorkingSetTrimEnabled;
-        settings.Performance.QuiescenceWorkingSetTrimEnabled =
-            PerformanceSettingsPolicy.DefaultQuiescenceWorkingSetTrimEnabled;
-        settings.PerformanceCacheBudget =
-            PerformanceSettingsPolicy.DefaultCacheBudget;
-        settings.EnableContinuousDecorativeAnimations =
-            PerformanceSettingsPolicy.DefaultContinuousDecorativeAnimationsEnabled;
-        settings.EnableTextMarqueeAnimations =
-            PerformanceSettingsPolicy.DefaultTextMarqueeAnimationsEnabled;
-        settings.EnableVinylRotationAnimations =
-            PerformanceSettingsPolicy.DefaultVinylRotationAnimationsEnabled;
-        settings.EnableGlanceImageAutoRotation =
-            PerformanceSettingsPolicy.DefaultGlanceImageAutoRotationEnabled;
-        settings.EnableCompactAmbientAnimations =
-            PerformanceSettingsPolicy.DefaultCompactAmbientAnimationsEnabled;
-        settings.Performance.KeepCapsuleContentWarm =
-            PerformanceSettingsPolicy.DefaultKeepCapsuleContentWarm;
+        settings.HiddenCacheCleanupDelaySeconds = PerformanceSettingsPolicy.DefaultHiddenCacheCleanupDelaySeconds;
+        settings.HiddenCacheCleanupScope = PerformanceSettingsPolicy.DefaultHiddenCacheCleanupScope;
+        settings.VisibleIdleCacheCleanupDelaySeconds = PerformanceSettingsPolicy.DefaultVisibleIdleCacheCleanupDelaySeconds;
+        settings.TransientWindowReleaseDelaySeconds = PerformanceSettingsPolicy.DefaultTransientWindowReleaseDelaySeconds;
+        settings.IdleWorkingSetTrimEnabled = PerformanceSettingsPolicy.DefaultIdleWorkingSetTrimEnabled;
+        settings.ImmediateHiddenWorkingSetTrimEnabled = PerformanceSettingsPolicy.DefaultImmediateHiddenWorkingSetTrimEnabled;
+        settings.Performance.QuiescenceWorkingSetTrimEnabled = PerformanceSettingsPolicy.DefaultQuiescenceWorkingSetTrimEnabled;
+        settings.PerformanceCacheBudget = PerformanceSettingsPolicy.DefaultCacheBudget;
+        settings.EnableContinuousDecorativeAnimations = PerformanceSettingsPolicy.DefaultContinuousDecorativeAnimationsEnabled;
+        settings.EnableTextMarqueeAnimations = PerformanceSettingsPolicy.DefaultTextMarqueeAnimationsEnabled;
+        settings.EnableVinylRotationAnimations = PerformanceSettingsPolicy.DefaultVinylRotationAnimationsEnabled;
+        settings.EnableGlanceImageAutoRotation = PerformanceSettingsPolicy.DefaultGlanceImageAutoRotationEnabled;
+        settings.EnableCompactAmbientAnimations = PerformanceSettingsPolicy.DefaultCompactAmbientAnimationsEnabled;
+        settings.Performance.KeepCapsuleContentWarm = PerformanceSettingsPolicy.DefaultKeepCapsuleContentWarm;
         settings.DefaultWidgetWidth = DefaultWidgetWidth;
         settings.DefaultWidgetHeight = DefaultWidgetHeight;
         settings.WidgetCornerPreference = WidgetCornerPreferenceRound;
@@ -882,7 +868,11 @@ settings.FocusClickedWidgetOnRaise = false;
                         }
                         catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(json, out int rawVer) && rawVer > SettingsMigrationPipeline.CurrentSchemaVersion)
                         {
-                            return new AppSettings { SchemaVersion = rawVer };
+                            ResilientJsonStore.PreserveFutureSchemaCopyIfMissing(_settingsPath, json, rawVer);
+                            var fallback = new AppSettings { DefaultManagedStorageRootPath = ManagedStoragePathService.GetRecommendedPath() };
+                            ApplyDefaultPreferences(fallback);
+                            fallback.SchemaVersion = rawVer;
+                            return fallback;
                         }
                     },
                     () => new AppSettings(),
@@ -1398,7 +1388,7 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             _settings = parsed;
             _prePreviewSettings = null;
-            _settingsSchemaNewerThanBuild = false;
+            _settingsSchemaNewerThanBuild = parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion;
             _lastPersistedSettingsSha256 = null;
             // The layout domain arrived inside the graph; keep the merged
             // flag consistent with a completed disk load (its consumers —
@@ -3526,7 +3516,8 @@ settings.FocusClickedWidgetOnRaise = false;
 
         foreach (var widget in settings.Widgets)
         {
-            if (!WidgetRegistry.Default.IsKnown(widget.WidgetKind))
+            if (!WidgetRegistry.Default.IsKnown(widget.WidgetKind) &&
+                !WidgetKindJsonConverter.IsUnknownFutureKind(widget.WidgetKind))
             {
                 widget.WidgetKind = WidgetKind.File;
                 changed = true;
@@ -3629,7 +3620,9 @@ settings.FocusClickedWidgetOnRaise = false;
                 changed = true;
             }
 
-            if (widget.IsDisabled && widget.WidgetKind is not (WidgetKind.Glance or WidgetKind.Custom))
+            if (widget.IsDisabled &&
+                widget.WidgetKind is not (WidgetKind.Glance or WidgetKind.Custom) &&
+                !WidgetKindJsonConverter.IsUnknownFutureKind(widget.WidgetKind))
             {
                 widget.IsDisabled = false;
                 changed = true;

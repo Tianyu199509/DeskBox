@@ -396,8 +396,7 @@ public sealed partial class QuickCaptureWidgetViewModel
             }
 
             DeskBoxClipboardWriteScope.MarkWrite(hasImage: true);
-            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(item.ImagePath);
-            dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
+            dataPackage.SetBitmap(await DeskBox.Platform.ClipboardStorageFileOps.CreateInMemoryBitmapStreamRefAsync(item.ImagePath));
         }
         else
         {

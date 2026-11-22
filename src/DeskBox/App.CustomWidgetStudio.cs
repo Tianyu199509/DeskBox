@@ -22,6 +22,11 @@ public partial class App
             return;
         }
 
+        if (intent.Action == DeskBoxProtocolAction.BackgroundStartup)
+        {
+            return;
+        }
+
         if (intent.Action == DeskBoxProtocolAction.OpenStudio)
         {
             ShowCustomWidgetStudio(intent.WidgetId, intent.Idea, autoStartGeneration: false);
@@ -144,7 +149,7 @@ public partial class App
 
         // op 为内部常量、stageId 已复核为 32 位十六进制，拼接无转义风险。
         string request = "{\"op\":\"" + op + "\",\"stageId\":\"" + stageId + "\"}";
-        return await _agentBridgeServer.DispatchRequestJsonAsync(request);
+        return await _agentBridgeServer.DispatchHostUiRequestJsonAsync(request);
     }
 
     internal void NotifyCustomWidgetStudioAgentUpsert(

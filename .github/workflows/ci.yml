@@ -14,6 +14,7 @@ jobs:
       RestoreLockedMode: true
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
+      PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
       - name: Checkout
@@ -26,32 +27,74 @@ jobs:
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          PUSH_COMMIT_COUNT: ${{ github.event_name == 'push' && github.event.commits && length(github.event.commits) || 1 }}
           TRIGGER_USER: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login || github.actor }}
           ALLOWED_LOGIN: Tianyu199509
-          ALLOWED_EMAIL: 1047078635@qq.com
+          ALLOWED_AUTHOR_NAMES: Simon;Tianyu199509
+          ALLOWED_COMMITTER_NAMES: Simon;Tianyu199509;GitHub
+          ALLOWED_AUTHOR_EMAILS: 1047078635@qq.com;122434621+Tianyu199509@users.noreply.github.com
+          ALLOWED_COMMITTER_EMAILS: 1047078635@qq.com;122434621+Tianyu199509@users.noreply.github.com;noreply@github.com
         run: |
           if ($env:TRIGGER_USER -ne $env:ALLOWED_LOGIN) {
-            Write-Host "Forbidden: trigger user '$env:TRIGGER_USER' is not the single-account owner ($env:ALLOWED_LOGIN)."
+            Write-Host "Forbidden: trigger user '$env:TRIGGER_USER' is not the repository owner ($env:ALLOWED_LOGIN)."
             exit 1
           }
           $base = $env:BASE_SHA
           $head = $env:HEAD_SHA
-          $isNewRef = [string]::IsNullOrWhiteSpace($base) -or $base -match '^0+$'
-          if ($isNewRef) {
-            $messages = git log -1 --format=%B $head
-            $identities = git log -1 --no-merges --format='%ae%n%ce' $head
+          $hasReachableBase = $false
+          if (-not [string]::IsNullOrWhiteSpace($base) -and $base -notmatch '^0+$') {
+            git cat-file -e "$base^{commit}" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $hasReachableBase = $true
+            }
+          }
+          $rangeArgs = @()
+          if ($hasReachableBase) {
+            $rangeArgs = @("$base..$head")
           } else {
-            $messages = git log --format=%B "$base..$head"
-            $identities = git log --no-merges --format='%ae%n%ce' "$base..$head"
+            $mainSha = git rev-parse --verify origin/main 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($mainSha) -and $mainSha.Trim() -ne $head) {
+              $rangeArgs = @("origin/main..$head")
+            } else {
+              $count = 1
+              [void][int]::TryParse($env:PUSH_COMMIT_COUNT, [ref]$count)
+              if ($count -lt 1) { $count = 1 }
+              $rangeArgs = @("-$count", $head)
+            }
+          }
+          $messages = (git log --format=%B @rangeArgs) -join "`n"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to inspect commit messages for range: $($rangeArgs -join ' ')"
+            exit 1
           }
           if ($messages -match '(?im)^\s*(co-authored-by|generated[ -]with|generated-by)\s*[: ]') {
             Write-Host 'Forbidden attribution trailer (Co-Authored-By / Generated with) found in commit messages.'
             exit 1
           }
-          $bad = @($identities | Where-Object { $_ -and $_ -ne $env:ALLOWED_EMAIL })
+          $rows = @(git log --format='%h|%an|%ae|%cn|%ce' @rangeArgs)
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to inspect commit identities for range: $($rangeArgs -join ' ')"
+            exit 1
+          }
+          $allowedAuthorNames = $env:ALLOWED_AUTHOR_NAMES -split ';'
+          $allowedCommitterNames = $env:ALLOWED_COMMITTER_NAMES -split ';'
+          $allowedAuthors = $env:ALLOWED_AUTHOR_EMAILS -split ';'
+          $allowedCommitters = $env:ALLOWED_COMMITTER_EMAILS -split ';'
+          $bad = @()
+          foreach ($row in $rows) {
+            if ([string]::IsNullOrWhiteSpace($row)) { continue }
+            $parts = $row -split '\|', 5
+            if ($parts.Count -lt 5) { continue }
+            if ($parts[1] -notin $allowedAuthorNames -or
+                $parts[2] -notin $allowedAuthors -or
+                $parts[3] -notin $allowedCommitterNames -or
+                $parts[4] -notin $allowedCommitters) {
+              $bad += "$($parts[0]) (author=$($parts[1]) <$($parts[2])>, committer=$($parts[3]) <$($parts[4])>)"
+            }
+          }
           if ($bad.Count -gt 0) {
-            Write-Host 'Forbidden: commit author/committer emails outside the single-identity whitelist:'
-            $bad | Select-Object -Unique | ForEach-Object { Write-Host "  $_" }
+            Write-Host 'Forbidden: commit author/committer identities outside the allowed owner whitelist:'
+            $bad | ForEach-Object { Write-Host "  $_" }
             exit 1
           }
 

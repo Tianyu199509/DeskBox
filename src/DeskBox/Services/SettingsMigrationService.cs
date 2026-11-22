@@ -754,6 +754,14 @@ internal sealed class Migration_15_To_16 : ISettingsMigration
             settings.Clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
         }
 
+        // Preserve explicit v1.5.x image-clipboard opt-out when upgrading legacy QuickCapture clipboard users.
+        if (settings.QuickCapture.QuickCaptureClipboardEnabled &&
+            !settings.QuickCapture.QuickCaptureImageClipboardEnabled &&
+            !(settings.WidgetLayout.FeatureWidgetEnabledStates?.ContainsKey(nameof(WidgetKind.Clipboard)) ?? false))
+        {
+            settings.Clipboard.ClipboardCaptureImages = false;
+        }
+
         UpgradeLegacyDragOutAction(
             settings.FileWidget,
             WindowsCompatibilityService.IsWindows11OrLater);

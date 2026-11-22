@@ -1351,15 +1351,38 @@ public static partial class DeskBoxAgentCliEntry
         try
         {
             string? exePath = CustomWidgetAgentConnectorService.ResolveAutoLaunchExecutablePath();
-            if (!string.IsNullOrWhiteSpace(exePath))
+            bool launched = false;
+            using (ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope())
             {
-                Process.Start(new ProcessStartInfo
+                if (!string.IsNullOrWhiteSpace(exePath))
                 {
-                    FileName = exePath,
-                    Arguments = "--startup",
-                    UseShellExecute = false
-                });
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = exePath,
+                        Arguments = "--startup",
+                        WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory,
+                        UseShellExecute = false
+                    };
+                    psi.Environment.Remove("ELECTRON_RUN_AS_NODE");
+                    psi.Environment.Remove("__COMPAT_LAYER");
+                    Process.Start(psi);
+                    launched = true;
+                }
+                else if (AppDistributionService.Current.IsPackaged ||
+                         AppDistributionService.Current.IsMicrosoftStore)
+                {
+                    // Fallback when Windows AppExecutionAlias is disabled: activate via registered protocol.
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "deskbox://startup",
+                        UseShellExecute = true
+                    });
+                    launched = true;
+                }
+            }
 
+            if (launched)
+            {
                 for (int attempt = 0; attempt < 10; attempt++)
                 {
                     await Task.Delay(500, cancellationToken);

@@ -68,9 +68,9 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
                 CancellationToken.None,
                 dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Loopback })));
 
-        // Clash/mihomo TUN Fake-IP (198.18.x.x) returned by DNS for a public domain remains
-        // allowed while a TUN adapter owns a fake-IP-range address (topology injected so the
-        // assertion does not depend on the machine's actual proxy software).
+        // Fake-IP (198.18.x.x) returned by DNS for a public domain is allowed for both local TUN
+        // and transparent router gateways (OpenWrt/Surge where PC has no local TUN NIC), while
+        // stack specials and any 198.18.x.x IP bound to a local NIC on this PC stay blocked.
         await CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
             new Uri("https://api.github.com/repos/example/demo"),
             requirePublicIpOnly: true,
@@ -78,55 +78,64 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
             dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }),
             tunAddressProvider: () => new[] { IPAddress.Parse("198.18.0.1") });
 
-        // Without an active TUN adapter the same fake-IP answer is reserved-range probing.
+        await CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
+            new Uri("https://api.github.com/repos/example/demo"),
+            requirePublicIpOnly: true,
+            CancellationToken.None,
+            dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }),
+            tunAddressProvider: () => Array.Empty<IPAddress>());
+
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
                 new Uri("https://api.github.com/repos/example/demo"),
                 requirePublicIpOnly: true,
                 CancellationToken.None,
                 dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }),
-                tunAddressProvider: () => Array.Empty<IPAddress>()));
+                tunAddressProvider: () => new[] { IPAddress.Parse("198.18.0.42") }));
     }
 
     [Fact]
-    public void FakeIpDnsGating_DependsOnActiveTunTopology_AndBlocksStackSpecials()
+    public void FakeIpDnsGating_AllowsRouterAndLocalFakeIpPool_WhileBlockingLiteralsSpecialsAndOwnNicIps()
     {
-        IPAddress[] noTun = Array.Empty<IPAddress>();
-        IPAddress[] tunActive = { IPAddress.Parse("198.18.0.1") };
+        IPAddress[] noLocalNicIp = Array.Empty<IPAddress>();
+        IPAddress[] localTunNic = { IPAddress.Parse("198.18.0.1"), IPAddress.Parse("198.18.0.99") };
 
-        // No TUN adapter: the whole 198.18.0.0/15 range is reserved and forbidden.
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), noTun));
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.200.7"), noTun));
+        // URL literals in 198.18.0.0/15 are always treated as local/non-public.
+        Assert.False(CustomWidgetNetworkSecurity.TryValidatePublicHttpsUrl("https://198.18.0.42/api", out _, out _));
+        Assert.False(CustomWidgetNetworkSecurity.TryValidateWidgetNetworkUrl(
+            "https://198.18.0.42/api", allowLocalAndHttp: false, out _, out bool reqLocal, out _));
+        Assert.True(reqLocal);
 
-        // Active TUN: the fake-IP pool is legitimate, but the adapter's own address and the
-        // stack's gateway/DNS specials stay forbidden.
-        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), tunActive));
-        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.200.7"), tunActive));
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.1"), tunActive));
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.0"), tunActive));
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.2"), tunActive));
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.255.255"), tunActive));
+        // Transparent router Fake-IP gateway (no local TUN NIC) and local TUN both allow normal pool answers.
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), noLocalNicIp));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.200.7"), noLocalNicIp));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), localTunNic));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.42"), noLocalNicIp));
 
-        // Public and private addresses are unaffected by this gate (other rules handle them).
-        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("8.8.8.8"), noTun));
-        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("192.168.1.1"), noTun));
+        // Stack specials and any IP owned by a local NIC remain forbidden.
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.0"), noLocalNicIp));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.1"), noLocalNicIp));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.2"), noLocalNicIp));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.255.255"), noLocalNicIp));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.99"), localTunNic));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.1"), noLocalNicIp));
 
-        // IPv4-mapped fake-IP answers normalize to the same verdict.
-        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.42"), noTun));
-        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.42"), tunActive));
+        // Public and RFC1918 addresses are unaffected by Fake-IP check (IsBlockedIpAddress handles RFC1918).
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("8.8.8.8"), noLocalNicIp));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("192.168.1.1"), noLocalNicIp));
     }
 
     [Fact]
-    public void StoreUserAssetMigration_RebasesClipboardJsonAndBackupDroppedFilePaths()
+    public void StoreUserAssetMigration_RebasesRealPre160StorePaths_QuickCaptureAndTodo()
     {
         string legacyData = Directory.CreateDirectory(Path.Combine(_tempRoot, "LegacyData")).FullName;
         string durableData = Directory.CreateDirectory(Path.Combine(_tempRoot, "DurableData")).FullName;
-        string clipboardDir = Directory.CreateDirectory(Path.Combine(durableData, "clipboard")).FullName;
-        string droppedOldPath = Path.Combine(legacyData, "clipboard", "dropped", "item1", "report.pdf");
-        string droppedNewPath = Path.Combine(durableData, "clipboard", "dropped", "item1", "report.pdf");
+        string qcDir = Directory.CreateDirectory(Path.Combine(durableData, "quick-capture")).FullName;
+        string oldAttachPath = Path.Combine(legacyData, "quick-capture", "attachments", "note1.png");
+        string newAttachPath = Path.Combine(durableData, "quick-capture", "attachments", "note1.png");
 
-        string payload = JsonSerializer.Serialize(new { filePaths = new[] { droppedOldPath } });
-        string primaryPath = Path.Combine(clipboardDir, "clipboard.json");
+        string payload = JsonSerializer.Serialize(new { imagePath = oldAttachPath });
+        string primaryPath = Path.Combine(qcDir, "quick-capture.json");
         string backupPath = primaryPath + ".bak";
         File.WriteAllText(primaryPath, payload, Encoding.UTF8);
         File.WriteAllText(backupPath, payload, Encoding.UTF8);
@@ -135,8 +144,8 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
 
         JsonNode? primaryNode = JsonNode.Parse(File.ReadAllText(primaryPath, Encoding.UTF8));
         JsonNode? backupNode = JsonNode.Parse(File.ReadAllText(backupPath, Encoding.UTF8));
-        Assert.Equal(droppedNewPath, primaryNode?["filePaths"]?[0]?.GetValue<string>());
-        Assert.Equal(droppedNewPath, backupNode?["filePaths"]?[0]?.GetValue<string>());
+        Assert.Equal(newAttachPath, primaryNode?["imagePath"]?.GetValue<string>());
+        Assert.Equal(newAttachPath, backupNode?["imagePath"]?.GetValue<string>());
     }
 
     [Fact]
@@ -158,10 +167,10 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
         string settingsDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "FutureSettingsProfile")).FullName;
         string settingsDataDir = Directory.CreateDirectory(Path.Combine(settingsDir, "data")).FullName;
         string settingsPath = Path.Combine(settingsDataDir, "settings.json");
-        string futureSettingsJson = """{"schemaVersion":999,"searchHotkeyGesture":{"activationKind":"TripleTapFuture"}}""";
+        string futureSettingsJson = """{"schemaVersion":999,"searchHotkeyActivationKind":"TripleTapFuture"}""";
         await File.WriteAllTextAsync(settingsPath, futureSettingsJson, Encoding.UTF8);
 
-        var settingsService = new SettingsService(settingsDir);
+        var settingsService = new SettingsService(settingsDataDir);
         await settingsService.LoadAsync();
         await settingsService.SaveAsync();
 
@@ -430,5 +439,277 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
             SettingsService.ManagedDropActionMove);
         Assert.Equal(SettingsService.ManagedDropActionMove, settings.Settings.FileWidget.ManagedDropAction);
         Assert.Equal(SettingsService.ManagedDragOutActionCopy, settings.Settings.FileWidget.ManagedDragOutAction);
+    }
+
+    [Fact]
+    public async Task ManualBackupWithClipboard_MaterializesPortablePlaintextSnapshot_AndRestoresAcrossKeyRotation()
+    {
+        byte[] onePixelPng = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+        string sourceRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "PortableBackupSrc")).FullName;
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "settings.json"), """{"schemaVersion":18}""", Encoding.UTF8);
+
+        var clipStore = new ClipboardStore(Path.Combine(sourceData, "clipboard"));
+        byte[] keyA = clipStore.GetOrCreateContentHashKey();
+        string imgHashA = DeskBox.Features.Clipboard.ClipboardContentHashing.ComputeImageContentHash(onePixelPng, keyA);
+        string imgLeafA = DeskBox.Features.Clipboard.ClipboardContentHashing.MediaFileNameFromContentHash(imgHashA);
+        Directory.CreateDirectory(clipStore.ImageDirectory);
+        await File.WriteAllBytesAsync(Path.Combine(clipStore.ImageDirectory, imgLeafA), onePixelPng);
+
+        string secretToken = "ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD";
+        string longSecret = secretToken + new string('X', 2300);
+        await clipStore.SaveAsync(new ClipboardStoreDocument
+        {
+            Items =
+            {
+                new ClipboardHistoryItem
+                {
+                    Id = "sec-text",
+                    Kind = ClipboardItemKind.Text,
+                    ContentHash = DeskBox.Features.Clipboard.ClipboardContentHashing.ComputeNormalizedTextContentHash(longSecret, keyA),
+                    TextContent = longSecret,
+                    Summary = ClipboardClassifier.BuildSummary(longSecret),
+                    IsSensitive = true
+                },
+                new ClipboardHistoryItem
+                {
+                    Id = "sec-img",
+                    Kind = ClipboardItemKind.Image,
+                    ContentHash = imgHashA,
+                    ImageFileName = imgLeafA,
+                    ThumbnailFileName = imgLeafA,
+                    ImageWidth = 1,
+                    ImageHeight = 1,
+                    Summary = "1 × 1",
+                    OcrText = secretToken,
+                    IsSensitive = true
+                }
+            }
+        });
+
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "widget-secrets.json"), """{"w1":{"apiKey":"cipher"}}""", Encoding.UTF8);
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "ai-credentials.json"), """{"customEndpoint":"https://priv.local"}""", Encoding.UTF8);
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "widget-permissions.json"), """{"version":1,"widgets":{"w1":{"trustedLocalAuthoring":true}}}""", Encoding.UTF8);
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "widget-permissions.key"), "machine-bound", Encoding.UTF8);
+
+        // Snapshot simulating manual export with includeClipboard = true
+        string snapshotDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "PortableSnapshot")).FullName;
+        foreach (string srcFile in Directory.EnumerateFiles(sourceData, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(sourceData, srcFile);
+            string dst = Path.Combine(snapshotDir, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            File.Copy(srcFile, dst, overwrite: true);
+        }
+
+        await DeskBox.Services.Backup.PortableBackupProcessor.MaterializePortableClipboardSnapshotAsync(snapshotDir);
+        Assert.False(File.Exists(Path.Combine(snapshotDir, "clipboard", "hmac-key.bin")));
+
+        // Simulate restoring onto a brand-new machine (new directory with no hmac-key.bin -> fresh HMAC key)
+        string restoredClipRoot = Path.Combine(_tempRoot, "RestoredOnMachineB", "clipboard");
+        foreach (string srcFile in Directory.EnumerateFiles(Path.Combine(snapshotDir, "clipboard"), "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(Path.Combine(snapshotDir, "clipboard"), srcFile);
+            string dst = Path.Combine(restoredClipRoot, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            File.Copy(srcFile, dst, overwrite: true);
+        }
+
+        var machineBStore = new ClipboardStore(restoredClipRoot);
+        ClipboardStoreDocument restoredDoc = await machineBStore.LoadAsync();
+        Assert.Equal(2, restoredDoc.Items.Count);
+
+        ClipboardHistoryItem restoredText = Assert.Single(restoredDoc.Items, x => x.Id == "sec-text");
+        string? fullRestored = await machineBStore.ReadPayloadTextAsync(restoredText.TextPayloadFileName);
+        Assert.Equal(longSecret, fullRestored);
+        Assert.StartsWith("txt:h1:", restoredText.ContentHash, StringComparison.Ordinal);
+
+        ClipboardHistoryItem restoredImg = Assert.Single(restoredDoc.Items, x => x.Id == "sec-img");
+        Assert.Equal("1 × 1", restoredImg.Summary);
+        Assert.Equal(secretToken, restoredImg.OcrText);
+        Assert.Null(restoredImg.ThumbnailFileName);
+        string restoredImgPath = Path.Combine(machineBStore.ImageDirectory, restoredImg.ImageFileName!);
+        Assert.True(DeskBox.Platform.ClipboardStorageFileOps.IsDpapiProtectedMediaFile(restoredImgPath));
+        Assert.True(DeskBox.Platform.ClipboardStorageFileOps.TryReadMediaBytes(restoredImgPath, out byte[] plainRestoredPng));
+        Assert.Equal(onePixelPng, plainRestoredPng);
+
+        // Verify clipboard.json.bak on Machine B does NOT retain cleartext secrets after migration resave.
+        string bakPath = ResilientJsonStore.GetBackupPath(Path.Combine(restoredClipRoot, "clipboard.json"));
+        if (File.Exists(bakPath))
+        {
+            string bakText = await File.ReadAllTextAsync(bakPath, Encoding.UTF8);
+            Assert.DoesNotContain(secretToken, bakText, StringComparison.Ordinal);
+        }
+
+        // Verify full ExportBackupAsync(includeClipboard: true) omits non-portable DPAPI vaults while exporting decrypted portable clipboard.
+        string exportRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "BackupSvcRoot")).FullName;
+        string exportData = Path.Combine(exportRoot, "data");
+        foreach (string srcFile in Directory.EnumerateFiles(sourceData, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(sourceData, srcFile);
+            string dst = Path.Combine(exportData, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            File.Copy(srcFile, dst, overwrite: true);
+        }
+        await File.WriteAllTextAsync(Path.Combine(exportData, "settings.json"), """{"schemaVersion":16}""", Encoding.UTF8);
+        var backupSvc = new DeskBoxDataBackupService(exportRoot);
+        string outDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "ExportOut")).FullName;
+        string exportedArchivePath = await backupSvc.ExportBackupAsync(outDir, includeClipboard: true);
+        using (System.IO.Compression.ZipArchive zip = System.IO.Compression.ZipFile.OpenRead(exportedArchivePath))
+        {
+            Assert.Contains(zip.Entries, e => e.FullName == "data/clipboard/clipboard.json");
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.EndsWith("ai-credentials.json", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.EndsWith("widget-secrets.json", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.EndsWith("widget-permissions.json", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.EndsWith("widget-permissions.key", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(zip.Entries, e => e.FullName.EndsWith("hmac-key.bin", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
+    public void ForeignRestoreStripsPermissions_AndChannelScopedWritesPreserveIntendedTrust()
+    {
+        // 1. Foreign / external backup archive restore strips machine-bound permission & secret vaults,
+        // even if manifestKind claims "automatic", while local recovery root snapshots keep them.
+        string stagedForeign = Directory.CreateDirectory(Path.Combine(_tempRoot, "StagedForeign")).FullName;
+        string recoveryRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "RecoveryRoot")).FullName;
+        File.WriteAllText(Path.Combine(stagedForeign, "widget-permissions.json"), """{"version":1,"widgets":{"evil":{"trustedLocalAuthoring":true,"overrides":{"commandExecution":true}}}}""");
+        File.WriteAllText(Path.Combine(stagedForeign, "ai-credentials.json"), """{"providers":{}}""");
+        DeskBox.Services.Backup.PortableBackupProcessor.StripMachineBoundSecretsIfUntrustedRestore(
+            stagedForeign,
+            Path.Combine(_tempRoot, "Downloads", "forged-auto.zip"),
+            recoveryRoot,
+            manifestKind: "automatic");
+        Assert.False(File.Exists(Path.Combine(stagedForeign, "widget-permissions.json")));
+        Assert.False(File.Exists(Path.Combine(stagedForeign, "ai-credentials.json")));
+
+        string stagedLocalAuto = Directory.CreateDirectory(Path.Combine(_tempRoot, "StagedLocalAuto")).FullName;
+        File.WriteAllText(Path.Combine(stagedLocalAuto, "widget-permissions.json"), """{"version":1,"widgets":{}}""");
+        DeskBox.Services.Backup.PortableBackupProcessor.StripMachineBoundSecretsIfUntrustedRestore(
+            stagedLocalAuto,
+            Path.Combine(recoveryRoot, "auto-snapshot.zip"),
+            recoveryRoot,
+            manifestKind: "automatic");
+        Assert.True(File.Exists(Path.Combine(stagedLocalAuto, "widget-permissions.json")));
+
+        // 2. Signed Official OTA keeps official baseline trust while revoking explicit CommandExecution override;
+        // Studio save on an Agent-origin widget keeps user-granted overrides without elevating ungranted permissions.
+        string trustRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "ChannelTrust")).FullName;
+        var trustStore = new CustomWidgetTrustStore(trustRoot);
+        const string m1 = """{"id":"deskbox.pomodoro","schemaVersion":1,"root":"r","elements":{"r":{"type":"Text","text":"v1"}}}""";
+        const string m2 = """{"id":"deskbox.pomodoro","schemaVersion":1,"root":"r","elements":{"r":{"type":"Text","text":"v2"}}}""";
+        trustStore.SetPermissionOverride("w-official", CustomWidgetPermissionKind.CommandExecution, enabled: true, defaultTrustedIfNew: true);
+        trustStore.RecordExecutableSurfaceAfterWrite("w-official", m1, "export function onInit(){}", trustedLocalAuthoring: true);
+        trustStore.RecordExecutableSurfaceAfterWrite("w-official", m2, "export function onInit(){ return 2; }", trustedLocalAuthoring: false, preserveTrustedAuthoringOnExternalWrite: true);
+        CustomWidgetTrustProfile afterOta = trustStore.GetProfile("w-official", manifestOriginFallback: "official", manifestTemplateId: "deskbox.pomodoro");
+        Assert.True(afterOta.TrustedLocalAuthoring);
+        Assert.False(afterOta.IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
+
+        trustStore.RegisterWidgetProvenance("w-agent", trustedLocalAuthoring: false);
+        trustStore.RecordExecutableSurfaceAfterWrite("w-agent", m1, "export function a(){}", trustedLocalAuthoring: false);
+        trustStore.SetPermissionOverride("w-agent", CustomWidgetPermissionKind.LocalFileAccess, enabled: true);
+        trustStore.RecordExecutableSurfaceAfterWrite("w-agent", m2, "export function b(){}", trustedLocalAuthoring: true, preserveExistingTrustedStateOnHostWrite: true);
+        CustomWidgetTrustProfile afterStudioEdit = trustStore.GetProfile("w-agent", manifestOriginFallback: "agent");
+        Assert.False(afterStudioEdit.TrustedLocalAuthoring);
+        Assert.True(afterStudioEdit.IsPermissionGranted(CustomWidgetPermissionKind.LocalFileAccess));
+        Assert.False(afterStudioEdit.IsPermissionGranted(CustomWidgetPermissionKind.LocalNetwork));
+
+        // 3. Public URL containing "10." in version path does NOT trigger LocalNetwork permission.
+        CustomWidgetManifest pubVerManifest = CustomWidgetManifestParser.Parse(
+            """{"id":"custom.ver","schemaVersion":1,"root":"b","elements":{"b":{"type":"Button","text":"Go","onClick":{"type":"http.request","url":"https://api.github.com/releases/v1.10.0"}}}}""").Manifest!;
+        IReadOnlySet<CustomWidgetPermissionKind> perms = CustomWidgetTrustStore.DetectRequestedPermissions(pubVerManifest);
+        Assert.Contains(CustomWidgetPermissionKind.PublicNetwork, perms);
+        Assert.DoesNotContain(CustomWidgetPermissionKind.LocalNetwork, perms);
+    }
+
+    [Fact]
+    public async Task RebaseClipboardPaths_UpdatesDroppedFilePathsAcrossProfiles_AndUnknownWidgetKindNeverBecomesFile()
+    {
+        string stagedData = Directory.CreateDirectory(Path.Combine(_tempRoot, "StagedRestoreData")).FullName;
+        string targetData = Directory.CreateDirectory(Path.Combine(_tempRoot, "TargetLiveData")).FullName;
+        string droppedFile = Path.Combine(stagedData, "clipboard", "dropped", "b1", "report.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(droppedFile)!);
+        await File.WriteAllBytesAsync(droppedFile, [1, 2, 3]);
+
+        string clipJsonPath = Path.Combine(stagedData, "clipboard", "clipboard.json");
+        await File.WriteAllTextAsync(
+            clipJsonPath,
+            """{"version":1,"items":[{"id":"f1","kind":"Files","filePaths":["C:\\Users\\OldUser\\AppData\\Local\\DeskBox\\data\\clipboard\\dropped\\b1\\report.pdf"],"textContent":"C:\\Users\\OldUser\\AppData\\Local\\DeskBox\\data\\clipboard\\dropped\\b1\\report.pdf"}]}""",
+            Encoding.UTF8);
+
+        await DeskBox.Services.Backup.PortableBackupProcessor.RebaseClipboardPathsAsync(
+            stagedData,
+            @"C:\Users\OldUser\AppData\Local\DeskBox\data",
+            targetData);
+
+        string expectedPath = Path.Combine(targetData, "clipboard", "dropped", "b1", "report.pdf");
+        JsonNode? rebasedNode = JsonNode.Parse(await File.ReadAllTextAsync(clipJsonPath, Encoding.UTF8));
+        Assert.Equal(expectedPath, rebasedNode?["items"]?[0]?["filePaths"]?[0]?.GetValue<string>());
+        Assert.Equal(expectedPath, rebasedNode?["items"]?[0]?["textContent"]?.GetValue<string>());
+
+        // Unknown future WidgetKind round-trips its original kind name through SettingsService without becoming WidgetKind.File.
+        string futureSettingsDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "FutureKindRoundTrip")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(futureSettingsDir, "settings.json"),
+            """{"schemaVersion":16}""",
+            Encoding.UTF8);
+        await File.WriteAllTextAsync(
+            Path.Combine(futureSettingsDir, "widget-layout.json"),
+            """{"schemaVersion":2,"layout":{"widgets":[{"id":"future-1","name":"Future","widgetKind":"HologramV9","isDisabled":true}]}}""",
+            Encoding.UTF8);
+        var futureSettings = new SettingsService(futureSettingsDir);
+        await futureSettings.LoadAsync();
+        WidgetConfig loadedFuture = Assert.Single(futureSettings.Settings.Widgets, w => w.Id == "future-1");
+        Assert.True(WidgetKindJsonConverter.IsUnknownFutureKind(loadedFuture.WidgetKind));
+        Assert.True(loadedFuture.IsDisabled);
+        Assert.False(WidgetRegistry.Default.IsAvailableForSession(loadedFuture, futureSettings.Settings));
+        await futureSettings.SaveAsync();
+        string savedLayoutJson = await File.ReadAllTextAsync(Path.Combine(futureSettingsDir, "widget-layout.json"), Encoding.UTF8);
+        Assert.Contains("\"HologramV9\"", savedLayoutJson, StringComparison.Ordinal);
+
+        // 1. Unparseable breaking future-schema stores back up original JSON and block destructive overwrite on SaveAsync.
+        string unparseableQcDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "UnparseableFutureQc")).FullName;
+        string unparseableQcJson = """{"version":99,"items":"breaking-non-array-shape"}""";
+        await File.WriteAllTextAsync(Path.Combine(unparseableQcDir, "quick-capture.json"), unparseableQcJson, Encoding.UTF8);
+        var unparseableQcStore = new QuickCaptureStore(unparseableQcDir);
+        QuickCaptureStoreData unparseableLoaded = await unparseableQcStore.LoadAsync();
+        Assert.Equal(99, unparseableLoaded.Version);
+        await unparseableQcStore.SaveAsync(new QuickCaptureStoreData { Items = [] });
+        Assert.Contains("breaking-non-array-shape", await File.ReadAllTextAsync(Path.Combine(unparseableQcDir, "quick-capture.json"), Encoding.UTF8), StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(unparseableQcDir, "quick-capture.json.future-v99.bak")));
+
+        // 2. Compatible additive future-schema stores archive .future-v99.bak once AND allow normal user saves (no silent data loss).
+        string additiveQcDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "AdditiveFutureQc")).FullName;
+        string additiveQcJson = """{"version":99,"futureBanner":"v99","items":[{"id":"n1","body":"future note"}]}""";
+        await File.WriteAllTextAsync(Path.Combine(additiveQcDir, "quick-capture.json"), additiveQcJson, Encoding.UTF8);
+        var additiveQcStore = new QuickCaptureStore(additiveQcDir);
+        QuickCaptureStoreData additiveLoaded = await additiveQcStore.LoadAsync();
+        Assert.Single(additiveLoaded.Items);
+        Assert.True(File.Exists(Path.Combine(additiveQcDir, "quick-capture.json.future-v99.bak")));
+        additiveLoaded.Items.Add(new QuickCaptureItem { Id = "n2", Body = "newly added note" });
+        await additiveQcStore.SaveAsync(additiveLoaded);
+        QuickCaptureStoreData reloadedAfterSave = await new QuickCaptureStore(additiveQcDir).LoadAsync();
+        Assert.Equal(2, reloadedAfterSave.Items.Count);
+
+        // Store background wakeup protocol URI parses cleanly and activates startup mode.
+        Assert.True(DeskBoxProtocolActivationService.TryParseProtocolUri("deskbox://startup", out DeskBoxProtocolIntent? wakeIntent, out _));
+        Assert.Equal(DeskBoxProtocolAction.BackgroundStartup, wakeIntent!.Action);
+        Assert.True(StartupLaunchPolicy.IsStartupLaunch(["deskbox://startup"]));
+
+        // Legacy v15 image-clipboard opt-out is preserved on upgrade to v16+.
+        string v15Dir = Directory.CreateDirectory(Path.Combine(_tempRoot, "LegacyV15ClipPrivacy")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(v15Dir, "settings.json"),
+            """{"schemaVersion":15,"quickCaptureClipboardEnabled":true,"quickCaptureImageClipboardEnabled":false}""",
+            Encoding.UTF8);
+        var migratedSettings = new SettingsService(v15Dir);
+        await migratedSettings.LoadAsync();
+        Assert.False(migratedSettings.Settings.Clipboard.ClipboardCaptureImages);
+
+        // Win10 glyph normalization covers Win11-only transport bold icons.
+        Assert.Equal("\uE892", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AC", isWindows11OrLater: false));
+        Assert.Equal("\uE893", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AD", isWindows11OrLater: false));
+        Assert.Equal("\uE769", CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs("\uF8AE", isWindows11OrLater: false));
     }
 }

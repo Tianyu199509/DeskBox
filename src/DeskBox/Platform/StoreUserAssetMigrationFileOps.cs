@@ -216,23 +216,6 @@ internal static class StoreUserAssetMigrationFileOps
         RewriteJsonPathPrefixesIfPresent(quickCaptureJson, oldPrefixes, newPrefix);
         RewriteJsonPathPrefixesIfPresent(quickCaptureJson + ".bak", oldPrefixes, newPrefix);
 
-        string clipboardJson = Path.Combine(durableDataDir, "clipboard", "clipboard.json");
-        RewriteJsonPathPrefixesIfPresent(clipboardJson, oldPrefixes, newPrefix);
-        RewriteJsonPathPrefixesIfPresent(clipboardJson + ".bak", oldPrefixes, newPrefix);
-
-        string legacyClipboardJson = Path.Combine(durableDataDir, "clipboard", "clipboard-history.json");
-        RewriteJsonPathPrefixesIfPresent(legacyClipboardJson, oldPrefixes, newPrefix);
-        RewriteJsonPathPrefixesIfPresent(legacyClipboardJson + ".bak", oldPrefixes, newPrefix);
-
-        string customWidgetsDir = Path.Combine(durableDataDir, "custom-widgets");
-        if (Directory.Exists(customWidgetsDir))
-        {
-            foreach (string storeJson in Directory.EnumerateFiles(customWidgetsDir, "store.json*", SearchOption.AllDirectories))
-            {
-                RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
-            }
-        }
-
         string widgetsDir = Path.Combine(durableDataDir, "widgets");
         if (Directory.Exists(widgetsDir))
         {
@@ -240,11 +223,20 @@ internal static class StoreUserAssetMigrationFileOps
             {
                 RewriteJsonPathPrefixesIfPresent(todoJson, oldPrefixes, newPrefix);
             }
+        }
+    }
 
-            foreach (string storeJson in Directory.EnumerateFiles(widgetsDir, "store.json*", SearchOption.AllDirectories))
-            {
-                RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
-            }
+    private static void WriteTextAtomically(string filePath, string updated)
+    {
+        string tempPath = $"{filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(tempPath, updated, Encoding.UTF8);
+            File.Move(tempPath, filePath, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
         }
     }
 
@@ -410,7 +402,7 @@ internal static class StoreUserAssetMigrationFileOps
                 Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(stageDir);
         string stagedPath = Path.Combine(stageDir, Path.GetFileName(resolvedSourcePath));
-        File.Copy(resolvedSourcePath, stagedPath, overwrite: true);
+        ClipboardStorageFileOps.CopyFileOverwrite(resolvedSourcePath, stagedPath);
         File.SetAttributes(stagedPath, FileAttributes.Normal);
         return Win32Helper.ResolveUnvirtualizedPhysicalPath(stagedPath);
     }

@@ -41,6 +41,7 @@ public sealed partial class SettingsWindow
             }
 
             dialog.RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot);
+            dialog.FlowDirection = SettingsRoot.FlowDirection;
 
             try
             {

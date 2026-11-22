@@ -79,9 +79,14 @@ public static partial class CustomWidgetManifestParser
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(minAppVersion) &&
-            TryParseLooseVersion(minAppVersion, out Version reqVer))
+        if (!string.IsNullOrWhiteSpace(minAppVersion))
         {
+            if (!TryParseLooseVersion(minAppVersion, out Version reqVer))
+            {
+                requirementLabel = $"v{minAppVersion.Trim().TrimStart('v', 'V')}";
+                return true;
+            }
+
             Version currentNormalized = new(
                 Math.Max(0, CurrentAppVersion.Major),
                 Math.Max(0, CurrentAppVersion.Minor),

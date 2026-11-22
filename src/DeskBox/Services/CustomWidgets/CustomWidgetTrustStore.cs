@@ -114,6 +114,7 @@ public sealed class CustomWidgetTrustStore
         lock (_sync)
         {
             _cache = null;
+            _transientLoadFailed = false;
             _lastLoadedWriteUtcTicks = -1;
             _lastLoadedLength = -1;
         }
@@ -361,20 +362,157 @@ public sealed class CustomWidgetTrustStore
 
     /// <summary>
     /// Fingerprints everything that can execute or reach out: the newline-normalized
-    /// script plus the manifest's privileged declarative surface (capabilities list and
-    /// command/launcher nodes). Only the hex digest is persisted, never content.
+    /// script plus the manifest's privileged declarative surface (capabilities, script,
+    /// data sources, drop handlers, privileged actions, and clipboard/secret bindings).
+    /// Only the hex digest is persisted, never content.
     /// </summary>
     public static string ComputeExecutableSurfaceHash(string? manifestJson, string? logicJs)
     {
         string privilegedNodes = ExtractPrivilegedManifestNodes(manifestJson);
-        byte[] logicBytes = System.Text.Encoding.UTF8.GetBytes(
+        byte[] logicBytes = Encoding.UTF8.GetBytes(
             (logicJs ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'));
-        byte[] nodeBytes = System.Text.Encoding.UTF8.GetBytes(privilegedNodes);
+        byte[] nodeBytes = Encoding.UTF8.GetBytes(privilegedNodes);
         byte[] combined = new byte[logicBytes.Length + 1 + nodeBytes.Length];
         logicBytes.AsSpan().CopyTo(combined);
         combined[logicBytes.Length] = 0;
         nodeBytes.AsSpan().CopyTo(combined[(logicBytes.Length + 1)..]);
         return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(combined));
+    }
+
+    internal static bool HasPrivilegedSurfaceInManifestOrScript(
+        CustomWidgetManifest? manifest,
+        string? manifestJson,
+        string? logicJs)
+    {
+        if (!string.IsNullOrWhiteSpace(logicJs) || manifest?.Script is not null)
+        {
+            return true;
+        }
+
+        if (manifest is not null)
+        {
+            foreach (string cap in manifest.Capabilities)
+            {
+                string? packId = CustomWidgetCapabilityRegistry.ResolveDomainPackId(cap);
+                if (string.Equals(packId, "local-files-and-cli", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(packId, "network-and-feeds", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(packId, "script-sandbox", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(cap?.Trim(), "clipboard-workspace", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(cap?.Trim(), "system-control", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            foreach (CustomWidgetSourceSpec src in manifest.Sources)
+            {
+                if (IsPrivilegedSourceType(src.Type))
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(manifestJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(
+                manifestJson,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            return ContainsPrivilegedAstElement(doc.RootElement);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsPrivilegedSourceType(string? type) =>
+        !string.IsNullOrWhiteSpace(type) &&
+        (string.Equals(type, "command", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "fileText", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "localFolder", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "httpJson", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "rss", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "clipboard", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(type, "aiMonitor", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPrivilegedActionOrNodeType(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return false;
+        }
+
+        string t = type.Trim();
+        return string.Equals(t, "command.run", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "script.run", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "http.request", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "ai.run", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "system.control", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "system.openSetting", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "openUrl", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(t, "url.open", StringComparison.OrdinalIgnoreCase) ||
+               t.StartsWith("launcher.", StringComparison.OrdinalIgnoreCase) ||
+               t.StartsWith("file.", StringComparison.OrdinalIgnoreCase) ||
+               t.StartsWith("clipboard.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ReferencesSensitiveRuntimeNamespace(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        (value.Contains("$clipboard.", StringComparison.OrdinalIgnoreCase) ||
+         value.Contains("$secrets.", StringComparison.OrdinalIgnoreCase));
+
+    private static bool ContainsPrivilegedAstElement(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return ReferencesSensitiveRuntimeNamespace(element.GetString());
+
+            case JsonValueKind.Array:
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    if (ContainsPrivilegedAstElement(item))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("type", out JsonElement typeEl) &&
+                    typeEl.ValueKind == JsonValueKind.String)
+                {
+                    string? typeStr = typeEl.GetString();
+                    if (IsPrivilegedActionOrNodeType(typeStr) || IsPrivilegedSourceType(typeStr))
+                    {
+                        return true;
+                    }
+                }
+
+                foreach (JsonProperty prop in element.EnumerateObject())
+                {
+                    if (ContainsPrivilegedAstElement(prop.Value))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+
+            default:
+                return false;
+        }
     }
 
     private static string ExtractPrivilegedManifestNodes(string? manifestJson)
@@ -386,22 +524,51 @@ public sealed class CustomWidgetTrustStore
 
         try
         {
-            if (System.Text.Json.Nodes.JsonNode.Parse(manifestJson) is not { } root)
+            using JsonDocument doc = JsonDocument.Parse(
+                manifestJson,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            JsonElement root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
                 return string.Empty;
             }
 
             var fragments = new List<string>();
-            if (root["capabilities"] is System.Text.Json.Nodes.JsonArray caps)
+            if (root.TryGetProperty("capabilities", out JsonElement caps) && caps.ValueKind == JsonValueKind.Array)
             {
-                fragments.AddRange(caps
-                    .Where(c => c is not null)
-                    .Select(c => c!.ToJsonString())
-                    .OrderBy(s => s, StringComparer.Ordinal));
+                foreach (JsonElement cap in caps.EnumerateArray())
+                {
+                    fragments.Add("cap:" + SerializeCanonicalJsonElement(cap));
+                }
             }
 
-            CollectPrivilegedNodes(root, fragments);
-            return string.Join("\n", fragments.OrderBy(s => s, StringComparer.Ordinal));
+            if (root.TryGetProperty("script", out JsonElement scriptEl) &&
+                scriptEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+            {
+                fragments.Add("script:" + SerializeCanonicalJsonElement(scriptEl));
+            }
+
+            if (root.TryGetProperty("sources", out JsonElement sourcesEl) && sourcesEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement src in sourcesEl.EnumerateArray())
+                {
+                    fragments.Add("source:" + SerializeCanonicalJsonElement(src));
+                }
+            }
+
+            if (root.TryGetProperty("onDrop", out JsonElement dropEl) &&
+                dropEl.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+            {
+                fragments.Add("onDrop:" + SerializeCanonicalJsonElement(dropEl));
+            }
+
+            CollectPrivilegedElements(root, fragments);
+            fragments.Sort(StringComparer.Ordinal);
+            return string.Join("\n", fragments);
         }
         catch
         {
@@ -409,55 +576,70 @@ public sealed class CustomWidgetTrustStore
         }
     }
 
-    private static void CollectPrivilegedNodes(System.Text.Json.Nodes.JsonNode node, List<string> fragments)
+    private static void CollectPrivilegedElements(JsonElement element, List<string> fragments)
     {
-        switch (node)
+        switch (element.ValueKind)
         {
-            case System.Text.Json.Nodes.JsonObject obj:
-                if (obj.TryGetPropertyValue("type", out System.Text.Json.Nodes.JsonNode? typeNode) &&
-                    typeNode is System.Text.Json.Nodes.JsonValue typeValue &&
-                    typeValue.TryGetValue<string>(out string? type))
+            case JsonValueKind.String:
+                string? strVal = element.GetString();
+                if (ReferencesSensitiveRuntimeNamespace(strVal))
                 {
-                    if (string.Equals(type, "command.run", StringComparison.OrdinalIgnoreCase) ||
-                        (type.StartsWith("launcher", StringComparison.OrdinalIgnoreCase) && type.Contains('.')))
-                    {
-                        fragments.Add(obj.ToJsonString());
-                    }
-                }
-
-                foreach (System.Collections.Generic.KeyValuePair<string, System.Text.Json.Nodes.JsonNode?> child in obj.ToArray())
-                {
-                    if (child.Value is not null)
-                    {
-                        CollectPrivilegedNodes(child.Value, fragments);
-                    }
+                    fragments.Add("expr:" + strVal);
                 }
 
                 break;
-            case System.Text.Json.Nodes.JsonArray array:
-                foreach (System.Text.Json.Nodes.JsonNode? child in array)
+
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("type", out JsonElement typeEl) &&
+                    typeEl.ValueKind == JsonValueKind.String &&
+                    IsPrivilegedActionOrNodeType(typeEl.GetString()))
                 {
-                    if (child is not null)
-                    {
-                        CollectPrivilegedNodes(child, fragments);
-                    }
+                    fragments.Add("node:" + SerializeCanonicalJsonElement(element));
+                }
+
+                foreach (JsonProperty prop in element.EnumerateObject())
+                {
+                    CollectPrivilegedElements(prop.Value, fragments);
+                }
+
+                break;
+
+            case JsonValueKind.Array:
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    CollectPrivilegedElements(item, fragments);
                 }
 
                 break;
         }
     }
 
+    private static string SerializeCanonicalJsonElement(JsonElement element) =>
+        DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.SerializeCanonicalJsonElement(element, relaxedEscaping: true);
+
+    private static readonly CustomWidgetPermissionKind[] RevocablePrivilegedPermissions =
+    [
+        CustomWidgetPermissionKind.PublicNetwork,
+        CustomWidgetPermissionKind.LocalNetwork,
+        CustomWidgetPermissionKind.SystemAndClipboard,
+        CustomWidgetPermissionKind.LocalFileAccess,
+        CustomWidgetPermissionKind.CommandExecution
+    ];
+
     /// <summary>
-    /// Records the executable surface after a workspace write. Studio (trusted) writes
-    /// extend the fingerprint silently; external channels (Agent/OTA/import) whose script
-    /// or privileged manifest nodes changed revoke positive privileged overrides so the
-    /// next execution asks the user again.
+    /// Records the executable surface after a workspace write. Host Studio writes preserve
+    /// existing user-granted overrides; signed Official OTA preserves official baseline trust
+    /// while revoking explicit overrides if the surface changed; external Agent/import writes
+    /// downgrade local-authoring provenance and revoke positive privileged overrides whenever
+    /// the surface changed.
     /// </summary>
     public void RecordExecutableSurfaceAfterWrite(
         string? widgetId,
         string? manifestJson,
         string? logicJs,
-        bool trustedLocalAuthoring)
+        bool trustedLocalAuthoring,
+        bool preserveTrustedAuthoringOnExternalWrite = false,
+        bool preserveExistingTrustedStateOnHostWrite = false)
     {
         if (string.IsNullOrWhiteSpace(widgetId))
         {
@@ -473,7 +655,8 @@ public sealed class CustomWidgetTrustStore
             {
                 _cache[key] = new StoredTrustEntry
                 {
-                    TrustedLocalAuthoring = trustedLocalAuthoring,
+                    TrustedLocalAuthoring = preserveTrustedAuthoringOnExternalWrite ||
+                        (trustedLocalAuthoring && !preserveExistingTrustedStateOnHostWrite),
                     ExecutableSurfaceHash = hash
                 };
                 PersistNoLock();
@@ -481,20 +664,24 @@ public sealed class CustomWidgetTrustStore
             }
 
             bool surfaceChanged =
-                !string.IsNullOrEmpty(entry.ExecutableSurfaceHash) &&
+                string.IsNullOrEmpty(entry.ExecutableSurfaceHash) ||
                 !string.Equals(entry.ExecutableSurfaceHash, hash, StringComparison.Ordinal);
-            if (surfaceChanged && !trustedLocalAuthoring)
+            if (!trustedLocalAuthoring)
             {
-                foreach (string privilegedKey in new[]
-                         {
-                             ToKey(CustomWidgetPermissionKind.LocalNetwork),
-                             ToKey(CustomWidgetPermissionKind.LocalFileAccess),
-                             ToKey(CustomWidgetPermissionKind.CommandExecution)
-                         })
+                if (!preserveTrustedAuthoringOnExternalWrite)
                 {
-                    if (entry.Overrides.TryGetValue(privilegedKey, out bool enabled) && enabled)
+                    entry.TrustedLocalAuthoring = false;
+                }
+
+                if (surfaceChanged)
+                {
+                    foreach (CustomWidgetPermissionKind kind in RevocablePrivilegedPermissions)
                     {
-                        entry.Overrides.Remove(privilegedKey);
+                        string privilegedKey = ToKey(kind);
+                        if (entry.Overrides.TryGetValue(privilegedKey, out bool enabled) && enabled)
+                        {
+                            entry.Overrides.Remove(privilegedKey);
+                        }
                     }
                 }
             }
@@ -653,11 +840,13 @@ public sealed class CustomWidgetTrustStore
                 set.Add(CustomWidgetPermissionKind.PublicNetwork);
                 if (string.Equals(t, "http.request", StringComparison.OrdinalIgnoreCase) &&
                     !string.IsNullOrWhiteSpace(act.Url) &&
-                    (act.Url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                     act.Url.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
-                     act.Url.Contains("127.0.0.1", StringComparison.Ordinal) ||
-                     act.Url.Contains("192.168.", StringComparison.Ordinal) ||
-                     act.Url.Contains("10.", StringComparison.Ordinal)))
+                    CustomWidgetNetworkSecurity.TryValidateWidgetNetworkUrl(
+                        act.Url,
+                        allowLocalAndHttp: true,
+                        out _,
+                        out bool needsLocal,
+                        out _) &&
+                    needsLocal)
                 {
                     set.Add(CustomWidgetPermissionKind.LocalNetwork);
                 }
@@ -859,7 +1048,10 @@ public sealed class CustomWidgetTrustStore
         var loaded = new Dictionary<string, StoredTrustEntry>(StringComparer.Ordinal);
         try
         {
-            using JsonDocument doc = JsonDocument.Parse(bytes);
+            ReadOnlyMemory<byte> jsonMemory = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble)
+                ? bytes.AsMemory(Encoding.UTF8.Preamble.Length)
+                : bytes;
+            using JsonDocument doc = JsonDocument.Parse(jsonMemory);
             if (doc.RootElement.ValueKind == JsonValueKind.Object &&
                 doc.RootElement.TryGetProperty("widgets", out JsonElement widgetsEl) &&
                 widgetsEl.ValueKind == JsonValueKind.Object)

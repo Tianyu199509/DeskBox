@@ -37,7 +37,7 @@ internal sealed partial class ClipboardJsonContext : JsonSerializerContext
 public sealed class ClipboardStore
 {
     internal const string DpapiPayloadPrefix = "dpapi:";
-    private const int CurrentVersion = 1;
+    internal const int CurrentVersion = 1;
     private const int MaxObservedAppsInStats = 24;
     private readonly string _rootDirectory;
     private readonly string _storePath;
@@ -82,17 +82,33 @@ public sealed class ClipboardStore
 
     internal string ExportDirectory => _exportDirectory;
 
+    private bool _hasUnparseableFutureSchema;
+
     public async Task<ClipboardStoreDocument> LoadAsync()
     {
+        bool unparseableFuture = false;
         ClipboardStoreDocument doc = await ResilientJsonStore.LoadAsync(
             _storePath,
-            json => Normalize(JsonSerializer.Deserialize(
+            json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                _storePath,
                 json,
-                ClipboardJsonContext.Default.ClipboardStoreDocument)),
+                CurrentVersion,
+                raw => JsonSerializer.Deserialize(raw, ClipboardJsonContext.Default.ClipboardStoreDocument),
+                static d => d.Version,
+                Normalize,
+                static ver => new ClipboardStoreDocument { Version = ver },
+                out unparseableFuture),
             () => new ClipboardStoreDocument(),
             nameof(ClipboardStore)).ConfigureAwait(false);
+        _hasUnparseableFutureSchema = unparseableFuture;
+        if (_hasUnparseableFutureSchema)
+        {
+            return doc;
+        }
 
         bool migratedInlinePayloads = false;
+        bool migratedSensitiveAtRest = false;
+        bool removedUnreadableProtected = false;
         for (int i = doc.Items.Count - 1; i >= 0; i--)
         {
             ClipboardHistoryItem item = doc.Items[i];
@@ -102,12 +118,14 @@ public sealed class ClipboardStore
                 // Cross-machine or corrupted DPAPI payload: omit gracefully instead of exposing ciphertext.
                 doc.Items.RemoveAt(i);
                 migratedInlinePayloads = true;
+                removedUnreadableProtected = true;
                 continue;
             }
 
             if (hydration.NeedsResave)
             {
                 migratedInlinePayloads = true;
+                migratedSensitiveAtRest = true;
             }
 
             if (await ExternalizeItemPayloadsAsync(item).ConfigureAwait(false))
@@ -121,10 +139,23 @@ public sealed class ClipboardStore
             }
         }
 
+        if (removedUnreadableProtected || migratedSensitiveAtRest)
+        {
+            PurgeUnreferencedLocalArtifacts(doc);
+        }
+
         if (migratedInlinePayloads)
         {
             try
             {
+                if (migratedSensitiveAtRest)
+                {
+                    // Unlink cleartext primary and backup before saving so ResilientJsonStore
+                    // never rotates portable plaintext secrets into clipboard.json.bak.
+                    ClipboardStorageFileOps.TryDeleteFile(ResilientJsonStore.GetBackupPath(_storePath));
+                    ClipboardStorageFileOps.TryDeleteFile(_storePath);
+                }
+
                 await SaveAsync(doc).ConfigureAwait(false);
             }
             catch
@@ -136,12 +167,47 @@ public sealed class ClipboardStore
         return doc;
     }
 
+    private void PurgeUnreferencedLocalArtifacts(ClipboardStoreDocument doc)
+    {
+        if (_hasUnparseableFutureSchema || doc.Version > CurrentVersion)
+        {
+            return;
+        }
+
+        var referencedImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var referencedThumbs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var referencedPayloads = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ClipboardHistoryItem item in doc.Items)
+        {
+            if (!string.IsNullOrWhiteSpace(item.ImageFileName)) referencedImages.Add(item.ImageFileName);
+            if (!string.IsNullOrWhiteSpace(item.ThumbnailFileName)) referencedThumbs.Add(item.ThumbnailFileName);
+            if (!string.IsNullOrWhiteSpace(item.TextPayloadFileName)) referencedPayloads.Add(item.TextPayloadFileName);
+            if (!string.IsNullOrWhiteSpace(item.HtmlPayloadFileName)) referencedPayloads.Add(item.HtmlPayloadFileName);
+            if (!string.IsNullOrWhiteSpace(item.RtfPayloadFileName)) referencedPayloads.Add(item.RtfPayloadFileName);
+        }
+
+        ClipboardStorageFileOps.DeleteOrphanedFiles(ImageDirectory, referencedImages);
+        ClipboardStorageFileOps.DeleteOrphanedFiles(ThumbnailDirectory, referencedThumbs);
+        ClipboardStorageFileOps.DeleteOrphanedFiles(PayloadDirectory, referencedPayloads);
+    }
+
     public async Task SaveAsync(ClipboardStoreDocument document)
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[ClipboardStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+            return;
+        }
+
         document = Normalize(document);
+        document.Version = CurrentVersion;
         foreach (ClipboardHistoryItem item in document.Items)
         {
             _ = await ExternalizeItemPayloadsAsync(item).ConfigureAwait(false);
+            if (item.IsSensitive && item.Kind == ClipboardItemKind.Image)
+            {
+                _ = await ProtectSensitiveItemMediaAsync(item).ConfigureAwait(false);
+            }
         }
 
         ClipboardStoreDocument persistedDocument = BuildPersistedDocument(document);
@@ -774,9 +840,49 @@ public sealed class ClipboardStore
             }
 
             byte[] fresh = RandomNumberGenerator.GetBytes(32);
-            File.WriteAllText(keyPath, DpapiSecretProtector.ProtectUtf8ToBase64(Convert.ToBase64String(fresh)));
+            ClipboardStorageFileOps.WriteTextAtomically(
+                keyPath,
+                DpapiSecretProtector.ProtectUtf8ToBase64(Convert.ToBase64String(fresh)));
             _contentHashKey = fresh;
             return fresh;
+        }
+    }
+
+    internal async Task<bool> ProtectSensitiveItemMediaAsync(
+        ClipboardHistoryItem item,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.Kind != ClipboardItemKind.Image || !item.IsSensitive)
+        {
+            return true;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(item.ImageFileName))
+            {
+                string imgPath = Path.Combine(ImageDirectory, Path.GetFileName(item.ImageFileName));
+                if (!await ClipboardStorageFileOps.ProtectMediaFileInPlaceAsync(imgPath, cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.ThumbnailFileName))
+            {
+                string thumbPath = Path.Combine(ThumbnailDirectory, Path.GetFileName(item.ThumbnailFileName));
+                if (!await ClipboardStorageFileOps.ProtectMediaFileInPlaceAsync(thumbPath, cancellationToken).ConfigureAwait(false))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            return false;
         }
     }
 
@@ -791,10 +897,12 @@ public sealed class ClipboardStore
         byte[] key = GetOrCreateContentHashKey();
         if (hash.StartsWith("txt:", StringComparison.Ordinal))
         {
-            string? text = item.TextContent;
-            if (string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(item.TextPayloadFileName))
+            string? text = !string.IsNullOrWhiteSpace(item.TextPayloadFileName)
+                ? await ReadPayloadTextAsync(item.TextPayloadFileName).ConfigureAwait(false)
+                : null;
+            if (string.IsNullOrEmpty(text))
             {
-                text = await ReadPayloadTextAsync(item.TextPayloadFileName).ConfigureAwait(false);
+                text = item.TextContent;
             }
 
             if (string.IsNullOrEmpty(text))
@@ -802,22 +910,40 @@ public sealed class ClipboardStore
                 return false;
             }
 
-            item.ContentHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(text, key);
+            ReadOnlySpan<char> trimmed = text.AsSpan().Trim();
+            if (trimmed.IsEmpty)
+            {
+                return false;
+            }
+
+            item.ContentHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(trimmed, key);
             return true;
         }
 
         if (hash.StartsWith("img:", StringComparison.Ordinal))
         {
-            string oldLeaf = hash["img:".Length..] + ".png";
+            string ext = !string.IsNullOrWhiteSpace(item.ImageFileName)
+                ? Path.GetExtension(item.ImageFileName)
+                : ".png";
+            if (string.IsNullOrWhiteSpace(ext))
+            {
+                ext = ".png";
+            }
+
+            string oldLeaf = !string.IsNullOrWhiteSpace(item.ImageFileName) &&
+                             File.Exists(Path.Combine(ImageDirectory, Path.GetFileName(item.ImageFileName)))
+                ? Path.GetFileName(item.ImageFileName)
+                : (hash["img:".Length..] + ext);
             string imagePath = Path.Combine(ImageDirectory, oldLeaf);
-            if (!File.Exists(imagePath))
+            if (!File.Exists(imagePath) ||
+                !ClipboardStorageFileOps.TryReadMediaBytes(imagePath, out byte[] pngBytes))
             {
                 return false;
             }
 
-            byte[] pngBytes = await File.ReadAllBytesAsync(imagePath).ConfigureAwait(false);
             string newHash = ClipboardContentHashing.ComputeImageContentHash(pngBytes, key);
-            string newLeaf = ClipboardContentHashing.MediaFileNameFromContentHash(newHash);
+            string newHashHex = newHash[(newHash.LastIndexOf(':') + 1)..];
+            string newLeaf = newHashHex + ext;
             if (!string.Equals(oldLeaf, newLeaf, StringComparison.OrdinalIgnoreCase))
             {
                 if (!TryMoveMediaLeaf(ImageDirectory, oldLeaf, newLeaf))
@@ -825,13 +951,16 @@ public sealed class ClipboardStore
                     return false;
                 }
 
-                bool thumbReady = !File.Exists(Path.Combine(ThumbnailDirectory, oldLeaf)) ||
-                    TryMoveMediaLeaf(ThumbnailDirectory, oldLeaf, newLeaf);
+                string oldThumbLeaf = !string.IsNullOrWhiteSpace(item.ThumbnailFileName)
+                    ? Path.GetFileName(item.ThumbnailFileName)
+                    : oldLeaf;
+                string newThumbLeaf = newHashHex + Path.GetExtension(oldThumbLeaf);
+                bool hasMovedThumb = File.Exists(Path.Combine(ThumbnailDirectory, oldThumbLeaf)) &&
+                    TryMoveMediaLeaf(ThumbnailDirectory, oldThumbLeaf, newThumbLeaf);
                 item.ImageFileName = newLeaf;
-                if (thumbReady && string.Equals(item.ThumbnailFileName, oldLeaf, StringComparison.OrdinalIgnoreCase))
-                {
-                    item.ThumbnailFileName = newLeaf;
-                }
+                item.ThumbnailFileName = hasMovedThumb || File.Exists(Path.Combine(ThumbnailDirectory, newThumbLeaf))
+                    ? newThumbLeaf
+                    : null;
             }
 
             item.ContentHash = newHash;
@@ -858,7 +987,7 @@ public sealed class ClipboardStore
                 return File.Exists(target);
             }
 
-            ClipboardStorageFileOps.CopyFileOverwrite(source, target);
+            ClipboardStorageFileOps.CopyRawFileOverwrite(source, target);
             ClipboardStorageFileOps.TryDeleteFile(source);
             return true;
         }
@@ -876,7 +1005,17 @@ public sealed class ClipboardStore
             (item.RtfContent?.StartsWith(DpapiPayloadPrefix, StringComparison.Ordinal) ?? false) ||
             (item.OcrText?.StartsWith(DpapiPayloadPrefix, StringComparison.Ordinal) ?? false);
 
-        if (!item.IsSensitive && !hasInlineDpapi)
+        string? imagePath = item.IsSensitive && item.Kind == ClipboardItemKind.Image && !string.IsNullOrWhiteSpace(item.ImageFileName)
+            ? Path.Combine(ImageDirectory, Path.GetFileName(item.ImageFileName))
+            : null;
+        string? thumbPath = item.IsSensitive && item.Kind == ClipboardItemKind.Image && !string.IsNullOrWhiteSpace(item.ThumbnailFileName)
+            ? Path.Combine(ThumbnailDirectory, Path.GetFileName(item.ThumbnailFileName))
+            : null;
+        bool hasProtectedMedia = item.IsSensitive &&
+            (ClipboardStorageFileOps.IsDpapiProtectedMediaFile(imagePath) ||
+             ClipboardStorageFileOps.IsDpapiProtectedMediaFile(thumbPath));
+
+        if (!item.IsSensitive && !hasInlineDpapi && !hasProtectedMedia)
         {
             return (true, false);
         }
@@ -887,6 +1026,15 @@ public sealed class ClipboardStore
             !TryUnprotectTextFromAtRest(item.OcrText, out string? plainOcr, out bool plainLegacyOcr))
         {
             return (false, false);
+        }
+
+        if (hasProtectedMedia)
+        {
+            if ((imagePath is not null && File.Exists(imagePath) && !ClipboardStorageFileOps.TryReadMediaBytes(imagePath, out _)) ||
+                (thumbPath is not null && File.Exists(thumbPath) && !ClipboardStorageFileOps.TryReadMediaBytes(thumbPath, out _)))
+            {
+                return (false, false);
+            }
         }
 
         bool needsResave = item.IsSensitive &&
@@ -918,6 +1066,18 @@ public sealed class ClipboardStore
             if (rtfSpill.Migrated)
             {
                 item.RtfPayloadFileName = rtfSpill.FileName;
+                needsResave = true;
+            }
+
+            if (item.Kind == ClipboardItemKind.Image &&
+                ((imagePath is not null && File.Exists(imagePath) && !ClipboardStorageFileOps.IsDpapiProtectedMediaFile(imagePath)) ||
+                 (thumbPath is not null && File.Exists(thumbPath) && !ClipboardStorageFileOps.IsDpapiProtectedMediaFile(thumbPath))))
+            {
+                if (!await ProtectSensitiveItemMediaAsync(item).ConfigureAwait(false))
+                {
+                    return (false, false);
+                }
+
                 needsResave = true;
             }
         }
@@ -1033,8 +1193,9 @@ public sealed class ClipboardStore
                 }
             }
 
-            string maskedSummary = ClipboardClassifier.MaskSecretForDisplay(
-                item.TextContent ?? item.Summary ?? string.Empty);
+            string maskedSummary = item.Kind == ClipboardItemKind.Image
+                ? (item.Summary ?? string.Empty)
+                : ClipboardClassifier.MaskSecretForDisplay(item.TextContent ?? item.Summary ?? string.Empty);
             var encryptedItem = new ClipboardHistoryItem
             {
                 Id = item.Id,
@@ -1203,7 +1364,7 @@ public sealed class ClipboardStore
     private static ClipboardStoreDocument Normalize(ClipboardStoreDocument? doc)
     {
         doc ??= new ClipboardStoreDocument();
-        doc.Version = CurrentVersion;
+        doc.Version = Math.Max(doc.Version, CurrentVersion);
         doc.Items ??= [];
         doc.ObservedApps ??= [];
         doc.Items.RemoveAll(item => item is null || string.IsNullOrWhiteSpace(item.Id));

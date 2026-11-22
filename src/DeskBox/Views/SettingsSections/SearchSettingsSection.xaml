@@ -56,7 +56,24 @@
                 svc:Localized.DescriptionKey="Settings.GlobalHotkey.ReservedWarning"
                 svc:Localized.HeaderKey="Settings.Search.Hotkey.Title" />
 
-            <!-- 2. Everything File Search (EverythingEnableToggle replaces legacy EverythingConsentCheckBox) -->
+            <!-- 2. Recommendations -->
+            <toolkit:SettingsCard
+                x:Name="SearchRecommendationsCard"
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Recommendations.Description"
+                svc:Localized.HeaderKey="Settings.Search.Recommendations.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE734;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Recommendations.Title"
+                    x:Name="SearchRecommendationsToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SearchRecommendationsToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- 3. Everything File Search (EverythingEnableToggle replaces legacy EverythingConsentCheckBox) -->
             <toolkit:SettingsExpander
                 x:Name="EverythingConnectionExpander"
                 IsExpanded="False"
@@ -150,7 +167,68 @@
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
 
-            <!-- 3. Local Search Scopes -->
+            <!-- 4. Direct URL & Web Search Fallback -->
+            <toolkit:SettingsExpander
+                x:Name="SearchWebFallbackExpander"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.Search.Scope.WebFallback.Description"
+                svc:Localized.HeaderKey="Settings.Search.Scope.WebFallback">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE774;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Scope.WebFallback"
+                    x:Name="SearchWebFallbackToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SearchWebFallbackToggle_Toggled" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="SearchWebEngineCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.WebEngine.Description"
+                        svc:Localized.HeaderKey="Settings.Search.WebEngine.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.Search.WebEngine.Title"
+                            x:Name="SearchWebEngineComboBox"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            SelectionChanged="SearchWebEngineComboBox_SelectionChanged">
+                            <ComboBoxItem Tag="bing">
+                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Bing" />
+                            </ComboBoxItem>
+                            <ComboBoxItem Tag="google">
+                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Google" />
+                            </ComboBoxItem>
+                            <ComboBoxItem Tag="baidu">
+                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Baidu" />
+                            </ComboBoxItem>
+                            <ComboBoxItem Tag="duckduckgo">
+                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.DuckDuckGo" />
+                            </ComboBoxItem>
+                            <ComboBoxItem Tag="custom">
+                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Custom" />
+                            </ComboBoxItem>
+                        </ComboBox>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        x:Name="SearchCustomWebUrlCard"
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch"
+                        Visibility="Collapsed"
+                        svc:Localized.DescriptionKey="Settings.Search.WebEngine.CustomUrl.Description"
+                        svc:Localized.HeaderKey="Settings.Search.WebEngine.CustomUrl.Title">
+                        <TextBox svc:Localized.AutomationNameKey="Settings.Search.WebEngine.CustomUrl.Title"
+                            svc:Localized.PlaceholderKey="Settings.Search.WebEngine.CustomUrl.Placeholder"
+                            x:Name="SearchCustomWebUrlTextBox"
+                            HorizontalAlignment="Stretch"
+                            KeyDown="SearchCustomWebUrlTextBox_KeyDown"
+                            LostFocus="SearchCustomWebUrlTextBox_LostFocus" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- 5. Local Search Scopes -->
             <toolkit:SettingsExpander
                 x:Name="SearchLocalScopeExpander"
                 IsExpanded="False"
@@ -197,7 +275,7 @@
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
 
-            <!-- 3b. Quick-Create Todo & QuickCapture Linkage -->
+            <!-- 5b. Quick-Create Todo & QuickCapture Linkage -->
             <toolkit:SettingsExpander
                 x:Name="SearchQuickCreateExpander"
                 IsExpanded="False"
@@ -294,84 +372,6 @@
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
-
-            <!-- 4. Direct URL & Web Search Fallback -->
-            <toolkit:SettingsExpander
-                x:Name="SearchWebFallbackExpander"
-                IsExpanded="False"
-                svc:Localized.DescriptionKey="Settings.Search.Scope.WebFallback.Description"
-                svc:Localized.HeaderKey="Settings.Search.Scope.WebFallback">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE774;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Scope.WebFallback"
-                    x:Name="SearchWebFallbackToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="SearchWebFallbackToggle_Toggled" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        x:Name="SearchWebEngineCard"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Search.WebEngine.Description"
-                        svc:Localized.HeaderKey="Settings.Search.WebEngine.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Search.WebEngine.Title"
-                            x:Name="SearchWebEngineComboBox"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            SelectionChanged="SearchWebEngineComboBox_SelectionChanged">
-                            <ComboBoxItem Tag="bing">
-                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Bing" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="google">
-                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Google" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="baidu">
-                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Baidu" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="duckduckgo">
-                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.DuckDuckGo" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="custom">
-                                <TextBlock svc:Localized.Key="Settings.Search.WebEngine.Custom" />
-                            </ComboBoxItem>
-                        </ComboBox>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        x:Name="SearchCustomWebUrlCard"
-                        ContentAlignment="Vertical"
-                        HorizontalContentAlignment="Stretch"
-                        Visibility="Collapsed"
-                        svc:Localized.DescriptionKey="Settings.Search.WebEngine.CustomUrl.Description"
-                        svc:Localized.HeaderKey="Settings.Search.WebEngine.CustomUrl.Title">
-                        <TextBox svc:Localized.AutomationNameKey="Settings.Search.WebEngine.CustomUrl.Title"
-                            svc:Localized.PlaceholderKey="Settings.Search.WebEngine.CustomUrl.Placeholder"
-                            x:Name="SearchCustomWebUrlTextBox"
-                            HorizontalAlignment="Stretch"
-                            KeyDown="SearchCustomWebUrlTextBox_KeyDown"
-                            LostFocus="SearchCustomWebUrlTextBox_LostFocus" />
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
-
-            <!-- 5. Recommendations -->
-            <toolkit:SettingsCard
-                x:Name="SearchRecommendationsCard"
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.Search.Recommendations.Description"
-                svc:Localized.HeaderKey="Settings.Search.Recommendations.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE734;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Recommendations.Title"
-                    x:Name="SearchRecommendationsToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="SearchRecommendationsToggle_Toggled" />
-            </toolkit:SettingsCard>
 
             <!-- 6. Results View & Sorting -->
             <toolkit:SettingsExpander

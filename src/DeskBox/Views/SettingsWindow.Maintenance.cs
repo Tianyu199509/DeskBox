@@ -4,6 +4,7 @@ using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 
 namespace DeskBox.Views;
@@ -159,6 +160,81 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        bool includeClipboard = false;
+        ContentDialogResult dialogResult = await ShowDialogWhenFreeAsync(() =>
+        {
+            Brush? cardBg = NeutralInteractionBrush.ResolveThemedResource("CardBackgroundFillColorDefaultBrush", SettingsRoot);
+            Brush? cardBorder = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", SettingsRoot);
+            Brush? secondaryFg = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", SettingsRoot);
+
+            var includeClipboardCheckBox = new CheckBox
+            {
+                Content = _localizationService.T("Settings.DataBackup.ExportIncludeClipboard"),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                IsChecked = includeClipboard
+            };
+            includeClipboardCheckBox.Checked += (_, _) => includeClipboard = true;
+            includeClipboardCheckBox.Unchecked += (_, _) => includeClipboard = false;
+
+            var optionCard = new Border
+            {
+                Padding = new Thickness(14, 12, 14, 12),
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(1),
+                Background = cardBg,
+                BorderBrush = cardBorder,
+                Child = new StackPanel
+                {
+                    Spacing = 4,
+                    Children =
+                    {
+                        includeClipboardCheckBox,
+                        new TextBlock
+                        {
+                            Text = _localizationService.T("Settings.DataBackup.ExportIncludeClipboardNote"),
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = secondaryFg,
+                            FontSize = 12.5,
+                            LineHeight = 19,
+                            Margin = new Thickness(28, 0, 0, 0)
+                        }
+                    }
+                }
+            };
+
+            return new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("Settings.DataBackup.ExportOptionsTitle"),
+                PrimaryButtonText = _localizationService.T("Settings.DataBackup.ExportChooseFolderButton"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Primary,
+                Content = new StackPanel
+                {
+                    Spacing = 12,
+                    MinWidth = 360,
+                    MaxWidth = 440,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = _localizationService.T("Settings.DataBackup.ExportOptionsSubtitle"),
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = secondaryFg,
+                            FontSize = 13,
+                            LineHeight = 19
+                        },
+                        optionCard
+                    }
+                }
+            };
+        });
+        if (dialogResult != ContentDialogResult.Primary ||
+            _isClosed ||
+            _backupCommands.IsStopping)
+        {
+            return;
+        }
         string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
         if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || _backupCommands.IsStopping)
         {
@@ -173,40 +249,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var includeClipboardCheckBox = new CheckBox
-        {
-            Content = _localizationService.T("Settings.DataBackup.ExportIncludeClipboard"),
-            IsChecked = false
-        };
-        var exportOptionsDialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.DataBackup.ExportOptionsTitle"),
-            PrimaryButtonText = _localizationService.T("Common.Continue"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary,
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    includeClipboardCheckBox,
-                    new TextBlock
-                    {
-                        Text = _localizationService.T("Settings.DataBackup.ExportIncludeClipboardNote"),
-                        TextWrapping = TextWrapping.Wrap,
-                        Opacity = 0.7,
-                        FontSize = 12
-                    }
-                }
-            }
-        };
-        if (await ShowDialogWhenFreeAsync(() => exportOptionsDialog) != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        bool includeClipboard = includeClipboardCheckBox.IsChecked == true;
         ExportDataBackupButton.IsEnabled = false;
         try
         {

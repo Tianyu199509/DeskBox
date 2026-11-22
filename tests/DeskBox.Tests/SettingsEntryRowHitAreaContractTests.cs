@@ -16,7 +16,7 @@ public sealed class SettingsEntryRowHitAreaContractTests
 {
     [Theory]
     [InlineData("src/DeskBox/Views/SettingsWindow.xaml", 7)]
-    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 1)]
+    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 0)]
     [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 0)]
     [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 2)]
     [InlineData("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", 1)]

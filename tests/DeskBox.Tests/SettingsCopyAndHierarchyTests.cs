@@ -445,8 +445,9 @@ public sealed class SettingsCopyAndHierarchyTests
             "x:Name=\"DesktopOrganizationPart\"",
             "svc:Localized.HeaderKey=\"Settings.ManagedPath.Title\"",
             "svc:Localized.HeaderKey=\"Settings.DragBehavior.Group.Title\"",
-            "svc:Localized.HeaderKey=\"Settings.AppearanceDetail.Title\"",
             "Tag=\"FileStackSettings\"",
+            "svc:Localized.HeaderKey=\"Settings.AppearanceDetail.Title\"",
+            "svc:Localized.HeaderKey=\"Settings.FileWidget.OpenAndMenu.Title\"",
             "svc:Localized.HeaderKey=\"Settings.OpenMethod.Title\"",
             "FeatureWidgets.FolderOpenBehavior",
             "Interaction.FileItemContextMenuEnabled");
@@ -459,12 +460,12 @@ public sealed class SettingsCopyAndHierarchyTests
         AssertInOrder(
             interaction,
             "svc:Localized.HeaderKey=\"Settings.GlobalHotkey.Title\"",
+            "svc:Localized.HeaderKey=\"Settings.WidgetLayerMode.Title\"",
+            "svc:Localized.HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
             "svc:Localized.HeaderKey=\"Settings.DesktopDoubleClick.Title\"",
             "x:Name=\"CapsuleModeEntryCard\"",
             "Tag=\"WidgetGroups\"",
             "Tag=\"Displays\"",
-            "svc:Localized.HeaderKey=\"Settings.WidgetLayerMode.Title\"",
-            "svc:Localized.HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
             "svc:Localized.HeaderKey=\"Settings.ResizeSnap.Title\"",
             "svc:Localized.HeaderKey=\"Settings.Interaction.Hover.Title\"");
 
@@ -623,6 +624,8 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("Common.AddFeatureWidget", widgetCommands, StringComparison.Ordinal);
         Assert.Contains("CreateFolderWidgetFromPickerAsync", widgetCommands, StringComparison.Ordinal);
         Assert.Contains("ShowSettings(\"FeatureWidgets\")", widgetCommands, StringComparison.Ordinal);
+        Assert.DoesNotContain("Common.CreateAiWidget", traySource, StringComparison.Ordinal);
+        Assert.DoesNotContain("Common.CreateAiWidget", widgetCommands, StringComparison.Ordinal);
     }
 
     [Fact]

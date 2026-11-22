@@ -590,7 +590,11 @@ public sealed class SettingsServiceTests : IDisposable
 
         var widget = Assert.Single(service.Settings.Widgets);
         Assert.Equal("unknown-kind", widget.Id);
-        Assert.Equal(WidgetKind.File, widget.WidgetKind);
+        Assert.True(WidgetKindJsonConverter.IsUnknownFutureKind(widget.WidgetKind));
+
+        await service.SaveAsync();
+        string savedLayoutJson = await File.ReadAllTextAsync(Path.Combine(_settingsRoot, "widget-layout.json"));
+        Assert.Contains("\"FutureExperimentalWidget\"", savedLayoutJson, StringComparison.Ordinal);
     }
 
     [Fact]

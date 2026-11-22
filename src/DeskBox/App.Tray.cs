@@ -28,7 +28,6 @@ public partial class App
     private const int TrayCommandUpdateAvailable = 5;
     private const int TrayCommandSettings = 6;
     private const int TrayCommandExit = 7;
-    private const int TrayCommandCreateAiWidget = 8;
     private const int TrayCommandGlobalSearch = 9;
     private const int TrayCommandCreateWidgetFirst = 100;
 
@@ -209,7 +208,6 @@ public partial class App
             () => RunTraySettingsActionAsync(OpenAboutSettingsFromTray),
             () => RunTraySettingsActionAsync(OpenSettingsFromTray),
             () => RunTrayMenuActionAsync(ExitApplication),
-            () => RunTraySettingsActionAsync(OpenAiCreateStudioFromTray),
             () => RunTraySettingsActionAsync(OpenGlobalSearchFromTray));
     }
 
@@ -226,10 +224,9 @@ public partial class App
         Func<Task> onOpenUpdate,
         Func<Task> onOpenSettings,
         Func<Task> onExit,
-        Func<Task>? onCreateAiWidget = null,
         Func<Task>? onOpenGlobalSearch = null)
     {
-        var entries = new List<NativeTrayMenuEntry>(19)
+        var entries = new List<NativeTrayMenuEntry>(18)
         {
             NativeTrayMenuEntry.Item(
                 TrayCommandOrganizeDesktop,
@@ -273,15 +270,6 @@ public partial class App
             "\uE710",
             isEnabled: true,
             onAddFeatureWidget));
-        if (onCreateAiWidget is not null)
-        {
-            entries.Add(NativeTrayMenuEntry.Item(
-                TrayCommandCreateAiWidget,
-                localization.T("Common.CreateAiWidget"),
-                "\uE945",
-                isEnabled: true,
-                onCreateAiWidget));
-        }
         entries.Add(NativeTrayMenuEntry.Separator);
         entries.Add(NativeTrayMenuEntry.Item(
             TrayCommandOpenManagedStorage,
@@ -1129,12 +1117,11 @@ public partial class App
             _folderMappingConflictWindow = null;
         }
 
-        var window = new FolderMappingConflictWindow(LocalizationService, body, plan);
+        var window = new FolderMappingConflictWindow(LocalizationService, body, plan, ThemeService);
         SubscribeWindowClosedOnce(window, () =>
         {
             if (ReferenceEquals(_folderMappingConflictWindow, window)) _folderMappingConflictWindow = null;
         });
-        ThemeService.TrackWindow(window);
         _folderMappingConflictWindow = window;
         window.Activate();
         return window;
@@ -1244,11 +1231,6 @@ public partial class App
     private void OpenFeatureWidgetsFromTray()
     {
         ShowSettings("FeatureWidgets");
-    }
-
-    private void OpenAiCreateStudioFromTray()
-    {
-        ShowCustomWidgetStudio();
     }
 
     private void OpenDesktopOrganizationFromTray()
@@ -1393,9 +1375,7 @@ public partial class App
     /// </summary>
     internal void EnsureXamlLoopLifelineIfNoOtherWindows()
     {
-        if (IsShuttingDown ||
-            _xamlLoopLifelineWindow is not null ||
-            WidgetManager?.LoadedWidgetCount > 0)
+        if (IsShuttingDown || _xamlLoopLifelineWindow is not null)
         {
             return;
         }
@@ -1421,6 +1401,7 @@ public partial class App
             _trayMenuPrewarmTimer = null;
         }
 
+        CloseActiveAgentApprovalWindow();
         TrayContextMenuWindow.DismissActiveIfOpen();
         TrayContextMenuWindow.Shutdown();
         NativeTrayIconHost.DestroyTransientOwnerWindow(ref _folderPickerHelperWindowHandle);

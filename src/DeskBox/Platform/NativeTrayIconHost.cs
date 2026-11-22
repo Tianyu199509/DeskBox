@@ -852,28 +852,53 @@ internal sealed class NativeTrayIconHost : IDisposable
 
     private static unsafe IntPtr CreateIconFont(IntPtr hdc, char glyph, int fontHeight)
     {
-        IntPtr fluentFont = CreateFontByFace("Segoe Fluent Icons", fontHeight);
-        if (fluentFont != IntPtr.Zero)
+        if (Environment.OSVersion.Version.Build >= 22000)
         {
-            IntPtr prev = SelectObject(hdc, fluentFont);
-            ushort glyphIndex = 0xFFFF;
-            char ch = glyph;
-            uint count = GetGlyphIndicesW(hdc, &ch, 1, &glyphIndex, GgiMarkNonexistingGlyphs);
-            if (prev != IntPtr.Zero)
+            IntPtr fluentFont = CreateFontByFace("Segoe Fluent Icons", fontHeight);
+            if (fluentFont != IntPtr.Zero)
             {
-                _ = SelectObject(hdc, prev);
-            }
+                IntPtr prev = SelectObject(hdc, fluentFont);
+                bool validFluentFace = IsSelectedFontFace(hdc, "Segoe Fluent Icons");
+                ushort glyphIndex = 0xFFFF;
+                uint count = 0;
+                if (validFluentFace)
+                {
+                    char ch = glyph;
+                    count = GetGlyphIndicesW(hdc, &ch, 1, &glyphIndex, GgiMarkNonexistingGlyphs);
+                }
 
-            if (count == 1 && glyphIndex != 0xFFFF && glyphIndex != 0)
-            {
-                return fluentFont;
-            }
+                if (prev != IntPtr.Zero)
+                {
+                    _ = SelectObject(hdc, prev);
+                }
 
-            _ = DeleteObject(fluentFont);
+                if (validFluentFace && count == 1 && glyphIndex != 0xFFFF && glyphIndex != 0)
+                {
+                    return fluentFont;
+                }
+
+                _ = DeleteObject(fluentFont);
+            }
         }
 
         return CreateFontByFace("Segoe MDL2 Assets", fontHeight);
     }
+
+    private static unsafe bool IsSelectedFontFace(IntPtr hdc, string expectedFace)
+    {
+        char* buf = stackalloc char[64];
+        int len = GetTextFaceW(hdc, 64, buf);
+        if (len <= 1)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> actual = new(buf, len - 1);
+        return actual.Equals(expectedFace.AsSpan(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [DllImport("gdi32.dll", EntryPoint = "GetTextFaceW", ExactSpelling = true)]
+    private static extern unsafe int GetTextFaceW(IntPtr hdc, int c, char* lpName);
 
     private static unsafe IntPtr CreateFontByFace(string faceName, int fontHeight)
     {

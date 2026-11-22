@@ -70,10 +70,34 @@ internal sealed partial class FolderMappingConflictWindow : Window
     public FolderMappingConflictWindow(
         LocalizationService localizationService,
         string body,
-        FolderMappingConflictButtonPlan plan)
+        FolderMappingConflictButtonPlan plan,
+        ThemeService? themeService = null)
     {
         InitializeComponent();
+
+        _hWnd = WindowNative.GetWindowHandle(this);
+        if (themeService is not null)
+        {
+            themeService.TrackWindow(this);
+        }
+        else
+        {
+            bool isDark = Win32Helper.IsSystemDarkMode();
+            if (Content is FrameworkElement root)
+            {
+                root.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
+            }
+
+            Win32Helper.SetWindowTheme(_hWnd, isDark);
+        }
+
         WindowsCompatibilityService.ApplySafeBackdrop(this);
+        if (Content is FrameworkElement flowRoot)
+        {
+            flowRoot.FlowDirection = Models.CustomWidgetLocaleCatalog.IsRightToLeftCulture(localizationService.CurrentCultureName)
+                ? FlowDirection.RightToLeft
+                : FlowDirection.LeftToRight;
+        }
 
         string title = localizationService.T("Widget.MapFolder.ConflictDialogTitle");
         Title = title;
@@ -103,9 +127,12 @@ internal sealed partial class FolderMappingConflictWindow : Window
 
         // Complete after Closed so the window is already torn down before any
         // continuation (such as Repick opening a new picker) runs.
-        Closed += (_, _) => _completion.TrySetResult(_selectedResult);
+        Closed += (_, _) =>
+        {
+            SystemBackdrop = null;
+            _completion.TrySetResult(_selectedResult);
+        };
 
-        _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         AppBranding.ApplyWindowIcon(_appWindow);

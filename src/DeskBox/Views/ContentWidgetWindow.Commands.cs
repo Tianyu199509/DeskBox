@@ -386,15 +386,6 @@ public sealed partial class ContentWidgetWindow
             App.Current.ShowSettings("FeatureWidgets");
         flyout.Items.Add(addFeatureWidgetItem);
 
-        var createAiWidgetItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Common.CreateAiWidget"),
-            Icon = new FontIcon { Glyph = "\uE945" }
-        };
-        createAiWidgetItem.Click += (_, _) =>
-            App.Current.ShowCustomWidgetStudio();
-        flyout.Items.Add(createAiWidgetItem);
-
         flyout.Closed += (_, _) =>
         {
             if (!mapFolderWhenClosed)

@@ -210,6 +210,12 @@ internal static class WidgetStyleBackupProjection
             settingsPath, cancellationToken);
         JsonObject settingsDom = JsonNode.Parse(originalSettingsJson)?.AsObject()
             ?? throw new InvalidDataException("settings.json is empty.");
+        int liveSettingsSchema = settingsDom["schemaVersion"]?.GetValue<int>() ?? 0;
+        if (liveSettingsSchema > SettingsMigrationPipeline.CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Live settings.json uses schema version {liveSettingsSchema}, which is newer than this DeskBox build ({SettingsMigrationPipeline.CurrentSchemaVersion}).");
+        }
 
         int shellPatched = 0;
         if (document["shell"] is JsonObject shellDoc)
@@ -308,10 +314,26 @@ internal static class WidgetStyleBackupProjection
 
                 foreach (string key in WidgetKeys)
                 {
-                    if (style.TryGetPropertyValue(key, out JsonNode? value))
+                    if (!style.TryGetPropertyValue(key, out JsonNode? value))
                     {
-                        element[key] = value?.DeepClone();
+                        continue;
                     }
+
+                    if (string.Equals(key, "viewMode", StringComparison.Ordinal) &&
+                        (value is not JsonValue vmVal || !vmVal.TryGetValue(out string? vmStr) ||
+                         !Enum.TryParse<Models.ViewMode>(vmStr, ignoreCase: true, out var vmParsed) || !Enum.IsDefined(vmParsed)))
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(key, "sortMode", StringComparison.Ordinal) &&
+                        (value is not JsonValue smVal || !smVal.TryGetValue(out string? smStr) ||
+                         !Enum.TryParse<Models.WidgetSortMode>(smStr, ignoreCase: true, out var smParsed) || !Enum.IsDefined(smParsed)))
+                    {
+                        continue;
+                    }
+
+                    element[key] = value?.DeepClone();
                 }
 
                 widgetsPatched++;

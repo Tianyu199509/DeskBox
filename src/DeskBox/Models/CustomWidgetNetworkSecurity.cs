@@ -82,7 +82,7 @@ public static class CustomWidgetNetworkSecurity
                 return false;
             }
 
-            if (IsBlockedIpAddress(literalIp))
+            if (IsBlockedIpAddress(literalIp) || IsBenchmarkTunIpAddress(literalIp))
             {
                 isPrivateOrLoopbackIp = true;
             }
@@ -337,24 +337,23 @@ public static class CustomWidgetNetworkSecurity
     }
 
     private static readonly object s_tunProbeGate = new();
-    private static IPAddress[] s_tunUnicastAddresses = [];
-    private static long s_tunProbeTimestamp;
+    private static IPAddress[] s_localBenchmarkAddresses = [];
+    private static long s_tunProbeTimestamp = long.MinValue;
     private static readonly TimeSpan TunProbeTtl = TimeSpan.FromSeconds(15);
 
     /// <summary>
-    /// Fake-IP (198.18.0.0/15) DNS answers are only legitimate while a local TUN
-    /// adapter (Clash/mihomo fake-ip mode) owns an address in that range; adding
-    /// the range to <see cref="IsBlockedIpAddress"/> would cut off every proxied
-    /// widget request for those users. Probe failures fail closed (no TUN).
+    /// Returns unicast addresses in 198.18.0.0/15 currently bound to any active local NIC.
+    /// Probed lazily only when a DNS response actually lands in 198.18.0.0/15.
     /// </summary>
     internal static IReadOnlyList<IPAddress> GetActiveTunFakeIpUnicastAddresses()
     {
         lock (s_tunProbeGate)
         {
             long now = Environment.TickCount64;
-            if (now - s_tunProbeTimestamp < (long)TunProbeTtl.TotalMilliseconds)
+            if (s_tunProbeTimestamp != long.MinValue &&
+                now - s_tunProbeTimestamp < (long)TunProbeTtl.TotalMilliseconds)
             {
-                return s_tunUnicastAddresses;
+                return s_localBenchmarkAddresses;
             }
 
             s_tunProbeTimestamp = now;
@@ -377,36 +376,43 @@ public static class CustomWidgetNetworkSecurity
                     }
                 }
 
-                s_tunUnicastAddresses = found.ToArray();
+                s_localBenchmarkAddresses = found.ToArray();
             }
             catch
             {
-                s_tunUnicastAddresses = [];
+                s_localBenchmarkAddresses = [];
             }
 
-            return s_tunUnicastAddresses;
+            return s_localBenchmarkAddresses;
         }
     }
 
-    internal static bool IsForbiddenFakeIpDnsResult(IPAddress address) =>
-        IsForbiddenFakeIpDnsResult(address, GetActiveTunFakeIpUnicastAddresses());
-
+    /// <summary>
+    /// RFC 2544 198.18.0.0/15 is never assigned to physical LAN hosts or cloud metadata,
+    /// and is widely used as Fake-IP pool by local TUN clients, TAP drivers, and LAN transparent
+    /// router gateways (OpenWrt/Surge). Literal 198.18.0.0/15 URLs are always blocked at URL
+    /// validation; for DNS answers in 198.18.0.0/15, only stack control addresses
+    /// (198.18.0.0/.0.1/.0.2, 198.19.255.255) and addresses owned by a local NIC are blocked.
+    /// </summary>
     internal static bool IsForbiddenFakeIpDnsResult(
         IPAddress address,
-        IReadOnlyList<IPAddress> activeTunUnicastAddresses)
+        IReadOnlyList<IPAddress>? localMachineBenchmarkIps = null)
     {
         if (!IsBenchmarkTunIpAddress(address))
         {
             return false;
         }
 
-        if (activeTunUnicastAddresses.Count == 0)
+        IPAddress v4 = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        byte[] bytes = v4.GetAddressBytes();
+        if ((bytes[0] == 198 && bytes[1] == 18 && bytes[2] == 0 && bytes[3] <= 2) ||
+            (bytes[0] == 198 && bytes[1] == 19 && bytes[2] == 255 && bytes[3] == 255))
         {
             return true;
         }
 
-        IPAddress v4 = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
-        foreach (IPAddress own in activeTunUnicastAddresses)
+        IReadOnlyList<IPAddress> ownAddresses = localMachineBenchmarkIps ?? GetActiveTunFakeIpUnicastAddresses();
+        foreach (IPAddress own in ownAddresses)
         {
             IPAddress ownV4 = own.IsIPv4MappedToIPv6 ? own.MapToIPv4() : own;
             if (ownV4.Equals(v4))
@@ -415,14 +421,7 @@ public static class CustomWidgetNetworkSecurity
             }
         }
 
-        byte[] bytes = v4.GetAddressBytes();
-        // TUN stack gateway/DNS specials (198.18.0.0/.0.1/.0.2, 198.19.255.255).
-        if (bytes[0] == 198 && bytes[1] == 18 && bytes[2] == 0 && bytes[3] <= 2)
-        {
-            return true;
-        }
-
-        return bytes[0] == 198 && bytes[1] == 19 && bytes[2] == 255 && bytes[3] == 255;
+        return false;
     }
 
     internal static bool IsConfiguredSystemProxyEndpoint(
@@ -483,16 +482,18 @@ public static class CustomWidgetNetworkSecurity
 
         if (requirePublicIpOnly)
         {
+            bool isLiteralIp = IPAddress.TryParse(targetHost, out IPAddress? targetIp);
             if (string.Equals(targetHost, "localhost", StringComparison.OrdinalIgnoreCase) ||
                 targetHost.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
                 targetHost.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
-                targetHost.EndsWith(".internal", StringComparison.OrdinalIgnoreCase))
+                targetHost.EndsWith(".internal", StringComparison.OrdinalIgnoreCase) ||
+                (!isLiteralIp && !targetHost.Contains('.')))
             {
                 throw new InvalidOperationException(
                     $"Blocked proxied connection to non-public target host '{targetHost}'.");
             }
 
-            if (IPAddress.TryParse(targetHost, out IPAddress? targetIp) &&
+            if (isLiteralIp && targetIp is not null &&
                 (IsBlockedIpAddress(targetIp) || IsBenchmarkTunIpAddress(targetIp)))
             {
                 throw new InvalidOperationException(
@@ -511,7 +512,8 @@ public static class CustomWidgetNetworkSecurity
         bool requirePublicIpOnly,
         CancellationToken cancellationToken,
         Func<string, CancellationToken, Task<IPAddress[]>>? dnsResolver = null,
-        Func<IReadOnlyList<IPAddress>>? tunAddressProvider = null)
+        Func<IReadOnlyList<IPAddress>>? tunAddressProvider = null,
+        bool allowLoopbackProxyDnsFailure = false)
     {
         ValidateTargetUriForProxyHandoff(requestUri, requirePublicIpOnly);
         if (requestUri is null)
@@ -535,22 +537,53 @@ public static class CustomWidgetNetworkSecurity
         using var dnsCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         dnsCts.CancelAfter(TimeSpan.FromSeconds(4));
 
-        IPAddress[] resolvedAddresses = dnsResolver is not null
-            ? await dnsResolver(targetHost, dnsCts.Token).ConfigureAwait(false)
-            : await Dns.GetHostAddressesAsync(targetHost, dnsCts.Token).ConfigureAwait(false);
+        IPAddress[] resolvedAddresses;
+        try
+        {
+            resolvedAddresses = dnsResolver is not null
+                ? await dnsResolver(targetHost, dnsCts.Token).ConfigureAwait(false)
+                : await Dns.GetHostAddressesAsync(targetHost, dnsCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (allowLoopbackProxyDnsFailure &&
+                                   dnsResolver is null &&
+                                   (ex is SocketException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)))
+        {
+            return;
+        }
+
         if (resolvedAddresses is null || resolvedAddresses.Length == 0)
         {
+            if (allowLoopbackProxyDnsFailure && dnsResolver is null)
+            {
+                return;
+            }
+
             throw new SocketException((int)SocketError.HostNotFound);
         }
 
-        IReadOnlyList<IPAddress> tunAddresses = tunAddressProvider is not null
-            ? tunAddressProvider()
-            : GetActiveTunFakeIpUnicastAddresses();
+        IReadOnlyList<IPAddress>? localBenchmarkIps = null;
         foreach (IPAddress ip in resolvedAddresses)
         {
-            bool blocked = requirePublicIpOnly
-                ? IsBlockedIpAddress(ip) || IsForbiddenFakeIpDnsResult(ip, tunAddresses)
-                : IsAlwaysForbiddenWidgetIpAddress(ip);
+            bool blocked = false;
+            if (requirePublicIpOnly)
+            {
+                if (IsBlockedIpAddress(ip))
+                {
+                    blocked = true;
+                }
+                else if (IsBenchmarkTunIpAddress(ip))
+                {
+                    localBenchmarkIps ??= tunAddressProvider is not null
+                        ? tunAddressProvider()
+                        : GetActiveTunFakeIpUnicastAddresses();
+                    blocked = IsForbiddenFakeIpDnsResult(ip, localBenchmarkIps);
+                }
+            }
+            else
+            {
+                blocked = IsAlwaysForbiddenWidgetIpAddress(ip);
+            }
+
             if (blocked)
             {
                 throw new InvalidOperationException(
@@ -558,6 +591,10 @@ public static class CustomWidgetNetworkSecurity
             }
         }
     }
+
+    private static bool IsLoopbackHostNameOrLiteral(string host) =>
+        string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+        (IPAddress.TryParse(host, out IPAddress? parsed) && IPAddress.IsLoopback(parsed));
 
     public static async ValueTask<Stream> ConnectToValidatedPublicIpAsync(
         SocketsHttpConnectionContext context,
@@ -573,7 +610,8 @@ public static class CustomWidgetNetworkSecurity
             await ValidateTargetUriForProxyHandoffAsync(
                 context.InitialRequestMessage.RequestUri,
                 requirePublicIpOnly: true,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                allowLoopbackProxyDnsFailure: IsLoopbackHostNameOrLiteral(host)).ConfigureAwait(false);
         }
 
         IPAddress[] addresses = IPAddress.TryParse(host, out IPAddress? literalIp)
@@ -649,7 +687,8 @@ public static class CustomWidgetNetworkSecurity
             await ValidateTargetUriForProxyHandoffAsync(
                 context.InitialRequestMessage.RequestUri,
                 requirePublicIpOnly,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                allowLoopbackProxyDnsFailure: IsLoopbackHostNameOrLiteral(host)).ConfigureAwait(false);
         }
 
         IPAddress[] addresses = IPAddress.TryParse(host, out IPAddress? literalIp)
@@ -664,7 +703,9 @@ public static class CustomWidgetNetworkSecurity
         {
             bool blocked = isSystemProxy
                 ? IsAlwaysForbiddenWidgetIpAddress(ip)
-                : (requirePublicIpOnly ? IsBlockedIpAddress(ip) : IsAlwaysForbiddenWidgetIpAddress(ip));
+                : (requirePublicIpOnly
+                    ? IsBlockedIpAddress(ip) || IsForbiddenFakeIpDnsResult(ip)
+                    : IsAlwaysForbiddenWidgetIpAddress(ip));
             if (blocked)
             {
                 throw new InvalidOperationException(

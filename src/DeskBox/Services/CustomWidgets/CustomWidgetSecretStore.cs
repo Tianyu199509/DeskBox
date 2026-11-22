@@ -295,10 +295,10 @@ public sealed class CustomWidgetSecretStore
                         continue;
                     }
 
-                    cipherMap[keyProp.Name] = cipher;
                     string plain = DpapiSecretProtector.UnprotectBase64ToUtf8(cipher);
                     if (!string.IsNullOrEmpty(plain))
                     {
+                        cipherMap[keyProp.Name] = cipher;
                         secretMap[keyProp.Name] = plain;
                     }
                 }

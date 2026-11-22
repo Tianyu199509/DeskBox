@@ -8,6 +8,7 @@ namespace DeskBox.Services;
 
 public enum DeskBoxProtocolAction
 {
+    BackgroundStartup,
     OpenStudio,
     InstallWidget
 }
@@ -213,6 +214,13 @@ public static class DeskBoxProtocolActivationService
 
         switch (route)
         {
+            case "startup":
+            case "wakeup":
+            {
+                intent = new DeskBoxProtocolIntent(DeskBoxProtocolAction.BackgroundStartup);
+                return true;
+            }
+
             case "studio":
             case "workshop":
             {

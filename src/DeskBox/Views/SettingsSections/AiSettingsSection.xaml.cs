@@ -47,7 +47,30 @@ public sealed partial class AiSettingsSection : UserControl
     public static string BuildEntrySummary(LocalizationService localization)
     {
         CustomWidgetStudioPreferencesStore prefs = CustomWidgetStudioPreferencesStore.Shared;
-        string? readyProviderId = DeskBoxAiService.Shared.ResolveActiveProviderId(prefs.PreferredAiProviderId);
+        bool isAgentMcpMode = string.Equals(
+            prefs.PreferredStudioChannel,
+            CustomWidgetStudioPreferencesStore.ChannelAgentMcp,
+            StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(prefs.PreferredAiProviderId))
+        {
+            CustomWidgetAiProviderPreset selectedPreset = DeskBoxAiService.FindProviderPreset(prefs.PreferredAiProviderId);
+            AiProviderCredentialEntry? entry = CustomWidgetAiCredentialStore.Shared.Get(selectedPreset.Id);
+            if (DeskBoxAiService.IsProviderConfigured(selectedPreset, entry))
+            {
+                ResolvedAiInvocation resolved = DeskBoxAiService.Shared.ResolveEffectiveSettings(selectedPreset.Id);
+                return localization.Format(
+                    "Settings.AiSettings.EntrySummary.Configured",
+                    resolved.Preset.DisplayName,
+                    resolved.Model);
+            }
+
+            return isAgentMcpMode
+                ? localization.T("CustomWidget.Workshop.Onboarding.ModeAgentTitle")
+                : localization.T("CustomWidget.Workshop.Composer.ChannelDirectUnconfigured");
+        }
+
+        string? readyProviderId = DeskBoxAiService.Shared.ResolveActiveProviderId(null);
         if (!string.IsNullOrWhiteSpace(readyProviderId))
         {
             ResolvedAiInvocation resolved = DeskBoxAiService.Shared.ResolveEffectiveSettings(readyProviderId);
@@ -57,15 +80,9 @@ public sealed partial class AiSettingsSection : UserControl
                 resolved.Model);
         }
 
-        if (string.Equals(
-                prefs.PreferredStudioChannel,
-                CustomWidgetStudioPreferencesStore.ChannelAgentMcp,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return localization.T("CustomWidget.Workshop.Onboarding.ModeAgentTitle");
-        }
-
-        return localization.T("CustomWidget.Workshop.Composer.ChannelDirectUnconfigured");
+        return isAgentMcpMode
+            ? localization.T("CustomWidget.Workshop.Onboarding.ModeAgentTitle")
+            : localization.T("CustomWidget.Workshop.Composer.ChannelDirectUnconfigured");
     }
 
     public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow, LocalizationService? localization = null)
@@ -268,7 +285,9 @@ public sealed partial class AiSettingsSection : UserControl
     {
         CustomWidgetStudioPreferencesStore prefs = CustomWidgetStudioPreferencesStore.Shared;
         string? readyProvider = DeskBoxAiService.Shared.ResolveActiveProviderId(prefs.PreferredAiProviderId);
-        string preferred = readyProvider ?? prefs.PreferredAiProviderId;
+        string preferred = !string.IsNullOrWhiteSpace(prefs.PreferredAiProviderId)
+            ? prefs.PreferredAiProviderId
+            : (readyProvider ?? string.Empty);
 
         _isAiMethodUiSyncing = true;
         try

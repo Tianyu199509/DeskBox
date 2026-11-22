@@ -25,7 +25,8 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         _client = client;
         _useInProcessStoreService =
             inProcessStoreUpdate is not null ||
-            AppDistributionService.Current.IsMicrosoftStore;
+            AppDistributionService.Current.IsMicrosoftStore ||
+            AppDistributionService.Current.IsPackaged;
         if (inProcessStoreUpdate is not null)
         {
             _storeUpdateService = AttachStoreService(inProcessStoreUpdate);

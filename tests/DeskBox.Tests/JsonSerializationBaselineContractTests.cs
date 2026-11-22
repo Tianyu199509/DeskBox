@@ -36,7 +36,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 6,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
-            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 8,
+            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/Lyrics/LrclibLyricsProvider.cs"] = 1,
             ["src/DeskBox/Services/Lyrics/LyricsCacheStore.cs"] = 4,
@@ -95,7 +95,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         }
 
         Assert.Equal(43, actual.Count);
-        Assert.Equal(145, actual.Values.Sum());
+        Assert.Equal(144, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -270,9 +270,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["SettingsJsonContext.Default.AppSettings"] = 8,
             ["QuickCaptureJsonContext.Default.StoreData"] = 2,
             ["TodoJsonContext.Default.StoreData"] = 3,
-            // 8: the seven pre-existing store calls (load/save/update
+            // 7: six store calls (unified load/migration deserialize + save/update
             // paths) + the settings-host relay serialize (batch R8).
-            ["GlancePreferencesJsonContext.Default.Preferences"] = 8,
+            ["GlancePreferencesJsonContext.Default.Preferences"] = 7,
             ["GlanceImageCatalogJsonContext.Default.ImageCatalog"] = 2,
             ["WidgetMetadataJsonContext.Default.StringMap"] = 4,
             ["WidgetMetadataJsonContext.Default.StringListMap"] = 4,
@@ -287,7 +287,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(34, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(33, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",
@@ -505,7 +505,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Assert.Contains(
             "private static void ValidateJsonFileIfPresent<T>(\r\n" +
             "        string path,\r\n" +
-            "        JsonTypeInfo<T> jsonTypeInfo)",
+            "        JsonTypeInfo<T> jsonTypeInfo,\r\n" +
+            "        bool allowNewerVersionFallback = false)",
             backup.ReplaceLineEndings("\r\n"),
             StringComparison.Ordinal);
 

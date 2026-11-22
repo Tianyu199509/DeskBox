@@ -223,9 +223,9 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // -------------------------------------------------------------- E. 材质
 
-    // Spec E1 + E3: AppearanceMaterialSettingsSectionTemplate is retired; Appearance
-    // overview hosts clickable MaterialEntryCard, and MaterialSubPagePanel hosts the
-    // retained MaterialType card + 2 default-expanded SettingsExpanders (Effect + WidgetBackground).
+    // Spec E1 + E2 + E3: AppearanceMaterialSettingsSectionTemplate and MaterialSubPagePanel
+    // are retired; Appearance overview hosts MaterialExpander directly, grouping Opacity,
+    // MaterialIntensity, SystemTransparency, and WidgetBackground cards without a sub-page hop.
     [Fact]
     public void AppearanceMaterial_IsFlattenedWithoutNestedExpanders()
     {
@@ -238,51 +238,41 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.DoesNotContain("AppearanceMaterialSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("\"AppearanceMaterialSettings\"", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("\"AppearanceMaterialSettings\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"MaterialSubPagePanel\"", appearanceXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"MaterialEntryCard\"", appearanceXaml, StringComparison.Ordinal);
 
-        Match? materialEntryCard = FindOpeningTag(
-            appearanceXaml, "toolkit:SettingsCard", "x:Name=\"MaterialEntryCard\"");
-        Assert.NotNull(materialEntryCard);
-        Assert.Contains("HeaderKey=\"Settings.Material.Title\"", materialEntryCard.Value, StringComparison.Ordinal);
-        Assert.Null(FindOpeningTag(
-            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\""));
-
-        string subPageSlice = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
-        Assert.Equal(2, CountOpeningTags(subPageSlice, "toolkit:SettingsExpander"));
-        Assert.NotNull(FindOpeningTag(
-            subPageSlice, "toolkit:SettingsCard", "HeaderKey=\"Settings.Material.Title\""));
+        Match? materialExpander = FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\"");
+        Assert.NotNull(materialExpander);
+        Assert.Contains("x:Name=\"MaterialExpander\"", materialExpander.Value, StringComparison.Ordinal);
 
         Assert.NotNull(FindOpeningTag(
             appearanceXaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.WidgetForeground.Title\""));
     }
 
-    // Spec E2 + E3: MaterialSubPagePanel groups Effect (3 rows) and WidgetBackground (5 rows)
-    // in default-expanded accordions, while CornerAndBorder and Density stay on AppearanceOverviewPanel.
     [Fact]
     public void AppearanceMaterial_CardsAreFlatAndCornerLivesOnOverview()
     {
         string appearanceXaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
-        string subPageSlice = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
 
-        Match? effectExpander = FindOpeningTag(
-            subPageSlice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Group.Effect\"");
-        Assert.NotNull(effectExpander);
-        Assert.Contains("IsExpanded=\"True\"", effectExpander.Value, StringComparison.Ordinal);
-        AssertInsideExpander(subPageSlice, effectExpander, "HeaderKey=\"Settings.Opacity.Title\"", "Material.Effect");
-        AssertInsideExpander(subPageSlice, effectExpander, "HeaderKey=\"Settings.SystemTransparency.Title\"", "Material.Effect");
+        Match? materialExpander = FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\"");
+        Assert.NotNull(materialExpander);
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.Opacity.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.MaterialIntensity.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.SystemTransparency.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.WidgetBackground.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.WidgetBackground.Image.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.WidgetBackground.Fit.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.WidgetBackground.Dim.Title\"", "Material");
+        AssertInsideExpander(appearanceXaml, materialExpander, "HeaderKey=\"Settings.WidgetBackground.PerWidget.Title\"", "Material");
 
-        Match? backgroundExpander = FindOpeningTag(
-            subPageSlice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Group.WidgetBackground\"");
-        Assert.NotNull(backgroundExpander);
-        Assert.Contains("IsExpanded=\"True\"", backgroundExpander.Value, StringComparison.Ordinal);
-
-        AssertAscending(subPageSlice, "Appearance Material sub-page ordering",
+        AssertAscending(appearanceXaml, "Appearance Material expander ordering",
             "HeaderKey=\"Settings.Material.Title\"",
-            "HeaderKey=\"Settings.Material.Group.Effect\"",
             "HeaderKey=\"Settings.Opacity.Title\"",
             "HeaderKey=\"Settings.MaterialIntensity.Title\"",
             "HeaderKey=\"Settings.SystemTransparency.Title\"",
-            "HeaderKey=\"Settings.Material.Group.WidgetBackground\"",
             "HeaderKey=\"Settings.WidgetBackground.Title\"",
             "HeaderKey=\"Settings.WidgetBackground.Image.Title\"",
             "HeaderKey=\"Settings.WidgetBackground.Fit.Title\"",
@@ -455,23 +445,31 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------- I. 交互页排序
 
-    // Spec I: Invocation (GlobalHotkey + DesktopDoubleClick) <
+    // Spec I: Invocation (GlobalHotkey + WidgetLayerMode expander [ClickRaiseScope,
+    // ShowDesktopBehavior, DesktopDoubleClick]) <
     // Layout (CapsuleModeSection + WidgetGroups + Displays) <
-    // WindowBehavior (WidgetLayerMode + ResizeSnap + Interaction.Hover).
+    // WindowBehavior (ResizeSnap + Interaction.Hover).
     [Fact]
     public void Interaction_Section_FollowsThePinnedOrder()
     {
         string slice = InteractionSlice();
 
+        Match? layerExpander = FindOpeningTag(
+            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.WidgetLayerMode.Title\"");
+        Assert.NotNull(layerExpander);
+        AssertInsideExpander(slice, layerExpander, "HeaderKey=\"Settings.ClickRaiseScope.Title\"", "WidgetLayerMode");
+        AssertInsideExpander(slice, layerExpander, "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"", "WidgetLayerMode");
+        AssertInsideExpander(slice, layerExpander, "HeaderKey=\"Settings.DesktopDoubleClick.Title\"", "WidgetLayerMode");
+
         AssertAscending(slice, "Interaction ordering",
             "HeaderKey=\"Settings.GlobalHotkey.Title\"",
+            "HeaderKey=\"Settings.WidgetLayerMode.Title\"",
+            "HeaderKey=\"Settings.ClickRaiseScope.Title\"",
+            "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
             "HeaderKey=\"Settings.DesktopDoubleClick.Title\"",
             "x:Name=\"CapsuleModeEntryCard\"",
             "HeaderKey=\"Settings.Section.WidgetGroups\"",
             "HeaderKey=\"Settings.Displays.Title\"",
-            "HeaderKey=\"Settings.WidgetLayerMode.Title\"",
-            "HeaderKey=\"Settings.ClickRaiseScope.Title\"",
-            "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
             "HeaderKey=\"Settings.ResizeSnap.Title\"",
             "HeaderKey=\"Settings.WidgetSnap.Spacing.Title\"",
             "HeaderKey=\"Settings.Interaction.Hover.Title\"");
@@ -544,27 +542,105 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------ L. 其他 Section
 
-    // Spec L1: Theme < TrayIcon < Accent < Material < CornerAndBorder < Density <
-    // WidgetTitleIcon < Group.Animation, while WidgetGroups lives in Interaction.
+    // Spec L1: ThemeExpander (TrayIcon < WidgetTitleIcon < Accent < Accent.CustomPalette,
+    // without nested Accent expander) < Material < CornerAndBorder < Density < Group.Animation,
+    // while WidgetGroups lives in Interaction.
     [Fact]
     public void AppearanceSection_FollowsThePinnedOrder()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
+        Match? themeExpander = FindOpeningTag(
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Theme.Title\"");
+        Assert.NotNull(themeExpander);
+        Assert.Null(FindOpeningTag(
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Accent.Title\""));
+        Assert.NotNull(FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.Accent.Title\""));
+        Assert.NotNull(FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.Accent.CustomPalette.Title\""));
+
+        AssertInsideExpander(xaml, themeExpander, "HeaderKey=\"Settings.TrayIcon.Title\"", "Theme");
+        AssertInsideExpander(xaml, themeExpander, "HeaderKey=\"Settings.WidgetTitleIcon.Title\"", "Theme");
+        AssertInsideExpander(xaml, themeExpander, "HeaderKey=\"Settings.Accent.Title\"", "Theme");
+        AssertInsideExpander(xaml, themeExpander, "HeaderKey=\"Settings.Accent.CustomPalette.Title\"", "Theme");
+
         AssertAscending(xaml, "AppearanceSection top-to-bottom ordering",
             "HeaderKey=\"Settings.Theme.Title\"",
             "HeaderKey=\"Settings.TrayIcon.Title\"",
+            "HeaderKey=\"Settings.WidgetTitleIcon.Title\"",
             "HeaderKey=\"Settings.Accent.Title\"",
             "AutomationNameKey=\"Settings.Accent.Source.Title\"",
+            "HeaderKey=\"Settings.Accent.CustomPalette.Title\"",
             "HeaderKey=\"Settings.Material.Title\"",
             "HeaderKey=\"Settings.CornerAndBorder.Title\"",
             "AutomationNameKey=\"Settings.Corner.Title\"",
             "HeaderKey=\"Settings.Density.Title\"",
-            "HeaderKey=\"Settings.WidgetTitleIcon.Title\"",
             "HeaderKey=\"Settings.Group.Animation.Title\"");
 
         Assert.DoesNotContain("HeaderKey=\"Settings.Section.WidgetGroups\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FileWidgetSection_OpenAndContextMenu_AreGroupedInOneExpander()
+    {
+        string xaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
+
+        Match? expander = FindOpeningTag(
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileWidget.OpenAndMenu.Title\"");
+        Assert.NotNull(expander);
+        Assert.Contains(
+            "DescriptionKey=\"Settings.FileWidget.OpenAndMenu.Description\"",
+            expander.Value,
+            StringComparison.Ordinal);
+
+        AssertInsideExpander(xaml, expander, "HeaderKey=\"Settings.OpenMethod.Title\"", "FileOpenAndMenu");
+        AssertInsideExpander(xaml, expander, "HeaderKey=\"Settings.FileWidget.FolderOpenBehavior.Title\"", "FileOpenAndMenu");
+        AssertInsideExpander(xaml, expander, "HeaderKey=\"Settings.FileItemContextMenu.Title\"", "FileOpenAndMenu");
+    }
+
+    [Fact]
+    public void SearchSection_FollowsThePinnedOrderWithoutNestingRecommendationsOrWebFallback()
+    {
+        string xaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml");
+
+        Assert.NotNull(FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.Search.Recommendations.Title\""));
+        Assert.Null(FindOpeningTag(
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Search.Recommendations.Title\""));
+
+        Match? everythingExpander = FindOpeningTag(
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Search.Everything.Title\"");
+        Assert.NotNull(everythingExpander);
+        int everythingClose = xaml.IndexOf("</toolkit:SettingsExpander>", everythingExpander.Index, StringComparison.Ordinal);
+        int webFallbackStart = IndexOfOrFail(xaml, "HeaderKey=\"Settings.Search.Scope.WebFallback\"", "SearchSection");
+        Assert.True(webFallbackStart > everythingClose, "WebFallback expander must be a sibling after EverythingConnectionExpander, not nested inside it.");
+
+        AssertAscending(xaml, "SearchSection ordering",
+            "HeaderKey=\"Settings.Search.Hotkey.Title\"",
+            "HeaderKey=\"Settings.Search.Recommendations.Title\"",
+            "HeaderKey=\"Settings.Search.Everything.Title\"",
+            "HeaderKey=\"Settings.Search.Scope.WebFallback\"",
+            "HeaderKey=\"Settings.Search.LocalScope.Title\"",
+            "HeaderKey=\"Settings.Search.QuickCreate.Title\"",
+            "HeaderKey=\"Settings.Search.ResultsView.Title\"");
+    }
+
+    [Fact]
+    public void AboutSection_UpdateExpander_ExpandsByDefault()
+    {
+        string aboutSlice = Slice(
+            ReadRepositoryFile(SettingsWindowXaml),
+            "x:Key=\"AboutSectionTemplate\"",
+            "x:Name=\"GeneralSection\"");
+
+        Match? updateExpander = FindOpeningTag(
+            aboutSlice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Update.Title\"");
+        Assert.NotNull(updateExpander);
+        Assert.Contains("IsExpanded=\"True\"", updateExpander.Value, StringComparison.Ordinal);
     }
 
     // Spec L2: the managed-storage section is no longer force-inserted at index 1.
@@ -675,10 +751,12 @@ public sealed class SettingsAccordionAndOrderingContractTests
             foreach (System.Xml.Linq.XElement expander in doc.Descendants(toolkit + "SettingsExpander"))
             {
                 System.Xml.Linq.XElement? items = expander.Element(toolkit + "SettingsExpander.Items");
-                int itemCount = items is null ? 0 : items.Elements().Count();
+                int unconditionalCount = items is null
+                    ? 0
+                    : items.Elements().Count(static item => item.Attribute("Visibility") is null);
                 Assert.True(
-                    itemCount <= 5,
-                    $"{file}: SettingsExpander (HeaderKey='{expander.Attributes().FirstOrDefault(a => a.Name.LocalName == "HeaderKey")?.Value}') has {itemCount} direct items (must be <= 5).");
+                    unconditionalCount <= 5,
+                    $"{file}: SettingsExpander (HeaderKey='{expander.Attributes().FirstOrDefault(a => a.Name.LocalName == "HeaderKey")?.Value}') has {unconditionalCount} unconditional direct items (must be <= 5).");
             }
         }
     }
@@ -689,7 +767,6 @@ public sealed class SettingsAccordionAndOrderingContractTests
         (string FilePath, string? PanelName)[] subPages =
         [
             ("src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml", null),
-            ("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", "MaterialSubPagePanel"),
             ("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", "FileDisplaySubPagePanel"),
             (SettingsWindowXaml, "CloudBackupSubPagePanel"),
         ];
@@ -729,12 +806,8 @@ public sealed class SettingsAccordionAndOrderingContractTests
             Assert.Equal(earliestControlIdx, entryCardStartIdx);
         }
 
-        string appearanceXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
         string capsuleXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
         string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
-
-        string materialSubPage = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
-        AssertFirstCardHasHeaderKey(materialSubPage, "Settings.Material.Title");
 
         AssertFirstCardHasHeaderKey(capsuleXaml, "Settings.CollapseBehavior.Title");
 
@@ -743,6 +816,26 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
         string cloudBackupSubPage = Slice(windowXaml, "x:Name=\"CloudBackupSubPagePanel\"", "x:Key=\"AboutSectionTemplate\"");
         AssertFirstCardHasHeaderKey(cloudBackupSubPage, "Settings.CloudBackup.Title");
+    }
+
+    [Fact]
+    public void EntryCardsWithInlineSelectors_ExposeDirectComboBoxes()
+    {
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string fileWidgetXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
+
+        string general = GeneralSectionSlice();
+        Assert.Contains("x:Name=\"AiSettingsEntryComboBox\"", general, StringComparison.Ordinal);
+
+        string interaction = InteractionSlice();
+        Assert.Contains("x:Name=\"WidgetGroupsEntryComboBox\"", interaction, StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding CanShowHotkeyWarning, Mode=OneWay, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            interaction,
+            StringComparison.Ordinal);
+
+        Assert.Contains("ItemsSource=\"{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
     }
 
     // Spec Z1: expanders must never carry HorizontalContentAlignment="Right".

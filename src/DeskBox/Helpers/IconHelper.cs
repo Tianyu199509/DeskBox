@@ -590,7 +590,32 @@ public static class IconHelper
                 return null;
             }
 
-            var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
+            string dataRoot = Services.DeskBoxDataPathService.Current.RootPath;
+            if (!string.IsNullOrWhiteSpace(dataRoot))
+            {
+                string dataRootPrefix = dataRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string fullCandidate = Path.GetFullPath(path);
+                if ((Services.AppDistributionService.Current.IsPackaged ||
+                     Services.AppDistributionService.Current.IsMicrosoftStore) &&
+                    fullCandidate.StartsWith(dataRootPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    // RuntimeBroker rejects StorageFile on hidden .appdata (0x8007016C);
+                    // return null immediately so caller uses in-process WIC stream decode.
+                    return null;
+                }
+
+                string clipboardPrefix = Path.Combine(Services.DeskBoxDataPathService.Current.DataDirectory, "clipboard")
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (fullCandidate.StartsWith(clipboardPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Avoid populating Windows Explorer's persistent thumbcache with clipboard screenshots.
+                    return null;
+                }
+            }
+
+            string resolvedPath = Platform.Win32Helper.ResolveUnvirtualizedPhysicalPath(path);
+            var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(
+                File.Exists(resolvedPath) ? resolvedPath : path);
             using var thumbnail = await storageFile.GetThumbnailAsync(
                 thumbnailMode,
                 (uint)decodePixelWidth,

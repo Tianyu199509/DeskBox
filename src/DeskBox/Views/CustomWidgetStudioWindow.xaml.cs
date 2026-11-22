@@ -1996,51 +1996,25 @@ public sealed partial class CustomWidgetStudioWindow : Window
                     : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3));
         }
 
-        if (AppWindowTitleBar.IsCustomizationSupported())
-        {
-            AppWindowTitleBar titleBar = _appWindow.TitleBar;
-            if (isHighContrast)
-            {
-                titleBar.ButtonBackgroundColor = null;
-                titleBar.ButtonInactiveBackgroundColor = null;
-                titleBar.ButtonForegroundColor = null;
-                titleBar.ButtonHoverForegroundColor = null;
-                titleBar.ButtonPressedForegroundColor = null;
-                titleBar.ButtonHoverBackgroundColor = null;
-                titleBar.ButtonPressedBackgroundColor = null;
-                titleBar.ButtonInactiveForegroundColor = null;
-            }
-            else
-            {
-                titleBar.ButtonBackgroundColor = Colors.Transparent;
-                titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-                titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-                titleBar.ButtonHoverForegroundColor = isDark ? Colors.White : Colors.Black;
-                titleBar.ButtonPressedForegroundColor = isDark ? Colors.White : Colors.Black;
-                titleBar.ButtonHoverBackgroundColor = isDark
-                    ? Windows.UI.Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)
-                    : Windows.UI.Color.FromArgb(0x10, 0x00, 0x00, 0x00);
-                titleBar.ButtonPressedBackgroundColor = isDark
-                    ? Windows.UI.Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)
-                    : Windows.UI.Color.FromArgb(0x18, 0x00, 0x00, 0x00);
-                titleBar.ButtonInactiveForegroundColor = isDark
-                    ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-                    : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
-            }
-        }
-
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
         UpdateTitleBarInsets();
     }
 
     private void UpdateTitleBarInsets()
     {
-        if (_isClosed || AppTitleBar is null || !AppWindowTitleBar.IsCustomizationSupported())
+        if (_isClosed || AppTitleBar is null)
         {
             return;
         }
 
         try
         {
+            if (!AppWindowTitleBar.IsCustomizationSupported())
+            {
+                AppTitleBar.Padding = new Thickness(14, 0, 148, 0);
+                return;
+            }
+
             double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
             if (scale <= 0)
             {
@@ -2051,6 +2025,7 @@ public sealed partial class CustomWidgetStudioWindow : Window
             int rightInsetPx = _appWindow.TitleBar.RightInset;
             if (leftInsetPx <= 0 && rightInsetPx <= 0)
             {
+                AppTitleBar.Padding = new Thickness(14, 0, 148, 0);
                 return;
             }
 
@@ -2150,7 +2125,8 @@ public sealed partial class CustomWidgetStudioWindow : Window
 
     private void CustomWidgetStudioWindow_Activated(object sender, WindowActivatedEventArgs args)
     {
-        if (_isClosed || args.WindowActivationState == WindowActivationState.Deactivated)
+        if (_isClosed ||
+            args.WindowActivationState == WindowActivationState.Deactivated)
         {
             return;
         }
@@ -2242,28 +2218,14 @@ public sealed partial class CustomWidgetStudioWindow : Window
     {
         if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            IntPtr result = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
-            int targetMinW = ToPhysicalPixels(MinimumWidth, scale);
-            int targetMinH = ToPhysicalPixels(MinimumHeight, scale);
-
-            unsafe
-            {
-                IntPtr monitor = Win32Helper.MonitorFromWindow(_hWnd, 2 /* MONITOR_DEFAULTTONEAREST */);
-                var info = new Win32Helper.MONITORINFO { cbSize = sizeof(Win32Helper.MONITORINFO) };
-                if (Win32Helper.GetMonitorInfo(monitor, ref info))
-                {
-                    int workW = Math.Max(320, info.rcWork.Right - info.rcWork.Left);
-                    int workH = Math.Max(280, info.rcWork.Bottom - info.rcWork.Top);
-                    targetMinW = Math.Min(targetMinW, workW);
-                    targetMinH = Math.Min(targetMinH, workH);
-                }
-
-                ref MinMaxInfo minMaxInfo = ref *(MinMaxInfo*)lParam;
-                minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, targetMinW);
-                minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, targetMinH);
-            }
-            return result;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                MinimumWidth,
+                MinimumHeight);
         }
 
         if (message == WmNcDestroy)
@@ -2272,14 +2234,6 @@ public sealed partial class CustomWidgetStudioWindow : Window
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
-    }
-
-    private static int ToPhysicalPixels(int logicalPixels, double scale)
-    {
-        double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
-        return Math.Max(
-            1,
-            (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
     }
 
     private void OnDisplayTopologyChanged()
@@ -2496,22 +2450,5 @@ public sealed partial class CustomWidgetStudioWindow : Window
             ? hr.VerticalOverflowPx
             : 0;
         return (pngBytes, rtb.PixelWidth, rtb.PixelHeight, overflowPx);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 }

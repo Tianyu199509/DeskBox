@@ -61,11 +61,19 @@ internal static class CustomWidgetAgentStageStore
         bool HasLocales,
         string LocalesSha256);
 
+    internal static bool HasPendingCommitLease(string stageId)
+    {
+        lock (Gate)
+        {
+            return s_pendingCommits.ContainsKey(stageId);
+        }
+    }
+
     /// <summary>
     /// 落盘成功后消费租约：删除批次目录并写幂等墓碑。崩溃时租约随进程消失，
     /// 批次目录保留，客户端可重试。
     /// </summary>
-    internal static void CompleteCommit(string stageId)
+    internal static void CompleteCommit(string stageId, string? committedWidgetId = null)
     {
         lock (Gate)
         {
@@ -89,7 +97,7 @@ internal static class CustomWidgetAgentStageStore
 
             RecordCommittedLocked(
                 stageId,
-                pending.WidgetId,
+                !string.IsNullOrWhiteSpace(committedWidgetId) ? committedWidgetId : pending.WidgetId,
                 pending.ManifestSha256,
                 pending.ManifestCanonicalSha256,
                 pending.RawCallerManifestCanonicalSha256,
@@ -130,58 +138,8 @@ internal static class CustomWidgetAgentStageStore
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifestJson ?? string.Empty)))
             .ToLowerInvariant();
 
-    internal static string ComputeCanonicalJsonHash(string? rawJson)
-    {
-        if (string.IsNullOrWhiteSpace(rawJson))
-        {
-            return ComputeManifestHash(string.Empty);
-        }
-
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(rawJson);
-            using var ms = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(ms))
-            {
-                WriteCanonicalJsonElement(writer, doc.RootElement);
-            }
-
-            return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
-        }
-        catch
-        {
-            return ComputeManifestHash(rawJson);
-        }
-    }
-
-    private static void WriteCanonicalJsonElement(Utf8JsonWriter writer, JsonElement element)
-    {
-        switch (element.ValueKind)
-        {
-            case JsonValueKind.Object:
-                writer.WriteStartObject();
-                foreach (JsonProperty prop in element.EnumerateObject().OrderBy(static p => p.Name, StringComparer.Ordinal))
-                {
-                    writer.WritePropertyName(prop.Name);
-                    WriteCanonicalJsonElement(writer, prop.Value);
-                }
-
-                writer.WriteEndObject();
-                break;
-            case JsonValueKind.Array:
-                writer.WriteStartArray();
-                foreach (JsonElement item in element.EnumerateArray())
-                {
-                    WriteCanonicalJsonElement(writer, item);
-                }
-
-                writer.WriteEndArray();
-                break;
-            default:
-                element.WriteTo(writer);
-                break;
-        }
-    }
+    internal static string ComputeCanonicalJsonHash(string? rawJson) =>
+        DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.ComputeCanonicalJsonHash(rawJson);
 
     private static string T(string? cultureName, string key) =>
         DeskBox.Services.LocalizationService.TranslateForCulture(
@@ -742,7 +700,7 @@ internal static class CustomWidgetAgentStageStore
         string dir = DirectoryOf(stageId!);
         lock (Gate)
         {
-            if (!File.Exists(MetaPath(stageId!)))
+            if (s_pendingCommits.ContainsKey(stageId!) || !File.Exists(MetaPath(stageId!)))
             {
                 error = T(cultureName, "CustomWidget.AgentStage.Error.MissingOrProcessed");
                 return false;
@@ -1165,6 +1123,7 @@ internal static class CustomWidgetAgentStageStore
 
                     if (matches)
                     {
+                        s_pendingCommits.Remove(stageId);
                         Directory.Delete(dir, recursive: true);
                         removed++;
                     }

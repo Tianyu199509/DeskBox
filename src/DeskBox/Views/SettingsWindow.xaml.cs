@@ -718,7 +718,6 @@ public sealed partial class SettingsWindow : Window
             if (section is AppearanceSettingsSection appearanceSection)
             {
                 appearanceSection.NavigationRequested -= SettingsSection_NavigationRequested;
-                appearanceSection.SubPageChanged -= AppearanceSection_SubPageChanged;
                 appearanceSection.ChooseBackgroundImageRequested -= AppearanceSection_ChooseBackgroundImageRequested;
                 appearanceSection.ClearPerWidgetBackgroundsRequested -= AppearanceSection_ClearPerWidgetBackgroundsRequested;
                 appearanceSection.OpenSystemTransparencyRequested -= AppearanceSection_OpenSystemTransparencyRequested;
@@ -848,9 +847,8 @@ public sealed partial class SettingsWindow : Window
         int rightInsetPx = titleBarSupported ? _appWindow.TitleBar.RightInset : 0;
         if (leftInsetPx <= 0 && rightInsetPx <= 0)
         {
-            bool isRtl = SettingsRoot?.FlowDirection == FlowDirection.RightToLeft;
-            TitleBarLeftInsetColumn.Width = new GridLength(isRtl ? DefaultCaptionInsetDip : 0);
-            TitleBarRightInsetColumn.Width = new GridLength(isRtl ? 0 : DefaultCaptionInsetDip);
+            TitleBarLeftInsetColumn.Width = new GridLength(0);
+            TitleBarRightInsetColumn.Width = new GridLength(DefaultCaptionInsetDip);
             return;
         }
 
@@ -942,11 +940,13 @@ public sealed partial class SettingsWindow : Window
             Grid.SetColumn(AboutRightPanel, isNarrow ? 0 : 2);
             Grid.SetColumnSpan(AboutRightPanel, isNarrow ? 3 : 1);
             AboutRightPanel.Margin = isNarrow ? new Thickness(0, 10, 0, 0) : new Thickness(0);
+            AboutRightPanel.MaxWidth = isNarrow ? double.PositiveInfinity : 480;
             AboutRightPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             AboutInfoActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             AboutInfoActionsPanel.Orientation = isNarrow ? Orientation.Vertical : Orientation.Horizontal;
             AboutMeButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             AboutWebsiteButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
+            AboutPrivacyPolicyButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             StoreSupportButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
             UpdateActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             UpdateActionsPanel.Orientation = isNarrow ? Orientation.Vertical : Orientation.Horizontal;

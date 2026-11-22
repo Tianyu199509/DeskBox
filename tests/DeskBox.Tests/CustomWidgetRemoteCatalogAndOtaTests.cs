@@ -226,7 +226,10 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
                 return new HttpResponseMessage(HttpStatusCode.NotFound);
             });
 
-            var catalogService = new CustomWidgetRemoteCatalogService(tempRoot, handler);
+            var catalogService = new CustomWidgetRemoteCatalogService(
+                tempRoot,
+                handler,
+                signatureVerifier: static (_, _, _, _) => true);
             bool refreshed = await catalogService.RefreshInBackgroundAsync(force: true);
             Assert.True(refreshed);
 
@@ -273,7 +276,10 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
 
             // Verify cold-start offline reload from persisted disk bundle cache
             var offlineHandler = new RoutingMockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
-            var coldCatalogService = new CustomWidgetRemoteCatalogService(tempRoot, offlineHandler);
+            var coldCatalogService = new CustomWidgetRemoteCatalogService(
+                tempRoot,
+                offlineHandler,
+                signatureVerifier: static (_, _, _, _) => true);
             Assert.True(coldCatalogService.TryGetRemoteTemplateBundle("music-pulse", out CustomWidgetTemplateBundle? coldBundle));
             Assert.NotNull(coldBundle);
             Assert.Contains("ctx.env.music", coldBundle!.LogicJs, StringComparison.Ordinal);
@@ -357,12 +363,8 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
 
             var catalogService = new CustomWidgetRemoteCatalogService(
                 cacheDir,
-                new RoutingMockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
-            // The raw test catalog is unsigned; stand in for the offline ECDSA gate so
-            // this test exercises the upgrade pipeline itself. Signing behavior has
-            // dedicated coverage in CustomWidgetCatalogSigningTests.
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
-                static (_, _, _, _) => true;
+                new RoutingMockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)),
+                signatureVerifier: static (_, _, _, _) => true);
             Assert.True(await catalogService.ApplyCatalogJsonAsync(catalogJson, "\"ota-etag\"", CustomWidgetRemoteCatalogService.PrimaryCatalogUrl));
 
             // 1. Official unmodified widget gets atomically upgraded with manifest.json + logic.js + locales/
@@ -397,7 +399,6 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
         }
         finally
         {
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }

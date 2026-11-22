@@ -143,7 +143,8 @@ public sealed partial class WidgetManager
         string? logicJs = null,
         bool updateLogicJs = false,
         CustomWidgetLocaleCatalog? locales = null,
-        bool updateLocales = false)
+        bool updateLocales = false,
+        bool trustedHostWrite = true)
     {
         if (!HasUiThreadAccess())
         {
@@ -156,7 +157,8 @@ public sealed partial class WidgetManager
                     logicJs,
                     updateLogicJs,
                     locales,
-                    updateLocales));
+                    updateLocales,
+                    trustedHostWrite));
         }
 
         if (updateLogicJs)
@@ -261,13 +263,15 @@ public sealed partial class WidgetManager
             : (File.Exists(store.LogicJsPath)
                 ? await File.ReadAllTextAsync(store.LogicJsPath)
                 : null);
+        bool isExternalOrigin =
+            string.Equals(manifest.Origin, CustomWidgetOriginKinds.Agent, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(manifest.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
         CustomWidgetTrustStore.Shared.RecordExecutableSurfaceAfterWrite(
             config.Id,
             stampedJson,
             effectiveSurfaceLogicJs,
-            trustedLocalAuthoring:
-                !string.Equals(manifest.Origin, CustomWidgetOriginKinds.Agent, StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(manifest.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase));
+            trustedLocalAuthoring: trustedHostWrite,
+            preserveExistingTrustedStateOnHostWrite: trustedHostWrite && isExternalOrigin);
 
         if (File.Exists(Path.Combine(store.WidgetDirectory, "AGENTS.md")))
         {
@@ -534,14 +538,6 @@ public sealed partial class WidgetManager
         {
             resolvedExisting = ResolveCustomWidgetConfig(widgetId, allowTemplateMetadataFallback: false);
         }
-        else if (ResolveStudioAgentUpsertTargetWidgetId?.Invoke() is { Length: > 0 } studioWaitingTargetId)
-        {
-            resolvedExisting = ResolveCustomWidgetConfig(studioWaitingTargetId, allowTemplateMetadataFallback: false);
-            if (resolvedExisting is not null)
-            {
-                widgetId = resolvedExisting.Id;
-            }
-        }
 
         CustomWidgetParseResult incomingParsed = CustomWidgetManifestParser.Parse(manifestJson);
         bool incomingIsCommunity = string.Equals(
@@ -580,7 +576,8 @@ public sealed partial class WidgetManager
                 logicJs,
                 updateLogicJs,
                 locales,
-                updateLocales);
+                updateLocales,
+                trustedHostWrite: false);
         }
         else
         {

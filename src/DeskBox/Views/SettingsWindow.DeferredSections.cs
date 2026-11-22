@@ -29,12 +29,6 @@ public sealed partial class SettingsWindow
             _ = ViewModel.RefreshQuickAccessStateAsync();
             _ = RefreshOrphanFoldersSummaryAsync();
         }
-        if (_currentSettingsSection == "Appearance" &&
-            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-            appearanceEl is AppearanceSettingsSection appearanceSec)
-        {
-            appearanceSec.SyncMaterialEntryCard();
-        }
         if (_currentSettingsSection == "Interaction")
         {
             SyncCapsuleModeEntryCard();
@@ -171,8 +165,6 @@ public sealed partial class SettingsWindow
                 break;
             case AppearanceSettingsSection appearanceSettings:
                 appearanceSettings.ViewModel = ViewModel;
-                appearanceSettings.SubPageChanged -= AppearanceSection_SubPageChanged;
-                appearanceSettings.SubPageChanged += AppearanceSection_SubPageChanged;
                 RefreshSystemAppearanceStates();
                 break;
             case GlanceWidgetSettingsSection glanceSettings:
@@ -216,6 +208,10 @@ public sealed partial class SettingsWindow
                 capsuleSettings.ViewModel = ViewModel;
                 capsuleSettings.Performance = _performanceSettingsViewModel;
                 capsuleSettings.DataContext = _capsuleSettingsViewModel;
+            }
+            if (WidgetGroupsEntryComboBox is { } widgetGroupsCombo)
+            {
+                widgetGroupsCombo.DataContext = _groupNavigationSettingsViewModel;
             }
             SyncCapsuleModeEntryCard(reloadOptions: true);
             RefreshDisplaysEntrySummary();
@@ -493,25 +489,6 @@ public sealed partial class SettingsWindow
                 customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true }
                     ? NavigationViewBackButtonVisible.Visible
                     : NavigationViewBackButtonVisible.Collapsed;
-            UpdateBreadcrumb(route);
-        }
-    }
-
-    private void AppearanceSection_SubPageChanged(object? sender, EventArgs e)
-    {
-        if (_isClosed || !string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
-        if (TryGetSectionRoute("Appearance", out SettingsSectionRoute route))
-        {
-            bool showBack = _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
-                appearanceEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true };
-            SettingsNavigationView.IsBackButtonVisible = showBack
-                ? NavigationViewBackButtonVisible.Visible
-                : NavigationViewBackButtonVisible.Collapsed;
             UpdateBreadcrumb(route);
         }
     }

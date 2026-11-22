@@ -17,13 +17,39 @@ public sealed class AgentConnectionTests : IDisposable
     [Fact]
     public void McpCommandGeneration_DistinguishesStoreAliasFromDirectAndSettingsHost()
     {
-        // 1. Store / MSIX packaged channel always uses the AppExecutionAlias deskbox.exe
+        // 1. Store / MSIX packaged channel prefers materialized %LOCALAPPDATA%\Microsoft\WindowsApps\deskbox.exe
+        // and falls back to bare "deskbox.exe" when the alias file is absent.
+        string emptyLocalAppData = Path.Combine(Home, "EmptyLocalAppData");
         Assert.Equal(
             "deskbox.exe",
-            CustomWidgetAgentConnectorService.ResolveMcpCommandExecutable(isPackagedOverride: true));
+            CustomWidgetAgentConnectorService.ResolveMcpCommandExecutable(
+                isPackagedOverride: true,
+                localAppDataOverride: emptyLocalAppData));
         Assert.Equal(
             "deskbox.exe --mcp",
-            CustomWidgetAgentConnectorService.FormatMcpCommandLine(isPackagedOverride: true));
+            CustomWidgetAgentConnectorService.FormatMcpCommandLine(
+                isPackagedOverride: true,
+                localAppDataOverride: emptyLocalAppData));
+        Assert.Null(CustomWidgetAgentConnectorService.ResolveAutoLaunchExecutablePath(
+            isPackagedOverride: true,
+            localAppDataOverride: emptyLocalAppData,
+            currentProcessPathOverride: @"C:\Program Files\DeskBox\DeskBox.exe"));
+
+        string storeLocalAppData = Path.Combine(Home, "StoreLocalAppData");
+        string aliasDir = Path.Combine(storeLocalAppData, "Microsoft", "WindowsApps");
+        Directory.CreateDirectory(aliasDir);
+        string aliasExe = Path.Combine(aliasDir, "deskbox.exe");
+        File.WriteAllBytes(aliasExe, [0]);
+        Assert.Equal(
+            aliasExe,
+            CustomWidgetAgentConnectorService.ResolveMcpCommandExecutable(
+                isPackagedOverride: true,
+                localAppDataOverride: storeLocalAppData));
+        Assert.Equal(
+            $"\"{aliasExe}\" --mcp",
+            CustomWidgetAgentConnectorService.FormatMcpCommandLine(
+                isPackagedOverride: true,
+                localAppDataOverride: storeLocalAppData));
 
         // 2. Direct / Debug unpackaged channel uses quoted full path
         const string directExe = @"C:\Program Files\DeskBox\DeskBox.exe";

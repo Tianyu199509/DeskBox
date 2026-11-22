@@ -613,11 +613,59 @@ public sealed partial class SettingsWindow
             primary?.DisplayName);
     }
 
+    private bool _isSyncingAiSettingsEntry;
+
     private void RefreshAiSettingsEntrySummary()
     {
+        if (AiSettingsEntryCard is not { } card)
+        {
+            return;
+        }
+
+        if (AiSettingsEntryComboBox is { IsDropDownOpen: false } comboBox)
+        {
+            _isSyncingAiSettingsEntry = true;
+            try
+            {
+                var form = new AiProviderConfigFormController(
+                    _localizationService.T,
+                    (key, args) => _localizationService.Format(key, args),
+                    () => _localizationService.CurrentCultureName);
+                string effectiveProviderId = CustomWidgetStudioPreferencesStore.Shared.PreferredAiProviderId;
+                if (string.IsNullOrWhiteSpace(effectiveProviderId))
+                {
+                    effectiveProviderId = DeskBoxAiService.Shared.ResolveActiveProviderId(null) ?? string.Empty;
+                }
+
+                form.PopulateProviderCombo(comboBox, effectiveProviderId);
+            }
+            finally
+            {
+                _isSyncingAiSettingsEntry = false;
+            }
+        }
+
+        card.Description = Views.SettingsSections.AiSettingsSection.BuildEntrySummary(_localizationService);
+    }
+
+    private void AiSettingsEntryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingAiSettingsEntry ||
+            sender is not ComboBox { SelectedItem: ComboBoxItem { Tag: string providerId } })
+        {
+            return;
+        }
+
+        CustomWidgetStudioPreferencesStore.Shared.SetPreferredAiProviderId(providerId);
         if (AiSettingsEntryCard is { } card)
         {
             card.Description = Views.SettingsSections.AiSettingsSection.BuildEntrySummary(_localizationService);
+        }
+
+        if (_settingsSectionElements.TryGetValue("AiSettings", out FrameworkElement? aiEl) &&
+            aiEl is Views.SettingsSections.AiSettingsSection aiSection)
+        {
+            aiSection.RefreshState();
         }
     }
 }

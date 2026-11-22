@@ -925,6 +925,11 @@ public sealed partial class WidgetManager
             .FirstOrDefault(e =>
                 string.Equals(e.Id, templateId, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(e.ManifestId, templateId, StringComparison.OrdinalIgnoreCase));
+        if (catalogEntry is { IsRemoteOnly: true, RequiresClientUpgrade: true })
+        {
+            throw new InvalidOperationException(
+                $"Template '{templateId}' requires DeskBox {catalogEntry.UpgradeRequirementLabel}.");
+        }
         CustomWidgetPresetInfo? preset = CustomWidgetTemplates.MatchPresetOrNull(templateId);
         string baseTitle = importedManifest?.ResolveLocalizedName(_localizationService.CurrentCultureName) ??
                            catalogEntry?.ResolveDisplayName(_localizationService) ??

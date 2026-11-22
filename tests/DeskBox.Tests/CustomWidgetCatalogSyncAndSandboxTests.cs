@@ -539,10 +539,6 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         Directory.CreateDirectory(tempRoot);
         try
         {
-            // Unsigned fixture catalog; offline ECDSA signing has dedicated coverage.
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
-                static (_, _, _, _) => true;
-
             string cacheDir = Path.Combine(tempRoot, "cache");
             string widgetsDir = Path.Combine(tempRoot, "widgets");
             Directory.CreateDirectory(cacheDir);
@@ -581,7 +577,8 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
 
             var catalogSvc = new CustomWidgetRemoteCatalogService(
                 cacheDir,
-                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
+                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)),
+                signatureVerifier: static (_, _, _, _) => true);
             Assert.True(await catalogSvc.ApplyCatalogJsonAsync(v20Catalog, "\"etag-v20\"", CustomWidgetRemoteCatalogService.PrimaryCatalogUrl));
 
             var otaStore = new CustomWidgetDataStore("w-clean", widgetsDir);
@@ -623,7 +620,8 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
             // Cold-start reload from disk cache must NOT resurrect v2.0 logic.js!
             var coldCatalog = new CustomWidgetRemoteCatalogService(
                 cacheDir,
-                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)),
+                signatureVerifier: static (_, _, _, _) => true);
             Assert.True(coldCatalog.TryGetRemoteTemplateBundle("clean-test", out CustomWidgetTemplateBundle? coldV21));
             Assert.Null(coldV21!.LogicJs);
 
@@ -637,7 +635,8 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
             string partialFailCacheDir = Path.Combine(tempRoot, "partial-cache");
             var failingSubArtifactCatalog = new CustomWidgetRemoteCatalogService(
                 partialFailCacheDir,
-                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+                new MockRouterHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)),
+                signatureVerifier: static (_, _, _, _) => true);
             string catalogWithGoodAndBrokenSubUrl = $$"""
             {
               "schemaVersion": 2,
@@ -673,7 +672,6 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         }
         finally
         {
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }
@@ -826,13 +824,12 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         Directory.CreateDirectory(tempRoot);
         try
         {
-            // Unsigned fixture catalog; offline ECDSA signing has dedicated coverage.
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
-                static (_, _, _, _) => true;
-
             var settingsSvc = new SettingsService(Path.Combine(tempRoot, "settings"));
             var locSvc = new LocalizationService(settingsSvc);
-            var catalogSvc = new CustomWidgetRemoteCatalogService(Path.Combine(tempRoot, "catalog-cache"));
+            var catalogSvc = new CustomWidgetRemoteCatalogService(
+                Path.Combine(tempRoot, "catalog-cache"),
+                httpMessageHandler: null,
+                signatureVerifier: static (_, _, _, _) => true);
 
             // 1. Official unmodified desktop widget on v1.0.0 with user data
             var officialStore = new CustomWidgetDataStore("w-official", Path.Combine(tempRoot, "widgets"));
@@ -955,7 +952,6 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         }
         finally
         {
-            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }
@@ -1040,7 +1036,10 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
                 return resp;
             });
 
-            var catalogSvc = new CustomWidgetRemoteCatalogService(Path.Combine(tempRoot, "catalog-cache"), handler);
+            var catalogSvc = new CustomWidgetRemoteCatalogService(
+                Path.Combine(tempRoot, "catalog-cache"),
+                handler,
+                signatureVerifier: static (_, _, _, _) => true);
             Assert.Null(catalogSvc.GetLastCheckedUtc());
 
             int catalogUpdatedEvents = 0;

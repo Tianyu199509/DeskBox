@@ -34,77 +34,76 @@ public static class ClipboardOcrService
 
         try
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath).AsTask(cancellationToken).ConfigureAwait(false);
-            using IRandomAccessStream stream = await file.OpenAsync(FileAccessMode.Read).AsTask(cancellationToken).ConfigureAwait(false);
+            using IRandomAccessStream stream = DeskBox.Platform.ClipboardStorageFileOps.OpenReadRandomAccessStream(imagePath);
             BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken).ConfigureAwait(false);
 
-            uint width = decoder.PixelWidth;
-            uint height = decoder.PixelHeight;
-            if (width == 0 || height == 0)
-            {
-                return null;
-            }
-
-            uint maxDim = OcrEngine.MaxImageDimension;
-            SoftwareBitmap bitmap;
-            if (width > maxDim || height > maxDim)
-            {
-                double scale = Math.Min(maxDim / (double)width, maxDim / (double)height);
-                var transform = new BitmapTransform
-                {
-                    InterpolationMode = BitmapInterpolationMode.Fant,
-                    ScaledWidth = Math.Max(1u, (uint)Math.Floor(width * scale)),
-                    ScaledHeight = Math.Max(1u, (uint)Math.Floor(height * scale))
-                };
-
-                bitmap = await decoder.GetSoftwareBitmapAsync(
-                    BitmapPixelFormat.Bgra8,
-                    BitmapAlphaMode.Premultiplied,
-                    transform,
-                    ExifOrientationMode.RespectExifOrientation,
-                    ColorManagementMode.DoNotColorManage).AsTask(cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                bitmap = await decoder.GetSoftwareBitmapAsync(
-                    BitmapPixelFormat.Bgra8,
-                    BitmapAlphaMode.Premultiplied).AsTask(cancellationToken).ConfigureAwait(false);
-            }
-
-            using (bitmap)
-            {
-                OcrResult? result = await engine.RecognizeAsync(bitmap).AsTask(cancellationToken).ConfigureAwait(false);
-                if (result is null || result.Lines.Count == 0)
+                uint width = decoder.PixelWidth;
+                uint height = decoder.PixelHeight;
+                if (width == 0 || height == 0)
                 {
                     return null;
                 }
 
-                var lines = new List<IReadOnlyList<string>>(result.Lines.Count);
-                foreach (OcrLine line in result.Lines)
+                uint maxDim = OcrEngine.MaxImageDimension;
+                SoftwareBitmap bitmap;
+                if (width > maxDim || height > maxDim)
                 {
-                    if (line.Words.Count == 0)
+                    double scale = Math.Min(maxDim / (double)width, maxDim / (double)height);
+                    var transform = new BitmapTransform
                     {
-                        continue;
+                        InterpolationMode = BitmapInterpolationMode.Fant,
+                        ScaledWidth = Math.Max(1u, (uint)Math.Floor(width * scale)),
+                        ScaledHeight = Math.Max(1u, (uint)Math.Floor(height * scale))
+                    };
+
+                    bitmap = await decoder.GetSoftwareBitmapAsync(
+                        BitmapPixelFormat.Bgra8,
+                        BitmapAlphaMode.Premultiplied,
+                        transform,
+                        ExifOrientationMode.RespectExifOrientation,
+                        ColorManagementMode.DoNotColorManage).AsTask(cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    bitmap = await decoder.GetSoftwareBitmapAsync(
+                        BitmapPixelFormat.Bgra8,
+                        BitmapAlphaMode.Premultiplied).AsTask(cancellationToken).ConfigureAwait(false);
+                }
+
+                using (bitmap)
+                {
+                    OcrResult? result = await engine.RecognizeAsync(bitmap).AsTask(cancellationToken).ConfigureAwait(false);
+                    if (result is null || result.Lines.Count == 0)
+                    {
+                        return null;
                     }
 
-                    var words = new List<string>(line.Words.Count);
-                    foreach (OcrWord word in line.Words)
+                    var lines = new List<IReadOnlyList<string>>(result.Lines.Count);
+                    foreach (OcrLine line in result.Lines)
                     {
-                        if (!string.IsNullOrWhiteSpace(word.Text))
+                        if (line.Words.Count == 0)
                         {
-                            words.Add(word.Text.Trim());
+                            continue;
+                        }
+
+                        var words = new List<string>(line.Words.Count);
+                        foreach (OcrWord word in line.Words)
+                        {
+                            if (!string.IsNullOrWhiteSpace(word.Text))
+                            {
+                                words.Add(word.Text.Trim());
+                            }
+                        }
+
+                        if (words.Count > 0)
+                        {
+                            lines.Add(words);
                         }
                     }
 
-                    if (words.Count > 0)
-                    {
-                        lines.Add(words);
-                    }
+                    string formatted = JoinOcrLines(lines);
+                    return string.IsNullOrWhiteSpace(formatted) ? null : formatted;
                 }
-
-                string formatted = JoinOcrLines(lines);
-                return string.IsNullOrWhiteSpace(formatted) ? null : formatted;
-            }
         }
         catch (OperationCanceledException)
         {

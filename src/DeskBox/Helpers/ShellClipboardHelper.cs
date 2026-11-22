@@ -25,12 +25,27 @@ public static class ShellClipboardHelper
 
     public static bool TrySetFileDropList(IReadOnlyList<string> paths, bool cut)
     {
-        var validPaths = paths
+        var rawValidPaths = paths
             .Where(path => !string.IsNullOrWhiteSpace(path) && (File.Exists(path) || Directory.Exists(path)))
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        if (rawValidPaths.Length == 0)
+        {
+            return false;
+        }
+
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsCopyOnlyVirtualizedSource(rawValidPaths))
+        {
+            cut = false;
+        }
+
+        string[] validPaths = rawValidPaths
+            .Select(static p => Services.DragDrop.StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(p))
+            .Where(static p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         if (validPaths.Length == 0)
         {
             return false;

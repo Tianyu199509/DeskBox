@@ -54,6 +54,7 @@ public sealed class CustomWidgetRemoteCatalogCacheMeta
 {
     public string? ETag { get; set; }
     public string? SourceUrl { get; set; }
+    public string? HydratedByAppVersion { get; set; }
     public long LastCheckedUtcTicks { get; set; }
 }
 
@@ -368,6 +369,7 @@ public sealed class CustomWidgetRemoteCatalogService
     public const int SupportedCatalogSchemaVersion = 2;
 
     private static readonly TimeSpan RefreshMinInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan OfflineRetryBackoff = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private const int MaxRemoteManifestBytes = 512 * 1024;
     private const int MaxRemoteBundleBytes = 4 * 1024 * 1024;
@@ -380,9 +382,11 @@ public sealed class CustomWidgetRemoteCatalogService
     private readonly string _catalogCachePath;
     private readonly string _metaCachePath;
     private readonly HttpClient _httpClient;
+    private readonly Func<CustomWidgetRemoteCatalogItemDto, string?, string?, CustomWidgetLocaleCatalog?, bool> _signatureVerifier;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _snapshotLock = new();
     private List<CustomWidgetRemoteCatalogItemDto>? _cachedRemoteItems;
+    private (IReadOnlyList<CustomWidgetRemoteCatalogItemDto> SourceItems, IReadOnlyList<CustomWidgetCatalogEntry> Entries)? _cachedMergedTemplates;
     private long _lastRefreshAttemptUtcTicks;
 
     public event EventHandler? CatalogUpdated;
@@ -390,6 +394,14 @@ public sealed class CustomWidgetRemoteCatalogService
     public CustomWidgetRemoteCatalogService(
         string? cacheDirectory = null,
         HttpMessageHandler? httpMessageHandler = null)
+        : this(cacheDirectory, httpMessageHandler, signatureVerifier: null)
+    {
+    }
+
+    internal CustomWidgetRemoteCatalogService(
+        string? cacheDirectory,
+        HttpMessageHandler? httpMessageHandler,
+        Func<CustomWidgetRemoteCatalogItemDto, string?, string?, CustomWidgetLocaleCatalog?, bool>? signatureVerifier)
     {
         _cacheDirectory = string.IsNullOrWhiteSpace(cacheDirectory)
             ? Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "cache", "widget-catalog")
@@ -397,10 +409,25 @@ public sealed class CustomWidgetRemoteCatalogService
         _bundlesCacheDirectory = Path.Combine(_cacheDirectory, "bundles");
         _catalogCachePath = Path.Combine(_cacheDirectory, "catalog.v1.json");
         _metaCachePath = Path.Combine(_cacheDirectory, "meta.json");
+        _signatureVerifier = signatureVerifier ?? VerifyEntryDefault;
 
         _httpClient = httpMessageHandler is not null
             ? new HttpClient(httpMessageHandler, disposeHandler: false) { Timeout = RequestTimeout }
             : CreateDefaultHttpClient();
+    }
+
+    private static bool VerifyEntryDefault(
+        CustomWidgetRemoteCatalogItemDto dto,
+        string? manifestJson,
+        string? logicJs,
+        CustomWidgetLocaleCatalog? locales) =>
+        CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyEntry(dto, manifestJson, logicJs, locales);
+
+    private bool VerifyRemoteEntrySignature(CustomWidgetRemoteCatalogItemDto dto)
+    {
+        string? rawDtoManifest = ExtractInlineOrCachedManifestJson(dto);
+        CustomWidgetLocaleCatalog? dtoLocales = BuildCatalogFromDto(dto.Locales, dto.BaseLocale);
+        return _signatureVerifier(dto, rawDtoManifest, dto.LogicJs, dtoLocales);
     }
 
     private static HttpClient CreateDefaultHttpClient()
@@ -424,6 +451,13 @@ public sealed class CustomWidgetRemoteCatalogService
     public IReadOnlyList<CustomWidgetCatalogEntry> GetMergedOfficialTemplates()
     {
         IReadOnlyList<CustomWidgetRemoteCatalogItemDto> remoteItems = EnsureSnapshotLoaded();
+        lock (_snapshotLock)
+        {
+            if (_cachedMergedTemplates is { } hit && ReferenceEquals(hit.SourceItems, remoteItems))
+            {
+                return hit.Entries;
+            }
+        }
         var remoteByNormalizedId = new Dictionary<string, CustomWidgetRemoteCatalogItemDto>(StringComparer.OrdinalIgnoreCase);
         foreach (CustomWidgetRemoteCatalogItemDto dto in remoteItems)
         {
@@ -450,56 +484,62 @@ public sealed class CustomWidgetRemoteCatalogService
             {
                 if (remoteDto.Deprecated)
                 {
-                    continue;
-                }
-
-                bool remoteIsNewer = IsStrictlyNewerVersion(remoteDto.Version, builtInVersion);
-                bool remoteRequiresUpgrade = CustomWidgetManifestParser.RequiresNewerClient(
-                    remoteDto.MinSchemaVersion,
-                    remoteDto.MinAppVersion,
-                    out _);
-
-                if (remoteIsNewer &&
-                    !remoteRequiresUpgrade &&
-                    TryBuildValidatedBundle(
-                        remoteDto,
-                        fallbackLocales: builtInBundle.Locales,
-                        fallbackLogicJs: builtInBundle.LogicJs,
-                        out string? remoteJson,
-                        out string? remoteLogicJs,
-                        out CustomWidgetLocaleCatalog? remoteLocales))
-                {
-                    merged.Add(new CustomWidgetCatalogEntry
+                    if (VerifyRemoteEntrySignature(remoteDto))
                     {
-                        Id = builtIn.Id,
-                        ManifestId = $"deskbox.{normId}",
-                        NameKey = builtIn.NameKey,
-                        DescriptionKey = builtIn.DescriptionKey,
-                        FeatureTagKey = builtIn.FeatureTagKey,
-                        Name = remoteDto.Name,
-                        NameEn = remoteDto.NameEn,
-                        Names = remoteDto.Names,
-                        Description = remoteDto.Description,
-                        DescriptionEn = remoteDto.DescriptionEn,
-                        Descriptions = remoteDto.Descriptions,
-                        FeatureTag = remoteDto.FeatureTag,
-                        FeatureTagEn = remoteDto.FeatureTagEn,
-                        FeatureTags = remoteDto.FeatureTags,
-                        DefaultTitle = !string.IsNullOrWhiteSpace(remoteDto.Name) ? remoteDto.Name : builtIn.DefaultTitle,
-                        IconGlyph = !string.IsNullOrWhiteSpace(remoteDto.IconGlyph) ? remoteDto.IconGlyph : builtIn.IconGlyph,
-                        BadgeColorHex = !string.IsNullOrWhiteSpace(remoteDto.BadgeColorHex) ? remoteDto.BadgeColorHex : builtIn.BadgeColorHex,
-                        Version = remoteDto.Version,
-                        MinSchemaVersion = remoteDto.MinSchemaVersion,
-                        MinAppVersion = remoteDto.MinAppVersion,
-                        DefaultWidth = remoteDto.DefaultWidth > 0 ? remoteDto.DefaultWidth : builtIn.DefaultWidth,
-                        DefaultHeight = remoteDto.DefaultHeight > 0 ? remoteDto.DefaultHeight : builtIn.DefaultHeight,
-                        ManifestJson = remoteJson,
-                        LogicJs = remoteLogicJs,
-                        Locales = remoteLocales,
-                        IsRemoteOnly = false,
-                        IsRemoteUpgraded = true
-                    });
-                    continue;
+                        continue;
+                    }
+                }
+                else
+                {
+                    bool remoteIsNewer = IsStrictlyNewerVersion(remoteDto.Version, builtInVersion);
+                    bool remoteRequiresUpgrade = CustomWidgetManifestParser.RequiresNewerClient(
+                        remoteDto.MinSchemaVersion,
+                        remoteDto.MinAppVersion,
+                        out _);
+
+                    if (remoteIsNewer &&
+                        !remoteRequiresUpgrade &&
+                        VerifyRemoteEntrySignature(remoteDto) &&
+                        TryBuildValidatedBundle(
+                            remoteDto,
+                            fallbackLocales: builtInBundle.Locales,
+                            fallbackLogicJs: builtInBundle.LogicJs,
+                            out string? remoteJson,
+                            out string? remoteLogicJs,
+                            out CustomWidgetLocaleCatalog? remoteLocales))
+                    {
+                        merged.Add(new CustomWidgetCatalogEntry
+                        {
+                            Id = builtIn.Id,
+                            ManifestId = $"deskbox.{normId}",
+                            NameKey = builtIn.NameKey,
+                            DescriptionKey = builtIn.DescriptionKey,
+                            FeatureTagKey = builtIn.FeatureTagKey,
+                            Name = remoteDto.Name,
+                            NameEn = remoteDto.NameEn,
+                            Names = remoteDto.Names,
+                            Description = remoteDto.Description,
+                            DescriptionEn = remoteDto.DescriptionEn,
+                            Descriptions = remoteDto.Descriptions,
+                            FeatureTag = remoteDto.FeatureTag,
+                            FeatureTagEn = remoteDto.FeatureTagEn,
+                            FeatureTags = remoteDto.FeatureTags,
+                            DefaultTitle = !string.IsNullOrWhiteSpace(remoteDto.Name) ? remoteDto.Name : builtIn.DefaultTitle,
+                            IconGlyph = !string.IsNullOrWhiteSpace(remoteDto.IconGlyph) ? remoteDto.IconGlyph : builtIn.IconGlyph,
+                            BadgeColorHex = !string.IsNullOrWhiteSpace(remoteDto.BadgeColorHex) ? remoteDto.BadgeColorHex : builtIn.BadgeColorHex,
+                            Version = remoteDto.Version,
+                            MinSchemaVersion = remoteDto.MinSchemaVersion,
+                            MinAppVersion = remoteDto.MinAppVersion,
+                            DefaultWidth = remoteDto.DefaultWidth > 0 ? remoteDto.DefaultWidth : builtIn.DefaultWidth,
+                            DefaultHeight = remoteDto.DefaultHeight > 0 ? remoteDto.DefaultHeight : builtIn.DefaultHeight,
+                            ManifestJson = remoteJson,
+                            LogicJs = remoteLogicJs,
+                            Locales = remoteLocales,
+                            IsRemoteOnly = false,
+                            IsRemoteUpgraded = true
+                        });
+                        continue;
+                    }
                 }
             }
 
@@ -541,13 +581,15 @@ public sealed class CustomWidgetRemoteCatalogService
             string? remoteJson = null;
             string? remoteLogicJs = null;
             CustomWidgetLocaleCatalog? remoteLocales = null;
-            bool hasValidBundle = !requiresUpgrade && TryBuildValidatedBundle(
-                remoteDto,
-                fallbackLocales: null,
-                fallbackLogicJs: null,
-                out remoteJson,
-                out remoteLogicJs,
-                out remoteLocales);
+            bool hasValidBundle = !requiresUpgrade &&
+                VerifyRemoteEntrySignature(remoteDto) &&
+                TryBuildValidatedBundle(
+                    remoteDto,
+                    fallbackLocales: null,
+                    fallbackLogicJs: null,
+                    out remoteJson,
+                    out remoteLogicJs,
+                    out remoteLocales);
 
             // Only show a remote-only entry if it either has a valid full bundle or explicitly flags a client upgrade
             if (!requiresUpgrade && !hasValidBundle)
@@ -558,6 +600,10 @@ public sealed class CustomWidgetRemoteCatalogService
             if (requiresUpgrade)
             {
                 remoteJson = ExtractInlineOrCachedManifestJson(remoteDto);
+                if (!VerifyRemoteEntrySignature(remoteDto))
+                {
+                    continue;
+                }
             }
 
             consumedIds.Add(normId);
@@ -591,6 +637,11 @@ public sealed class CustomWidgetRemoteCatalogService
                 IsRemoteOnly = true,
                 IsRemoteUpgraded = false
             });
+        }
+
+        lock (_snapshotLock)
+        {
+            _cachedMergedTemplates = (remoteItems, merged);
         }
 
         return merged;
@@ -686,8 +737,9 @@ public sealed class CustomWidgetRemoteCatalogService
         string normId = NormalizeTemplateId(existingId);
         IReadOnlyList<CustomWidgetRemoteCatalogItemDto> remoteItems = EnsureSnapshotLoaded();
         CustomWidgetRemoteCatalogItemDto? match = remoteItems.FirstOrDefault(item =>
-            string.Equals(NormalizeTemplateId(item.Id), normId, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(NormalizeTemplateId(item.ManifestId), normId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(NormalizeTemplateId(item.Id), normId, StringComparison.OrdinalIgnoreCase) &&
+            (string.IsNullOrWhiteSpace(item.ManifestId) ||
+             string.Equals(NormalizeTemplateId(item.ManifestId), normId, StringComparison.OrdinalIgnoreCase)));
         if (match is null ||
             match.Deprecated ||
             CustomWidgetManifestParser.RequiresNewerClient(match.MinSchemaVersion, match.MinAppVersion, out _))
@@ -696,6 +748,13 @@ public sealed class CustomWidgetRemoteCatalogService
         }
 
         if (!IsStrictlyNewerVersion(match.Version, existingVersion))
+        {
+            return false;
+        }
+
+        // Supply-chain gate: unsigned or badly signed entries never auto-upgrade a
+        // widget, even when the catalog came over HTTPS from an official origin.
+        if (!VerifyRemoteEntrySignature(match))
         {
             return false;
         }
@@ -714,13 +773,6 @@ public sealed class CustomWidgetRemoteCatalogService
                 out string? candidateLogicJs,
                 out CustomWidgetLocaleCatalog? candidateLocales) ||
             string.IsNullOrWhiteSpace(candidateJson))
-        {
-            return false;
-        }
-
-        // Supply-chain gate: unsigned or badly signed entries never auto-upgrade a
-        // widget, even when the catalog came over HTTPS from an official origin.
-        if (!CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyEntry(match, candidateJson, candidateLogicJs, candidateLocales))
         {
             return false;
         }
@@ -779,8 +831,11 @@ public sealed class CustomWidgetRemoteCatalogService
             nowTicks = DateTimeOffset.UtcNow.UtcTicks;
             Interlocked.Exchange(ref _lastRefreshAttemptUtcTicks, nowTicks);
             CustomWidgetRemoteCatalogCacheMeta meta = ReadCacheMeta();
+            string currentAppVer = CustomWidgetManifestParser.CurrentAppVersion.ToString();
+            bool sameClientVersion = string.Equals(meta.HydratedByAppVersion, currentAppVer, StringComparison.OrdinalIgnoreCase);
 
             if (!force &&
+                sameClientVersion &&
                 meta.LastCheckedUtcTicks > 0 &&
                 nowTicks - meta.LastCheckedUtcTicks < RefreshMinInterval.Ticks &&
                 File.Exists(_catalogCachePath))
@@ -809,7 +864,7 @@ public sealed class CustomWidgetRemoteCatalogService
                         requireTrustedOfficialHost: true,
                         configureRequest: req =>
                         {
-                            if (force)
+                            if (force || !sameClientVersion)
                             {
                                 req.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
                             }
@@ -872,6 +927,9 @@ public sealed class CustomWidgetRemoteCatalogService
                 }
             }
 
+            Interlocked.Exchange(
+                ref _lastRefreshAttemptUtcTicks,
+                nowTicks - RefreshMinInterval.Ticks + OfflineRetryBackoff.Ticks);
             return new CustomWidgetCatalogSyncResult(
                 CustomWidgetCatalogSyncStatus.OfflineOrFailed,
                 ChangedCount: 0,
@@ -927,16 +985,46 @@ public sealed class CustomWidgetRemoteCatalogService
             return (false, 0, beforeFingerprints.Count);
         }
 
+        IReadOnlyList<CustomWidgetRemoteCatalogItemDto> previousVerifiedItems = EnsureSnapshotLoaded();
+        var previousByNormId = new Dictionary<string, CustomWidgetRemoteCatalogItemDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (CustomWidgetRemoteCatalogItemDto prev in previousVerifiedItems)
+        {
+            string prevNorm = NormalizeTemplateId(prev.Id);
+            if (!string.IsNullOrWhiteSpace(prevNorm))
+            {
+                previousByNormId[prevNorm] = prev;
+            }
+        }
+
+        bool usingDefaultVerifier = _signatureVerifier == VerifyEntryDefault;
         bool anySubArtifactFetchFailed = false;
         var persistedBundleItemIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var acceptedWidgets = new List<CustomWidgetRemoteCatalogItemDto>(doc.Widgets.Count);
 
         foreach (CustomWidgetRemoteCatalogItemDto item in doc.Widgets)
         {
+            string normItemId = NormalizeTemplateId(item.Id);
+            if (string.IsNullOrWhiteSpace(normItemId))
+            {
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(item.ManifestJson) &&
                 item.Manifest is { ValueKind: JsonValueKind.Object } inlineElement)
             {
                 item.ManifestJson = inlineElement.GetRawText();
                 item.Manifest = null;
+            }
+
+            if (usingDefaultVerifier &&
+                (string.IsNullOrWhiteSpace(item.ContentSha256) || string.IsNullOrWhiteSpace(item.Signature)))
+            {
+                if (previousByNormId.TryGetValue(normItemId, out CustomWidgetRemoteCatalogItemDto? preservedUnsigned))
+                {
+                    acceptedWidgets.Add(preservedUnsigned);
+                }
+
+                continue;
             }
 
             bool requiresUpgrade = CustomWidgetManifestParser.RequiresNewerClient(
@@ -1071,6 +1159,20 @@ public sealed class CustomWidgetRemoteCatalogService
                 }
             }
 
+            if (item.Deprecated || requiresUpgrade)
+            {
+                if (VerifyRemoteEntrySignature(item))
+                {
+                    acceptedWidgets.Add(item);
+                }
+                else if (previousByNormId.TryGetValue(normItemId, out CustomWidgetRemoteCatalogItemDto? preservedMeta))
+                {
+                    acceptedWidgets.Add(preservedMeta);
+                }
+
+                continue;
+            }
+
             if (!string.IsNullOrWhiteSpace(item.ManifestJson))
             {
                 CustomWidgetLocaleCatalog? extractedLocales = BuildCatalogFromDto(item.Locales, item.BaseLocale);
@@ -1084,6 +1186,17 @@ public sealed class CustomWidgetRemoteCatalogService
                     item.LogicJs = null;
                 }
 
+                // Verify cryptographic signature BEFORE executing QuickJS dry-run or overwriting cached bundle artifacts.
+                if (!_signatureVerifier(item, upgradedManifest, item.LogicJs, extractedLocales))
+                {
+                    if (previousByNormId.TryGetValue(normItemId, out CustomWidgetRemoteCatalogItemDto? preservedSigned))
+                    {
+                        acceptedWidgets.Add(preservedSigned);
+                    }
+
+                    continue;
+                }
+
                 CustomWidgetWorkspaceValidationResult validation = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
                     upgradedManifest,
                     item.LogicJs,
@@ -1091,9 +1204,11 @@ public sealed class CustomWidgetRemoteCatalogService
                     runOnInitDryRun: true);
                 if (!validation.IsValid)
                 {
-                    item.ManifestJson = null;
-                    item.LogicJs = null;
-                    item.Locales = null;
+                    if (previousByNormId.TryGetValue(normItemId, out CustomWidgetRemoteCatalogItemDto? preservedValid))
+                    {
+                        acceptedWidgets.Add(preservedValid);
+                    }
+
                     continue;
                 }
 
@@ -1112,6 +1227,23 @@ public sealed class CustomWidgetRemoteCatalogService
                 {
                     persistedBundleItemIds.Add(item.Id);
                 }
+
+                acceptedWidgets.Add(item);
+            }
+            else if (previousByNormId.TryGetValue(normItemId, out CustomWidgetRemoteCatalogItemDto? preservedMissing))
+            {
+                acceptedWidgets.Add(preservedMissing);
+            }
+        }
+
+        // Preserve bundle cache indicators for any retained previously-hydrated items.
+        foreach (CustomWidgetRemoteCatalogItemDto retained in acceptedWidgets)
+        {
+            string safeKey = SanitizeCacheKey(NormalizeTemplateId(retained.Id));
+            if (!string.IsNullOrWhiteSpace(safeKey) &&
+                Directory.Exists(Path.Combine(_bundlesCacheDirectory, safeKey)))
+            {
+                persistedBundleItemIds.Add(retained.Id);
             }
         }
 
@@ -1120,7 +1252,7 @@ public sealed class CustomWidgetRemoteCatalogService
         {
             SchemaVersion = doc.SchemaVersion,
             UpdatedAtUtc = doc.UpdatedAtUtc,
-            Widgets = doc.Widgets.Select(w => persistedBundleItemIds.Contains(w.Id)
+            Widgets = acceptedWidgets.Select(w => persistedBundleItemIds.Contains(w.Id)
                 ? CloneWithoutHydratedArtifacts(w)
                 : w).ToList()
         };
@@ -1137,7 +1269,7 @@ public sealed class CustomWidgetRemoteCatalogService
 
         lock (_snapshotLock)
         {
-            _cachedRemoteItems = doc.Widgets;
+            _cachedRemoteItems = acceptedWidgets;
         }
 
         Dictionary<string, string> afterFingerprints = BuildMergedTemplateFingerprints();
@@ -1289,6 +1421,7 @@ public sealed class CustomWidgetRemoteCatalogService
     {
         try
         {
+            meta.HydratedByAppVersion ??= CustomWidgetManifestParser.CurrentAppVersion.ToString();
             Directory.CreateDirectory(_cacheDirectory);
             string json = JsonSerializer.Serialize(
                 meta,
@@ -1364,6 +1497,8 @@ public sealed class CustomWidgetRemoteCatalogService
             BundleUrl = src.BundleUrl,
             ManifestUrl = src.ManifestUrl,
             LogicUrl = src.LogicUrl,
+            ContentSha256 = src.ContentSha256,
+            Signature = src.Signature,
             BaseLocale = src.BaseLocale
         };
 
@@ -1600,6 +1735,11 @@ public sealed class CustomWidgetRemoteCatalogService
         if (trimmed.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase))
         {
             return trimmed["deskbox.".Length..];
+        }
+
+        if (trimmed.StartsWith("starter.", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed["starter.".Length..];
         }
 
         return trimmed;

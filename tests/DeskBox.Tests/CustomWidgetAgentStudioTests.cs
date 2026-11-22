@@ -320,7 +320,7 @@ public sealed class CustomWidgetAgentStudioTests
     }
 
     [Fact]
-    public async Task TrayMenu_IncludesCreateAiWidgetEntryWhenCallbackProvided()
+    public void TrayMenu_OmitsWorkshopEntry_SoStudioOpensFromFeatureWidgetsSettings()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), $"deskbox-tray-ai-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -328,7 +328,6 @@ public sealed class CustomWidgetAgentStudioTests
         {
             var settingsService = new SettingsService(Path.Combine(tempDir, "settings.json"));
             var localization = new LocalizationService(settingsService);
-            bool invoked = false;
 
             IReadOnlyList<DeskBox.Platform.NativeTrayMenuEntry> entries = DeskBox.App.BuildTrayMenuEntriesCore(
                 localization,
@@ -342,17 +341,11 @@ public sealed class CustomWidgetAgentStudioTests
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
                 () => Task.CompletedTask,
-                () => Task.CompletedTask,
-                () =>
-                {
-                    invoked = true;
-                    return Task.CompletedTask;
-                });
+                () => Task.CompletedTask);
 
-            DeskBox.Platform.NativeTrayMenuEntry aiEntry = entries.Single(
+            Assert.DoesNotContain(
+                entries,
                 e => !e.IsSeparator && e.Text == localization.T("Common.CreateAiWidget"));
-            await aiEntry.Action!();
-            Assert.True(invoked);
         }
         finally
         {
@@ -1202,7 +1195,8 @@ public sealed class CustomWidgetAgentStudioTests
                 new StubAiHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent(remoteCatalogJson, Encoding.UTF8, "application/json")
-                })));
+                })),
+                signatureVerifier: static (_, _, _, _) => true);
 
             Assert.True(await onlineCatalog.RefreshInBackgroundAsync(force: true));
             IReadOnlyList<CustomWidgetCatalogEntry> merged = onlineCatalog.GetMergedOfficialTemplates();
@@ -1611,7 +1605,8 @@ public sealed class CustomWidgetAgentStudioTests
                 {
                     Content = new StringContent(validRemoteJson, Encoding.UTF8, "application/json")
                 })),
-                currentAppVersionOverride: new Version(1, 6, 0, 0));
+                currentAppVersionOverride: new Version(1, 6, 0, 0),
+                signatureVerifier: static _ => true);
 
             Assert.True(await onlineService.RefreshInBackgroundAsync(force: true));
             CustomWidgetEffectivePromptPack pack = onlineService.GetEffectivePromptPack();
@@ -1636,7 +1631,8 @@ public sealed class CustomWidgetAgentStudioTests
             var coldOfflineService = new CustomWidgetRemotePromptService(
                 cacheDir,
                 new StubAiHttpMessageHandler((_, _) => throw new HttpRequestException("Offline")),
-                currentAppVersionOverride: new Version(1, 6, 0, 0));
+                currentAppVersionOverride: new Version(1, 6, 0, 0),
+                signatureVerifier: static _ => true);
             Assert.False(await coldOfflineService.RefreshInBackgroundAsync(force: true));
             CustomWidgetEffectivePromptPack hydratedPack = coldOfflineService.GetEffectivePromptPack();
             Assert.True(hydratedPack.IsRemoteOverride);
@@ -1688,7 +1684,8 @@ public sealed class CustomWidgetAgentStudioTests
                         Content = new StringContent("""{"schemaVersion":1,"promptVersion":1}""", Encoding.UTF8, "application/json")
                     });
                 }),
-                currentAppVersionOverride: new Version(1, 6, 0, 0));
+                currentAppVersionOverride: new Version(1, 6, 0, 0),
+                signatureVerifier: static _ => true);
             Assert.False(await rollbackService.RefreshInBackgroundAsync(force: true));
             Assert.Equal(1, baselineCalls);
             CustomWidgetEffectivePromptPack retiredPack = rollbackService.GetEffectivePromptPack();
@@ -3118,7 +3115,7 @@ public sealed class CustomWidgetAgentStudioTests
         Assert.DoesNotContain("PreferredMinimumWidth", studioWindowSource, StringComparison.Ordinal);
         Assert.Contains("InstallMinimumSizeHook();", studioWindowSource, StringComparison.Ordinal);
         Assert.Contains("DisplayTopologyChanged += OnDisplayTopologyChanged;", studioWindowSource, StringComparison.Ordinal);
-        Assert.Contains("titleBar.ButtonHoverForegroundColor =", studioWindowSource, StringComparison.Ordinal);
+        Assert.Contains("WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);", studioWindowSource, StringComparison.Ordinal);
 
         string studioXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/CustomWidgetStudioWindow.xaml"));

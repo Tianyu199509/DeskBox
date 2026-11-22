@@ -57,6 +57,15 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
     public CustomWidgetSettingsSection()
     {
         InitializeComponent();
+        StudioStatusInfoBar.RegisterPropertyChangedCallback(
+            InfoBar.IsOpenProperty,
+            static (sender, _) =>
+            {
+                if (sender is InfoBar bar)
+                {
+                    bar.Visibility = bar.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+                }
+            });
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ActualThemeChanged += OnActualThemeChanged;
@@ -445,8 +454,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             return emojiTb;
         }
 
-        string mappedKind = WidgetTitleIconKindNames.FromLegacyGlyph(glyph);
-        if (mappedKind != WidgetTitleIconKindNames.Default || string.IsNullOrWhiteSpace(glyph) || glyph == "\uE71D")
+        string safeGlyph = CustomWidgetSemanticIcons.NormalizeFluentGlyphForOs(
+            string.IsNullOrWhiteSpace(glyph) ? "\uE71D" : glyph,
+            WindowsCompatibilityService.IsWindows11OrLater);
+        string mappedKind = WidgetTitleIconKindNames.FromLegacyGlyph(safeGlyph);
+        if (mappedKind != WidgetTitleIconKindNames.Default || string.IsNullOrWhiteSpace(glyph) || safeGlyph == "\uE71D")
         {
             return new Controls.WidgetTitleIcon
             {
@@ -455,7 +467,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                     : WidgetTitleIconKindNames.Custom,
                 Mode = WidgetTitleIconModeNames.Color,
                 IconSize = 16,
-                Glyph = string.IsNullOrWhiteSpace(glyph) ? "\uE71D" : glyph,
+                Glyph = safeGlyph,
                 IsHitTestVisible = false,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
@@ -464,7 +476,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
         return new FontIcon
         {
-            Glyph = glyph,
+            Glyph = safeGlyph,
             FontSize = glyphFontSize,
             Foreground = fallbackForeground,
             HorizontalAlignment = HorizontalAlignment.Center,

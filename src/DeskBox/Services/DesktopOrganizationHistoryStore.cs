@@ -18,6 +18,7 @@ internal sealed partial class DesktopOrganizationHistoryJsonContext : JsonSerial
 
 internal sealed class DesktopOrganizationHistoryData
 {
+    public int Version { get; set; } = 1;
     public List<OrganizationHistoryEntry> Items { get; set; } = [];
 }
 
@@ -69,15 +70,30 @@ public sealed class DesktopOrganizationHistoryStore
         // tried next and restored as primary, and only a total miss falls
         // through — the same protection settings.json had when the receipts
         // lived inside it.
+        bool unparseableFuture = false;
         ResilientJsonLoadResult<DesktopOrganizationHistoryData> result =
             await ResilientJsonStore.LoadWithResultAsync(
                 _historyPath,
-                static json => JsonSerializer.Deserialize(
+                json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                    _historyPath,
                     json,
-                    DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData)
-                    ?? new DesktopOrganizationHistoryData(),
+                    currentVersion: 1,
+                    raw => JsonSerializer.Deserialize(
+                        raw,
+                        DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData),
+                    static d => d.Version,
+                    static d => d ?? new DesktopOrganizationHistoryData(),
+                    static ver => new DesktopOrganizationHistoryData { Version = ver },
+                    out unparseableFuture),
                 static () => new DesktopOrganizationHistoryData(),
                 "DesktopOrganizationHistory");
+
+        _hasUnparseableFutureSchema = unparseableFuture;
+        if (_hasUnparseableFutureSchema)
+        {
+            Entries = [];
+            return true;
+        }
 
         if (result.Source is ResilientJsonLoadSource.Primary or ResilientJsonLoadSource.Backup)
         {
@@ -95,13 +111,23 @@ public sealed class DesktopOrganizationHistoryStore
         return Entries.Count == 0 || await SaveCheckedAsync();
     }
 
+    private bool _hasUnparseableFutureSchema;
+
     /// <summary>
     /// Persists via <see cref="ResilientJsonStore"/>: unique temp file, atomic
     /// replace, verified <c>.bak</c> backup, and the in-place fallback — the
     /// same commit protocol settings.json had.
     /// </summary>
-    public Task SaveAsync() =>
-        ResilientJsonStore.SaveAsync(_historyPath, WriteTempFileAsync);
+    public Task SaveAsync()
+    {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[DesktopOrganizationHistoryStore] Skipping write to preserve unparseable newer schema document '{_historyPath}'.");
+            return Task.CompletedTask;
+        }
+
+        return ResilientJsonStore.SaveAsync(_historyPath, WriteTempFileAsync);
+    }
 
 
     /// <summary>
@@ -111,6 +137,11 @@ public sealed class DesktopOrganizationHistoryStore
     /// </summary>
     public async Task<bool> SaveCheckedAsync()
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            return false;
+        }
+
         try
         {
             await SaveAsync();

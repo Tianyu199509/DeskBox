@@ -27,7 +27,15 @@ public static class AttachmentStorageService
         Directory.CreateDirectory(managedDirectory);
         string destinationPath = FileService.GetAvailablePath(
             Path.Combine(managedDirectory, Path.GetFileName(normalizedSourcePath)));
-        await Task.Run(() => File.Copy(normalizedSourcePath, destinationPath, overwrite: false));
+        try
+        {
+            await Task.Run(() => ClipboardStorageFileOps.CopyFileOverwrite(normalizedSourcePath, destinationPath));
+        }
+        catch
+        {
+            return null;
+        }
+
         return CreateAttachment(destinationPath, TodoAttachment.ManagedStorageMode);
     }
 

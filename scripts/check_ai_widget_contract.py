@@ -297,7 +297,7 @@ def main() -> int:
 
     with PROMPT_PACK.open("r", encoding="utf-8-sig") as f:
         pack = json.load(f)
-    placeholder = len(pack) <= 4 and "overrides" not in pack
+    placeholder = int(pack.get("promptVersion", 2) or 2) <= 2 and "overrides" not in pack
 
     print(f"MCP/CLI 工具: {len(tools)}；语言文件: {len(catalogs)}")
     print(f"远程 Prompt Pack: {'占位（OTA 覆盖未启用）' if placeholder else '含覆盖内容'}")

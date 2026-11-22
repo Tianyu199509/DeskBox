@@ -25,6 +25,7 @@ public sealed partial class CustomWidgetNativeRenderer
         public int IncrementSourceGeneration() => Interlocked.Increment(ref _sourceGeneration);
         public int PosterGeneration { get; set; }
         public MediaSource? AppliedMediaSource { get; set; }
+        public Windows.Storage.Streams.IRandomAccessStream? AppliedMediaStream { get; set; }
         public Windows.Foundation.TypedEventHandler<MediaPlayer, MediaPlayerFailedEventArgs>? MediaFailedHandler { get; set; }
         public bool WasPlayingBeforeSuspend { get; set; }
         public bool IsDisposed
@@ -109,6 +110,8 @@ public sealed partial class CustomWidgetNativeRenderer
         try { slot.Player.Dispose(); } catch { }
         try { slot.AppliedMediaSource?.Dispose(); } catch { }
         slot.AppliedMediaSource = null;
+        try { slot.AppliedMediaStream?.Dispose(); } catch { }
+        slot.AppliedMediaStream = null;
     }
 
     private void ForgetMediaPlayerElement(MediaPlayerElement mpe)
@@ -364,6 +367,18 @@ public sealed partial class CustomWidgetNativeRenderer
                     {
                     }
                 }
+                Windows.Storage.Streams.IRandomAccessStream? mediaStream = slot.AppliedMediaStream;
+                slot.AppliedMediaStream = null;
+                if (mediaStream is not null)
+                {
+                    try
+                    {
+                        mediaStream.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
                 try
                 {
                     mediaElement.Visibility = Visibility.Collapsed;
@@ -494,7 +509,22 @@ public sealed partial class CustomWidgetNativeRenderer
 
                 try
                 {
-                    mediaElement.PosterSource = new BitmapImage(posterUri);
+                    if (posterUri.IsAbsoluteUri && posterUri.IsFile)
+                    {
+                        var posterBitmap = new BitmapImage { DecodePixelWidth = 960 };
+                        mediaElement.PosterSource = posterBitmap;
+                        WidgetImageStreamLoader.Fill(posterBitmap, posterUri.LocalPath, ok =>
+                        {
+                            if (!ok && !slot.IsDisposed && generation == slot.PosterGeneration)
+                            {
+                                try { mediaElement.PosterSource = null; } catch { }
+                            }
+                        });
+                    }
+                    else
+                    {
+                        mediaElement.PosterSource = new BitmapImage(posterUri);
+                    }
                 }
                 catch
                 {
@@ -503,15 +533,19 @@ public sealed partial class CustomWidgetNativeRenderer
 
             void CommitVerifiedMediaUri(Uri mediaUri, CustomWidgetEvaluationContext evalCtx)
             {
+                Windows.Storage.Streams.IRandomAccessStream? nextStream = null;
                 try
                 {
                     mediaElement.Visibility = Visibility.Visible;
                     fallbackStage.Visibility = Visibility.Collapsed;
-                    MediaSource nextSource = MediaSource.CreateFromUri(mediaUri);
+                    MediaSource nextSource = DeskBox.Platform.ClipboardStorageFileOps.CreateMediaSourceFromUri(mediaUri, out nextStream);
                     MediaSource? previousSource = slot.AppliedMediaSource;
+                    Windows.Storage.Streams.IRandomAccessStream? previousStream = slot.AppliedMediaStream;
                     slot.AppliedMediaSource = nextSource;
+                    slot.AppliedMediaStream = nextStream;
                     mediaElement.Source = nextSource;
                     previousSource?.Dispose();
+                    previousStream?.Dispose();
                     if (ResolveMediaBool(spec.AutoPlayExpression, spec.AutoPlay, evalCtx) && !_isMediaPlaybackSuspended)
                     {
                         player.Play();
@@ -519,6 +553,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 }
                 catch
                 {
+                    try { nextStream?.Dispose(); } catch { }
                     ClearMediaSlot();
                 }
             }

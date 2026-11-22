@@ -136,6 +136,98 @@ internal static class DpapiSecretProtector
         }
     }
 
+    internal static unsafe byte[] ProtectBytes(ReadOnlySpan<byte> plainBytes)
+    {
+        if (plainBytes.IsEmpty)
+        {
+            return [];
+        }
+
+        fixed (byte* pIn = plainBytes)
+        {
+            var inBlob = new DataBlob
+            {
+                cbData = plainBytes.Length,
+                pbData = (nint)pIn
+            };
+            if (!CryptProtectData(ref inBlob, null, nint.Zero, nint.Zero, nint.Zero, CryptProtectUiForbidden, out DataBlob outBlob))
+            {
+                int win32Error = Marshal.GetLastWin32Error();
+                throw new CryptographicException(win32Error != 0 ? win32Error : -2147467259);
+            }
+
+            try
+            {
+                if (outBlob.cbData <= 0 || outBlob.pbData == nint.Zero)
+                {
+                    throw new CryptographicException("DPAPI CryptProtectData returned an empty cipher blob.");
+                }
+
+                return new ReadOnlySpan<byte>((void*)outBlob.pbData, outBlob.cbData).ToArray();
+            }
+            finally
+            {
+                if (outBlob.pbData != nint.Zero)
+                {
+                    LocalFree(outBlob.pbData);
+                }
+            }
+        }
+    }
+
+    internal static unsafe bool TryUnprotectBytes(ReadOnlySpan<byte> cipherBytes, out byte[] plainBytes)
+    {
+        plainBytes = [];
+        if (cipherBytes.IsEmpty)
+        {
+            return false;
+        }
+
+        try
+        {
+            fixed (byte* pIn = cipherBytes)
+            {
+                var inBlob = new DataBlob
+                {
+                    cbData = cipherBytes.Length,
+                    pbData = (nint)pIn
+                };
+                if (!CryptUnprotectData(ref inBlob, nint.Zero, nint.Zero, nint.Zero, nint.Zero, CryptProtectUiForbidden, out DataBlob outBlob))
+                {
+                    return false;
+                }
+
+                try
+                {
+                    if (outBlob.cbData <= 0 || outBlob.pbData == nint.Zero)
+                    {
+                        return false;
+                    }
+
+                    plainBytes = new ReadOnlySpan<byte>((void*)outBlob.pbData, outBlob.cbData).ToArray();
+                    return true;
+                }
+                finally
+                {
+                    if (outBlob.pbData != nint.Zero)
+                    {
+                        if (outBlob.cbData > 0)
+                        {
+                            NativeMemory.Clear((void*)outBlob.pbData, (nuint)outBlob.cbData);
+                        }
+
+                        LocalFree(outBlob.pbData);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            plainBytes = [];
+            return false;
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct DataBlob
     {

@@ -147,7 +147,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
         _quickCaptureService.Changed += OnQuickCaptureChanged;
         _appWindow.Changed += AppWindow_Changed;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged += AppTitleBar_ActualThemeChanged;
         Closed += OnWindowClosed;
 
         PopoutMarkdownView.AttachmentResolver = ResolveAttachmentPath;
@@ -592,8 +591,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
 
         try
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-            using var stream = await file.OpenReadAsync();
+            using var stream = DeskBox.Platform.ClipboardStorageFileOps.OpenReadRandomAccessStream(path);
             var bitmap = new BitmapImage { DecodePixelWidth = ImageDecodeWidth };
             await bitmap.SetSourceAsync(stream);
             if (!_isClosed && version == _imageLoadVersion)
@@ -1546,8 +1544,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
         ApplyMaterialSurface();
     }
 
-    private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args) => ApplyTitleBarColors();
-
     private void ApplyWindowChromeBorder()
     {
         if (WindowsCompatibilityService.IsWindows11OrLater)
@@ -1568,7 +1564,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
     {
         bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
         Win32Helper.SetWindowTheme(_hWnd, isDark);
-        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark, syncProcessWideWin10Resources: false);
     }
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
@@ -1949,7 +1945,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _quickCaptureService.Changed -= OnQuickCaptureChanged;
         RootGrid.ActualThemeChanged -= RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= OnWindowClosed;
 
         if (_readerDoubleTappedHandler is not null)

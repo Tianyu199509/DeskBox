@@ -14,14 +14,15 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="8">
         <InfoBar
             x:Name="StudioStatusInfoBar"
             IsClosable="True"
-            IsOpen="False" />
+            IsOpen="False"
+            Visibility="Collapsed" />
 
         <StackPanel x:Name="StudioViewPanel" Spacing="6">
-            <StackPanel Margin="4,4,4,2" Spacing="2">
+            <StackPanel Margin="4,0,4,0" Spacing="2">
                 <TextBlock
                     x:Name="MyWidgetsSectionHeaderText"
                     Style="{StaticResource SettingsSubsectionTitleTextStyle}"

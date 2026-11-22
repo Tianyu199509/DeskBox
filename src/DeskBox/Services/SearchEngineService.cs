@@ -1232,7 +1232,7 @@ public sealed class SearchEngineService : IDisposable
                 string? dims = clip.ImageWidth > 0 && clip.ImageHeight > 0
                     ? $"{clip.ImageWidth} × {clip.ImageHeight} px"
                     : null;
-                string? thumbPath = _clipboardPreviewImageResolver?.Invoke(clip);
+                string? thumbPath = clip.IsSensitive ? null : _clipboardPreviewImageResolver?.Invoke(clip);
                 return (dims, thumbPath, null, null, thumbPath);
             }
 

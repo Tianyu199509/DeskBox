@@ -1305,6 +1305,7 @@ public sealed partial class QuickCaptureService
                 }
             }
 
+            byte[] hmacKey = clipboardStore.GetOrCreateContentHashKey();
             int importedCount = 0;
             foreach (QuickCaptureItem recent in _data.RecentItems)
             {
@@ -1329,8 +1330,8 @@ public sealed partial class QuickCaptureService
                         byte[] imgBytes = await File.ReadAllBytesAsync(sourceImagePath, cancellationToken).ConfigureAwait(false);
                         if (imgBytes.Length > 0)
                         {
-                            string sha256 = Convert.ToHexStringLower(SHA256.HashData(imgBytes));
-                            string contentHash = $"img:{sha256}";
+                            string contentHash = Features.Clipboard.ClipboardContentHashing.ComputeImageContentHash(imgBytes, hmacKey);
+                            string sha256 = contentHash[(contentHash.LastIndexOf(':') + 1)..];
                             if (existingContentHashes.Add(contentHash))
                             {
                                 string ext = NormalizeImageExtension(sourceImagePath);
@@ -1400,7 +1401,7 @@ public sealed partial class QuickCaptureService
                 }
 
                 string normalizedKey = trimmed.Replace("\r\n", "\n", StringComparison.Ordinal);
-                string textHash = $"txt:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey)))}";
+                string textHash = Features.Clipboard.ClipboardContentHashing.ComputeNormalizedTextContentHash(trimmed, hmacKey);
                 if (!existingContentHashes.Add(textHash) || !existingNormalizedTexts.Add(normalizedKey))
                 {
                     continue;
@@ -2454,7 +2455,7 @@ public sealed partial class QuickCaptureService
 
     private async Task<string> SaveImageFileAsync(string sourceImagePath)
     {
-        byte[] bytes = await File.ReadAllBytesAsync(sourceImagePath);
+        byte[] bytes = await DeskBox.Platform.ClipboardStorageFileOps.ReadDecodedMediaBytesAsync(sourceImagePath);
         string contentHash = ComputeContentHash(bytes);
         string extension = NormalizeImageExtension(sourceImagePath);
         Directory.CreateDirectory(_store.ImageDirectory);
@@ -2486,8 +2487,7 @@ public sealed partial class QuickCaptureService
         try
         {
             Directory.CreateDirectory(_store.ThumbnailDirectory);
-            var file = await StorageFile.GetFileFromPathAsync(imagePath);
-            using IRandomAccessStream inputStream = await file.OpenAsync(FileAccessMode.Read);
+            using IRandomAccessStream inputStream = DeskBox.Platform.ClipboardStorageFileOps.OpenReadRandomAccessStream(imagePath);
             var decoder = await BitmapDecoder.CreateAsync(inputStream);
             var transform = new BitmapTransform
             {

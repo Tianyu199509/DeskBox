@@ -2223,11 +2223,21 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 return;
             }
 
-            ClipboardStorageFileOps.CopyFileOverwrite(sourcePath, destination.Path);
-            RaiseFeedback(
-                _localizationService.T("Clipboard.Feedback.ImageSaved"),
-                WidgetFeedbackSeverity.Info,
-                "clipboard-image-saved");
+            try
+            {
+                await Task.Run(() => ClipboardStorageFileOps.CopyFileOverwrite(sourcePath, destination.Path));
+                RaiseFeedback(
+                    _localizationService.T("Clipboard.Feedback.ImageSaved"),
+                    WidgetFeedbackSeverity.Info,
+                    "clipboard-image-saved");
+            }
+            catch
+            {
+                RaiseFeedback(
+                    _localizationService.T("Clipboard.Feedback.CopyFailed"),
+                    WidgetFeedbackSeverity.Warning,
+                    "clipboard-image-save-failed");
+            }
         }
     }
 
@@ -2483,18 +2493,36 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 : item.Model.FilePaths.FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(fullPath) && File.Exists(fullPath))
             {
-                var bitmap = new BitmapImage
-                {
-                    DecodePixelWidth = 640
-                };
-                bitmap.UriSource = new Uri(fullPath);
-
                 peekImageElement = new Image
                 {
-                    Source = bitmap,
                     Stretch = Stretch.Uniform,
                     MaxHeight = 256
                 };
+                Image targetImage = peekImageElement;
+                string previewFile = fullPath;
+                _ = PopulatePeekImageAsync(targetImage, previewFile, peekToken);
+
+                static async Task PopulatePeekImageAsync(Image img, string path, CancellationToken ct)
+                {
+                    try
+                    {
+                        if (ct.IsCancellationRequested || new FileInfo(path).Length > 64L * 1024 * 1024)
+                        {
+                            return;
+                        }
+
+                        using Windows.Storage.Streams.IRandomAccessStream stream = ClipboardStorageFileOps.OpenReadRandomAccessStream(path);
+                        var bmp = new BitmapImage { DecodePixelWidth = 640 };
+                        await bmp.SetSourceAsync(stream).AsTask(ct);
+                        if (!ct.IsCancellationRequested)
+                        {
+                            img.Source = bmp;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
 
                 var imageBorder = new Border
                 {
@@ -3058,7 +3086,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                              File.Exists(p) ||
                              Directory.Exists(p))));
                     }
-                    else if (entry.Kind == ClipboardItemKind.Image)
+                    else if (entry.Kind == ClipboardItemKind.Image && !entry.Model.IsSensitive)
                     {
                         string? imgPath = ViewModel.ResolveOriginalImagePath(entry.Model);
                         if (!string.IsNullOrWhiteSpace(imgPath) && File.Exists(imgPath))
@@ -3180,57 +3208,42 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                         return;
                     }
 
-                    string dragImagePath = imagePath;
-                    if (DeskBox.Services.AppDistributionService.Current.IsPackaged ||
-                        DeskBox.Services.AppDistributionService.Current.IsMicrosoftStore)
+                    if (!item.Model.IsSensitive)
                     {
-                        try
+                        string dragImagePath = imagePath;
+                        if (DeskBox.Services.AppDistributionService.Current.IsPackaged ||
+                            DeskBox.Services.AppDistributionService.Current.IsMicrosoftStore)
                         {
-                            dragImagePath = DeskBox.Platform.StoreUserAssetMigrationFileOps
-                                .StageTemporaryDragExportCopy(imagePath, "ClipboardDragExports");
+                            try
+                            {
+                                dragImagePath = DeskBox.Platform.StoreUserAssetMigrationFileOps
+                                    .StageTemporaryDragExportCopy(imagePath, "ClipboardDragExports");
+                            }
+                            catch
+                            {
+                                dragImagePath = imagePath;
+                            }
                         }
-                        catch
-                        {
-                            dragImagePath = imagePath;
-                        }
+
+                        FileService fileService = App.Current?.FileService ?? new FileService();
+                        _ = FileItemDragPackage.TryPreparePaths(
+                            e.Data,
+                            [dragImagePath],
+                            fileService.GetStorageItems,
+                            static paths => Path.GetFileName(paths[0]),
+                            "clipboard-image",
+                            out _);
                     }
 
-                    FileService fileService = App.Current?.FileService ?? new FileService();
-                    _ = FileItemDragPackage.TryPreparePaths(
-                        e.Data,
-                        [dragImagePath],
-                        fileService.GetStorageItems,
-                        static paths => Path.GetFileName(paths[0]),
-                        "clipboard-image",
-                        out _);
                     e.Data.RequestedOperation = DataPackageOperation.Copy;
 
-                    string exportImagePath = dragImagePath;
+                    string sourceImagePath = imagePath;
                     e.Data.SetDataProvider(StandardDataFormats.Bitmap, async request =>
                     {
                         DataProviderDeferral deferral = request.GetDeferral();
                         try
                         {
-                            try
-                            {
-                                StorageFile file = await StorageFile.GetFileFromPathAsync(exportImagePath);
-                                request.SetData(RandomAccessStreamReference.CreateFromFile(file));
-                            }
-                            catch
-                            {
-                                byte[] bytes = await File.ReadAllBytesAsync(exportImagePath);
-                                var memStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-                                using (var writer = new Windows.Storage.Streams.DataWriter(memStream.GetOutputStreamAt(0)))
-                                {
-                                    writer.WriteBytes(bytes);
-                                    await writer.StoreAsync();
-                                    await writer.FlushAsync();
-                                    writer.DetachStream();
-                                }
-
-                                memStream.Seek(0);
-                                request.SetData(RandomAccessStreamReference.CreateFromStream(memStream));
-                            }
+                            request.SetData(await DeskBox.Platform.ClipboardStorageFileOps.CreateInMemoryBitmapStreamRefAsync(sourceImagePath));
                         }
                         catch (Exception ex)
                         {

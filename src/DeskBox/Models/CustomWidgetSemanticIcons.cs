@@ -320,6 +320,9 @@ public static class CustomWidgetSemanticIcons
         {
             "\uED1A" => "\uE890", // Win11 Fluent Hide -> Win10 MDL2 View fallback
             "\uE7C2" => "\uE8AB", // Win11 Fluent Move -> Win10 MDL2 Switch fallback
+            "\uF8AC" => "\uE892", // Win11 BackSolidBold -> Win10 MDL2 Previous
+            "\uF8AD" => "\uE893", // Win11 ForwardSolidBold -> Win10 MDL2 Next
+            "\uF8AE" => "\uE769", // Win11 PauseBold -> Win10 MDL2 Pause
             _ => mapped
         };
     }

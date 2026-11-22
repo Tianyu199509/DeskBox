@@ -1251,7 +1251,8 @@ public sealed partial class SearchPopupWindow
         try
         {
             bool cut = operation == DataPackageOperation.Move &&
-                !Platform.DriveMediaInterop.IsProtectedDragOutSource(paths);
+                !Platform.DriveMediaInterop.IsProtectedDragOutSource(paths) &&
+                !Services.DragDrop.StoreVirtualizedPathPolicy.IsCopyOnlyVirtualizedSource(paths);
             if (!ShellClipboardHelper.TrySetFileDropList(paths, cut))
             {
                 var data = new DataPackage
@@ -1564,7 +1565,8 @@ public sealed partial class SearchPopupWindow
         try
         {
             bool cut = operation == DataPackageOperation.Move &&
-                !Platform.DriveMediaInterop.IsProtectedDragOutSource([item.DetailPath]);
+                !Platform.DriveMediaInterop.IsProtectedDragOutSource([item.DetailPath]) &&
+                !Services.DragDrop.StoreVirtualizedPathPolicy.IsCopyOnlyVirtualizedSource([item.DetailPath]);
             if (!ShellClipboardHelper.TrySetFileDropList([item.DetailPath], cut))
             {
                 var data = new DataPackage
@@ -1883,18 +1885,20 @@ public sealed partial class SearchPopupWindow
     /// </summary>
     private static async Task SetDragPayloadAsync(DataPackage data, string path)
     {
+        string resolved = Services.DragDrop.StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(path);
+        string targetPath = !string.IsNullOrWhiteSpace(resolved) ? resolved : path;
         try
         {
-            if (Directory.Exists(path))
+            if (Directory.Exists(targetPath))
             {
-                var folder = await StorageFolder.GetFolderFromPathAsync(path);
+                var folder = await StorageFolder.GetFolderFromPathAsync(targetPath);
                 data.SetStorageItems(new IStorageItem[] { folder });
                 return;
             }
 
-            if (File.Exists(path))
+            if (File.Exists(targetPath))
             {
-                var file = await StorageFile.GetFileFromPathAsync(path);
+                var file = await StorageFile.GetFileFromPathAsync(targetPath);
                 data.SetStorageItems(new IStorageItem[] { file });
                 return;
             }
@@ -1904,7 +1908,7 @@ public sealed partial class SearchPopupWindow
             // Fall through to a plain-text path payload.
         }
 
-        data.SetText(path);
+        data.SetText(targetPath);
     }
 
     private static async Task SetDragPayloadAsync(DataPackage data, List<string> paths)
@@ -1913,24 +1917,26 @@ public sealed partial class SearchPopupWindow
         var fallbackText = new StringBuilder();
         foreach (var path in paths)
         {
+            string resolved = Services.DragDrop.StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(path);
+            string targetPath = !string.IsNullOrWhiteSpace(resolved) ? resolved : path;
             try
             {
-                if (Directory.Exists(path))
+                if (Directory.Exists(targetPath))
                 {
-                    items.Add(await StorageFolder.GetFolderFromPathAsync(path));
+                    items.Add(await StorageFolder.GetFolderFromPathAsync(targetPath));
                 }
-                else if (File.Exists(path))
+                else if (File.Exists(targetPath))
                 {
-                    items.Add(await StorageFile.GetFileFromPathAsync(path));
+                    items.Add(await StorageFile.GetFileFromPathAsync(targetPath));
                 }
                 else
                 {
-                    fallbackText.AppendLine(path);
+                    fallbackText.AppendLine(targetPath);
                 }
             }
             catch
             {
-                fallbackText.AppendLine(path);
+                fallbackText.AppendLine(targetPath);
             }
         }
 

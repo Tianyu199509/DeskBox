@@ -33,11 +33,34 @@ public sealed partial class RecoveryOfferWindow : Window
 
     public RecoveryOfferWindow(
         LocalizationService localizationService,
-        RecoverySnapshotCandidate candidate)
+        RecoverySnapshotCandidate candidate,
+        ThemeService? themeService = null)
     {
         InitializeComponent();
 
+        _hWnd = WindowNative.GetWindowHandle(this);
+        if (themeService is not null)
+        {
+            themeService.TrackWindow(this);
+        }
+        else
+        {
+            bool isDark = Win32Helper.IsSystemDarkMode();
+            if (Content is FrameworkElement root)
+            {
+                root.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
+            }
+
+            Win32Helper.SetWindowTheme(_hWnd, isDark);
+        }
+
         WindowsCompatibilityService.ApplySafeBackdrop(this);
+        if (Content is FrameworkElement flowRoot)
+        {
+            flowRoot.FlowDirection = Models.CustomWidgetLocaleCatalog.IsRightToLeftCulture(localizationService.CurrentCultureName)
+                ? FlowDirection.RightToLeft
+                : FlowDirection.LeftToRight;
+        }
 
         string title = localizationService.T("Settings.Recovery.OfferTitle");
         Title = title;
@@ -59,7 +82,6 @@ public sealed partial class RecoveryOfferWindow : Window
 
         BodyText.Text = body;
 
-        _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         AppBranding.ApplyWindowIcon(_appWindow);
@@ -73,7 +95,11 @@ public sealed partial class RecoveryOfferWindow : Window
 
         ResizeAndCenterForDisplay(windowId);
 
-        Closed += (_, _) => _completion.TrySetResult(RecoveryOfferDecision.Dismissed);
+        Closed += (_, _) =>
+        {
+            SystemBackdrop = null;
+            _completion.TrySetResult(RecoveryOfferDecision.Dismissed);
+        };
     }
 
     private void RestoreButton_Click(object sender, RoutedEventArgs e) =>

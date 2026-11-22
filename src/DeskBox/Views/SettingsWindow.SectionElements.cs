@@ -66,6 +66,8 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ComboBox>("Interaction", "CapsuleModeEntryComboBox");
     private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("Interaction", "CapsuleModeSection")!;
+    private global::Microsoft.UI.Xaml.Controls.ComboBox? WidgetGroupsEntryComboBox =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ComboBox>("Interaction", "WidgetGroupsEntryComboBox");
     private global::CommunityToolkit.WinUI.Controls.SettingsCard? DisplaysEntryCard =>
         FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("Interaction", "DisplaysEntryCard");
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
@@ -160,6 +162,8 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "AboutMeButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button AboutWebsiteButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "AboutWebsiteButton")!;
+    private global::Microsoft.UI.Xaml.Controls.Button AboutPrivacyPolicyButton =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "AboutPrivacyPolicyButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button OneClickUpdateButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OneClickUpdateButton")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel UpdateCheckActionsPanel =>

@@ -1077,11 +1077,15 @@ public sealed partial class AppUpdateService : IAppUpdateService
     public static AppUpdateManifest CreateReleaseNotesOnlyManifest(string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        bool isStore = AppDistributionService.Current.IsMicrosoftStore ||
+                       AppDistributionService.Current.IsPackaged;
         return new AppUpdateManifest
         {
-            Channel = "direct",
+            Channel = isStore ? "store" : "direct",
             Version = version.Trim(),
-            ReleaseNotesUrl = $"https://github.com/Tianyu199509/DeskBox/releases/tag/v{version.Trim()}",
+            ReleaseNotesUrl = isStore
+                ? string.Empty
+                : $"https://github.com/Tianyu199509/DeskBox/releases/tag/v{version.Trim()}",
         };
     }
 

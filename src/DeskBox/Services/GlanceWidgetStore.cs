@@ -108,6 +108,23 @@ public sealed class GlanceWidgetStore
 
     public event EventHandler? Changed;
 
+    private bool _hasUnparseableFutureSchema;
+
+    private GlanceWidgetData DeserializeGlanceDocument(string json)
+    {
+        GlanceWidgetData data = ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+            _storePath,
+            json,
+            GlanceWidgetData.CurrentVersion,
+            raw => JsonSerializer.Deserialize(raw, GlancePreferencesJsonContext.Default.Preferences),
+            static d => d.Version,
+            Normalize,
+            static ver => new GlanceWidgetData { Version = ver },
+            out bool unparseable);
+        _hasUnparseableFutureSchema = unparseable;
+        return data;
+    }
+
     public async Task<GlanceWidgetData> LoadAsync()
     {
         await _gate.WaitAsync();
@@ -117,9 +134,7 @@ public sealed class GlanceWidgetStore
             InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
-                json => Normalize(JsonSerializer.Deserialize(
-                    json,
-                    GlancePreferencesJsonContext.Default.Preferences)),
+                DeserializeGlanceDocument,
                 () => new GlanceWidgetData(),
                 nameof(GlanceWidgetStore));
             _cachedStamp = ReadFileStamp(_storePath);
@@ -198,7 +213,14 @@ public sealed class GlanceWidgetStore
         await _gate.WaitAsync();
         try
         {
+            if (_hasUnparseableFutureSchema)
+            {
+                App.Log($"[GlanceWidgetStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+                return;
+            }
+
             _cached = Normalize(Clone(data));
+            _cached.Version = GlanceWidgetData.CurrentVersion;
             await PersistLockedAsync();
         }
         finally
@@ -219,13 +241,18 @@ public sealed class GlanceWidgetStore
             InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
-                json => Normalize(JsonSerializer.Deserialize(
-                    json,
-                    GlancePreferencesJsonContext.Default.Preferences)),
+                DeserializeGlanceDocument,
                 () => new GlanceWidgetData(),
                 nameof(GlanceWidgetStore));
+            if (_hasUnparseableFutureSchema)
+            {
+                App.Log($"[GlanceWidgetStore] Skipping UpdateAsync write to preserve unparseable newer schema document '{_storePath}'.");
+                return;
+            }
+
             update(_cached);
             _cached = Normalize(_cached);
+            _cached.Version = GlanceWidgetData.CurrentVersion;
             await PersistLockedAsync();
         }
         finally
@@ -346,7 +373,7 @@ public sealed class GlanceWidgetStore
         // Keep the legacy mirrors coherent so an older build reading this
         // document still renders a sensible layout.
         GlanceWidgetSettingsPolicy.SyncLegacyMirrors(data);
-        data.Version = GlanceWidgetData.CurrentVersion;
+        data.Version = Math.Max(data.Version, GlanceWidgetData.CurrentVersion);
         data.LocalImagePaths ??= [];
         data.LocalImagePaths = data.LocalImagePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))

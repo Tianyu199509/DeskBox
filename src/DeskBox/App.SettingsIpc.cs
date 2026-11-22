@@ -17,6 +17,7 @@ public partial class App
     private SettingsIpcServer? _settingsIpcServer;
     private SettingsIpcMethodRouter? _settingsIpcRouter;
     private DeskBoxAgentBridgeServer? _agentBridgeServer;
+    private readonly SemaphoreSlim _agentApprovalDialogGate = new(1, 1);
 
     private void StartSettingsIpcServer()
     {
@@ -156,41 +157,86 @@ public partial class App
         StartStudioIpcServer();
     }
 
+    private Views.AgentCommitApprovalWindow? _activeAgentApprovalWindow;
+
+    internal void CloseActiveAgentApprovalWindow()
+    {
+        Views.AgentCommitApprovalWindow? active = Interlocked.Exchange(ref _activeAgentApprovalWindow, null);
+        if (active is null)
+        {
+            return;
+        }
+
+        if (UiDispatcherQueue is { HasThreadAccess: false } queue)
+        {
+            _ = queue.TryEnqueue(() =>
+            {
+                try { active.Close(); } catch { }
+            });
+            return;
+        }
+
+        try
+        {
+            active.Close();
+        }
+        catch
+        {
+        }
+    }
+
     private async Task<bool> ShowAgentCommitApprovalAsync(
         Services.AgentCommitApprovalRequest request)
     {
-        // Fail closed: no UI dispatcher / no window => the commit is denied.
-        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (UiDispatcherQueue?.TryEnqueue(() =>
-            {
-                try
-                {
-                    string reasons =
-                        (request.OverwritesExisting
-                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonOverwrite")
-                            : string.Empty) +
-                        (request.ClearsExistingData
-                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonDataLoss")
-                            : string.Empty) +
-                        (request.DeclaresPrivilegedCapabilities
-                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonPrivileged")
-                            : string.Empty);
-                    var window = new Helpers.AgentCommitApprovalWindow(LocalizationService, request.WidgetId, reasons);
-                    window.Activate();
-                    _ = window.Result.ContinueWith(
-                        result => completion.TrySetResult(result.Result),
-                        TaskScheduler.Default);
-                }
-                catch
-                {
-                    completion.TrySetResult(false);
-                }
-            }) != true)
+        // Fail closed: no UI dispatcher / shutting down => the commit is denied.
+        if (IsShuttingDown || UiDispatcherQueue is null)
         {
             return false;
         }
 
-        return await completion.Task.ConfigureAwait(false);
+        await _agentApprovalDialogGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (IsShuttingDown)
+            {
+                return false;
+            }
+
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!UiDispatcherQueue.TryEnqueue(() =>
+                {
+                    if (IsShuttingDown)
+                    {
+                        completion.TrySetResult(false);
+                        return;
+                    }
+
+                    try
+                    {
+                        EnsureXamlLoopLifelineIfNoOtherWindows();
+                        var window = new Views.AgentCommitApprovalWindow(LocalizationService, request, ThemeService);
+                        _activeAgentApprovalWindow = window;
+                        window.Closed += (_, _) => Interlocked.CompareExchange(ref _activeAgentApprovalWindow, null, window);
+                        window.Activate();
+                        _ = window.Result.ContinueWith(
+                            result => completion.TrySetResult(result.IsCompletedSuccessfully && result.Result),
+                            TaskScheduler.Default);
+                    }
+                    catch
+                    {
+                        completion.TrySetResult(false);
+                    }
+                }))
+            {
+                return false;
+            }
+
+            return await completion.Task.ConfigureAwait(false);
+        }
+        finally
+        {
+            _agentApprovalDialogGate.Release();
+        }
     }
 
     private async Task SyncAgentWorkspaceDocsOnStartupAsync()
@@ -217,6 +263,7 @@ public partial class App
 
     private void ShutdownSettingsIpcServer()
     {
+        CloseActiveAgentApprovalWindow();
         ShutdownStudioIpcServer();
         if (_agentBridgeServer is { } agentBridge)
         {

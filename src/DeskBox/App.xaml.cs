@@ -499,8 +499,7 @@ public partial class App : Application
         Log("App() constructor start");
         string[] commandLineArgs = effectiveCommandLineArgs;
         _processStartupLaunchDetected = StartupLaunchPolicy.IsStartupLaunch(
-            commandLineArgs,
-            isStartupTaskActivation: IsStartupTaskActivation());
+            commandLineArgs, SingleInstanceAndActivationInterop.TryGetPackagedProtocolUri(Log), IsStartupTaskActivation());
         bool notificationLaunch = NativeNotificationActivationBootstrap.IsNotificationLaunch(
             commandLineArgs);
 
@@ -713,7 +712,9 @@ public partial class App : Application
         string? coldStartProtocolUri = DeskBoxProtocolActivationService.TryExtractProtocolUri(
             commandLineArgs,
             SingleInstanceAndActivationInterop.TryGetPackagedProtocolUri(Log) ?? TryGetPackagedLaunchArguments());
-        if (!string.IsNullOrWhiteSpace(coldStartProtocolUri))
+        if (!string.IsNullOrWhiteSpace(coldStartProtocolUri) &&
+            (!DeskBoxProtocolActivationService.TryParseProtocolUri(coldStartProtocolUri, out DeskBoxProtocolIntent? parsedIntent, out _) ||
+             parsedIntent?.Action != DeskBoxProtocolAction.BackgroundStartup))
         {
             DeskBoxProtocolActivationService.StorePendingProtocolUri(coldStartProtocolUri);
         }
@@ -1495,7 +1496,7 @@ public partial class App : Application
         ConfigureCustomWidgetHostActionBridge();
 
         bool startupTaskActivation = IsStartupTaskActivation();
-        bool isStartupLaunch = StartupLaunchPolicy.IsStartupLaunch(
+        bool isStartupLaunch = _processStartupLaunchDetected || StartupLaunchPolicy.IsStartupLaunch(
             Environment.GetCommandLineArgs(),
             args.Arguments,
             startupTaskActivation);
@@ -1516,12 +1517,13 @@ public partial class App : Application
         try
         {
             string? updateInstallOutcome = TryGetUpdateInstallOutcome(Environment.GetCommandLineArgs());
-            IsStartupMode = _processStartupLaunchDetected || isStartupLaunch;
+            IsStartupMode = isStartupLaunch;
             RunCriticalStartupStep("dispatcher-init", () =>
             {
                 UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
                 DeskBox.Platform.UiDispatch.MarkReady(UiDispatcherQueue);
                 WidgetSegmentedLayoutHelper.Initialize(UiDispatcherQueue);
+                EnsureXamlLoopLifelineIfNoOtherWindows();
             });
 
             // The diagnostic report walks a snapshot of every process on the
@@ -2931,7 +2933,7 @@ public partial class App : Application
 
     private void ScheduleBackgroundUpdateCheck()
     {
-        if (DistributionService.IsMicrosoftStore)
+        if (DistributionService.IsMicrosoftStore || DistributionService.IsPackaged)
         {
             return;
         }
@@ -5354,10 +5356,9 @@ public partial class App : Application
             try
             {
                 EnsureXamlLoopLifelineIfNoOtherWindows();
-                var recoveryWindow = new RecoveryOfferWindow(LocalizationService, candidate);
+                var recoveryWindow = new RecoveryOfferWindow(LocalizationService, candidate, ThemeService);
                 _recoveryOfferWindow = recoveryWindow;
                 SubscribeWindowClosedOnce(recoveryWindow, () => { if (ReferenceEquals(_recoveryOfferWindow, recoveryWindow)) _recoveryOfferWindow = null; });
-                ThemeService.TrackWindow(_recoveryOfferWindow);
                 _recoveryOfferWindow.Activate();
                 Log($"[RecoveryOffer] Offer shown for snapshot '{candidate.Path}'.");
 
@@ -5646,7 +5647,6 @@ public partial class App : Application
             var elevatedWindow = CreateTrackedElevationNoticeWindow();
             _elevationNoticeWindow = elevatedWindow;
             SubscribeWindowClosedOnce(elevatedWindow, () => { if (ReferenceEquals(_elevationNoticeWindow, elevatedWindow)) _elevationNoticeWindow = null; });
-            ThemeService.TrackWindow(_elevationNoticeWindow);
             _elevationNoticeWindow.Activate();
             Log("[Elevation] Notice shown for interactive elevated launch");
             return;
@@ -5691,7 +5691,7 @@ public partial class App : Application
     private ElevationNoticeWindow CreateTrackedElevationNoticeWindow()
     {
         EnsureXamlLoopLifelineIfNoOtherWindows();
-        return new ElevationNoticeWindow(LocalizationService, _startupElevationAssessment);
+        return new ElevationNoticeWindow(LocalizationService, _startupElevationAssessment, ThemeService);
     }
 
     private void MarkFullyElevatedNoticeAcknowledged()
