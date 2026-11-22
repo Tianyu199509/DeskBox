@@ -23,9 +23,9 @@ internal static class StorageBusTypeHelper
     private const uint OpenExisting = 3;
     private const uint IoctlStorageQueryProperty = 0x002D1400;
 
-    // STORAGE_PROPERTY_QUERY with PropertyId = StorageDeviceProperty and
-    // QueryType = PropertyStandardQuery: two zeroed DWORDs.
-    private static readonly byte[] s_storageDeviceQuery = new byte[8];
+    // STORAGE_PROPERTY_QUERY (sizeof = 12 bytes): PropertyId = StorageDeviceProperty (0),
+    // QueryType = PropertyStandardQuery (0), AdditionalParameters[1] + 3 bytes padding.
+    private static readonly byte[] s_storageDeviceQuery = new byte[12];
 
     // BusType lives at offset 28 inside STORAGE_DEVICE_DESCRIPTOR.
     private const int BusTypeOffset = 28;
@@ -68,20 +68,15 @@ internal static class StorageBusTypeHelper
             return null;
         }
 
-        string root;
-        try
-        {
-            root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(driveRoot.Trim()));
-        }
-        catch (Exception)
+        string trimmed = driveRoot.Trim().TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar);
+        if (trimmed.Length != 2 || !char.IsAsciiLetter(trimmed[0]) || trimmed[1] != ':')
         {
             return null;
         }
 
-        if (root.Length != 2 || root[1] != ':')
-        {
-            return null;
-        }
+        string root = $"{char.ToUpperInvariant(trimmed[0])}:";
 
         // Query-only access (desiredAccess 0) is enough for property IOCTLs and
         // works without elevation on volumes the user cannot read.
@@ -93,7 +88,7 @@ internal static class StorageBusTypeHelper
             OpenExisting,
             0,
             IntPtr.Zero);
-        if (handle == new IntPtr(-1))
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
         {
             return null;
         }

@@ -189,7 +189,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
             await _updateDrain.WaitAsync().ConfigureAwait(false);
             try
             {
-                _settings.Update(change);
+                await _settings.UpdateAsync(change).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -253,6 +253,11 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         return read;
     }
 
+    private static bool HasReachableEndpoint(BackupSettingsSnapshot state) =>
+        state.HasEndpoint ||
+        (Uri.TryCreate(state.CloudServerUrl, UriKind.Absolute, out Uri? uri) &&
+         (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp));
+
     private async Task RefreshCredentialCoreAsync(bool listAfter)
     {
         if (!IsActive) return;
@@ -262,7 +267,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         CancellationToken token = EndpointToken;
         try
         {
-            bool saved = State.HasEndpoint && await _settings.HasCredentialAsync(endpoint, token);
+            bool saved = HasReachableEndpoint(State) && await _settings.HasCredentialAsync(endpoint, token);
             if (!IsCurrent(visit, endpointGeneration, token)) return;
             CredentialSaved = saved;
             if (saved && listAfter) await RefreshSnapshotsCoreAsync(checkCredential: false);
@@ -366,7 +371,7 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         CancellationToken token = EndpointToken;
         try
         {
-            if (!State.HasEndpoint) return null;
+            if (!HasReachableEndpoint(State)) return null;
             if (checkCredential)
             {
                 bool saved = await _settings.HasCredentialAsync(endpoint, token);

@@ -319,9 +319,7 @@ public static partial class PerformanceLogger
             var app = App.Current;
             string everythingState = app.EverythingSearchService?.CurrentSnapshot.State.ToString()
                 ?? "uninitialized";
-            bool searchEnabled = FeatureWidgetSettings.IsEnabled(
-                app.SettingsService.Settings,
-                DeskBox.Models.WidgetKind.Search);
+            bool searchEnabled = app.SettingsService.Settings.Search.SearchHotkeyEnabled;
             int loadedWidgetCount = app.WidgetManager?.LoadedWidgetCount ?? 0;
             int visibleWidgetCount = app.WidgetManager?.VisibleWidgetCount ?? 0;
             int surfaceSwitchGateCount =

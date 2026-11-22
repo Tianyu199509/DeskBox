@@ -6,12 +6,18 @@ namespace DeskBox.Features.Todo;
 // used by that XAML surface in NativeAOT builds, mirroring the
 // Glance/Music/FileStack/QuickCapture editor bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(AllDayReminderTimeOfDay),
+    nameof(AllDayReminderTimeText),
+    nameof(AllDayRemindersEnabled),
+    nameof(AllDefaultFilterOptionItems),
+    nameof(AllDefaultFilterOptions),
     nameof(AvailableEnterBehaviorOptions),
     nameof(AvailableLayoutOptions),
     nameof(AvailableNewTaskPositionOptions),
     nameof(AvailablePreviewLineOptions),
     nameof(AvailableReminderOffsetOptions),
     nameof(AutoSelectFirstInWideLayout),
+    nameof(CanEditAllDayReminderTime),
     nameof(ContentSummaryText),
     nameof(ContentTextSize),
     nameof(ContentTextSizeValueText),
@@ -20,6 +26,7 @@ namespace DeskBox.Features.Todo;
     nameof(EditorEnterBehavior),
     nameof(Enabled),
     nameof(FooterDisplaySummaryText),
+    nameof(HasCustomTextSizeOverride),
     nameof(ItemPreviewLineCount),
     nameof(LayoutMode),
     nameof(LayoutSummaryText),
@@ -28,13 +35,16 @@ namespace DeskBox.Features.Todo;
     nameof(NewTaskPosition),
     nameof(ReminderSummaryText),
     nameof(RemindersEnabled),
+    nameof(SelectedDefaultFilter),
     nameof(ShowCompletedTasks),
     nameof(ShowTabBar),
     nameof(ShowWideOptions),
     nameof(TabStyleIndex),
     nameof(TabsSummaryText),
+    nameof(TextSizeSummaryText),
     nameof(VisibleDefaultFilterOptions),
-    nameof(VisibleTabsText)
+    nameof(VisibleTabsText),
+    nameof(WideLayoutSummaryText)
 ], [])]
 public sealed partial class TodoSettingsViewModel
 {

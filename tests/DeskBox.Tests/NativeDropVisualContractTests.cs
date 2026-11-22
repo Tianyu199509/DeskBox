@@ -78,23 +78,23 @@ public sealed class NativeDropVisualContractTests
             StringComparison.Ordinal);
 
         Assert.Contains(
-            "NativeDropImageManager.TryCreate()",
+            "NativeDropImageManager.Show(this, visible: true);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragEnter(",
+            "NativeDropImageManager.TryDragEnter(",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragOver(point, effect);",
+            "NativeDropImageManager.DragOver(this, point, effect);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragLeave();",
+            "NativeDropImageManager.DragLeave(this);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.Drop(",
+            "NativeDropImageManager.Drop(",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -110,7 +110,7 @@ public sealed class NativeDropVisualContractTests
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ScheduleNativeFileDropFallback(",
+            "DispatchNativeFileDropGesture(",
             window,
             StringComparison.Ordinal);
 
@@ -325,6 +325,25 @@ public sealed class NativeDropVisualContractTests
             "[ComImport",
             combined,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeDropBridge_TracksSurfaceCleanupWithoutWindowHighlight()
+    {
+        string source = ReadRepositoryFile(
+            "src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs");
+
+        Assert.Contains("DragEnterEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("DragOverEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("DragLeaveEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("ObserveNativeDragPointer", source, StringComparison.Ordinal);
+        Assert.Contains("ClearDragSessionVisualState", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearNativeFileDropHighlight", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetExclusiveWindowDropTarget", source, StringComparison.Ordinal);
+        Assert.Contains("UIElement.DragLeaveEvent", source, StringComparison.Ordinal);
+        Assert.Contains("GroupFileDrop_DragLeave", source, StringComparison.Ordinal);
+        Assert.Contains("IsPointerOverContentWindow()", source, StringComparison.Ordinal);
+        Assert.Contains("Group drag leave cleared tracking", source, StringComparison.Ordinal);
     }
 
     private static string ReadRepositoryFile(string relativePath)

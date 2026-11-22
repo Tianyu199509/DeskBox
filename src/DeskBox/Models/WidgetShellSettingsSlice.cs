@@ -49,24 +49,24 @@ public sealed class WidgetShellSettingsSlice
     public string WidgetBorderStyle { get; set; } = "Thin";
 
     /// <summary>
-    /// Native DWM corner style for widget windows.
-    /// Valid values: <c>"Square"</c>, <c>"Small"</c>, <c>"Round"</c>.
+    /// Corner radius style for widget windows and popups.
+    /// Valid values: <c>"Square"</c>, <c>"Small"</c>, <c>"Round"</c>, <c>"Large"</c>.
     /// </summary>
     public string WidgetCornerPreference { get; set; } = "Round";
 
     /// <summary>
     /// Animation effect used when desktop widgets show or hide.
     /// </summary>
-    public string WidgetAnimationEffect { get; set; } = "SlideFade";
+    public string WidgetAnimationEffect { get; set; } = "ScreenEdgeSlide";
 
     /// <summary>
     /// Animation speed preset used when desktop widgets show or hide.
     /// </summary>
-    public string WidgetAnimationSpeed { get; set; } = "Standard";
+    public string WidgetAnimationSpeed { get; set; } = "Relaxed";
 
     /// <summary>
     /// Slide direction for Slide animation effect.
-    /// Valid values: <c>"None"</c>, <c>"Left"</c>, <c>"Right"</c>, <c>"Up"</c>, <c>"Down"</c>.
+    /// Valid values: <c>"None"</c>, <c>"Auto"</c>, <c>"Left"</c>, <c>"Right"</c>, <c>"Up"</c>, <c>"Down"</c>.
     /// </summary>
     public string WidgetAnimationSlideDirection { get; set; } = "Right";
 
@@ -89,6 +89,13 @@ public sealed class WidgetShellSettingsSlice
     /// <c>"QuickReveal"</c>.
     /// </summary>
     public string WidgetLayerMode { get; set; } = "Dynamic";
+
+    /// <summary>
+    /// Click-raise scope in Dynamic layer mode: <c>"Single"</c> raises only the
+    /// clicked widget; <c>"Group"</c> raises all visible widgets together when
+    /// any area of a widget is clicked.
+    /// </summary>
+    public string DynamicClickRaiseScope { get; set; } = "Group";
 
     /// <summary>
     /// Whether dynamically layered widgets stay visible when Windows shows the desktop.

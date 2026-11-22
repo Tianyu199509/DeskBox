@@ -14,6 +14,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     private const string StoreInstallFailedError = "STORE_INSTALL_FAILED";
 
     private IReadOnlyList<StorePackageUpdate> _pendingUpdates = [];
+    private static IntPtr s_lastInitializedOwnerHwnd;
 
     public AppUpdateCheckResult? LastCheckResult { get; private set; }
     public DateTime? LastCheckTimeUtc { get; private set; }
@@ -68,6 +69,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                 Channel = "store",
                 Version = GetDisplayVersion(_pendingUpdates),
                 DownloadUrl = StoreUpdateUri,
+                Mandatory = _pendingUpdates.Any(u => u.Mandatory),
                 Summary = []
             };
 
@@ -124,6 +126,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
             }
 
             var storeContext = GetStoreContext();
+            EnsureStoreContextOwnerInitialized(storeContext);
             var result = await storeContext
                 .RequestDownloadAndInstallStorePackageUpdatesAsync(_pendingUpdates)
                 .AsTask(
@@ -140,6 +143,9 @@ public sealed class StoreAppUpdateService : IAppUpdateService
             if (string.Equals(overallState, "Completed", StringComparison.OrdinalIgnoreCase))
             {
                 _pendingUpdates = [];
+                SetLastCheckResult(new AppUpdateCheckResult(
+                    AppUpdateCheckStatus.UpToDate,
+                    AppUpdateService.GetCurrentAppVersion()));
                 progress?.Report(new AppUpdateDownloadProgress(100, 100));
                 return AppUpdateDownloadResult.Completed(StoreUpdateUri);
             }
@@ -147,7 +153,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
             if (string.Equals(overallState, "Canceled", StringComparison.OrdinalIgnoreCase))
             {
                 return AppUpdateDownloadResult.Failed(
-                    AppUpdateDownloadFailureKind.Network,
+                    AppUpdateDownloadFailureKind.Cancelled,
                     StoreCanceledError);
             }
 
@@ -158,7 +164,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
         catch (TaskCanceledException)
         {
             return AppUpdateDownloadResult.Failed(
-                AppUpdateDownloadFailureKind.Network,
+                AppUpdateDownloadFailureKind.Cancelled,
                 StoreCanceledError);
         }
         catch (Exception ex)
@@ -190,23 +196,34 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     private static StoreContext GetStoreContext()
     {
         var storeContext = StoreContext.GetDefault();
+        EnsureStoreContextOwnerInitialized(storeContext);
+        return storeContext;
+    }
+
+    private static void EnsureStoreContextOwnerInitialized(StoreContext storeContext)
+    {
         IntPtr windowHandle = GetSettingsWindowHandle();
-        if (windowHandle != IntPtr.Zero)
+        if (windowHandle == IntPtr.Zero)
         {
-            InitializeWithWindow.Initialize(storeContext, windowHandle);
+            return;
         }
 
-        return storeContext;
+        IntPtr previousOwner = Volatile.Read(ref s_lastInitializedOwnerHwnd);
+        bool previousStillValid = previousOwner != IntPtr.Zero &&
+            Platform.Win32Helper.IsWindow(previousOwner) &&
+            Platform.Win32Helper.IsWindowVisible(previousOwner);
+        if (!previousStillValid || previousOwner != windowHandle)
+        {
+            InitializeWithWindow.Initialize(storeContext, windowHandle);
+            Volatile.Write(ref s_lastInitializedOwnerHwnd, windowHandle);
+        }
     }
 
     private static IntPtr GetSettingsWindowHandle()
     {
         try
         {
-            return global::DeskBox.App.Current.SettingsWindowInstance is
-                { IsVisibleToUser: true } window
-                ? WindowNative.GetWindowHandle(window)
-                : IntPtr.Zero;
+            return global::DeskBox.App.Current.GetStoreUpdateOwnerWindowHandle();
         }
         catch
         {
@@ -221,7 +238,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
             try
             {
                 var version = update.Package.Id.Version;
-                return $"{version.Major}.{version.Minor}.{version.Build}.{version.Revision}";
+                return FormatStorePackageVersion(version.Major, version.Minor, version.Build, version.Revision);
             }
             catch
             {
@@ -230,4 +247,9 @@ public sealed class StoreAppUpdateService : IAppUpdateService
 
         return "Microsoft Store";
     }
+
+    internal static string FormatStorePackageVersion(ushort major, ushort minor, ushort build, ushort revision) =>
+        revision == 0
+            ? $"{major}.{minor}.{build}"
+            : $"{major}.{minor}.{build}.{revision}";
 }

@@ -16,19 +16,39 @@ namespace DeskBox.Helpers;
 /// </summary>
 public static class WidgetBackgroundImageSourceFactory
 {
+    public const int MinDecodedBackgroundPixels = 320;
     public const int MaxDecodedBackgroundPixels = 1280;
+
+    public static int ResolveBoundedDecodePixels(double physicalSpanPixels)
+    {
+        if (!double.IsFinite(physicalSpanPixels) || physicalSpanPixels <= 0)
+        {
+            return MaxDecodedBackgroundPixels;
+        }
+
+        int quantized = (int)Math.Ceiling(physicalSpanPixels / 64.0) * 64;
+        return Math.Clamp(quantized, MinDecodedBackgroundPixels, MaxDecodedBackgroundPixels);
+    }
 
     /// <summary>
     /// Creates the source with decode bounds set but no content loaded —
     /// the caller owns streaming the bytes (the shared-source cache does
     /// this so one decode serves every window).
     /// </summary>
-    public static ImageSource? CreateSource(string? filePath)
+    public static ImageSource? CreateSource(string? filePath) =>
+        CreateSource(filePath, MaxDecodedBackgroundPixels);
+
+    public static ImageSource? CreateSource(string? filePath, int decodePixelWidth)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
             return null;
         }
+
+        int boundedPixels = Math.Clamp(
+            decodePixelWidth,
+            MinDecodedBackgroundPixels,
+            MaxDecodedBackgroundPixels);
 
         try
         {
@@ -47,14 +67,14 @@ public static class WidgetBackgroundImageSourceFactory
             {
                 return new SvgImageSource
                 {
-                    RasterizePixelWidth = MaxDecodedBackgroundPixels
+                    RasterizePixelWidth = boundedPixels
                 };
             }
 
             return new BitmapImage
             {
                 DecodePixelType = DecodePixelType.Physical,
-                DecodePixelWidth = MaxDecodedBackgroundPixels
+                DecodePixelWidth = boundedPixels
             };
         }
         catch (Exception ex)
@@ -69,9 +89,12 @@ public static class WidgetBackgroundImageSourceFactory
     /// <paramref name="loadFailed"/> runs when the streamed decode fails
     /// so callers can degrade to their fallback layer.
     /// </summary>
-    public static ImageSource? TryCreate(string? filePath, Action? loadFailed = null)
+    public static ImageSource? TryCreate(
+        string? filePath,
+        Action? loadFailed = null,
+        int decodePixelWidth = MaxDecodedBackgroundPixels)
     {
-        ImageSource? source = CreateSource(filePath);
+        ImageSource? source = CreateSource(filePath, decodePixelWidth);
         if (source is null)
         {
             return null;

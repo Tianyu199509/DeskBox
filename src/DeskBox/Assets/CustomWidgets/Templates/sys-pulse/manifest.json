@@ -1,0 +1,820 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.sys-pulse",
+  "name": "${$i18n.widgetName}",
+  "version": "4.2.0",
+  "author": "DeskBox",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "📊",
+  "minSize": {
+    "width": 284,
+    "height": 220
+  },
+  "defaultSize": {
+    "width": 344,
+    "height": 564
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "cpu:1,memory:1,gpu:1,processes:1,network:1,storage:1,recycleBin:1,search:1",
+      "options": [
+        {
+          "value": "cpu",
+          "label": "${$i18n.modCpu}"
+        },
+        {
+          "value": "memory",
+          "label": "${$i18n.modMemory}"
+        },
+        {
+          "value": "gpu",
+          "label": "${$i18n.modGpu}"
+        },
+        {
+          "value": "processes",
+          "label": "${$i18n.modProcesses}"
+        },
+        {
+          "value": "network",
+          "label": "${$i18n.modNetwork}"
+        },
+        {
+          "value": "storage",
+          "label": "${$i18n.modStorage}"
+        },
+        {
+          "value": "recycleBin",
+          "label": "${$i18n.modRecycleBin}"
+        },
+        {
+          "value": "search",
+          "label": "${$i18n.modSearch}"
+        }
+      ]
+    },
+    {
+      "key": "chartBackdrop",
+      "type": "choice",
+      "label": "${$i18n.setChartBg}",
+      "default": "grid",
+      "options": [
+        {
+          "value": "grid",
+          "label": "${$i18n.optBgGrid}"
+        },
+        {
+          "value": "dots",
+          "label": "${$i18n.optBgDots}"
+        },
+        {
+          "value": "lines",
+          "label": "${$i18n.optBgLines}"
+        },
+        {
+          "value": "none",
+          "label": "${$i18n.optBgNone}"
+        }
+      ]
+    },
+    {
+      "key": "topProcessCount",
+      "type": "choice",
+      "label": "${$i18n.setTopProc}",
+      "default": "5",
+      "options": [
+        {
+          "value": "3",
+          "label": "${$i18n.optTop3}"
+        },
+        {
+          "value": "5",
+          "label": "${$i18n.optTop5}"
+        },
+        {
+          "value": "8",
+          "label": "${$i18n.optTop8}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optTop10}"
+        }
+      ]
+    },
+    {
+      "key": "defaultProcessSort",
+      "type": "choice",
+      "label": "${$i18n.setProcSort}",
+      "default": "memory",
+      "options": [
+        {
+          "value": "memory",
+          "label": "${$i18n.optSortMem}"
+        },
+        {
+          "value": "cpu",
+          "label": "${$i18n.optSortCpu}"
+        }
+      ]
+    },
+    {
+      "key": "refreshRate",
+      "type": "choice",
+      "label": "${$i18n.setRefresh}",
+      "default": "2000",
+      "options": [
+        {
+          "value": "1000",
+          "label": "${$i18n.optRef1s}"
+        },
+        {
+          "value": "2000",
+          "label": "${$i18n.optRef2s}"
+        },
+        {
+          "value": "5000",
+          "label": "${$i18n.optRef5s}"
+        }
+      ]
+    },
+    {
+      "key": "targetDrive",
+      "type": "choice",
+      "label": "${$i18n.setDrive}",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "${$i18n.optDriveAuto}"
+        }
+      ]
+    },
+    {
+      "key": "warnThreshold",
+      "type": "choice",
+      "label": "${$i18n.setWarn}",
+      "default": "85",
+      "options": [
+        {
+          "value": "75",
+          "label": "${$i18n.optWarn75}"
+        },
+        {
+          "value": "85",
+          "label": "${$i18n.optWarn85}"
+        },
+        {
+          "value": "95",
+          "label": "${$i18n.optWarn95}"
+        },
+        {
+          "value": "999",
+          "label": "${$i18n.optWarnOff}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "chartStyle": "wave"
+  },
+  "sources": [
+    {
+      "type": "systemMetrics",
+      "intervalMs": 2000
+    },
+    {
+      "type": "storageDrives",
+      "targetCollection": "drives",
+      "intervalMs": 15000
+    }
+  ],
+  "capsule": {
+    "title": "CPU ${$sys.cpu.percent}% · ${$i18n.capMemLabel} ${$sys.memory.percent}% · GPU ${$sys.gpu.percent}%",
+    "summary": "↓ ${$sys.net.downText} · ↑ ${$sys.net.upText}",
+    "glyph": "📊",
+    "progress": "${$sys.cpu.percent}",
+    "badge": "${$sys.cpu.percent >= $settings.warnThreshold ? $i18n.highLoadBadge : ''}",
+    "badgeIsWarning": "${$sys.cpu.percent >= $settings.warnThreshold}"
+  },
+  "root": "main",
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "spacing": 6,
+      "padding": "10",
+      "children": [
+        "system_modules_stack"
+      ]
+    },
+    "system_modules_stack": {
+      "type": "ModuleStack",
+      "bind": "settings.modules",
+      "pinTrailingGroup": "utility",
+      "spacing": 6,
+      "children": [
+        "cpu",
+        "memory",
+        "gpu",
+        "processes",
+        "network",
+        "storage",
+        "recycle_bin",
+        "search"
+      ]
+    },
+    "cpu": {
+      "compactPair": true,
+      "pairGroup": "metrics",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 5,
+      "onClick": {
+        "type": "state.set",
+        "key": "chartStyle",
+        "value": "${state.chartStyle == 'meter' ? 'wave' : 'meter'}"
+      },
+      "tooltip": "${$i18n.tipToggleChart}",
+      "children": [
+        "cpu_header_grid",
+        "spark_cpu_history",
+        "prog_cpu_usage",
+        "txt_cpu_subtitle"
+      ]
+    },
+    "cpu_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_cpu_label",
+        "txt_cpu_percent"
+      ]
+    },
+    "txt_cpu_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "CPU",
+      "style": "caption",
+      "color": "secondary",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "txt_cpu_percent": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.cpu.percent}%",
+      "style": "mono",
+      "fontSize": 16,
+      "fontWeight": "bold",
+      "color": "${$sys.cpu.percent >= $settings.warnThreshold ? 'warning' : 'cyan'}",
+      "verticalAlignment": "center"
+    },
+    "spark_cpu_history": {
+      "type": "Sparkline",
+      "when": "${state.chartStyle != 'meter'}",
+      "sparkline": "$sys.cpu.history",
+      "min": 0,
+      "max": 100,
+      "variant": "${$settings.chartBackdrop}",
+      "color": "cyan",
+      "height": 42,
+      "showArea": true
+    },
+    "prog_cpu_usage": {
+      "type": "ProgressBar",
+      "when": "${state.chartStyle == 'meter'}",
+      "value": "${$sys.cpu.percent}",
+      "max": 100,
+      "color": "${$sys.cpu.percent >= $settings.warnThreshold ? 'warning' : 'cyan'}"
+    },
+    "txt_cpu_subtitle": {
+      "type": "Text",
+      "text": "${$i18n.cpuSubtitle}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "memory": {
+      "compactPair": true,
+      "pairGroup": "metrics",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 5,
+      "onClick": {
+        "type": "state.set",
+        "key": "chartStyle",
+        "value": "${state.chartStyle == 'meter' ? 'wave' : 'meter'}"
+      },
+      "tooltip": "${$i18n.tipToggleChart}",
+      "children": [
+        "memory_header_grid",
+        "spark_memory_history",
+        "prog_memory_usage",
+        "txt_memory_summary"
+      ]
+    },
+    "memory_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_memory_label",
+        "txt_memory_percent"
+      ]
+    },
+    "txt_memory_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.memTitle}",
+      "style": "caption",
+      "color": "secondary",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "txt_memory_percent": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.memory.percent}%",
+      "style": "mono",
+      "fontSize": 16,
+      "fontWeight": "bold",
+      "color": "${$sys.memory.percent >= $settings.warnThreshold ? 'warning' : 'accent'}",
+      "verticalAlignment": "center"
+    },
+    "spark_memory_history": {
+      "type": "Sparkline",
+      "when": "${state.chartStyle != 'meter'}",
+      "sparkline": "$sys.memory.history",
+      "min": 0,
+      "max": 100,
+      "variant": "${$settings.chartBackdrop}",
+      "color": "accent",
+      "height": 42,
+      "showArea": true
+    },
+    "prog_memory_usage": {
+      "type": "ProgressBar",
+      "when": "${state.chartStyle == 'meter'}",
+      "value": "${$sys.memory.percent}",
+      "max": 100,
+      "color": "${$sys.memory.percent >= $settings.warnThreshold ? 'warning' : 'accent'}"
+    },
+    "txt_memory_summary": {
+      "type": "Text",
+      "text": "${$sys.memory.summaryText}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "gpu": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 5,
+      "onClick": {
+        "type": "state.set",
+        "key": "chartStyle",
+        "value": "${state.chartStyle == 'meter' ? 'wave' : 'meter'}"
+      },
+      "tooltip": "${$i18n.tipToggleChart}",
+      "children": [
+        "gpu_header_grid",
+        "spark_gpu_history",
+        "prog_gpu_usage",
+        "gpu_vram_grid"
+      ]
+    },
+    "gpu_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "txt_gpu_name",
+        "txt_gpu_percent",
+        "btn_toggle_chart_style"
+      ]
+    },
+    "txt_gpu_name": {
+      "type": "Text",
+      "column": 0,
+      "text": "GPU · ${$sys.gpu.name}",
+      "style": "bodyStrong",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_gpu_percent": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.gpu.percent}%",
+      "style": "mono",
+      "fontSize": 15,
+      "fontWeight": "bold",
+      "color": "${$sys.gpu.percent >= $settings.warnThreshold ? 'warning' : 'emerald'}",
+      "verticalAlignment": "center"
+    },
+    "btn_toggle_chart_style": {
+      "type": "IconButton",
+      "column": 2,
+      "icon": "line-chart",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipToggleChart}",
+      "onClick": {
+        "type": "state.set",
+        "key": "chartStyle",
+        "value": "${state.chartStyle == 'meter' ? 'wave' : 'meter'}"
+      }
+    },
+    "spark_gpu_history": {
+      "type": "Sparkline",
+      "when": "${state.chartStyle != 'meter'}",
+      "sparkline": "$sys.gpu.history",
+      "min": 0,
+      "max": 100,
+      "variant": "${$settings.chartBackdrop}",
+      "color": "emerald",
+      "height": 40,
+      "showArea": true
+    },
+    "prog_gpu_usage": {
+      "type": "ProgressBar",
+      "when": "${state.chartStyle == 'meter'}",
+      "value": "${$sys.gpu.percent}",
+      "max": 100,
+      "color": "${$sys.gpu.percent >= $settings.warnThreshold ? 'warning' : 'emerald'}"
+    },
+    "gpu_vram_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_gpu_vram_label",
+        "prog_gpu_vram_usage",
+        "txt_gpu_vram_summary"
+      ]
+    },
+    "txt_gpu_vram_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "VRAM",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "prog_gpu_vram_usage": {
+      "type": "ProgressBar",
+      "column": 1,
+      "value": "${$sys.gpu.vramPercent}",
+      "max": 100,
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "txt_gpu_vram_summary": {
+      "type": "Text",
+      "column": 2,
+      "text": "${$sys.gpu.vramSummary}",
+      "style": "mono",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "processes": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 5,
+      "children": [
+        "processes_header_grid",
+        "grid_top_processes"
+      ]
+    },
+    "processes_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "txt_processes_title",
+        "seg_process_sort"
+      ]
+    },
+    "txt_processes_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.procTitle}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center"
+    },
+    "seg_process_sort": {
+      "type": "Segmented",
+      "column": 1,
+      "bind": "$settings.defaultProcessSort",
+      "options": [
+        {
+          "value": "memory",
+          "label": "${$i18n.capMemLabel}"
+        },
+        {
+          "value": "cpu",
+          "label": "CPU"
+        }
+      ]
+    },
+    "grid_top_processes": {
+      "type": "ItemsGrid",
+      "items": "$sys.topProcesses",
+      "columns": "1",
+      "maxItems": 3,
+      "spacing": 3,
+      "itemTemplate": "row_top_process_item"
+    },
+    "row_top_process_item": {
+      "type": "Grid",
+      "columns": "*,Auto,42,Auto",
+      "columnSpacing": 6,
+      "padding": "2,2",
+      "tooltip": "${$item.name}${$item.subtitle != '' ? ' ' + $item.subtitle : ''} · ${$item.valueText} (${$item.percent}%)",
+      "children": [
+        "txt_process_name",
+        "txt_process_subtitle",
+        "prog_process_load",
+        "txt_process_value"
+      ]
+    },
+    "txt_process_name": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.title}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_process_subtitle": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.subtitle}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "prog_process_load": {
+      "type": "ProgressBar",
+      "column": 2,
+      "value": "${$item.barPercent}",
+      "max": 100,
+      "color": "${$item.percent >= $settings.warnThreshold ? 'warning' : 'cyan'}",
+      "verticalAlignment": "center"
+    },
+    "txt_process_value": {
+      "type": "Text",
+      "column": 3,
+      "text": "${$item.valueText}",
+      "style": "mono",
+      "color": "${$item.percent >= $settings.warnThreshold ? 'warning' : 'default'}",
+      "minWidth": 46,
+      "horizontalAlignment": "right",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "network": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,7",
+      "children": [
+        "network_traffic_grid"
+      ]
+    },
+    "network_traffic_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,*",
+      "columnSpacing": 10,
+      "children": [
+        "network_down_grid",
+        "txt_network_divider",
+        "network_up_grid"
+      ]
+    },
+    "network_down_grid": {
+      "type": "Grid",
+      "column": 0,
+      "columns": "Auto,*",
+      "columnSpacing": 6,
+      "children": [
+        "txt_network_down_label",
+        "txt_network_down_rate"
+      ]
+    },
+    "txt_network_down_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.netDown}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "txt_network_down_rate": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.net.downText}",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "cyan",
+      "horizontalAlignment": "right",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_network_divider": {
+      "type": "Text",
+      "column": 1,
+      "text": "|",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "network_up_grid": {
+      "type": "Grid",
+      "column": 2,
+      "columns": "Auto,*",
+      "columnSpacing": 6,
+      "children": [
+        "txt_network_up_label",
+        "txt_network_up_rate"
+      ]
+    },
+    "txt_network_up_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.netUp}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "txt_network_up_rate": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.net.upText}",
+      "style": "mono",
+      "fontWeight": "semiBold",
+      "color": "accent",
+      "horizontalAlignment": "right",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "storage": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 5,
+      "children": [
+        "storage_header_grid",
+        "grid_storage_drives"
+      ]
+    },
+    "storage_header_grid": {
+      "type": "Grid",
+      "columns": "Auto,*",
+      "columnSpacing": 8,
+      "children": [
+        "txt_storage_title",
+        "txt_system_status"
+      ]
+    },
+    "txt_storage_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.diskTitlePrefix} · ${$settings.targetDrive != 'auto' && $settings.targetDrive != '' ? $settings.targetDrive : $drives.count > 0 ? $drives.count : $sys.disk.selectedName}",
+      "style": "bodyStrong",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_system_status": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$sys.status.label} · ${$sys.status.value}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "right",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "grid_storage_drives": {
+      "type": "ItemsGrid",
+      "items": "drives",
+      "minItemWidth": 132,
+      "maxItems": 8,
+      "spacing": 6,
+      "itemTemplate": "row_storage_drive_item"
+    },
+    "row_storage_drive_item": {
+      "type": "Stack",
+      "when": "${$settings.targetDrive == 'auto' || $settings.targetDrive == '' || $item.name == $settings.targetDrive}",
+      "spacing": 3,
+      "padding": "2,1",
+      "tooltip": "${$item.title} · ${$i18n.diskSubFree}${$item.freeGb}${$i18n.diskSubOf}${$item.totalGb} GB",
+      "children": [
+        "drive_metrics_grid",
+        "prog_drive_usage"
+      ]
+    },
+    "drive_metrics_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 4,
+      "children": [
+        "txt_drive_name",
+        "txt_drive_free_space",
+        "txt_drive_percent"
+      ]
+    },
+    "txt_drive_name": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.name}",
+      "style": "caption",
+      "fontWeight": "semiBold"
+    },
+    "txt_drive_free_space": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$i18n.diskSubFree}${$item.freeGb}G",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "txt_drive_percent": {
+      "type": "Text",
+      "column": 2,
+      "text": "${$item.percent}%",
+      "style": "mono",
+      "horizontalAlignment": "right",
+      "color": "${$item.percent >= 92 ? 'danger' : ($item.percent >= $settings.warnThreshold ? 'warning' : 'secondary')}"
+    },
+    "prog_drive_usage": {
+      "type": "ProgressBar",
+      "value": "${$item.percent}",
+      "max": 100,
+      "color": "${$item.percent >= 92 ? 'danger' : ($item.percent >= $settings.warnThreshold ? 'warning' : 'accent')}"
+    },
+    "recycle_bin": {
+      "id": "recycleBin",
+      "compactPair": true,
+      "pairGroup": "utility",
+      "pairWidth": "*",
+      "type": "RecycleBin",
+      "title": "${$i18n.binTitle}",
+      "subtitle": "${$i18n.binDropHint}",
+      "tooltip": "${$i18n.binClearTip}"
+    },
+    "search": {
+      "compactPair": true,
+      "pairGroup": "utility",
+      "pairWidth": "Auto",
+      "type": "Card",
+      "tone": "subtle",
+      "minHeight": 36,
+      "padding": "11,6",
+      "tooltip": "${$sys.searchShortcut != '' ? $i18n.searchTip + ' (' + $sys.searchShortcut + ')' : $i18n.searchTip}",
+      "onClick": {
+        "type": "deskbox.search"
+      },
+      "children": [
+        "search_compact_row",
+        "search_expanded_grid"
+      ]
+    },
+    "search_compact_row": {
+      "type": "KeyValueRow",
+      "when": "${$slot.paired == 'true'}",
+      "icon": "search",
+      "title": "${$i18n.searchLabel}",
+      "style": "bodyStrong"
+    },
+    "search_expanded_grid": {
+      "type": "Grid",
+      "when": "${$slot.paired != 'true'}",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "search_expanded_row",
+        "badge_search_shortcut"
+      ]
+    },
+    "search_expanded_row": {
+      "type": "KeyValueRow",
+      "column": 0,
+      "icon": "search",
+      "title": "${$i18n.searchExpandedPlaceholder}",
+      "verticalAlignment": "center"
+    },
+    "badge_search_shortcut": {
+      "type": "Badge",
+      "when": "${$sys.searchShortcut != ''}",
+      "column": 1,
+      "text": "${$sys.searchShortcut}",
+      "tone": "subtle",
+      "verticalAlignment": "center"
+    }
+  }
+}

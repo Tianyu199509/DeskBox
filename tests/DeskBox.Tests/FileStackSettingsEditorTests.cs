@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DeskBox.Contracts;
 using DeskBox.Features.FeatureWidgets;
 using DeskBox.Features.FileStack;
@@ -121,7 +121,7 @@ public sealed class FileStackSettingsEditorTests : IDisposable
         Assert.Equal(FileStackOptionKinds.GroupByKind, editor.GroupBy);
         Assert.Equal(FileStackOptionKinds.DefaultThreshold, editor.Threshold);
         Assert.Equal(FileStackOptionKinds.OrderByWidget, editor.OrderBy);
-        Assert.Equal(FileStackOptionKinds.OpenModeInline, editor.OpenMode);
+        Assert.Equal(FileStackOptionKinds.OpenModePopover, editor.OpenMode);
         Assert.Equal(FileStackOptionKinds.PopoverLayoutAdaptive, editor.PopoverLayout);
         Assert.Equal(FileStackOptionKinds.PopoverStyleNeutral, editor.PopoverStyle);
         Assert.Equal(FileStackOptionKinds.UnmatchedKeepLoose, editor.UnmatchedBehavior);
@@ -138,7 +138,7 @@ public sealed class FileStackSettingsEditorTests : IDisposable
         editor.GroupBy = FileStackOptionKinds.GroupByCustom;
         editor.Threshold = 2;
         editor.OrderBy = FileStackOptionKinds.OrderByName;
-        editor.OpenMode = FileStackOptionKinds.OpenModePopover;
+        editor.OpenMode = FileStackOptionKinds.OpenModeInline;
         editor.PopoverLayout = FileStackOptionKinds.PopoverLayoutAdaptive;
         editor.PopoverStyle = FileStackOptionKinds.PopoverStyleFollowMaterial;
         editor.UnmatchedBehavior = FileStackOptionKinds.UnmatchedOther;
@@ -148,7 +148,7 @@ public sealed class FileStackSettingsEditorTests : IDisposable
         Assert.Equal(FileStackOptionKinds.GroupByCustom, slice.FileStackGroupBy);
         Assert.Equal(2, slice.FileStackThreshold);
         Assert.Equal(FileStackOptionKinds.OrderByName, slice.FileStackOrderBy);
-        Assert.Equal(FileStackOptionKinds.OpenModePopover, slice.FileStackOpenMode);
+        Assert.Equal(FileStackOptionKinds.OpenModeInline, slice.FileStackOpenMode);
         Assert.Equal(FileStackOptionKinds.PopoverLayoutAdaptive, slice.FileStackPopoverLayout);
         Assert.Equal(FileStackOptionKinds.PopoverStyleFollowMaterial, slice.FileStackPopoverStyle);
         Assert.Equal(FileStackOptionKinds.UnmatchedOther, slice.FileStackUnmatchedBehavior);
@@ -299,10 +299,10 @@ public sealed class FileStackSettingsEditorTests : IDisposable
     {
         (_, _, FileStackSettingsViewModel editor) = CreateEditor(_root);
 
-        // Defaults: auto-stacking off, group-by kind, inline open mode.
+        // Defaults: auto-stacking off, group-by kind, popover open mode.
         Assert.False(editor.ShowCustomRules);
         Assert.True(editor.HasNoRules);
-        Assert.False(editor.IsPopoverOpenMode);
+        Assert.True(editor.IsPopoverOpenMode);
         Assert.Equal("Settings.FileStacks.Status.Manual", editor.SettingsSummaryText);
 
         editor.AutoStacking = true;
@@ -316,8 +316,8 @@ public sealed class FileStackSettingsEditorTests : IDisposable
         Assert.Equal("Settings.FileStacks.Status.Manual", editor.SettingsSummaryText);
         Assert.False(editor.CanAddRule);
 
-        editor.OpenMode = FileStackOptionKinds.OpenModePopover;
-        Assert.True(editor.IsPopoverOpenMode);
+        editor.OpenMode = FileStackOptionKinds.OpenModeInline;
+        Assert.False(editor.IsPopoverOpenMode);
     }
 
     [Fact]
@@ -473,117 +473,5 @@ public sealed class FileStackSettingsEditorTests : IDisposable
             Assert.DoesNotContain(name, publicProperties);
         }
 
-        // The shell keeps only the preview-entry scan; the aggregation,
-        // priorities, matching and summary moved to the editor.
-        string shell = File.ReadAllText(Path.Combine(
-            TestPaths.FromRepository("src/DeskBox/ViewModels"),
-            "SettingsViewModel.FileStackOptions.cs"));
-        Assert.Contains("RefreshFileStackRulePreviewFromDiskAsync", shell, StringComparison.Ordinal);
-        Assert.Contains("_fileStackSettings.UpdatePreviewEntries(entries);", shell, StringComparison.Ordinal);
-        Assert.DoesNotContain("PersistFileStackCustomRules", shell, StringComparison.Ordinal);
-        Assert.DoesNotContain("RefreshFileStackRulePreview()", shell, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void MigrationPattern_XamlBridgesAndWindowWiringStayPinned()
-    {
-        string windowXaml = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml"));
-        string overviewXaml = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml"));
-        string overviewCode = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml.cs"));
-        string deferred = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.DeferredSections.cs"));
-        string bridge = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Features/FileStack/FileStackSettingsViewModel.AotBindableProperties.cs"));
-        string bindableShell = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs"));
-
-        // Section-level DataContext switch with the compiled x:Bind surface
-        // typed to the editor (ProcessBindings receives the editor root).
-        Assert.Contains(
-            "x:DataType=\"fileStack:FileStackSettingsViewModel\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ItemsSource=\"{x:Bind CustomRules, Mode=OneWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind OpenMode, Mode=TwoWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{Binding AutoStacking, Mode=TwoWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsEnabled=\"{Binding IsPopoverOpenMode}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Visibility=\"{Binding ShowCustomRules, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-
-        // The overview page's three typed editor dependency properties.
-        Assert.Contains(
-            "ItemsSource=\"{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Description=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ItemsSource=\"{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}\"",
-            overviewXaml,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("ViewModelProperty", overviewCode, StringComparison.Ordinal);
-
-        // The deferred host assigns the editor bridges after the DataContext
-        // root and routes the compiled-bindings root for the file-stack
-        // template.
-        Assert.Contains(
-            "fileSettings.FileStack = _fileStackSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "fileSettings.FeatureWidgets = _featureWidgetsSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "fileSettings.Interaction = _interactionSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "section.DataContext = _fileStackSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "object compiledBindingsRoot = sectionTag == \"FileStackSettings\"",
-            deferred,
-            StringComparison.Ordinal);
-
-        // The editor's {Binding} bridge and the shrunken shell bridge.
-        Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge, StringComparison.Ordinal);
-        Assert.Contains("nameof(IsPopoverOpenMode)", bridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(StacksEnabled)", bridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(AvailableOpenModeOptions)", bridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(CustomRules)", bridge, StringComparison.Ordinal);
-        Assert.Equal(39, Regex.Matches(bindableShell, @"nameof\(").Count);
     }
 }

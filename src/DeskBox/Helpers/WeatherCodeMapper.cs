@@ -257,45 +257,27 @@ public static class WeatherCodeMapper
     // ── Legacy glyph support (kept for backward compatibility) ──
 
     /// <summary>
-    /// Returns a Segoe Fluent Icons glyph for the given WMO weather code.
-    /// Glyphs are chosen for visual clarity at small sizes (16-20px) and
-    /// consistent rendering across Windows versions.
+    /// Returns a Win10/Win11-compatible Segoe MDL2 Assets / Segoe Fluent Icons glyph
+    /// for the given WMO weather code.
     /// </summary>
     public static string GetGlyph(int code, bool isDay = true)
     {
         return code switch
         {
-            0 => isDay ? "\uE706" : "\uE708",   // Sun / Moon
-            1 => isDay ? "\uE706" : "\uE708",   // Sun / Moon (mainly clear)
-            2 => isDay ? "\uE9D2" : "\uE708",   // PartlyCloudyDay (Cloud) / Moon
-            3 => "\uE9D2",                        // Cloud (overcast)
-            45 => "\uE9CB",                       // Fog
-            48 => "\uE9CB",                       // Fog (rime)
-            51 => "\uE755",                       // Rain (light drizzle)
-            53 => "\uE755",                       // Rain (moderate drizzle)
-            55 => "\uE755",                       // Rain (dense drizzle)
-            56 => "\uE755",                       // Rain (freezing drizzle)
-            57 => "\uE755",                       // Rain (freezing drizzle)
-            61 => "\uE755",                       // Rain (slight)
-            63 => "\uE755",                       // Rain (moderate)
-            65 => "\uE755",                       // Rain (heavy)
-            66 => "\uE755",                       // Rain (freezing)
-            67 => "\uE755",                       // Rain (heavy freezing)
-            71 => "\uE703",                       // Snow (slight)
-            73 => "\uE703",                       // Snow (moderate)
-            75 => "\uE703",                       // Snow (heavy)
-            77 => "\uE703",                       // Snow (grains)
-            80 => "\uE755",                       // Rain (showers)
-            81 => "\uE755",                       // Rain (moderate showers)
-            82 => "\uE755",                       // Rain (violent showers)
-            85 => "\uE703",                       // Snow (showers)
-            86 => "\uE703",                       // Snow (heavy showers)
-            95 => "\uE756",                       // Thunderstorm
-            96 => "\uE756",                       // Thunderstorm (hail)
-            99 => "\uE756",                       // Thunderstorm (heavy hail)
-            _ => "\uE706"                          // Sun (unknown fallback)
+            0 or 1 => isDay ? "\uE706" : "\uE708",
+            2 or 3 => "\uE753",
+            45 or 48 => "\uE753",
+            >= 51 and <= 67 => "\uE753",
+            >= 71 and <= 77 => "\uE753",
+            >= 80 and <= 82 => "\uE753",
+            85 or 86 => "\uE753",
+            95 or 96 or 99 => "\uE945",
+            _ => isDay ? "\uE706" : "\uE708"
         };
     }
+
+    public static string GetWeatherGlyph(int code, bool isDay = true) =>
+        GetGlyph(code, isDay);
 
     /// <summary>
     /// Returns the localization resource key for the given WMO weather

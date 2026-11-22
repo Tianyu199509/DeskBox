@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DeskBox.Platform;
+using DeskBox.Services;
 
 namespace DeskBox.Helpers;
 
@@ -39,7 +40,11 @@ internal static class NativeDropMaterializationWorker
         /// to none when it did not.</summary>
         public required uint CompletionEffect { get; init; }
 
-        public required Action<IReadOnlyList<string>> OnCompleted { get; init; }
+        public required uint LogicalEffect { get; init; }
+
+        public Func<bool>? ConfirmAcceptBeforeReceipt { get; init; }
+
+        public required Action<IReadOnlyList<string>, IReadOnlyList<DroppedItemOriginKind>, int> OnCompleted { get; init; }
     }
 
     private static readonly BlockingCollection<Job> PendingJobs =
@@ -62,13 +67,17 @@ internal static class NativeDropMaterializationWorker
         nint marshalStream,
         bool asyncOperationStarted,
         uint completionEffect,
-        Action<IReadOnlyList<string>> onCompleted)
+        uint logicalEffect,
+        Action<IReadOnlyList<string>, IReadOnlyList<DroppedItemOriginKind>, int> onCompleted,
+        Func<bool>? confirmAcceptBeforeReceipt = null)
     {
         var job = new Job
         {
             MarshalStream = marshalStream,
             AsyncOperationStarted = asyncOperationStarted,
             CompletionEffect = completionEffect,
+            LogicalEffect = logicalEffect,
+            ConfirmAcceptBeforeReceipt = confirmAcceptBeforeReceipt,
             OnCompleted = onCompleted,
         };
 
@@ -87,25 +96,13 @@ internal static class NativeDropMaterializationWorker
     /// </summary>
     internal static void CleanupVirtualDropDirectories(IReadOnlyList<string> paths)
     {
-        string temporaryRoot = Path.GetFullPath(Path.Combine(
-                Path.GetTempPath(),
-                "DeskBox",
-                "VirtualDrops"))
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
-            Path.DirectorySeparatorChar;
-
         foreach (string directory in paths
                      .Select(Path.GetDirectoryName)
                      .Where(directory => !string.IsNullOrWhiteSpace(directory))
                      .Select(directory => Path.GetFullPath(directory!))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            string normalizedDirectory = directory
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
-                Path.DirectorySeparatorChar;
-            if (!normalizedDirectory.StartsWith(
-                    temporaryRoot,
-                    StringComparison.OrdinalIgnoreCase))
+            if (!DropStagingFileOps.IsUnderVirtualDropsDirectory(directory + Path.DirectorySeparatorChar + "_probe"))
             {
                 continue;
             }
@@ -114,7 +111,7 @@ internal static class NativeDropMaterializationWorker
             {
                 if (Directory.Exists(directory))
                 {
-                    Directory.Delete(directory, recursive: true);
+                    DropStagingFileOps.DeleteStagingTreeNonReparse(new DirectoryInfo(directory));
                 }
             }
             catch (Exception ex)
@@ -166,11 +163,69 @@ internal static class NativeDropMaterializationWorker
         }
     }
 
+    internal static bool ConfirmAcceptanceBeforeReceipt(
+        Func<bool>? confirmAcceptBeforeReceipt,
+        int timeoutMs = 5000)
+    {
+        if (confirmAcceptBeforeReceipt is null)
+        {
+            return true;
+        }
+
+        if (UiDispatch.Phase == UiDispatch.PhaseKind.Shutdown)
+        {
+            return false;
+        }
+
+        if (UiDispatch.HasAccess || UiDispatch.Phase == UiDispatch.PhaseKind.Headless)
+        {
+            try
+            {
+                return confirmAcceptBeforeReceipt();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        UiDispatch.PostAfterCallback(() =>
+        {
+            bool accepted = false;
+            try
+            {
+                accepted = confirmAcceptBeforeReceipt();
+            }
+            catch
+            {
+                accepted = false;
+            }
+            finally
+            {
+                completion.TrySetResult(accepted);
+            }
+        });
+
+        try
+        {
+            return completion.Task.Wait(Math.Max(1, timeoutMs)) && completion.Task.Result;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static void RunJob(Job job)
     {
         IReadOnlyList<string> extractedPaths = [];
+        IReadOnlyList<DroppedItemOriginKind> itemOrigins = [];
+        int skippedOrFailedCount = 0;
         uint finalEffect = NativeDropEffectPolicy.None;
         int operationResult = unchecked((int)0x80004005); // E_UNEXPECTED
+        bool refusedBeforeReceipt = false;
 
         nint dataObject = 0;
         try
@@ -199,12 +254,30 @@ internal static class NativeDropMaterializationWorker
             }
             else
             {
-                extractedPaths = NativeDropTarget.ExtractVirtualFiles(
-                    new NativeOleDataObject(dataObject));
+                extractedPaths = NativeDropTarget.ExtractDeferredWorkerFilesWithOrigins(
+                    new NativeOleDataObject(dataObject),
+                    out itemOrigins,
+                    out skippedOrFailedCount);
                 if (extractedPaths.Count > 0)
                 {
-                    finalEffect = job.CompletionEffect;
-                    operationResult = 0; // S_OK
+                    if (ConfirmAcceptanceBeforeReceipt(job.ConfirmAcceptBeforeReceipt))
+                    {
+                        finalEffect = job.CompletionEffect;
+                        operationResult = 0; // S_OK
+                    }
+                    else
+                    {
+                        refusedBeforeReceipt = true;
+                        CleanupVirtualDropDirectories(extractedPaths);
+                        extractedPaths = [];
+                        itemOrigins = [];
+                        skippedOrFailedCount = 0;
+                        finalEffect = NativeDropEffectPolicy.None;
+                        operationResult = unchecked((int)0x80004005);
+                        App.Log(
+                            "[DropTarget] Deferred-drop worker refused drop before receipt " +
+                            "(import pipeline busy or target disposed).");
+                    }
                 }
                 else
                 {
@@ -218,6 +291,11 @@ internal static class NativeDropMaterializationWorker
                 // never before OnDrop returned. Order matters: the source
                 // reads the receipt after EndOperation.
                 NativeDropTarget.WritePerformedDropEffect(dataObject, finalEffect);
+                NativeDropTarget.WriteLogicalPerformedDropEffect(
+                    dataObject,
+                    finalEffect != NativeDropEffectPolicy.None
+                        ? job.LogicalEffect
+                        : NativeDropEffectPolicy.None);
             }
         }
         catch (Exception ex)
@@ -234,6 +312,9 @@ internal static class NativeDropMaterializationWorker
                 if (dataObject != 0)
                 {
                     NativeDropTarget.WritePerformedDropEffect(
+                        dataObject,
+                        NativeDropEffectPolicy.None);
+                    NativeDropTarget.WriteLogicalPerformedDropEffect(
                         dataObject,
                         NativeDropEffectPolicy.None);
                 }
@@ -269,7 +350,11 @@ internal static class NativeDropMaterializationWorker
             }
         }
 
-        UiDispatch.PostAfterCallback(() => job.OnCompleted(extractedPaths));
+        if (!refusedBeforeReceipt)
+        {
+            int capturedSkipped = skippedOrFailedCount;
+            UiDispatch.PostAfterCallback(() => job.OnCompleted(extractedPaths, itemOrigins, capturedSkipped));
+        }
     }
 
     private static unsafe uint ReleaseDataObject(nint pointer)

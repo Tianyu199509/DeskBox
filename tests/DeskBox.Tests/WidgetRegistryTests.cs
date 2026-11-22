@@ -16,6 +16,8 @@ public sealed class WidgetRegistryTests
         Assert.True(registry.CanCreateWindow(WidgetKind.QuickCapture));
         Assert.True(registry.CanCreateWindow(WidgetKind.Todo));
         Assert.True(registry.CanCreateWindow(WidgetKind.Music));
+        Assert.True(registry.CanCreateWindow(WidgetKind.Custom));
+        Assert.True(registry.CanCreateWindow(WidgetKind.Clipboard));
     }
 
     [Fact]

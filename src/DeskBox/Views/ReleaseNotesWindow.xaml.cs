@@ -52,7 +52,9 @@ public sealed partial class ReleaseNotesWindow : Window
         LocalizationService localizationService,
         Func<CancellationToken, Task<AppUpdateManifest?>>? manifestLoader = null)
     {
-        _manifest = manifest;
+        _manifest = manifest is not null
+            ? Services.AppUpdateService.NormalizeManifestForReleaseNotes(manifest, currentVersion)
+            : null;
         _currentVersion = currentVersion;
         _themeService = themeService;
         _localizationService = localizationService;
@@ -60,7 +62,6 @@ public sealed partial class ReleaseNotesWindow : Window
         _releaseNotesService = new ReleaseNotesService();
 
         InitializeComponent();
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
@@ -81,7 +82,6 @@ public sealed partial class ReleaseNotesWindow : Window
         _themeService.TrackWindow(this);
         _localizationService.LanguageChanged += OnLanguageChanged;
         RootGrid.ActualThemeChanged += RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged += AppTitleBar_ActualThemeChanged;
         Closed += ReleaseNotesWindow_Closed;
 
         ResizeAndCenter(windowId);
@@ -99,6 +99,18 @@ public sealed partial class ReleaseNotesWindow : Window
     }
 
     public void UpdateManifest(AppUpdateManifest manifest, string currentVersion)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        ApplyResolvedManifest(
+            Services.AppUpdateService.NormalizeManifestForReleaseNotes(manifest, currentVersion),
+            currentVersion);
+    }
+
+    private void ApplyResolvedManifest(AppUpdateManifest manifest, string currentVersion)
     {
         if (_isClosed)
         {
@@ -125,15 +137,22 @@ public sealed partial class ReleaseNotesWindow : Window
         _isRebuildingVersionList = true;
         try
         {
-            string target = _manifest is { } manifest && !string.IsNullOrWhiteSpace(manifest.Version)
-                ? manifest.Version
+            string fallbackTarget = Services.AppUpdateService.IsVersionBlockedForReleaseNotes(_currentVersion, _manifest)
+                ? (Services.ReleaseNotesService.KnownReleaseVersions.FirstOrDefault(v =>
+                    !Services.AppUpdateService.IsVersionBlockedForReleaseNotes(v, _manifest)) ?? _currentVersion)
                 : _currentVersion;
+            string target = _manifest is { } manifest &&
+                !string.IsNullOrWhiteSpace(manifest.Version) &&
+                !Services.AppUpdateService.IsVersionBlockedForReleaseNotes(manifest.Version, manifest)
+                    ? manifest.Version
+                    : fallbackTarget;
             _selectedVersion = target;
 
             var versions = new List<string> { target };
             foreach (string known in Services.ReleaseNotesService.KnownReleaseVersions)
             {
-                if (!versions.Contains(known, StringComparer.OrdinalIgnoreCase))
+                if (!Services.AppUpdateService.IsVersionBlockedForReleaseNotes(known, _manifest) &&
+                    !versions.Contains(known, StringComparer.OrdinalIgnoreCase))
                 {
                     versions.Add(known);
                 }
@@ -141,7 +160,8 @@ public sealed partial class ReleaseNotesWindow : Window
 
             foreach (string cached in _releaseNotesService.GetCachedVersions())
             {
-                if (!versions.Contains(cached, StringComparer.OrdinalIgnoreCase))
+                if (!Services.AppUpdateService.IsVersionBlockedForReleaseNotes(cached, _manifest) &&
+                    !versions.Contains(cached, StringComparer.OrdinalIgnoreCase))
                 {
                     versions.Add(cached);
                 }
@@ -196,16 +216,20 @@ public sealed partial class ReleaseNotesWindow : Window
         {
             // Back on the resolved manifest: it carries the locale-aware
             // inline notes.
-            UpdateManifest(manifest, _currentVersion);
+            ApplyResolvedManifest(manifest, _currentVersion);
             return;
         }
 
         // Any other version resolves through its GitHub release tag; the
         // notes loader serves that version's disk cache first, so versions
         // viewed once stay readable offline.
-        UpdateManifest(
-            Services.AppUpdateService.CreateReleaseNotesOnlyManifest(version),
-            _currentVersion);
+        var selectedManifest = Services.AppUpdateService.CreateReleaseNotesOnlyManifest(version);
+        if (_manifest is { BlockedVersions.Count: > 0 } existingManifest)
+        {
+            selectedManifest.BlockedVersions = [.. existingManifest.BlockedVersions];
+        }
+
+        ApplyResolvedManifest(selectedManifest, _currentVersion);
     }
 
     /// <summary>
@@ -277,7 +301,10 @@ public sealed partial class ReleaseNotesWindow : Window
 
         OpenOnlineButton.Content = _localizationService.T("Settings.ReleaseNotes.OpenOnline");
         CloseButton.Content = _localizationService.T("Settings.ReleaseNotes.Close");
-        OpenOnlineButton.Visibility = AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl)
+        bool isStoreOrPackaged = AppDistributionService.Current.IsMicrosoftStore ||
+                                 AppDistributionService.Current.IsPackaged;
+        OpenOnlineButton.Visibility = !isStoreOrPackaged &&
+                                      AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl)
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -512,14 +539,16 @@ public sealed partial class ReleaseNotesWindow : Window
 
     private void OpenOnlineButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_manifest is not { } manifest)
+        if (Services.AppDistributionService.Current.IsMicrosoftStore ||
+            Services.AppDistributionService.Current.IsPackaged ||
+            _manifest is not { } manifest)
         {
             return;
         }
 
         if (AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl))
         {
-            Win32Helper.OpenFile(manifest.ReleaseNotesUrl);
+            Services.ShellLaunchService.FireAndForgetOpenPath(manifest.ReleaseNotesUrl);
         }
     }
 
@@ -554,23 +583,11 @@ public sealed partial class ReleaseNotesWindow : Window
         }
     }
 
-    private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args) => ApplyTitleBarColors();
-
     private void ApplyTitleBarColors()
     {
-        bool isDark = RootGrid.ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-        AppWindowTitleBar titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private void ResizeAndCenter(WindowId displayWindowId)
@@ -623,14 +640,16 @@ public sealed partial class ReleaseNotesWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinimumWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinimumHeight, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                MinimumWidth,
+                MinimumHeight);
         }
 
         if (message == WmNcDestroy)
@@ -650,6 +669,7 @@ public sealed partial class ReleaseNotesWindow : Window
 
         _isClosed = true;
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
@@ -658,9 +678,10 @@ public sealed partial class ReleaseNotesWindow : Window
         _manifestLoadCts = null;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         RootGrid.ActualThemeChanged -= RootGrid_ActualThemeChanged;
-        AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= ReleaseNotesWindow_Closed;
         RemoveMinimumSizeHook();
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     private Brush GetThemeBrush(string key)
@@ -676,22 +697,5 @@ public sealed partial class ReleaseNotesWindow : Window
     {
         double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
         return Math.Max(1, (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
     }
 }

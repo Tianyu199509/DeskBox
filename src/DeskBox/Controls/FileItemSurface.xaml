@@ -20,10 +20,11 @@
                         <Viewbox Stretch="Uniform">
                             <Grid Width="36" Height="36">
                                 <Border
+                                    Margin="2"
                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                     BorderThickness="1"
-                                    CornerRadius="9"
+                                    CornerRadius="8"
                                     Opacity="0.62" />
                             </Grid>
                         </Viewbox>
@@ -62,6 +63,8 @@
                         IsHitTestVisible="False"
                         Visibility="{x:Bind ActivityBadgeVisibility, Mode=OneWay}">
                         <ProgressRing
+                            x:Name="IconActivityRing"
+                            x:Load="{x:Bind IsActivityActive, Mode=OneWay}"
                             Width="13"
                             Height="13"
                             IsActive="{x:Bind IsActivityActive, Mode=OneWay}"
@@ -122,6 +125,8 @@
                         IsHitTestVisible="False"
                         Visibility="{x:Bind ActivityBadgeVisibility, Mode=OneWay}">
                         <ProgressRing
+                            x:Name="ListActivityRing"
+                            x:Load="{x:Bind IsActivityActive, Mode=OneWay}"
                             Width="12"
                             Height="12"
                             IsActive="{x:Bind IsActivityActive, Mode=OneWay}"
@@ -166,10 +171,7 @@
         x:Name="SurfaceBorder"
         Tag="InteractiveSurface"
         Background="Transparent"
-        HorizontalAlignment="{Binding SurfaceHorizontalAlignment, ElementName=SurfaceRoot}"
-        MaxWidth="{Binding SurfaceMaxWidth, ElementName=SurfaceRoot}"
-        Margin="{Binding SurfaceMargin, ElementName=SurfaceRoot}"
-        Padding="{Binding SurfacePadding, ElementName=SurfaceRoot}"
+        HorizontalAlignment="Stretch"
         CornerRadius="2"
         Loaded="SurfaceBorder_Loaded"
         Unloaded="SurfaceBorder_Unloaded"
@@ -178,25 +180,6 @@
         PointerPressed="SurfaceBorder_PointerPressed"
         PointerReleased="SurfaceBorder_PointerReleased"
         PointerCaptureLost="SurfaceBorder_PointerCaptureLost">
-        <ToolTipService.ToolTip>
-            <!-- PathTooltipVisibility is derived from LayoutContext.ShowFileItemPathTooltips. -->
-            <ToolTip
-                IsEnabled="{x:Bind ToolTipEnabled, Mode=OneWay}">
-                <StackPanel Spacing="2">
-                    <TextBlock
-                        FontWeight="SemiBold"
-                        Text="{x:Bind ActivityStatusText, Mode=OneWay}"
-                        Visibility="{x:Bind ActivityStatusVisibility, Mode=OneWay}" />
-                    <TextBlock
-                        MaxWidth="360"
-                        MaxLines="2"
-                        Text="{Binding FullPath}"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap"
-                        Visibility="{x:Bind PathTooltipVisibility, Mode=OneWay}" />
-                </StackPanel>
-            </ToolTip>
-        </ToolTipService.ToolTip>
         <Grid x:Name="LayoutHost" />
     </Border>
 </UserControl>

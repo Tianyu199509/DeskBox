@@ -29,6 +29,8 @@ $publishDir = Join-Path $runRoot "publish"
 $symbolsDir = Join-Path $runRoot "symbols"
 $rustIntermediateDir = Join-Path $runRoot "rust-staging"
 $rustCargoTargetDir = Join-Path $runRoot "rust-target"
+$qjsIntermediateDir = Join-Path $runRoot "qjs-staging"
+$qjsObjDir = Join-Path $runRoot "qjs-obj"
 $logPath = Join-Path $runRoot "publish.log"
 $summaryPath = Join-Path $runRoot "summary.json"
 
@@ -271,6 +273,7 @@ $commonProperties = @(
     "-p:DeskBoxAotSmokeHarness=true",
     "-p:PublishAot=true",
     "-p:DeskBoxRustNative=true",
+    "-p:DeskBoxQjsNative=true",
     "-p:JsonSerializerIsReflectionEnabledByDefault=false",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
@@ -306,6 +309,8 @@ try {
         "--no-restore",
         "-p:DeskBoxRustNativeIntermediateDir=$rustIntermediateDir",
         "-p:DeskBoxRustNativeCargoTargetDir=$rustCargoTargetDir",
+        "-p:DeskBoxQjsIntermediateDir=$qjsIntermediateDir",
+        "-p:DeskBoxQjsObjDir=$qjsObjDir",
         "-p:PublishSingleFile=false",
         "-v:minimal"
     ) + $commonProperties
@@ -326,6 +331,12 @@ $nativeValidation = & (Join-Path $PSScriptRoot "build-rust-native.ps1") `
     -OutputDirectory $rustIntermediateDir `
     -ValidateOnly
 $runtimeAbiProbeExecuted = $nativeValidation.RuntimeProbeExecuted
+$qjsValidation = & (Join-Path $PSScriptRoot "build-qjs-native.ps1") `
+    -Platform ARM64 `
+    -Configuration Release `
+    -CrtLinkage Static `
+    -OutputDirectory $qjsIntermediateDir `
+    -ValidateOnly
 if ($processArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) {
     if (-not $runtimeAbiProbeExecuted) {
         throw "A native ARM64 audit must execute the target Rust ABI probe."
@@ -347,7 +358,8 @@ $requiredFiles = @(
     "DeskBox.Updater.exe",
     "DeskBox.ThumbnailProxy.exe",
     "DeskBox.pri",
-    "deskbox_native.dll"
+    "deskbox_native.dll",
+    "deskbox_qjs.dll"
 )
 foreach ($requiredFile in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDir $requiredFile) -PathType Leaf)) {
@@ -357,7 +369,8 @@ foreach ($requiredFile in $requiredFiles) {
 
 foreach ($moduleName in @(
         "DeskBox.ThumbnailProxy.exe",
-        "deskbox_native.dll")) {
+        "deskbox_native.dll",
+        "deskbox_qjs.dll")) {
     $matches = @(Get-ChildItem -LiteralPath $publishDir -Filter $moduleName -File -Recurse)
     $expectedPath = [System.IO.Path]::GetFullPath((Join-Path $publishDir $moduleName))
     if ($matches.Count -ne 1 -or
@@ -375,6 +388,14 @@ $nativePublishSha256 =
     (Get-FileHash -LiteralPath (Join-Path $publishDir "deskbox_native.dll") -Algorithm SHA256).Hash
 if ($nativeStagingSha256 -cne $nativePublishSha256) {
     throw "ARM64 published Rust module does not match this run's isolated staging output."
+}
+
+$qjsStagingSha256 =
+    (Get-FileHash -LiteralPath (Join-Path $qjsIntermediateDir "deskbox_qjs.dll") -Algorithm SHA256).Hash
+$qjsPublishSha256 =
+    (Get-FileHash -LiteralPath (Join-Path $publishDir "deskbox_qjs.dll") -Algorithm SHA256).Hash
+if ($qjsStagingSha256 -cne $qjsPublishSha256) {
+    throw "ARM64 published QuickJS module does not match this run's isolated staging output."
 }
 
 $pdbFiles = @(Get-ChildItem -LiteralPath $publishDir -Filter "*.pdb" -File -Recurse)
@@ -395,7 +416,8 @@ foreach ($requiredSymbol in @(
         "DeskBox.pdb",
         "DeskBox.Updater.pdb",
         "DeskBox.ThumbnailProxy.pdb",
-        "deskbox_native.pdb")) {
+        "deskbox_native.pdb",
+        "deskbox_qjs.pdb")) {
     if (-not ($symbolFiles | Where-Object Name -eq $requiredSymbol)) {
         throw "ARM64 symbols are missing '$requiredSymbol'."
     }
@@ -428,7 +450,8 @@ $peResults = @(
             "DeskBox.exe",
             "DeskBox.Updater.exe",
             "DeskBox.ThumbnailProxy.exe",
-            "deskbox_native.dll")) {
+            "deskbox_native.dll",
+            "deskbox_qjs.dll")) {
         $path = Join-Path $publishDir $fileName
         $machine = Get-PeMachine -Path $path
         if ($machine -ne $expectedMachine) {
@@ -526,6 +549,15 @@ $summary = [ordered]@{
         contractValidation = $nativeValidation.ContractValidation
         stagingSha256 = $nativeStagingSha256
         publishSha256 = $nativePublishSha256
+        publishMatchesStaging = $true
+    }
+    qjsNative = [ordered]@{
+        abiVersion = $qjsValidation.AbiVersion
+        crtLinkage = $qjsValidation.CrtLinkage
+        requiredExports = @($qjsValidation.RequiredExports)
+        machine = $qjsValidation.MachineHex
+        stagingSha256 = $qjsStagingSha256
+        publishSha256 = $qjsPublishSha256
         publishMatchesStaging = $true
     }
 }

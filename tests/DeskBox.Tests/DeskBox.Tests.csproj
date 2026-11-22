@@ -2,41 +2,58 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
-    <Platform Condition="'$(Platform)' == ''">x64</Platform>
-
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <WindowsAppSDKBootstrapInitialize>false</WindowsAppSDKBootstrapInitialize>
+
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+    <_DeskBoxEffectiveTestRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_DeskBoxEffectiveTestRid>
+    <_DeskBoxEffectiveTestRid Condition="'$(_DeskBoxEffectiveTestRid)' == '' and '$(Platform)' == 'ARM64'">win-arm64</_DeskBoxEffectiveTestRid>
+    <_DeskBoxEffectiveTestRid Condition="'$(_DeskBoxEffectiveTestRid)' == ''">win-x64</_DeskBoxEffectiveTestRid>
+
+    <DeskBoxNativeTestBuildPlatform>$(Platform)</DeskBoxNativeTestBuildPlatform>
+    <DeskBoxNativeTestRuntimeSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</DeskBoxNativeTestRuntimeSegment>
+    <DeskBoxNativeTestRuntimeSegment Condition="'$(DeskBoxNativeTestRuntimeSegment)' == ''">no-rid</DeskBoxNativeTestRuntimeSegment>
     <DeskBoxNativeTestPlatform Condition="'$(Platform)' == 'ARM64' Or '$(RuntimeIdentifier)' == 'win-arm64'">ARM64</DeskBoxNativeTestPlatform>
     <DeskBoxNativeTestPlatform Condition="'$(DeskBoxNativeTestPlatform)' == ''">x64</DeskBoxNativeTestPlatform>
     <DeskBoxRustCrtLinkage Condition="'$(DeskBoxRustCrtLinkage)' == ''">Static</DeskBoxRustCrtLinkage>
-    <DeskBoxNativeTestIntermediateDir>$(MSBuildProjectDirectory)\obj\rust-native\$(Configuration)\$(Platform)\$(RuntimeIdentifier)\$(DeskBoxRustCrtLinkage)</DeskBoxNativeTestIntermediateDir>
-    <DeskBoxNativeTestCargoTargetDir>$(DeskBoxNativeTestIntermediateDir)\cargo-target</DeskBoxNativeTestCargoTargetDir>
+    <DeskBoxSharedNativeProjectDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\src\DeskBox'))</DeskBoxSharedNativeProjectDir>
+    <DeskBoxNativeTestIntermediateDir Condition="'$(DeskBoxNativeTestIntermediateDir)' == ''">$(DeskBoxSharedNativeProjectDir)\obj\rust-native\$(Configuration)\$(DeskBoxNativeTestBuildPlatform)\$(DeskBoxNativeTestRuntimeSegment)\$(DeskBoxRustCrtLinkage)</DeskBoxNativeTestIntermediateDir>
+    <DeskBoxNativeTestCargoTargetDir Condition="'$(DeskBoxNativeTestCargoTargetDir)' == ''">$(DeskBoxNativeTestIntermediateDir)\cargo-target</DeskBoxNativeTestCargoTargetDir>
     <DeskBoxNativeTestDll>$(DeskBoxNativeTestIntermediateDir)\deskbox_native.dll</DeskBoxNativeTestDll>
     <DeskBoxNativeTestPdb>$(DeskBoxNativeTestIntermediateDir)\deskbox_native.pdb</DeskBoxNativeTestPdb>
+    <DeskBoxQjsTestIntermediateDir Condition="'$(DeskBoxQjsTestIntermediateDir)' == ''">$(DeskBoxSharedNativeProjectDir)\obj\qjs-native\$(Configuration)\$(DeskBoxNativeTestBuildPlatform)\$(DeskBoxNativeTestRuntimeSegment)\$(DeskBoxRustCrtLinkage)</DeskBoxQjsTestIntermediateDir>
+    <DeskBoxQjsTestObjDir Condition="'$(DeskBoxQjsTestObjDir)' == ''">$(DeskBoxQjsTestIntermediateDir)\c-obj</DeskBoxQjsTestObjDir>
+    <DeskBoxQjsTestDll>$(DeskBoxQjsTestIntermediateDir)\deskbox_qjs.dll</DeskBoxQjsTestDll>
+    <DeskBoxQjsTestPdb>$(DeskBoxQjsTestIntermediateDir)\deskbox_qjs.pdb</DeskBoxQjsTestPdb>
   </PropertyGroup>
 
   <ItemGroup>
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\rust-toolchain.toml" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\Cargo.toml" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\Cargo.lock" />
+    <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\README.md" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-native\Cargo.toml" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-native\src\**\*" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\native\include\deskbox_native.h" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-rust-native.ps1" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\native-pe-contract.ps1" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\include\deskbox_qjs.h" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\deskbox_qjs_bridge.c" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs.h" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs-amalgam.c" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\native-pe-contract.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.7.0" GeneratePathProperty="true" PrivateAssets="all" />
     <PackageReference Include="xunit" Version="2.5.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,7 +69,8 @@
   <Target
     Name="BuildDeskBoxNativeTestModule"
     BeforeTargets="CoreCompile"
-    Inputs="@(DeskBoxNativeTestInput)"
+    DependsOnTargets="ResolveProjectReferences"
+    Inputs="$(MSBuildAllProjects);@(DeskBoxNativeTestInput)"
     Outputs="$(DeskBoxNativeTestDll);$(DeskBoxNativeTestPdb)">
     <Error
       Condition="'$(DeskBoxRustCrtLinkage)' != 'Dynamic' and '$(DeskBoxRustCrtLinkage)' != 'Static'"
@@ -68,7 +86,49 @@
     <Copy
       SourceFiles="$(DeskBoxNativeTestDll);$(DeskBoxNativeTestPdb)"
       DestinationFolder="$(OutDir)"
-      SkipUnchangedFiles="true" />
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <Target
+    Name="BuildDeskBoxQjsTestModule"
+    BeforeTargets="CoreCompile"
+    DependsOnTargets="ResolveProjectReferences"
+    Inputs="$(MSBuildAllProjects);@(DeskBoxQjsTestInput)"
+    Outputs="$(DeskBoxQjsTestDll);$(DeskBoxQjsTestPdb)">
+    <Exec
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1&quot; -Platform $(DeskBoxNativeTestPlatform) -Configuration $(Configuration) -CrtLinkage $(DeskBoxRustCrtLinkage) -OutputDirectory &quot;$(DeskBoxQjsTestIntermediateDir)&quot; -IntermediateDirectory &quot;$(DeskBoxQjsTestObjDir)&quot;" />
+  </Target>
+
+  <Target
+    Name="CopyDeskBoxQjsTestModule"
+    AfterTargets="Build"
+    DependsOnTargets="BuildDeskBoxQjsTestModule">
+    <Copy
+      SourceFiles="$(DeskBoxQjsTestDll);$(DeskBoxQjsTestPdb)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <Target
+    Name="CopyDeskBoxWinRtDispatcherNativeRuntime"
+    AfterTargets="Build">
+    <PropertyGroup>
+      <_DeskBoxInteractiveExperiencesNativeDir>$(PkgMicrosoft_WindowsAppSDK_InteractiveExperiences)\runtimes-framework\$(_DeskBoxEffectiveTestRid)\native</_DeskBoxInteractiveExperiencesNativeDir>
+    </PropertyGroup>
+    <ItemGroup Condition="Exists('$(_DeskBoxInteractiveExperiencesNativeDir)')">
+      <_DeskBoxDispatcherNativeDll Include="$(_DeskBoxInteractiveExperiencesNativeDir)\*.dll" />
+    </ItemGroup>
+    <Copy
+      Condition="'@(_DeskBoxDispatcherNativeDll)' != ''"
+      SourceFiles="@(_DeskBoxDispatcherNativeDll)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
   </Target>
 
 </Project>

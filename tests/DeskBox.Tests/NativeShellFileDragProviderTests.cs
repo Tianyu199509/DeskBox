@@ -26,13 +26,19 @@ public sealed class NativeShellFileDragProviderTests
     }
 
     [Fact]
-    public void CanAttachPaths_RequiresOneSharedParent()
+    public void CanAttachPaths_AcceptsSingleAndMultiParentPaths_RejectsDriveRootsAndEmpty()
     {
         Assert.True(NativeShellFileDragProvider.CanAttachPaths(
             [@"E:\DeskBox\my\One.lnk", @"E:\DeskBox\my\Readme.txt"],
             _ => true));
-        Assert.False(NativeShellFileDragProvider.CanAttachPaths(
+        Assert.True(NativeShellFileDragProvider.CanAttachPaths(
             [@"E:\DeskBox\my\One.lnk", @"E:\DeskBox\other\Two.lnk"],
+            _ => true));
+        Assert.True(NativeShellFileDragProvider.CanAttachPaths(
+            [@"E:\DeskBox\sub\Three.txt"],
+            _ => true));
+        Assert.False(NativeShellFileDragProvider.CanAttachPaths(
+            [@"E:\"],
             _ => true));
         Assert.False(NativeShellFileDragProvider.CanAttachPaths(
             [],

@@ -6,6 +6,8 @@ public sealed class QuickCaptureStoreData
 
     public QuickCaptureViewMode CurrentView { get; set; } = QuickCaptureViewMode.Records;
 
+    public string? MirrorFolderPath { get; set; }
+
     public List<QuickCaptureItem> Items { get; set; } = [];
 
     public List<QuickCaptureItem> RecentItems { get; set; } = [];

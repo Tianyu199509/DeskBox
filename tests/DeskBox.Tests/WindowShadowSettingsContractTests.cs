@@ -10,14 +10,10 @@ namespace DeskBox.Tests;
 public sealed class WindowShadowSettingsContractTests
 {
     [Fact]
-    public void MaterialSection_HostsBothSystemEffectCardsWithStatusAndDeepLinks()
+    public void MaterialSection_HostsSystemTransparencyAndTextShadowWithoutWindowShadowCard()
     {
-        string slice = Read(
-            "src/DeskBox/Views/SettingsWindow.xaml");
-        string material = Slice(
-            slice,
-            "x:Key=\"AppearanceMaterialSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"");
+        string material = Read(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
         // Transparency card: status projection + ms-settings deep link.
         Assert.Contains("HeaderKey=\"Settings.SystemTransparency.Title\"", material, StringComparison.Ordinal);
@@ -25,10 +21,11 @@ public sealed class WindowShadowSettingsContractTests
         Assert.Contains("Click=\"OpenSystemTransparencySettingsButton_Click\"", material, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.Key=\"Settings.SystemEffect.OpenSystemSettings\"", material, StringComparison.Ordinal);
 
-        // Shadow card: same shape, mirroring SPI_GETDROPSHADOW.
-        Assert.Contains("HeaderKey=\"Settings.WindowShadow.Title\"", material, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding SystemShadowStatusText}\"", material, StringComparison.Ordinal);
-        Assert.Contains("Click=\"OpenWindowShadowSettingsButton_Click\"", material, StringComparison.Ordinal);
+        // Widget text shadow remains available, while the system window-shadow card is retired.
+        Assert.Contains("HeaderKey=\"Settings.TextShadow.Title\"", material, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.WindowShadow.Title\"", material, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemShadowStatusText", material, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenWindowShadowSettingsButton_Click", material, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -42,21 +39,17 @@ public sealed class WindowShadowSettingsContractTests
     }
 
     [Fact]
-    public void Win32Helper_ExposesReadOnlyProbes_WithoutAnyWritePath()
+    public void Win32Helper_ExposesReadOnlyTransparencyProbe_WithoutDropShadowOrWritePath()
     {
         string source = Read("src/DeskBox/Platform/Win32Helper.cs");
-
-        // Live session state via SystemParametersInfo (GET only).
-        Assert.Contains("SpiGetDropShadow = 0x1024", source, StringComparison.Ordinal);
-        Assert.Contains("TryGetWindowDropShadowEnabled", source, StringComparison.Ordinal);
 
         // Registry source of truth for the transparency switch.
         Assert.Contains("TryGetSystemTransparencyEffectsEnabled", source, StringComparison.Ordinal);
         Assert.Contains("EnableTransparency", source, StringComparison.Ordinal);
 
-        // The write path is gone: SPIF_UPDATEINIFILE persistence would be
-        // swallowed by MSIX HKCU copy-on-write virtualization and revert
-        // after the next sign-in.
+        // Both the read probe and write path for system drop shadow are gone.
+        Assert.DoesNotContain("SpiGetDropShadow", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryGetWindowDropShadowEnabled", source, StringComparison.Ordinal);
         Assert.DoesNotContain("TrySetWindowDropShadowEnabled", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SpiSetDropShadow", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SpifUpdateIniFile", source, StringComparison.Ordinal);
@@ -64,13 +57,14 @@ public sealed class WindowShadowSettingsContractTests
     }
 
     [Fact]
-    public void SettingsShell_DeepLinksIntoTheOsSettingsSurfaces()
+    public void SettingsShell_DeepLinksIntoTheOsTransparencySettingsSurface()
     {
         string source = Read(
             "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs");
 
         Assert.Contains("ms-settings:colors", source, StringComparison.Ordinal);
-        Assert.Contains("SystemPropertiesPerformance.exe", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemPropertiesPerformance.exe", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenWindowShadowSettingsButton_Click", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -92,15 +86,15 @@ public sealed class WindowShadowSettingsContractTests
 
         Assert.Contains("RefreshSystemAppearanceStates()", startup, StringComparison.Ordinal);
         Assert.Contains("public void RefreshSystemAppearanceStates()", shell, StringComparison.Ordinal);
-        Assert.Contains("TryGetWindowDropShadowEnabled(out bool shadowsEnabled)", shell, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryGetWindowDropShadowEnabled", shell, StringComparison.Ordinal);
         Assert.Contains("TryGetSystemTransparencyEffectsEnabled(out bool transparencyEnabled)", shell, StringComparison.Ordinal);
-        Assert.Contains("UpdateSystemEffectStates(shadowOn, transparencyOn)", shell, StringComparison.Ordinal);
+        Assert.Contains("UpdateSystemEffectStates(transparencyOn)", shell, StringComparison.Ordinal);
 
         // Creation-time refresh covers changes made while the window was closed.
         Assert.Contains("RefreshSystemAppearanceStates()", deferred, StringComparison.Ordinal);
 
         Assert.Contains("public void UpdateSystemEffectStates(", editor, StringComparison.Ordinal);
-        Assert.Contains("nameof(SystemShadowStatusText)", editorBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("nameof(SystemShadowStatusText)", editorBridge, StringComparison.Ordinal);
         Assert.Contains("nameof(SystemTransparencyStatusText)", editorBridge, StringComparison.Ordinal);
 
         // Language switch regression: the status texts are computed getters
@@ -111,7 +105,7 @@ public sealed class WindowShadowSettingsContractTests
             editor,
             "public void RefreshLocalization()",
             "/// <summary>");
-        Assert.Contains("OnPropertyChanged(nameof(SystemShadowStatusText))", refresh, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemShadowStatusText", refresh, StringComparison.Ordinal);
         Assert.Contains("OnPropertyChanged(nameof(SystemTransparencyStatusText))", refresh, StringComparison.Ordinal);
     }
 
@@ -125,11 +119,12 @@ public sealed class WindowShadowSettingsContractTests
             "Settings.SystemEffect.OpenSystemSettings",
             "Settings.SystemEffect.StateOn",
             "Settings.SystemEffect.StateOff",
-            "Settings.WindowShadow.Title",
-            "Settings.WindowShadow.Description"
+            "Settings.TextShadow.Title"
         ];
         string[] removedKeys =
         [
+            "Settings.WindowShadow.Title",
+            "Settings.WindowShadow.Description",
             "Settings.WindowShadow.Confirm.Title",
             "Settings.WindowShadow.Confirm.Body",
             "Settings.WindowShadow.ApplyFailed",

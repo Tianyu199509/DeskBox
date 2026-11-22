@@ -1,0 +1,635 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.weather-desk",
+  "name": "${$i18n.widgetName}",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🌤️",
+  "version": "3.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "minSize": {
+    "width": 300,
+    "height": 320
+  },
+  "defaultSize": {
+    "width": 340,
+    "height": 424
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "sources": [
+    {
+      "id": "weather",
+      "type": "weather",
+      "city": "${$settings.city}",
+      "targetCollection": "forecast",
+      "intervalMs": 900000
+    }
+  ],
+  "settings": [
+    {
+      "key": "city",
+      "type": "text",
+      "label": "${$i18n.setCity}",
+      "default": "",
+      "placeholder": "${$i18n.cityPlaceholder}"
+    },
+    {
+      "key": "tempUnit",
+      "type": "choice",
+      "label": "${$i18n.setUnit}",
+      "default": "c",
+      "options": [
+        {
+          "value": "c",
+          "label": "°C"
+        },
+        {
+          "value": "f",
+          "label": "°F"
+        }
+      ]
+    },
+    {
+      "key": "showAdvice",
+      "type": "toggle",
+      "label": "${$i18n.setShowAdvice}",
+      "default": true
+    },
+    {
+      "key": "showMetrics",
+      "type": "toggle",
+      "label": "${$i18n.setShowMetrics}",
+      "default": true
+    }
+  ],
+  "state": {
+    "draftCity": "",
+    "lastCity": ""
+  },
+  "collections": {
+    "forecast": {
+      "maxItems": 7,
+      "fields": [
+        "date",
+        "shortDate",
+        "weekday",
+        "high",
+        "low",
+        "range",
+        "condition",
+        "icon",
+        "precip"
+      ]
+    }
+  },
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "${$computed.heroIcon}",
+    "badge": "${$computed.capsuleBadge}",
+    "primaryAction": {
+      "icon": "refresh",
+      "tooltip": "${$i18n.refreshTip}",
+      "onClick": {
+        "type": "source.refresh",
+        "targetId": "weather"
+      }
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "cityPop": {
+      "title": "${$i18n.cityPopTitle}",
+      "width": 288,
+      "root": "pop_city_picker_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "hero_weather_card",
+        "weather_error_card",
+        "forecast_card",
+        "weather_metrics_grid"
+      ]
+    },
+    "hero_weather_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10",
+      "spacing": 7,
+      "children": [
+        "weather_header_grid",
+        "hero_temperature_grid",
+        "div_weather_advice",
+        "weather_advice_grid"
+      ]
+    },
+    "weather_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "columnSpacing": 4,
+      "children": [
+        "city_status_row",
+        "btn_open_city_picker",
+        "btn_refresh_weather"
+      ]
+    },
+    "city_status_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_city_name",
+        "txt_weather_status_meta"
+      ]
+    },
+    "txt_city_name": {
+      "type": "Text",
+      "text": "${$computed.cityName}",
+      "style": "bodyStrong",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_weather_status_meta": {
+      "type": "Text",
+      "when": "${$computed.statusMeta != ''}",
+      "text": "${$computed.statusMeta}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "btn_open_city_picker": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "map",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.cityPopTitle}",
+      "onClick": {
+        "type": "state.set",
+        "key": "draftCity",
+        "value": "${$settings.city}"
+      },
+      "popover": "cityPop"
+    },
+    "btn_refresh_weather": {
+      "type": "IconButton",
+      "column": 2,
+      "icon": "refresh",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.refreshTip}",
+      "onClick": {
+        "type": "source.refresh",
+        "targetId": "weather"
+      }
+    },
+    "hero_temperature_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 10,
+      "children": [
+        "txt_hero_temperature",
+        "hero_condition_stack",
+        "txt_hero_weather_icon"
+      ]
+    },
+    "txt_hero_temperature": {
+      "type": "Text",
+      "column": 0,
+      "dir": "ltr",
+      "text": "${$computed.tempHero}",
+      "fontSize": 36,
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "hero_condition_stack": {
+      "type": "Stack",
+      "column": 1,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_hero_condition",
+        "txt_hero_range_feels"
+      ]
+    },
+    "txt_hero_condition": {
+      "type": "Text",
+      "text": "${$computed.conditionText}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "txt_hero_range_feels": {
+      "type": "Text",
+      "text": "${$computed.rangeAndFeels}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "txt_hero_weather_icon": {
+      "type": "Text",
+      "column": 2,
+      "text": "${$computed.heroIcon}",
+      "fontSize": 30,
+      "verticalAlignment": "center"
+    },
+    "div_weather_advice": {
+      "type": "Divider",
+      "when": "${$settings.showAdvice == 'true' && $computed.hasAdvice == 'true'}"
+    },
+    "weather_advice_grid": {
+      "type": "Grid",
+      "when": "${$settings.showAdvice == 'true' && $computed.hasAdvice == 'true'}",
+      "columns": "Auto,*",
+      "columnSpacing": 8,
+      "children": [
+        "badge_weather_advice",
+        "txt_weather_advice"
+      ]
+    },
+    "badge_weather_advice": {
+      "type": "Badge",
+      "column": 0,
+      "variant": "pill",
+      "tone": "${$computed.adviceTone}",
+      "text": "${$computed.adviceTag}",
+      "verticalAlignment": "center"
+    },
+    "txt_weather_advice": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.adviceText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "weather_error_card": {
+      "type": "Card",
+      "when": "${$computed.hasError == 'true'}",
+      "tone": "warning",
+      "padding": "10,8",
+      "children": [
+        "weather_error_grid"
+      ]
+    },
+    "weather_error_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_weather_error_message",
+        "btn_retry_weather"
+      ]
+    },
+    "txt_weather_error_message": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.errorMessage}",
+      "style": "caption",
+      "maxLines": 2,
+      "verticalAlignment": "center"
+    },
+    "btn_retry_weather": {
+      "type": "Button",
+      "column": 1,
+      "variant": "subtle",
+      "text": "${$i18n.retryBtn}",
+      "onClick": {
+        "type": "source.refresh",
+        "targetId": "weather"
+      }
+    },
+    "forecast_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,9",
+      "spacing": 6,
+      "children": [
+        "forecast_header_grid",
+        "grid_forecast_rows"
+      ]
+    },
+    "forecast_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_forecast_header",
+        "txt_sun_schedule"
+      ]
+    },
+    "txt_forecast_header": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.forecastHeader}",
+      "style": "caption",
+      "color": "secondary",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "txt_sun_schedule": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.sunLine}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "grid_forecast_rows": {
+      "type": "ItemsGrid",
+      "items": "${$computed.forecastRows}",
+      "columns": "1",
+      "maxItems": 5,
+      "spacing": 5,
+      "itemTemplate": "row_forecast_day"
+    },
+    "row_forecast_day": {
+      "type": "Grid",
+      "columns": "40,52,28,*,28",
+      "columnSpacing": 6,
+      "children": [
+        "txt_forecast_day_label",
+        "forecast_condition_row",
+        "txt_forecast_low_temp",
+        "canvas_forecast_temp_bar",
+        "txt_forecast_high_temp"
+      ]
+    },
+    "txt_forecast_day_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.label}",
+      "style": "${$item.isToday == 'true' ? 'bodyStrong' : 'caption'}",
+      "color": "${$item.isToday == 'true' ? 'default' : 'secondary'}",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "forecast_condition_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 3,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_forecast_icon",
+        "txt_forecast_precip"
+      ]
+    },
+    "txt_forecast_icon": {
+      "type": "Text",
+      "text": "${$item.icon}",
+      "verticalAlignment": "center"
+    },
+    "txt_forecast_precip": {
+      "type": "Text",
+      "when": "${$item.pop != ''}",
+      "text": "${$item.pop}",
+      "style": "caption",
+      "color": "cyan",
+      "verticalAlignment": "center"
+    },
+    "txt_forecast_low_temp": {
+      "type": "Text",
+      "column": 2,
+      "dir": "ltr",
+      "text": "${$item.lowText}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "right",
+      "verticalAlignment": "center"
+    },
+    "canvas_forecast_temp_bar": {
+      "type": "Canvas",
+      "column": 3,
+      "height": 13,
+      "viewBox": "0 0 124 13",
+      "stretch": "uniform",
+      "elementsSource": "${$item.barJson}",
+      "verticalAlignment": "center"
+    },
+    "txt_forecast_high_temp": {
+      "type": "Text",
+      "column": 4,
+      "dir": "ltr",
+      "text": "${$item.highText}",
+      "style": "bodyStrong",
+      "horizontalAlignment": "right",
+      "verticalAlignment": "center"
+    },
+    "weather_metrics_grid": {
+      "type": "Grid",
+      "when": "${$settings.showMetrics == 'true'}",
+      "columns": "*,*",
+      "rows": "Auto,Auto",
+      "columnSpacing": 6,
+      "rowSpacing": 6,
+      "children": [
+        "metric_humidity_card",
+        "metric_wind_card",
+        "metric_precip_card",
+        "metric_uv_card"
+      ]
+    },
+    "metric_humidity_card": {
+      "type": "Card",
+      "column": 0,
+      "row": 0,
+      "tone": "subtle",
+      "padding": "10,6",
+      "children": [
+        "metric_humidity_grid"
+      ]
+    },
+    "metric_humidity_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_humidity_label",
+        "txt_humidity_value"
+      ]
+    },
+    "txt_humidity_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.lblHumidity}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "txt_humidity_value": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.humidityDisplay}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "metric_wind_card": {
+      "type": "Card",
+      "column": 1,
+      "row": 0,
+      "tone": "subtle",
+      "padding": "10,6",
+      "children": [
+        "metric_wind_grid"
+      ]
+    },
+    "metric_wind_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_wind_label",
+        "txt_wind_value"
+      ]
+    },
+    "txt_wind_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.lblWind}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "txt_wind_value": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.windDisplay}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "metric_precip_card": {
+      "type": "Card",
+      "column": 0,
+      "row": 1,
+      "tone": "subtle",
+      "padding": "10,6",
+      "children": [
+        "metric_precip_grid"
+      ]
+    },
+    "metric_precip_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_precip_label",
+        "txt_precip_value"
+      ]
+    },
+    "txt_precip_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.lblPrecip}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "txt_precip_value": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.precipDisplay}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "metric_uv_card": {
+      "type": "Card",
+      "column": 1,
+      "row": 1,
+      "tone": "subtle",
+      "padding": "10,6",
+      "children": [
+        "metric_uv_grid"
+      ]
+    },
+    "metric_uv_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_uv_label",
+        "txt_uv_value"
+      ]
+    },
+    "txt_uv_label": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.lblUv}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "txt_uv_value": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.uvDisplay}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "verticalAlignment": "center"
+    },
+    "pop_city_picker_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "inp_draft_city",
+        "city_picker_controls_grid",
+        "btn_save_city"
+      ]
+    },
+    "inp_draft_city": {
+      "type": "Input",
+      "bind": "state.draftCity",
+      "placeholder": "${$i18n.cityPlaceholder}",
+      "onSubmit": {
+        "type": "script.run",
+        "fn": "applyCity"
+      }
+    },
+    "city_picker_controls_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "btn_auto_locate_city",
+        "seg_temp_unit"
+      ]
+    },
+    "btn_auto_locate_city": {
+      "type": "Button",
+      "column": 0,
+      "variant": "subtle",
+      "icon": "gps",
+      "text": "${$i18n.autoLocate}",
+      "horizontalAlignment": "stretch",
+      "onClick": {
+        "type": "script.run",
+        "fn": "useAutoCity"
+      }
+    },
+    "seg_temp_unit": {
+      "type": "Segmented",
+      "column": 1,
+      "bind": "$settings.tempUnit"
+    },
+    "btn_save_city": {
+      "type": "Button",
+      "variant": "accent",
+      "horizontalAlignment": "stretch",
+      "text": "${$i18n.saveCityBtn}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "applyCity"
+      }
+    }
+  }
+}

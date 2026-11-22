@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Collections.Concurrent;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -29,11 +31,17 @@ public sealed class GlanceWidgetStore
 
     internal static int CachedWidgetStoreCount => WidgetStores.Count;
 
+    private readonly record struct FileStamp(
+        bool Exists,
+        DateTime LastWriteTimeUtc,
+        long Length);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _widgetId;
     private readonly string _storePath;
     private readonly string? _legacyStorePath;
     private GlanceWidgetData? _cached;
+    private FileStamp _cachedStamp;
 
     /// <summary>
     /// Settings-host relay (batch R8): in the two-process world the settings
@@ -100,19 +108,36 @@ public sealed class GlanceWidgetStore
 
     public event EventHandler? Changed;
 
+    private bool _hasUnparseableFutureSchema;
+
+    private GlanceWidgetData DeserializeGlanceDocument(string json)
+    {
+        GlanceWidgetData data = ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+            _storePath,
+            json,
+            GlanceWidgetData.CurrentVersion,
+            raw => JsonSerializer.Deserialize(raw, GlancePreferencesJsonContext.Default.Preferences),
+            static d => d.Version,
+            Normalize,
+            static ver => new GlanceWidgetData { Version = ver },
+            out bool unparseable);
+        _hasUnparseableFutureSchema = unparseable;
+        return data;
+    }
+
     public async Task<GlanceWidgetData> LoadAsync()
     {
         await _gate.WaitAsync();
         try
         {
             await MigrateLegacyStoreIfNeededLockedAsync();
+            InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
-                json => Normalize(JsonSerializer.Deserialize(
-                    json,
-                    GlancePreferencesJsonContext.Default.Preferences)),
+                DeserializeGlanceDocument,
                 () => new GlanceWidgetData(),
                 nameof(GlanceWidgetStore));
+            _cachedStamp = ReadFileStamp(_storePath);
             return Clone(_cached);
         }
         finally
@@ -127,6 +152,8 @@ public sealed class GlanceWidgetStore
         if (SaveRelay is { } relay && _widgetId.Length > 0)
         {
             GlanceWidgetData? previousCache;
+            FileStamp previousStamp;
+            GlanceWidgetData nextCache;
             await _gate.WaitAsync();
             try
             {
@@ -134,7 +161,9 @@ public sealed class GlanceWidgetStore
                 // authoritative normalize + persist + Changed happen in the
                 // MAIN process, whose store owns the file.
                 previousCache = _cached;
-                _cached = Normalize(Clone(data));
+                previousStamp = _cachedStamp;
+                nextCache = Normalize(Clone(data));
+                _cached = nextCache;
             }
             finally
             {
@@ -146,6 +175,18 @@ public sealed class GlanceWidgetStore
                 await relay(
                     _widgetId,
                     JsonSerializer.Serialize(data, GlancePreferencesJsonContext.Default.Preferences));
+                await _gate.WaitAsync();
+                try
+                {
+                    if (ReferenceEquals(_cached, nextCache))
+                    {
+                        _cachedStamp = ReadFileStamp(_storePath);
+                    }
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             catch
             {
@@ -156,6 +197,7 @@ public sealed class GlanceWidgetStore
                 try
                 {
                     _cached = previousCache;
+                    _cachedStamp = previousStamp;
                 }
                 finally
                 {
@@ -171,7 +213,14 @@ public sealed class GlanceWidgetStore
         await _gate.WaitAsync();
         try
         {
+            if (_hasUnparseableFutureSchema)
+            {
+                App.Log($"[GlanceWidgetStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+                return;
+            }
+
             _cached = Normalize(Clone(data));
+            _cached.Version = GlanceWidgetData.CurrentVersion;
             await PersistLockedAsync();
         }
         finally
@@ -189,15 +238,21 @@ public sealed class GlanceWidgetStore
         try
         {
             await MigrateLegacyStoreIfNeededLockedAsync();
+            InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
-                json => Normalize(JsonSerializer.Deserialize(
-                    json,
-                    GlancePreferencesJsonContext.Default.Preferences)),
+                DeserializeGlanceDocument,
                 () => new GlanceWidgetData(),
                 nameof(GlanceWidgetStore));
+            if (_hasUnparseableFutureSchema)
+            {
+                App.Log($"[GlanceWidgetStore] Skipping UpdateAsync write to preserve unparseable newer schema document '{_storePath}'.");
+                return;
+            }
+
             update(_cached);
             _cached = Normalize(_cached);
+            _cached.Version = GlanceWidgetData.CurrentVersion;
             await PersistLockedAsync();
         }
         finally
@@ -227,12 +282,36 @@ public sealed class GlanceWidgetStore
         try
         {
             _cached = null;
+            _cachedStamp = default;
             TryDeleteFile(_storePath);
             TryDeleteFile(ResilientJsonStore.GetBackupPath(_storePath));
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private void InvalidateCacheIfStaleLocked()
+    {
+        if (_cached is not null && ReadFileStamp(_storePath) != _cachedStamp)
+        {
+            _cached = null;
+        }
+    }
+
+    private static FileStamp ReadFileStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists
+                ? new FileStamp(true, info.LastWriteTimeUtc, info.Length)
+                : default;
+        }
+        catch
+        {
+            return default;
         }
     }
 
@@ -273,12 +352,28 @@ public sealed class GlanceWidgetStore
             _cached,
             GlancePreferencesJsonContext.Default.Preferences);
         await ResilientJsonStore.SaveAsync(_storePath, json);
+        _cachedStamp = ReadFileStamp(_storePath);
     }
 
     private static GlanceWidgetData Normalize(GlanceWidgetData? data)
     {
         data ??= new GlanceWidgetData();
-        data.Version = GlanceWidgetData.CurrentVersion;
+        data.Layout = Enum.IsDefined(data.Layout) ? data.Layout : GlanceLayoutMode.Centered;
+        if (GlanceWidgetSettingsPolicy.ShouldAdoptLegacyLayout(data))
+        {
+            // v10 and earlier expressed the presentation through Layout (+
+            // ShowCalendar); derive the authoritative Style once.
+            GlanceWidgetSettingsPolicy.MigrateLegacyStyle(data);
+        }
+
+        data.Style = Enum.IsDefined(data.Style) ? data.Style : GlanceStyle.PhotoClock;
+        data.PhotoClockAlignment = Enum.IsDefined(data.PhotoClockAlignment)
+            ? data.PhotoClockAlignment
+            : GlancePhotoClockAlignment.Center;
+        // Keep the legacy mirrors coherent so an older build reading this
+        // document still renders a sensible layout.
+        GlanceWidgetSettingsPolicy.SyncLegacyMirrors(data);
+        data.Version = Math.Max(data.Version, GlanceWidgetData.CurrentVersion);
         data.LocalImagePaths ??= [];
         data.LocalImagePaths = data.LocalImagePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -288,6 +383,10 @@ public sealed class GlanceWidgetStore
         data.LocalFolderPath = string.IsNullOrWhiteSpace(data.LocalFolderPath)
             ? null
             : data.LocalFolderPath.Trim();
+        if (!data.ShowTime)
+        {
+            data.ShowSeconds = false;
+        }
         if (!data.ShowDate)
         {
             data.ShowYear = false;
@@ -319,7 +418,6 @@ public sealed class GlanceWidgetStore
         data.TimeFormat = Enum.IsDefined(data.TimeFormat)
             ? data.TimeFormat
             : GlanceTimeFormatMode.FollowSystem;
-        data.Layout = Enum.IsDefined(data.Layout) ? data.Layout : GlanceLayoutMode.Centered;
         data.BackgroundSource = Enum.IsDefined(data.BackgroundSource)
             ? data.BackgroundSource
             : GlanceBackgroundSource.Bing;
@@ -357,13 +455,54 @@ public sealed class GlanceWidgetStore
                new GlanceWidgetData();
     }
 
-    private static string GetSafeWidgetFileName(string widgetId)
+    internal static string GetSafeWidgetFileName(string widgetId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(widgetId);
-        char[] invalidCharacters = Path.GetInvalidFileNameChars();
-        return new string(widgetId.Trim()
-            .Select(character => invalidCharacters.Contains(character) ? '_' : character)
-            .ToArray());
+        const int MaxFileNameLength = 96;
+        string trimmed = widgetId.Trim();
+        var builder = new StringBuilder(Math.Min(trimmed.Length, MaxFileNameLength + 8));
+        foreach (char ch in trimmed)
+        {
+            builder.Append((char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-') ? ch : '_');
+        }
+
+        string sanitized = builder.ToString().Trim('.', ' ');
+        if (sanitized.Length > MaxFileNameLength)
+        {
+            sanitized = sanitized[..MaxFileNameLength].Trim('.', ' ');
+        }
+
+        if (sanitized.Length == 0 ||
+            sanitized is "." or ".." ||
+            IsWindowsReservedDeviceFileName(sanitized))
+        {
+            return "invalid_" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(widgetId)))[..16];
+        }
+
+        return sanitized;
+    }
+
+    private static bool IsWindowsReservedDeviceFileName(string fileName)
+    {
+        int dotIndex = fileName.IndexOf('.');
+        ReadOnlySpan<char> stem = (dotIndex >= 0 ? fileName.AsSpan(0, dotIndex) : fileName.AsSpan()).Trim();
+        if (stem.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (stem.Length == 4 &&
+            (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+             stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) &&
+            stem[3] is >= '0' and <= '9')
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static void TryDeleteFile(string path)

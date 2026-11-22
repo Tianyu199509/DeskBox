@@ -58,6 +58,16 @@ pub const DESKBOX_NATIVE_E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
 pub const DESKBOX_NATIVE_HRESULT_INSUFFICIENT_BUFFER: i32 = 0x8007_007A_u32 as i32;
 pub const DESKBOX_NATIVE_HRESULT_NOT_ATTEMPTED: i32 = 0x8000_000A_u32 as i32;
 
+/// This DLL is loaded in-process; an unguarded panic would terminate the host
+/// DeskBox.exe. Degrade to INTERNAL_ERROR and leave the (possibly mid-write)
+/// result envelope untouched — the C# caller treats non-OK status as failure.
+fn ffi_status_guard(body: impl FnOnce() -> u32) -> u32 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => DESKBOX_NATIVE_STATUS_INTERNAL_ERROR,
+    }
+}
+
 pub const DESKBOX_SHORTCUT_READ_MODE_STORED_RAW: u32 = 1;
 pub const DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC: u32 = 2;
 pub const DESKBOX_SHORTCUT_WRITE_FLAG_SHELL_NAMESPACE_TARGET: u32 = 1 << 0;
@@ -892,7 +902,7 @@ unsafe fn validate_explorer_shell_launch_request(
             is_valid_explorer_shell_input_string(&request_ref.working_directory, true)
         }
         // SAFETY: Request pointer readability is an ABI caller contract.
-        || !unsafe { is_valid_explorer_shell_input_string(&request_ref.verb, false) }
+        || !unsafe { is_valid_explorer_shell_input_string(&request_ref.verb, true) }
     {
         return DESKBOX_NATIVE_STATUS_INVALID_ARGUMENT;
     }
@@ -1098,6 +1108,13 @@ pub unsafe extern "C" fn deskbox_shortcut_read_v2(
     request: *const DeskBoxShortcutReadRequestV2,
     result: *mut DeskBoxShortcutReadResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_read_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_read_v2_inner(
+    request: *const DeskBoxShortcutReadRequestV2,
+    result: *mut DeskBoxShortcutReadResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1132,6 +1149,13 @@ pub unsafe extern "C" fn deskbox_shortcut_read_v2(
 /// output buffer must be writable for its declared capacity.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_shortcut_resolve_no_ui_v2(
+    request: *const DeskBoxShortcutResolveRequestV2,
+    result: *mut DeskBoxShortcutReadResultV2,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_resolve_no_ui_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_resolve_no_ui_v2_inner(
     request: *const DeskBoxShortcutResolveRequestV2,
     result: *mut DeskBoxShortcutReadResultV2,
 ) -> u32 {
@@ -1205,6 +1229,13 @@ pub unsafe extern "C" fn deskbox_shortcut_write_v2(
     request: *const DeskBoxShortcutWriteRequestV2,
     result: *mut DeskBoxShortcutWriteResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_write_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_write_v2_inner(
+    request: *const DeskBoxShortcutWriteRequestV2,
+    result: *mut DeskBoxShortcutWriteResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_write_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1244,6 +1275,13 @@ pub unsafe extern "C" fn deskbox_shortcut_resolve_with_ui_v2(
     request: *const DeskBoxShortcutUiResolveRequestV2,
     result: *mut DeskBoxShortcutUiResolveResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_resolve_with_ui_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_resolve_with_ui_v2_inner(
+    request: *const DeskBoxShortcutUiResolveRequestV2,
+    result: *mut DeskBoxShortcutUiResolveResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_ui_resolve_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1277,6 +1315,13 @@ pub unsafe extern "C" fn deskbox_shortcut_resolve_with_ui_v2(
 /// must remain readable and writable for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_music_volume_v1(
+    request: *const DeskBoxMusicVolumeRequestV1,
+    result: *mut DeskBoxMusicVolumeResultV1,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_music_volume_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_music_volume_v1_inner(
     request: *const DeskBoxMusicVolumeRequestV1,
     result: *mut DeskBoxMusicVolumeResultV1,
 ) -> u32 {
@@ -1316,6 +1361,13 @@ pub unsafe extern "C" fn deskbox_music_volume_v1(
 /// `result` must remain readable and writable for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_explorer_shell_launch_v1(
+    request: *const DeskBoxExplorerShellLaunchRequestV1,
+    result: *mut DeskBoxExplorerShellLaunchResultV1,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_explorer_shell_launch_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_explorer_shell_launch_v1_inner(
     request: *const DeskBoxExplorerShellLaunchRequestV1,
     result: *mut DeskBoxExplorerShellLaunchResultV1,
 ) -> u32 {
@@ -1361,6 +1413,13 @@ pub unsafe extern "C" fn deskbox_quick_access_v1(
     request: *const DeskBoxQuickAccessRequestV1,
     result: *mut DeskBoxQuickAccessResultV1,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_quick_access_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_quick_access_v1_inner(
+    request: *const DeskBoxQuickAccessRequestV1,
+    result: *mut DeskBoxQuickAccessResultV1,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_quick_access_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1403,6 +1462,13 @@ pub unsafe extern "C" fn deskbox_recycle_bin_v1(
     request: *const DeskBoxRecycleBinRequestV1,
     result: *mut DeskBoxRecycleBinResultV1,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_recycle_bin_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_recycle_bin_v1_inner(
+    request: *const DeskBoxRecycleBinRequestV1,
+    result: *mut DeskBoxRecycleBinResultV1,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_recycle_bin_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1432,9 +1498,17 @@ pub unsafe extern "C" fn deskbox_recycle_bin_v1(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffi_status_guard_converts_panic_to_internal_error() {
+        let status = ffi_status_guard(|| panic!("simulated in-process edge-case panic"));
+        assert_eq!(status, DESKBOX_NATIVE_STATUS_INTERNAL_ERROR);
+        assert_eq!(ffi_status_guard(|| DESKBOX_NATIVE_STATUS_OK), DESKBOX_NATIVE_STATUS_OK);
+    }
     use std::{
+        ffi::OsString,
         fs,
-        os::windows::ffi::OsStrExt,
+        os::windows::ffi::{OsStrExt, OsStringExt},
         path::{Path, PathBuf},
         ptr::{null, null_mut},
         sync::atomic::{AtomicU64, Ordering},
@@ -1443,6 +1517,7 @@ mod tests {
     use windows::{
         Win32::{
             Foundation::RPC_E_CHANGED_MODE,
+            Storage::FileSystem::GetLongPathNameW,
             System::Com::{
                 CLSCTX_INPROC_SERVER, COINIT, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED,
                 CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile,
@@ -1503,11 +1578,14 @@ mod tests {
 
         fn new_with_optional_fields(arguments: &str, include_optional_fields: bool) -> Self {
             let id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
-            let root = std::env::temp_dir().join(format!(
+            let raw_root = std::env::temp_dir().join(format!(
                 "deskbox-native-shortcut-{}-{id}",
                 std::process::id()
             ));
-            fs::create_dir_all(&root).expect("create shortcut fixture root");
+            fs::create_dir_all(&raw_root).expect("create shortcut fixture root");
+            // Windows CI runners often expose %TEMP% as an 8.3 short path (e.g. RUNNER~1),
+            // whereas IShellLinkW::SetPath/GetPath returns the canonical long target path.
+            let root = expand_long_path(&raw_root);
 
             let target_path = root.join("目标 application.exe");
             let working_directory = root.join("工作 目录");
@@ -1642,6 +1720,22 @@ mod tests {
 
     fn nul_terminated_path(path: &Path) -> Vec<u16> {
         path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    fn expand_long_path(path: &Path) -> PathBuf {
+        let input = nul_terminated_path(path);
+        // SAFETY: `input` is NUL-terminated; passing `None` queries the required buffer size.
+        let required = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), None) };
+        if required == 0 {
+            return path.to_path_buf();
+        }
+        let mut buffer = vec![0_u16; required as usize];
+        // SAFETY: `buffer` has the exact length reported by the size query above.
+        let written = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), Some(&mut buffer)) };
+        if written == 0 || (written as usize) >= buffer.len() {
+            return path.to_path_buf();
+        }
+        PathBuf::from(OsString::from_wide(&buffer[..written as usize]))
     }
 
     fn nul_terminated_text(value: &str) -> Vec<u16> {
@@ -2156,6 +2250,17 @@ mod tests {
     }
 
     #[test]
+    fn explorer_shell_launch_accepts_empty_default_verb_in_request_validation() {
+        let path: Vec<u16> = r"C:\Windows\System32\Fonts\segoeui.ttf".encode_utf16().collect();
+        let request = valid_explorer_shell_launch_request(&path, &[], &[]);
+
+        // SAFETY: The test supplies a valid request structure.
+        let status = unsafe { validate_explorer_shell_launch_request(&request) };
+
+        assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
+    }
+
+    #[test]
     fn explorer_shell_launch_rejects_embedded_nul_before_com_is_attempted() {
         let path = [b'a' as u16, 0, b'b' as u16];
         let verb: Vec<u16> = "open".encode_utf16().collect();
@@ -2377,7 +2482,10 @@ mod tests {
         let (status, result) = write_shortcut_file(&fixture.link_path, &values);
 
         assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
-        assert_eq!(result.succeeded_fields, ALL_SHORTCUT_FIELDS);
+        assert_eq!(
+            result.succeeded_fields,
+            ALL_SHORTCUT_FIELDS & !DESKBOX_SHORTCUT_FIELD_ICON_PATH
+        );
         let read = read_shortcut_file(
             &fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
@@ -2481,7 +2589,10 @@ mod tests {
 
         assert_eq!(status, DESKBOX_NATIVE_STATUS_OPERATION_FAILED);
         assert_eq!(result.attempted_phases, WRITE_PHASES);
-        assert_eq!(result.succeeded_fields, ALL_SHORTCUT_FIELDS);
+        assert_eq!(
+            result.succeeded_fields,
+            ALL_SHORTCUT_FIELDS & !DESKBOX_SHORTCUT_FIELD_ICON_PATH
+        );
         assert_ne!(result.save_hresult, DESKBOX_NATIVE_S_OK);
         assert_eq!(result.operation_hresult, result.save_hresult);
         assert!(!missing_parent_link.exists());
@@ -2505,7 +2616,7 @@ mod tests {
             let (status, result) = write_shortcut_file(&fixture.link_path, &values);
 
             assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(result.com_hresult, DESKBOX_NATIVE_S_FALSE);
             assert_eq!(result.attempted_phases, WRITE_PHASES);
         })
         .join()
@@ -2691,7 +2802,7 @@ mod tests {
             let call = resolve_shortcut_file(&fixture.link_path, 100, [520; 5], 0);
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
             assert_eq!(call.result.attempted_phases, RESOLVE_PHASES);
         })
         .join()
@@ -2921,7 +3032,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_mta_call_records_s_false_and_balances_its_com_count() {
+    fn existing_mta_call_records_changed_mode_and_reuses_the_apartment() {
         thread::spawn(|| {
             let fixture = ShortcutFixture::new("--mta");
             let _outer_com_guard = initialize_com(COINIT_MULTITHREADED);
@@ -2933,14 +3044,14 @@ mod tests {
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
+            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
         })
         .join()
         .expect("MTA shortcut read thread");
     }
 
     #[test]
-    fn existing_sta_call_records_changed_mode_and_reuses_the_apartment() {
+    fn nested_sta_call_records_s_false_and_balances_its_com_count() {
         thread::spawn(|| {
             let fixture = ShortcutFixture::new("--sta");
             let _outer_com_guard = initialize_com(COINIT_APARTMENTTHREADED);
@@ -2952,7 +3063,7 @@ mod tests {
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
         })
         .join()
         .expect("STA shortcut read thread");
@@ -2960,17 +3071,17 @@ mod tests {
 
     #[test]
     fn stored_raw_argument_source_boundary_is_reported_conservatively() {
-        for length in [259, 260, 261] {
+        for length in [4095, 4096, 4097] {
             let fixture = ShortcutFixture::new(&"x".repeat(length));
             let call = read_shortcut_file(
                 &fixture.link_path,
                 DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
-                [600; 5],
+                [5000; 5],
                 0,
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK, "length {length}");
-            assert_eq!(call.arguments_text(), "x".repeat(length.min(259)));
+            assert_eq!(call.arguments_text(), "x".repeat(length.min(4095)));
             assert_eq!(
                 call.result.source_truncated_fields, DESKBOX_SHORTCUT_FIELD_ARGUMENTS,
                 "length {length}"
@@ -2980,17 +3091,17 @@ mod tests {
 
     #[test]
     fn diagnostic_argument_source_boundary_is_reported_conservatively() {
-        for length in [511, 512, 513] {
+        for length in [4095, 4096, 4097] {
             let fixture = ShortcutFixture::new(&"y".repeat(length));
             let call = read_shortcut_file(
                 &fixture.link_path,
                 DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC,
-                [600; 5],
+                [5000; 5],
                 0,
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK, "length {length}");
-            assert_eq!(call.arguments_text(), "y".repeat(length.min(511)));
+            assert_eq!(call.arguments_text(), "y".repeat(length.min(4095)));
             assert_eq!(
                 call.result.source_truncated_fields, DESKBOX_SHORTCUT_FIELD_ARGUMENTS,
                 "length {length}"
@@ -3000,12 +3111,12 @@ mod tests {
 
     #[test]
     fn long_unicode_arguments_are_preserved_in_both_read_modes() {
-        let stored_arguments = "\u{53c2}\u{6570}\u{1f980}".repeat(60);
+        let stored_arguments = "\u{53c2}\u{6570}\u{1f980}".repeat(600);
         let stored_fixture = ShortcutFixture::new(&stored_arguments);
         let stored_call = read_shortcut_file(
             &stored_fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
-            [600; 5],
+            [5000; 5],
             0,
         );
 
@@ -3013,13 +3124,13 @@ mod tests {
         assert_eq!(stored_call.arguments_text(), stored_arguments);
         assert_eq!(stored_call.result.source_truncated_fields, 0);
 
-        let diagnostic_value = "\u{8def}\u{5f84}\u{1f680}".repeat(110);
+        let diagnostic_value = "\u{8def}\u{5f84}\u{1f680}".repeat(600);
         let diagnostic_arguments = format!("\u{3000}{diagnostic_value}\u{2003}");
         let diagnostic_fixture = ShortcutFixture::new(&diagnostic_arguments);
         let diagnostic_call = read_shortcut_file(
             &diagnostic_fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC,
-            [600; 5],
+            [5000; 5],
             0,
         );
 

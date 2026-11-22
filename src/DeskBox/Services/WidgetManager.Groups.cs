@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -23,10 +23,6 @@ public sealed partial class WidgetManager
         new();
     internal int SurfaceSwitchGateCount => _widgetSurfaceSwitchGates.Count;
     private readonly WidgetGroupSwitchRequestCoordinator _widgetGroupSwitchRequests = new();
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _groupDragDwellTimer;
-    private string? _groupDragSourceId;
-    private string? _groupDragTargetId;
-    private bool _groupDragDropReady;
     private WidgetDetachPlacementPreviewWindow? _widgetDetachPlacementPreview;
     private readonly Dictionary<string, WidgetGroupTransientState> _widgetGroupTransientStates = [];
     // Residency P0: Stopwatch timestamp of when each member last left the
@@ -40,8 +36,7 @@ public sealed partial class WidgetManager
     private bool _lastWidgetGroupHoverSwitchEnabled;
 
     internal void PrewarmWidgetDetachPlacementPreview(
-        string caption,
-        double cornerRadius)
+        WidgetDetachPreviewAppearance appearance)
     {
         if (_widgetDetachPlacementPreview is not null)
         {
@@ -51,7 +46,7 @@ public sealed partial class WidgetManager
         try
         {
             _widgetDetachPlacementPreview =
-                new WidgetDetachPlacementPreviewWindow(caption, cornerRadius);
+                new WidgetDetachPlacementPreviewWindow(appearance);
         }
         catch (Exception ex)
         {
@@ -60,16 +55,29 @@ public sealed partial class WidgetManager
     }
 
     internal WidgetDetachPlacementPreviewWindow AcquireWidgetDetachPlacementPreview(
-        string caption,
-        double cornerRadius)
+        WidgetDetachPreviewAppearance appearance)
     {
-        PrewarmWidgetDetachPlacementPreview(caption, cornerRadius);
+        PrewarmWidgetDetachPlacementPreview(appearance);
         WidgetDetachPlacementPreviewWindow preview =
             _widgetDetachPlacementPreview ??
             throw new InvalidOperationException(
                 "The widget detach placement preview could not be created.");
-        preview.BeginTracking(caption, cornerRadius);
+        preview.BeginTracking(appearance);
         return preview;
+    }
+
+    internal bool HasWidgetDetachPlacementPreview =>
+        _widgetDetachPlacementPreview is not null;
+
+    internal bool ReleaseIdleWidgetDetachPlacementPreview()
+    {
+        if (_widgetDetachPlacementPreview is not { IsVisible: false })
+        {
+            return false;
+        }
+
+        DisposeWidgetDetachPlacementPreview();
+        return true;
     }
 
     private void DisposeWidgetDetachPlacementPreview()
@@ -221,11 +229,7 @@ public sealed partial class WidgetManager
                 ResolveGroupMemberDisplayName(config),
                 config.WidgetKind,
                 glyph,
-                config.WidgetKind == WidgetKind.File
-                    ? WidgetTitleIconKindNames.FromFileWidget(
-                        config.FollowsDefaultStoragePath)
-                    : WidgetTitleIconKindNames.FromWidgetKind(
-                        config.WidgetKind),
+                WidgetTitleIconKindNames.FromWidgetConfig(config),
                 string.Equals(group.ActiveMemberId, config.Id, StringComparison.Ordinal),
                 customEmoji,
                 customImagePath));
@@ -277,14 +281,8 @@ public sealed partial class WidgetManager
                 group.NavigationStyle,
                 allowFollowDefault: true);
             group.NavigationStyle = normalized;
-            if (string.Equals(
-                    previous,
-                    WidgetGroupNavigationStyles.Tabs,
-                    StringComparison.Ordinal) &&
-                !string.Equals(
-                    normalized,
-                    WidgetGroupNavigationStyles.Tabs,
-                    StringComparison.Ordinal) &&
+            if (WidgetGroupNavigationStyles.UsesTabStrip(previous) &&
+                !WidgetGroupNavigationStyles.UsesTabStrip(normalized) &&
                 group.WheelSwitchEnabled == false)
             {
                 // Tabs historically wrote an implicit wheel-off override.
@@ -463,7 +461,25 @@ public sealed partial class WidgetManager
         return GetWidgetGroupChromeMode(config.Id) ??
                new WidgetChromeModeResolver(_settingsService).Resolve(
                    config,
-                   descriptor);
+                   descriptor,
+                   ResolveDynamicChromeCategoryOverride(config));
+    }
+
+    private WidgetChromeCategory? ResolveDynamicChromeCategoryOverride(WidgetConfig config)
+    {
+        if (config.WidgetKind != WidgetKind.Custom)
+        {
+            return null;
+        }
+
+        if (_contentWidgets.TryGetValue(config.Id, out ContentWidgetWindow? window) &&
+            window.CurrentContent is CustomWidgetContentAdapter customAdapter &&
+            string.Equals(customAdapter.Config.Id, config.Id, StringComparison.Ordinal))
+        {
+            return CustomWidgetChromeCategoryClassifier.Classify(customAdapter.ViewModel.Manifest);
+        }
+
+        return CustomWidgetChromeCategoryClassifier.ResolveForWidgetId(config.Id);
     }
 
     private bool TryResolveGroupingChromeMode(
@@ -485,7 +501,8 @@ public sealed partial class WidgetManager
                     .GetDescriptor(config.WidgetKind);
             mode = new WidgetChromeModeResolver(_settingsService).Resolve(
                 config,
-                descriptor);
+                descriptor,
+                ResolveDynamicChromeCategoryOverride(config));
             return mode != WidgetChromeMode.System;
         }
         catch (Exception ex)
@@ -697,8 +714,9 @@ public sealed partial class WidgetManager
             WidgetKind.Todo => "Todo.Title",
             WidgetKind.Weather => "Weather.Title",
             WidgetKind.Music => "Music.Title",
-            WidgetKind.Search => "Search.Title",
             WidgetKind.Glance => "Glance.Title",
+            WidgetKind.Custom => "CustomWidget.Title",
+            WidgetKind.Clipboard => "Clipboard.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => null
@@ -1000,22 +1018,17 @@ public sealed partial class WidgetManager
                     $"source={sourceWidgetId} target={targetWidgetId}");
             }
 
+            WidgetGroupStandaloneSizeMemory.CaptureIfStandalone(
+                activeTargetConfig,
+                wasAlreadyGrouped: targetGroup is not null);
+            WidgetGroupStandaloneSizeMemory.CaptureIfStandalone(
+                sourceConfig,
+                wasAlreadyGrouped: sourceGroup is not null);
             ApplyGroupLayoutToMembers(mergedGroup);
             NormalizeCapsuleIdentityForGroup(mergedGroup);
-            try
-            {
-                await SaveWidgetGroupSettingsCheckedAsync();
-            }
-            catch (Exception postCommitSaveException)
-            {
-                // The topology was durably saved before the legacy host was
-                // retired. Keep the ready unified host alive if this secondary
-                // member-layout save fails; the group layout remains the
-                // authoritative source and will be reapplied on the next load.
-                App.Log(
-                    $"[WidgetGroup] Post-commit member layout save failed " +
-                    $"group={mergedGroup.Id}: {postCommitSaveException}");
-            }
+            // Topology was already durably persisted in beforeRetireAsync; flush
+            // mirrored member layouts asynchronously to avoid a second blocking write.
+            _settingsService.SaveDebounced(notifySubscribers: false);
 
             foreach (string memberId in combinedMembers)
             {
@@ -1239,12 +1252,16 @@ public sealed partial class WidgetManager
 
     public async Task<bool> SwitchWidgetGroupMemberAsync(
         string targetWidgetId,
-        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic)
+        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic,
+        bool? preferredForward = null)
     {
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(
-                () => SwitchWidgetGroupMemberAsync(targetWidgetId, origin));
+                () => SwitchWidgetGroupMemberAsync(
+                    targetWidgetId,
+                    origin,
+                    preferredForward));
         }
 
         long switchStartedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1272,7 +1289,8 @@ public sealed partial class WidgetManager
         WidgetGroupSwitchRequest request = _widgetGroupSwitchRequests.Begin(
             requestedGroup.SurfaceId,
             targetWidgetId,
-            origin);
+            origin,
+            preferredForward);
         bool gateEntered = false;
         SemaphoreSlim? switchGate = null;
         try
@@ -1495,7 +1513,9 @@ public sealed partial class WidgetManager
         }
         LogWidgetSurfaceEvidence(group, "transition");
 
-        if (group.IsVisible && persistentWindow.Visible)
+        if (group.IsVisible &&
+            persistentWindow.Visible &&
+            !persistentWindow.IsSettledCollapsedCapsule)
         {
             // Once the prepared view has entered the live presenter this
             // transaction must settle atomically. A later navigation request
@@ -1556,9 +1576,10 @@ public sealed partial class WidgetManager
                 outgoingContent as IWidgetTransientStateContent);
             int previousIndex = group.MemberIds.IndexOf(previousActiveId);
             int targetIndex = group.MemberIds.IndexOf(targetConfig.Id);
+            bool forward = request.PreferredForward ?? (targetIndex >= previousIndex);
             await transition.CompleteAsync(
                 request.Origin,
-                forward: targetIndex >= previousIndex,
+                forward: forward,
                 CancellationToken.None);
         }
         catch
@@ -1729,7 +1750,7 @@ public sealed partial class WidgetManager
             // timestamp so a never-reactivated id cannot linger in the map.
             _widgetGroupMemberInactiveSince.Remove(widgetId);
 
-            PlaceDetachedMember(
+            bool restoredRemovedSize = PlaceDetachedMember(
                 removedConfig,
                 group,
                 Math.Max(1, removedIndex + 1),
@@ -1745,6 +1766,13 @@ public sealed partial class WidgetManager
                     new Windows.Graphics.RectInt32(dropPoint.X, dropPoint.Y, 1, 1),
                     WidgetPlacementSource.Drag,
                     captureIntent: false);
+            }
+            else if (restoredRemovedSize)
+            {
+                removedConfig.LastUserPlacementUtc = DateTimeOffset.UtcNow;
+                MarkSurfaceEntryAuthoritative(
+                    removedConfig,
+                    authoredAtUtc: removedConfig.LastUserPlacementUtc);
             }
 
             removedConfig.IsVisible = revealStandalone && group.IsVisible;
@@ -1762,6 +1790,13 @@ public sealed partial class WidgetManager
                     FindConfig(remainingId) is { } remainingConfig)
                 {
                     ApplyGroupLayoutToMember(group, remainingConfig);
+                    if (WidgetGroupStandaloneSizeMemory.RestoreAndClear(remainingConfig))
+                    {
+                        remainingConfig.LastUserPlacementUtc = DateTimeOffset.UtcNow;
+                        MarkSurfaceEntryAuthoritative(
+                            remainingConfig,
+                            authoredAtUtc: remainingConfig.LastUserPlacementUtc);
+                    }
                     remainingConfig.IsVisible = group.IsVisible;
                 }
             }
@@ -1837,53 +1872,106 @@ public sealed partial class WidgetManager
                     IDesktopWidgetWindow Host)>();
                 try
                 {
-                    foreach (string memberId in previousMembers)
+                    bool keepActiveHostInPlace =
+                        !removedWasActive &&
+                        originalHost is ContentWidgetWindow { Visible: true } existingHost &&
+                        _widgetSurfaces.TryGet(group.SurfaceId, out var activeSession) &&
+                        ReferenceEquals(activeSession!.Host, existingHost);
+                    if (keepActiveHostInPlace)
                     {
-                        RetireLoadedWindowForGroup(
-                            memberId,
-                            keepConfigVisible: FindConfig(memberId)?.IsVisible == true);
-                    }
-
-                    // Closed may arrive after the replacement starts creating.
-                    // The old host has been retired explicitly; release its
-                    // claim before standalone members take their aliases.
-                    _widgetSurfaces.RemoveSurface(group.SurfaceId);
-
-                    if (survivingGroup is not null && survivingGroup.IsVisible)
-                    {
-                        IDesktopWidgetWindow replacement =
-                            await ShowGroupActiveWindowAsync(
-                                survivingGroup,
-                                raiseTransitionWindows) ??
-                            throw new InvalidOperationException(
-                                "The surviving group host could not be created.");
-                        created.Add((survivingGroup.ActiveMemberId, replacement));
-                        await WaitForGroupReplacementFirstFrameAsync(replacement);
-                    }
-                    else if (survivingGroup is null && group.IsVisible)
-                    {
-                        foreach (string remainingId in group.MemberIds)
+                        ContentWidgetWindow survivingHost = (ContentWidgetWindow)originalHost!;
+                        foreach (string memberId in previousMembers)
                         {
-                            if (FindConfig(remainingId) is { IsVisible: true } remainingConfig)
+                            if (!string.Equals(memberId, previousActiveId, StringComparison.Ordinal))
                             {
-                                IDesktopWidgetWindow replacement =
-                                    await ShowStandaloneWindowAsync(
-                                        remainingConfig,
-                                        raiseTransitionWindows);
-                                created.Add((remainingId, replacement));
-                                await WaitForGroupReplacementFirstFrameAsync(replacement);
+                                RetireLoadedWindowForGroup(
+                                    memberId,
+                                    keepConfigVisible: FindConfig(memberId)?.IsVisible == true);
                             }
                         }
-                    }
 
-                    if (removedConfig.IsVisible)
+                        if (removedConfig.IsVisible)
+                        {
+                            IDesktopWidgetWindow replacement =
+                                await ShowStandaloneWindowAsync(
+                                    removedConfig,
+                                    raiseTransitionWindows);
+                            created.Add((removedConfig.Id, replacement));
+                            await WaitForGroupReplacementFirstFrameAsync(replacement);
+                        }
+
+                        if (survivingGroup is not null)
+                        {
+                            CommitSurfaceHost(survivingGroup, survivingHost);
+                        }
+                        else
+                        {
+                            _widgetSurfaces.RemoveSurface(group.SurfaceId);
+                            if (FindConfig(previousActiveId) is { } remainingCfg)
+                            {
+                                _widgetSurfaces.RegisterActive(
+                                    CreateSurfaceDefinition(remainingCfg),
+                                    survivingHost);
+                                RegisterStandaloneUnifiedFileSessionIfNeeded(
+                                    remainingCfg,
+                                    survivingHost,
+                                    survivingHost.CurrentContent);
+                                survivingHost.RestoreBoundsForCurrentTopology();
+                            }
+                        }
+
+                        reusedSurface = true;
+                    }
+                    else
                     {
-                        IDesktopWidgetWindow replacement =
-                            await ShowStandaloneWindowAsync(
-                                removedConfig,
-                                raiseTransitionWindows);
-                        created.Add((removedConfig.Id, replacement));
-                        await WaitForGroupReplacementFirstFrameAsync(replacement);
+                        foreach (string memberId in previousMembers)
+                        {
+                            RetireLoadedWindowForGroup(
+                                memberId,
+                                keepConfigVisible: FindConfig(memberId)?.IsVisible == true);
+                        }
+
+                        // Closed may arrive after the replacement starts creating.
+                        // The old host has been retired explicitly; release its
+                        // claim before standalone members take their aliases.
+                        _widgetSurfaces.RemoveSurface(group.SurfaceId);
+
+                        if (survivingGroup is not null && survivingGroup.IsVisible)
+                        {
+                            IDesktopWidgetWindow replacement =
+                                await ShowGroupActiveWindowAsync(
+                                    survivingGroup,
+                                    raiseTransitionWindows) ??
+                                throw new InvalidOperationException(
+                                    "The surviving group host could not be created.");
+                            created.Add((survivingGroup.ActiveMemberId, replacement));
+                            await WaitForGroupReplacementFirstFrameAsync(replacement);
+                        }
+                        else if (survivingGroup is null && group.IsVisible)
+                        {
+                            foreach (string remainingId in group.MemberIds)
+                            {
+                                if (FindConfig(remainingId) is { IsVisible: true } remainingConfig)
+                                {
+                                    IDesktopWidgetWindow replacement =
+                                        await ShowStandaloneWindowAsync(
+                                            remainingConfig,
+                                            raiseTransitionWindows);
+                                    created.Add((remainingId, replacement));
+                                    await WaitForGroupReplacementFirstFrameAsync(replacement);
+                                }
+                            }
+                        }
+
+                        if (removedConfig.IsVisible)
+                        {
+                            IDesktopWidgetWindow replacement =
+                                await ShowStandaloneWindowAsync(
+                                    removedConfig,
+                                    raiseTransitionWindows);
+                            created.Add((removedConfig.Id, replacement));
+                            await WaitForGroupReplacementFirstFrameAsync(replacement);
+                        }
                     }
                 }
                 catch (Exception replacementError)
@@ -1982,9 +2070,15 @@ public sealed partial class WidgetManager
             for (int index = 0; index < members.Count; index++)
             {
                 ApplyGroupLayoutToMember(group, members[index]);
-                if (index > 0)
+                bool restoredSize = index > 0
+                    ? PlaceDetachedMember(members[index], group, index)
+                    : WidgetGroupStandaloneSizeMemory.RestoreAndClear(members[index]);
+                if (restoredSize)
                 {
-                    PlaceDetachedMember(members[index], group, index);
+                    members[index].LastUserPlacementUtc = DateTimeOffset.UtcNow;
+                    MarkSurfaceEntryAuthoritative(
+                        members[index],
+                        authoredAtUtc: members[index].LastUserPlacementUtc);
                 }
                 members[index].IsVisible = group.IsVisible;
             }
@@ -2238,112 +2332,6 @@ public sealed partial class WidgetManager
         return true;
     }
 
-    public void UpdateWidgetGroupDragPreview(string sourceWidgetId)
-    {
-        if (!IsWidgetGroupingEnabled)
-        {
-            ClearGroupDragPreview();
-            return;
-        }
-
-        if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
-        {
-            ClearGroupDragPreview();
-            return;
-        }
-
-        _groupDragSourceId = sourceWidgetId;
-        WidgetGroupDragCandidate? candidate = FindWidgetGroupDragCandidateAtPoint(
-            sourceWidgetId,
-            cursor.X,
-            cursor.Y);
-        string? targetId = candidate?.Window.Config.Id;
-
-        if (string.Equals(targetId, _groupDragTargetId, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        ClearGroupDragTargetPreview();
-        if (targetId is null)
-        {
-            return;
-        }
-
-        _groupDragSourceId = sourceWidgetId;
-        _groupDragTargetId = targetId;
-        _groupDragDropReady = false;
-        WidgetGroupJoinTarget targetRule = candidate!.Value.Rule;
-        if (targetRule is { CanJoin: false })
-        {
-            GetLoadedWindow(targetId)?.SetGroupDropPreview(
-                visible: true,
-                ready: false,
-                targetRule.RejectionReasonKey ??
-                    "Widget.Group.RequiresVisibleTitle");
-            return;
-        }
-
-        GetLoadedWindow(targetId)?.SetGroupDropPreview(visible: true, ready: false);
-
-        _groupDragDwellTimer ??= CreateGroupDragDwellTimer();
-        _groupDragDwellTimer.Stop();
-        _groupDragDwellTimer.Start();
-    }
-
-    public async Task<bool> CompleteWidgetGroupDragAsync(string sourceWidgetId)
-    {
-        if (!IsWidgetGroupingEnabled)
-        {
-            ClearGroupDragPreview();
-            return false;
-        }
-
-        string? targetId = string.Equals(
-                _groupDragSourceId,
-                sourceWidgetId,
-                StringComparison.Ordinal) &&
-            _groupDragDropReady &&
-            IsGroupDragTargetUnderCursor()
-            ? _groupDragTargetId
-            : null;
-        ClearGroupDragPreview();
-        if (targetId is not null &&
-            await MergeWidgetsAsync(sourceWidgetId, targetId))
-        {
-            // The merge created a new group surface: commit its landing once
-            // so the entry lands under the group surface id as authoritative
-            // (spec 5.4 合并建组 entry).
-            if (FindConfig(sourceWidgetId) is { } merged &&
-                GetLoadedWindow(sourceWidgetId) is { } hostWindow &&
-                Win32Helper.GetWindowRect(hostWindow.WindowHandle, out Win32Helper.RECT hostRect))
-            {
-                CommitUserPlacement(
-                    merged,
-                    new Windows.Graphics.RectInt32(
-                        hostRect.Left, hostRect.Top,
-                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
-                    new Windows.Graphics.RectInt32(
-                        hostRect.Left, hostRect.Top,
-                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
-                    WidgetPlacementSource.GroupMerge,
-                    captureIntent: false);
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
-    public void CancelWidgetGroupDrag(string sourceWidgetId)
-    {
-        if (string.Equals(_groupDragSourceId, sourceWidgetId, StringComparison.Ordinal))
-        {
-            ClearGroupDragPreview();
-        }
-    }
-
     private WidgetGroupConfig CreateGroupFromTarget(
         WidgetConfig target,
         WidgetChromeMode groupMode)
@@ -2384,6 +2372,8 @@ public sealed partial class WidgetManager
             PositionAnchor = source.PositionAnchor,
             PositionMarginX = source.PositionMarginX,
             PositionMarginY = source.PositionMarginY,
+            LastUserPlacementUtc = source.LastUserPlacementUtc,
+            LastUserPlacementTopologyKey = source.LastUserPlacementTopologyKey,
             PositionMonitorKey = source.PositionMonitorKey,
             PositionMonitorDeviceName = source.PositionMonitorDeviceName,
             PositionMonitorStableId = source.PositionMonitorStableId,
@@ -2415,6 +2405,8 @@ public sealed partial class WidgetManager
         group.PositionAnchor = member.PositionAnchor;
         group.PositionMarginX = member.PositionMarginX;
         group.PositionMarginY = member.PositionMarginY;
+        group.LastUserPlacementUtc = member.LastUserPlacementUtc;
+        group.LastUserPlacementTopologyKey = member.LastUserPlacementTopologyKey;
         group.PositionMonitorKey = member.PositionMonitorKey;
         group.PositionMonitorDeviceName = member.PositionMonitorDeviceName;
         group.PositionMonitorStableId = member.PositionMonitorStableId;
@@ -2450,6 +2442,8 @@ public sealed partial class WidgetManager
         member.PositionAnchor = group.PositionAnchor;
         member.PositionMarginX = group.PositionMarginX;
         member.PositionMarginY = group.PositionMarginY;
+        member.LastUserPlacementUtc = group.LastUserPlacementUtc;
+        member.LastUserPlacementTopologyKey = group.LastUserPlacementTopologyKey;
         member.PositionMonitorKey = group.PositionMonitorKey;
         member.PositionMonitorDeviceName = group.PositionMonitorDeviceName;
         member.PositionMonitorStableId = group.PositionMonitorStableId;
@@ -2494,12 +2488,13 @@ public sealed partial class WidgetManager
             };
     }
 
-    private static void PlaceDetachedMember(
+    private static bool PlaceDetachedMember(
         WidgetConfig member,
         WidgetGroupConfig group,
         int cascadeIndex,
         PointInt32? detachedPosition = null)
     {
+        bool restoredSize = WidgetGroupStandaloneSizeMemory.RestoreAndClear(member);
         if (detachedPosition is { } position)
         {
             member.X = position.X;
@@ -2518,12 +2513,15 @@ public sealed partial class WidgetManager
         member.PositionMonitorDeviceName = null;
         member.PositionMonitorStableId = null;
         member.PositionMonitorWasPrimary = null;
+        member.LastUserPlacementUtc = null;
+        member.LastUserPlacementTopologyKey = null;
         // Detaching inherits the surface binding: the member stays on the
         // monitor the group was bound to, as a standalone surface.
         member.ScreenBindingMode = group.ScreenBindingMode;
         member.BoundScreenId = group.BoundScreenId;
         member.BoundScreenLabel = group.BoundScreenLabel;
         member.CompactPlacement = null;
+        return restoredSize;
     }
 
     private async Task<WidgetGroupDetachSurfaceReuseResult>
@@ -3310,55 +3308,6 @@ public sealed partial class WidgetManager
         }
     }
 
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateGroupDragDwellTimer()
-    {
-        var timer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
-        timer.IsRepeating = false;
-        timer.Interval = TimeSpan.FromMilliseconds(360);
-        timer.Tick += (_, _) =>
-        {
-            if (_groupDragTargetId is not { } targetId ||
-                !IsGroupDragTargetUnderCursor())
-            {
-                ClearGroupDragPreview();
-                return;
-            }
-
-            _groupDragDropReady = true;
-            GetLoadedWindow(targetId)?.SetGroupDropPreview(visible: true, ready: true);
-        };
-        return timer;
-    }
-
-    private bool IsGroupDragTargetUnderCursor()
-    {
-        return _groupDragTargetId is { } targetId &&
-               Win32Helper.GetCursorPos(out Win32Helper.POINT cursor) &&
-               GetLoadedWindow(targetId) is { Visible: true } targetWindow &&
-               WidgetGroupDropHitTestPolicy.Contains(
-                   targetWindow.GetGroupMergeTitleScreenBounds(),
-                   cursor.X,
-                   cursor.Y);
-    }
-
-    private void ClearGroupDragPreview()
-    {
-        ClearGroupDragTargetPreview();
-        _groupDragSourceId = null;
-        ClearWidgetGroupDragCandidateCache();
-    }
-
-    private void ClearGroupDragTargetPreview()
-    {
-        _groupDragDwellTimer?.Stop();
-        if (_groupDragTargetId is not null)
-        {
-            GetLoadedWindow(_groupDragTargetId)?.SetGroupDropPreview(visible: false, ready: false);
-        }
-        _groupDragTargetId = null;
-        _groupDragDropReady = false;
-    }
-
     private void CaptureWidgetGroupTransientState(
         string widgetId,
         IWidgetTransientStateContent? transientStateSource)
@@ -3672,6 +3621,8 @@ public sealed partial class WidgetManager
             private readonly string? _positionAnchor;
             private readonly double _positionMarginX;
             private readonly double _positionMarginY;
+            private readonly DateTimeOffset? _lastUserPlacementUtc;
+            private readonly string? _lastUserPlacementTopologyKey;
             private readonly string? _positionMonitorKey;
             private readonly string? _positionMonitorDeviceName;
             private readonly string? _positionMonitorStableId;
@@ -3695,6 +3646,8 @@ public sealed partial class WidgetManager
                 _positionAnchor = config.PositionAnchor;
                 _positionMarginX = config.PositionMarginX;
                 _positionMarginY = config.PositionMarginY;
+                _lastUserPlacementUtc = config.LastUserPlacementUtc;
+                _lastUserPlacementTopologyKey = config.LastUserPlacementTopologyKey;
                 _positionMonitorKey = config.PositionMonitorKey;
                 _positionMonitorDeviceName = config.PositionMonitorDeviceName;
                 _positionMonitorStableId = config.PositionMonitorStableId;
@@ -3720,6 +3673,8 @@ public sealed partial class WidgetManager
                 _config.PositionAnchor = _positionAnchor;
                 _config.PositionMarginX = _positionMarginX;
                 _config.PositionMarginY = _positionMarginY;
+                _config.LastUserPlacementUtc = _lastUserPlacementUtc;
+                _config.LastUserPlacementTopologyKey = _lastUserPlacementTopologyKey;
                 _config.PositionMonitorKey = _positionMonitorKey;
                 _config.PositionMonitorDeviceName = _positionMonitorDeviceName;
                 _config.PositionMonitorStableId = _positionMonitorStableId;

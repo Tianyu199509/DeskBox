@@ -159,7 +159,7 @@ public sealed class ExplorerLaunchCircuitBreakerTests
     public void AotShellSmoke_DirectExplorerLaunch_IsNotGatedByTheBreaker()
     {
         string smoke = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/App.AotShellSmoke.cs"));
+            "tests/DeskBox.AotSmoke/App.AotShellSmoke.cs"));
 
         Assert.Contains("ExplorerShellLaunchService.TryOpen(", smoke, StringComparison.Ordinal);
         Assert.DoesNotContain("ExplorerLaunchCircuitBreaker", smoke, StringComparison.Ordinal);

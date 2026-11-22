@@ -162,39 +162,20 @@ pub(crate) unsafe fn execute(
         let item = match unsafe { items.Item(&index_variant) } {
             Ok(value) => value,
             Err(error) => {
+                // Skip unreadable foreign Recycle Bin entries rather than aborting
+                // the entire scan before reaching our target item.
                 result.enumerate_hresult = error.code().0;
-                return finish(
-                    result,
-                    DESKBOX_NATIVE_STATUS_OPERATION_FAILED,
-                    error.code().0,
-                    false,
-                );
+                continue;
             }
         };
 
         match unsafe { item_name_matches(&item, expected_name, result) } {
             Ok(true) => {}
-            Ok(false) => continue,
-            Err(hresult) => {
-                return finish(
-                    result,
-                    DESKBOX_NATIVE_STATUS_OPERATION_FAILED,
-                    hresult,
-                    false,
-                );
-            }
+            Ok(false) | Err(_) => continue,
         }
         match unsafe { deleted_from_matches(&item, &normalized_parent, result) } {
             Ok(true) => {}
-            Ok(false) => continue,
-            Err(hresult) => {
-                return finish(
-                    result,
-                    DESKBOX_NATIVE_STATUS_OPERATION_FAILED,
-                    hresult,
-                    false,
-                );
-            }
+            Ok(false) | Err(_) => continue,
         }
 
         result.matched_count += 1;
@@ -270,7 +251,25 @@ unsafe fn item_name_matches(
 
     result.item_name_hresult = DESKBOX_NATIVE_S_OK;
     // SAFETY: Both slices are readable for their declared lengths.
-    Ok(unsafe { CompareStringOrdinal(&name, expected_name, true) == CSTR_EQUAL })
+    if unsafe { CompareStringOrdinal(&name, expected_name, true) == CSTR_EQUAL } {
+        return Ok(true);
+    }
+
+    // When Explorer's "Hide extensions for known file types" is enabled,
+    // FolderItem::Name() omits the file extension while System.FileName keeps it.
+    if let Ok(item2) = item.cast::<FolderItem2>() {
+        let file_name_prop = BSTR::from("System.FileName");
+        if let Ok(prop_val) = unsafe { item2.ExtendedProperty(&file_name_prop) }
+            && prop_val.vt() == VT_BSTR
+            && let Ok(full_file_name) = BSTR::try_from(&prop_val)
+        {
+            return Ok(unsafe {
+                CompareStringOrdinal(&full_file_name, expected_name, true) == CSTR_EQUAL
+            });
+        }
+    }
+
+    Ok(false)
 }
 
 unsafe fn deleted_from_matches(

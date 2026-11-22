@@ -25,7 +25,9 @@ public sealed partial record WidgetGroupSettingsItem(
     IReadOnlyList<SettingsOption> CollapseOptions,
     string ChromeMode,
     IReadOnlyList<SettingsOption> ChromeOptions,
-    IReadOnlyList<WidgetGroupMemberSettingsItem> Members);
+    IReadOnlyList<WidgetGroupMemberSettingsItem> Members,
+    string RawName,
+    bool IsHoverSwitchApplicable);
 
 [WinRT.GeneratedBindableCustomProperty]
 public sealed partial record WidgetGroupMemberSettingsItem(

@@ -96,7 +96,8 @@ internal static class WicBuiltInThumbnailDecoder
         Guid decoderId,
         int requestedSize)
     {
-        if (!File.Exists(path))
+        if (!File.Exists(path) ||
+            DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(path))
         {
             return null;
         }
@@ -107,10 +108,8 @@ internal static class WicBuiltInThumbnailDecoder
             return null;
         }
 
-        Windows.Storage.StorageFile file =
-            await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
         using Windows.Storage.Streams.IRandomAccessStream stream =
-            await file.OpenReadAsync();
+            DeskBox.Platform.ClipboardStorageFileOps.OpenReadRandomAccessStream(path);
         // The Guid overload pins the exact built-in decoder; the plain
         // CreateAsync(stream) overload would run automatic codec arbitration
         // and must never be used here.

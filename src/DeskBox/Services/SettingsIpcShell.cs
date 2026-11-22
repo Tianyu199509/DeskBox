@@ -56,4 +56,24 @@ internal static class SettingsIpcShell
         string? payload = null,
         CancellationToken cancellationToken = default)
         => client.RequestAsync(method, payload, cancellationToken);
+
+    /// <summary>
+    /// Executes a synchronous IPC request from a remote facade without letting
+    /// pipe disconnects or request timeouts crash the settings-host UI thread.
+    /// </summary>
+    internal static (bool Ok, string? Payload, string? Error) RequestSyncSafe(
+        SettingsIpcClient client,
+        string method,
+        string? payload = null)
+    {
+        try
+        {
+            return client.RequestAsync(method, payload).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            App.Log($"[SettingsIpc] Sync request '{method}' failed: {ex.Message}");
+            return (false, null, ex.Message);
+        }
+    }
 }

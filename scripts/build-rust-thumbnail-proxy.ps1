@@ -35,13 +35,11 @@ $cargoTargetRoot = if ([string]::IsNullOrWhiteSpace($CargoTargetDirectory)) {
 else {
     [System.IO.Path]::GetFullPath($CargoTargetDirectory)
 }
-$arm64EnvironmentScript = Join-Path $PSScriptRoot "rust-arm64-msvc-environment.ps1"
-if ($Platform -eq "ARM64") {
-    if (-not (Test-Path -LiteralPath $arm64EnvironmentScript -PathType Leaf)) {
-        throw "ARM64 MSVC environment helper was not found: '$arm64EnvironmentScript'."
-    }
-    . $arm64EnvironmentScript
+$msvcEnvironmentScript = Join-Path $PSScriptRoot "rust-arm64-msvc-environment.ps1"
+if (-not (Test-Path -LiteralPath $msvcEnvironmentScript -PathType Leaf)) {
+    throw "MSVC environment helper was not found: '$msvcEnvironmentScript'."
 }
+. $msvcEnvironmentScript
 
 $outputExe = Join-Path $outputRoot "DeskBox.ThumbnailProxy.exe"
 $outputPdb = Join-Path $outputRoot "DeskBox.ThumbnailProxy.pdb"
@@ -70,6 +68,10 @@ function Get-PeMachine {
 }
 
 if (-not $ValidateOnly.IsPresent) {
+    $defaultCargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath (Join-Path $defaultCargoBin "cargo.exe") -PathType Leaf)) {
+        $env:PATH = "$defaultCargoBin;$env:PATH"
+    }
     $cargo = (Get-Command cargo -ErrorAction Stop).Source
     $rustc = (Get-Command rustc -ErrorAction Stop).Source
     # PowerShell 5.1 wraps redirected native stderr as ErrorRecords, and
@@ -100,12 +102,8 @@ if (-not $ValidateOnly.IsPresent) {
         $cargoArguments += "--release"
     }
 
-    $arm64EnvironmentState = $null
-    if ($Platform -eq "ARM64") {
-        $arm64Toolchain = Get-DeskBoxArm64MsvcEnvironment
-        $arm64EnvironmentState =
-            Enter-DeskBoxArm64MsvcEnvironment -Toolchain $arm64Toolchain
-    }
+    $msvcToolchain = Get-DeskBoxMsvcEnvironment -Platform $Platform
+    $msvcEnvironmentState = Enter-DeskBoxMsvcEnvironment -Toolchain $msvcToolchain
 
     $previousCargoColor = [Environment]::GetEnvironmentVariable("CARGO_TERM_COLOR", "Process")
     $previousEncodedRustFlags =
@@ -117,7 +115,9 @@ if (-not $ValidateOnly.IsPresent) {
     else {
         "target-feature=-crt-static"
     }
-    $encodedRustFlags = @("-C", $crtTargetFeature) -join [char]0x1F
+    # The workspace profile unwinds for the in-process deskbox-native FFI
+    # catch_unwind guards; this out-of-process proxy keeps panic=abort.
+    $encodedRustFlags = @("-C", $crtTargetFeature, "-C", "panic=abort") -join [char]0x1F
     try {
         [Environment]::SetEnvironmentVariable("CARGO_TERM_COLOR", "never", "Process")
         [Environment]::SetEnvironmentVariable(
@@ -143,8 +143,8 @@ if (-not $ValidateOnly.IsPresent) {
             $previousEncodedRustFlags,
             "Process")
         [Environment]::SetEnvironmentVariable("RUSTFLAGS", $previousRustFlags, "Process")
-        if ($null -ne $arm64EnvironmentState) {
-            Exit-DeskBoxArm64MsvcEnvironment -State $arm64EnvironmentState
+        if ($null -ne $msvcEnvironmentState) {
+            Exit-DeskBoxMsvcEnvironment -State $msvcEnvironmentState
         }
     }
 
@@ -156,9 +156,12 @@ if (-not $ValidateOnly.IsPresent) {
     }
 
     New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
+    $stampUtc = [DateTime]::UtcNow
     Copy-Item -LiteralPath $builtExe -Destination $outputExe -Force
+    (Get-Item -LiteralPath $outputExe).LastWriteTimeUtc = $stampUtc
     if (Test-Path -LiteralPath $builtPdb -PathType Leaf) {
         Copy-Item -LiteralPath $builtPdb -Destination $outputPdb -Force
+        (Get-Item -LiteralPath $outputPdb).LastWriteTimeUtc = $stampUtc
     }
 }
 
@@ -169,6 +172,13 @@ $expectedMachine = if ($Platform -eq "ARM64") { 0xAA64 } else { 0x8664 }
 $machine = Get-PeMachine -Path $outputExe
 if ($machine -ne $expectedMachine) {
     throw "Unexpected thumbnail proxy PE machine 0x$($machine.ToString('X4')); expected $Platform (0x$($expectedMachine.ToString('X4')))."
+}
+
+# Verify embedded RT_MANIFEST declares PerMonitorV2 DPI awareness (proves mt.exe embedded DeskBox.ThumbnailProxy.manifest).
+$peBytes = [System.IO.File]::ReadAllBytes($outputExe)
+$peText = [System.Text.Encoding]::ASCII.GetString($peBytes)
+if (-not $peText.Contains("PerMonitorV2") -or -not $peText.Contains("DeskBox.ThumbnailProxy.app")) {
+    throw "DeskBox.ThumbnailProxy.exe is missing its embedded PerMonitorV2 application manifest."
 }
 
 [PSCustomObject]@{

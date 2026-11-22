@@ -97,11 +97,12 @@ public sealed class SettingsAboutContactTests
         Assert.Contains("Settings.Dialog.AboutMeP1", xaml, StringComparison.Ordinal);
         Assert.Contains("Text=\"{Binding AppVersion}\"", xaml, StringComparison.Ordinal);
         Assert.Null(versionText.Attribute("Foreground"));
-        Assert.Contains("ms-appx:///Assets/wechat-qrcode.jpg", xaml, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(xaml, "ms-appx:///Assets/wechat-qrcode.jpg"));
+        Assert.DoesNotContain("ms-appx:///Assets/wechat-qrcode.jpg", xaml, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(dialogCode, "ms-appx:///Assets/wechat-qrcode.jpg"));
         Assert.Contains("StoreSupportCardVisibility", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SupportDeskBoxDialog\"", xaml, StringComparison.Ordinal);
-        Assert.Equal("480", supportDialogContent.Attribute("Width")?.Value);
+        Assert.Null(supportDialogContent.Attribute("Width"));
+        Assert.Equal("Stretch", supportDialogContent.Attribute("HorizontalAlignment")?.Value);
         Assert.Equal("480", supportDialogContent.Attribute("MaxWidth")?.Value);
         Assert.Equal(2, supportQrContainers.Length);
         Assert.All(supportQrContainers, container =>
@@ -117,10 +118,10 @@ public sealed class SettingsAboutContactTests
         Assert.Equal("Center", supportStoreButton.Attribute("VerticalAlignment")?.Value);
         Assert.Contains("ShowStoreSupportDialogButton_Click", xaml, StringComparison.Ordinal);
         Assert.Contains("OpenMicrosoftStoreButton_Click", xaml, StringComparison.Ordinal);
-        Assert.Contains("ms-appx:///Assets/Support/support-wechat.png", xaml, StringComparison.Ordinal);
-        Assert.Contains("ms-appx:///Assets/Support/support-alipay.png", xaml, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(xaml, "ms-appx:///Assets/Support/support-wechat.png"));
-        Assert.Equal(1, CountOccurrences(xaml, "ms-appx:///Assets/Support/support-alipay.png"));
+        Assert.DoesNotContain("ms-appx:///Assets/Support/support-wechat.png", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ms-appx:///Assets/Support/support-alipay.png", xaml, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(storeActions, "ms-appx:///Assets/Support/support-wechat.png"));
+        Assert.Equal(1, CountOccurrences(storeActions, "ms-appx:///Assets/Support/support-alipay.png"));
         Assert.Contains("https://apps.microsoft.com/detail/", viewModel, StringComparison.Ordinal);
         Assert.Contains("9PBZSNB4D69H", viewModel, StringComparison.Ordinal);
         Assert.Contains("deskbox_about_support", viewModel, StringComparison.Ordinal);
@@ -132,8 +133,8 @@ public sealed class SettingsAboutContactTests
         Assert.Contains("SupportDeskBoxDialog.ShowAsync", storeActions, StringComparison.Ordinal);
         Assert.Contains("ViewModel.StoreSupportCardVisibility != Visibility.Visible", storeActions, StringComparison.Ordinal);
         Assert.Contains("Launcher.LaunchUriAsync(new Uri(ViewModel.MicrosoftStoreAppLink))", storeActions, StringComparison.Ordinal);
-        Assert.Contains("Win32Helper.OpenFile(ViewModel.MicrosoftStoreLink)", storeActions, StringComparison.Ordinal);
-        Assert.Contains("感谢每一位愿意使用和支持 DeskBox 的朋友。", zhCn, StringComparison.Ordinal);
+        Assert.Contains("ShellLaunchService.FireAndForgetOpenPath(ViewModel.MicrosoftStoreLink)", storeActions, StringComparison.Ordinal);
+        Assert.Contains("感谢每一位愿意使用和支持 DeskBox 的朋友", zhCn, StringComparison.Ordinal);
         Assert.Contains("无论是否支持，DeskBox 都会继续认真维护，努力为大家带来更好的使用体验。", zhCn, StringComparison.Ordinal);
         Assert.DoesNotContain("不会解锁额外功能", zhCn, StringComparison.Ordinal);
         Assert.DoesNotContain("暂时不支持", zhCn, StringComparison.Ordinal);

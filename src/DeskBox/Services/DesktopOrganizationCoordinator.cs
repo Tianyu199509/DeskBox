@@ -1,5 +1,6 @@
 using DeskBox.Models;
 using DeskBox.Platform;
+using Windows.Graphics;
 
 namespace DeskBox.Services;
 
@@ -33,7 +34,8 @@ public sealed class DesktopOrganizationCoordinator
             fileService,
             widgetManager: widgetManager)
         {
-            AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions
+            AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions,
+            DesktopIconPositions = organizerService.DesktopIconPositions
         };
     }
 
@@ -69,12 +71,7 @@ public sealed class DesktopOrganizationCoordinator
         var selectionByBucket = selections
             .Where(selection => !string.IsNullOrWhiteSpace(selection.SourceBucketId))
             .ToDictionary(selection => selection.SourceBucketId, StringComparer.Ordinal);
-        var widgetsById = _settingsService.Settings.Widgets
-            .Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !widget.IsDisabled &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
-            .ToDictionary(widget => widget.Id, StringComparer.Ordinal);
+        var widgetsById = GetActiveFileWidgetsById();
         var targetsByDestination = new Dictionary<string, DesktopOrganizationTargetPlan>(StringComparer.Ordinal);
         var retainedByChoice = new List<DesktopOrganizationFileSnapshot>();
 
@@ -189,18 +186,14 @@ public sealed class DesktopOrganizationCoordinator
             _settingsService.Settings.DesktopOrganizationRules,
             ResolveCategoryName,
             includePersonalDesktop ?? basePlan.IncludePersonalDesktop,
-            includePublicDesktop ?? basePlan.IncludePublicDesktop);
+            includePublicDesktop ?? basePlan.IncludePublicDesktop,
+            included);
         AssignNonOverlappingBounds(plan);
         return plan;
     }
 
-    public IReadOnlyList<DesktopOrganizationDestinationOption> GetDestinationOptions()
-    {
-        return _settingsService.Settings.Widgets
-            .Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !widget.IsDisabled &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+    public IReadOnlyList<DesktopOrganizationDestinationOption> GetDestinationOptions() =>
+        GetActiveFileWidgetsById().Values
             .OrderBy(widget => widget.Name, StringComparer.CurrentCultureIgnoreCase)
             .Select(widget => new DesktopOrganizationDestinationOption(
                 widget.Id,
@@ -208,7 +201,14 @@ public sealed class DesktopOrganizationCoordinator
                 Path.GetFullPath(widget.MappedFolderPath!),
                 IsDynamic: false))
             .ToList();
-    }
+
+    internal IReadOnlyDictionary<string, WidgetConfig> GetActiveFileWidgetsById() =>
+        _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                !widget.IsDisabled &&
+                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+            .ToDictionary(widget => widget.Id, StringComparer.Ordinal);
 
     public async Task<DesktopOrganizationExecutionResult> ExecuteAsync(
         DesktopOrganizationPlan plan,
@@ -264,6 +264,9 @@ public sealed class DesktopOrganizationCoordinator
     }
 
     public bool HasPendingRecovery => _transaction.HasPendingRecovery;
+
+    public Task<DesktopOrganizationRecoveryJournal?> GetPendingRecoveryJournalAsync() =>
+        _transaction.LoadPendingRecoveryJournalAsync();
 
     public Task<int> RecoverPendingAsync(IntPtr ownerWindowHandle = default) => _transaction.RecoverPendingAsync(ownerWindowHandle);
 
@@ -324,8 +327,15 @@ public sealed class DesktopOrganizationCoordinator
     {
         foreach (OrganizationHistoryTarget target in history.Targets)
         {
-            if (target.WasCreated && (!Directory.Exists(target.DirectoryPath) ||
-                !Directory.EnumerateFileSystemEntries(target.DirectoryPath).Any()))
+            WidgetConfig? liveWidget = _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(
+                widget => string.Equals(widget.Id, target.WidgetId, StringComparison.Ordinal));
+            string? effectiveDirectoryPath = !string.IsNullOrWhiteSpace(liveWidget?.MappedFolderPath)
+                ? liveWidget.MappedFolderPath
+                : target.DirectoryPath;
+
+            if (target.WasCreated && (string.IsNullOrWhiteSpace(effectiveDirectoryPath) ||
+                !Directory.Exists(effectiveDirectoryPath) ||
+                !Directory.EnumerateFileSystemEntries(effectiveDirectoryPath).Any()))
             {
                 await _widgetManager.RemoveWidgetAsync(
                     target.WidgetId,
@@ -335,7 +345,15 @@ public sealed class DesktopOrganizationCoordinator
                         rule.TargetWidgetId,
                         target.WidgetId,
                         StringComparison.Ordinal));
-                TryDeleteEmptyDirectory(target.DirectoryPath);
+                if (!string.IsNullOrWhiteSpace(effectiveDirectoryPath))
+                {
+                    TryDeleteEmptyDirectory(effectiveDirectoryPath);
+                }
+                if (!string.IsNullOrWhiteSpace(target.DirectoryPath) &&
+                    !string.Equals(target.DirectoryPath, effectiveDirectoryPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDeleteEmptyDirectory(target.DirectoryPath);
+                }
             }
             else
             {
@@ -362,26 +380,60 @@ public sealed class DesktopOrganizationCoordinator
             return;
         }
 
-        Win32Helper.NativeRect nativeWorkArea = default;
-        if (!Win32Helper.SystemParametersInfo(SpiGetWorkArea, 0, ref nativeWorkArea, 0))
-        {
-            return;
-        }
+        DesktopOrganizationRect workArea;
+        double scale;
+        List<DesktopOrganizationRect> occupied;
 
-        double scale = Math.Max(1, Win32Helper.GetDpiForSystem() / 96d);
-        var workArea = new DesktopOrganizationRect(
-            nativeWorkArea.Left,
-            nativeWorkArea.Top,
-            nativeWorkArea.Right - nativeWorkArea.Left,
-            nativeWorkArea.Bottom - nativeWorkArea.Top);
-        var occupied = _settingsService.Settings.Widgets
-            .Where(widget => widget.IsVisible && !widget.IsDisabled)
-            .Select(widget => new DesktopOrganizationRect(
-                widget.X,
-                widget.Y,
-                widget.Width * scale,
-                widget.Height * scale))
-            .ToList();
+        IReadOnlyList<WidgetScreenInfo> screens = WidgetScreenCatalog.Capture();
+        WidgetScreenInfo? targetScreen = ResolveTargetPlacementScreen(screens);
+        if (targetScreen is not null)
+        {
+            workArea = new DesktopOrganizationRect(
+                targetScreen.WorkArea.X,
+                targetScreen.WorkArea.Y,
+                targetScreen.WorkArea.Width,
+                targetScreen.WorkArea.Height);
+            scale = targetScreen.EffectiveDpiScale;
+            IReadOnlyList<RectInt32> allWorkAreas = screens
+                .Select(screen => screen.WorkArea)
+                .ToList();
+            occupied = _settingsService.Settings.WidgetLayout.Widgets
+                .Where(widget => widget.IsVisible && !widget.IsDisabled)
+                .Select(widget => WidgetPositioningService.ResolveBounds(
+                    widget,
+                    targetScreen.WorkArea,
+                    allWorkAreas))
+                .Select(rect => new DesktopOrganizationRect(
+                    rect.X,
+                    rect.Y,
+                    rect.Width,
+                    rect.Height))
+                .Where(rect => rect.Intersects(workArea))
+                .ToList();
+        }
+        else
+        {
+            Win32Helper.NativeRect nativeWorkArea = default;
+            if (!Win32Helper.SystemParametersInfo(SpiGetWorkArea, 0, ref nativeWorkArea, 0))
+            {
+                return;
+            }
+
+            scale = Math.Max(1, Win32Helper.GetDpiForSystem() / 96d);
+            workArea = new DesktopOrganizationRect(
+                nativeWorkArea.Left,
+                nativeWorkArea.Top,
+                nativeWorkArea.Right - nativeWorkArea.Left,
+                nativeWorkArea.Bottom - nativeWorkArea.Top);
+            occupied = _settingsService.Settings.Widgets
+                .Where(widget => widget.IsVisible && !widget.IsDisabled)
+                .Select(widget => new DesktopOrganizationRect(
+                    widget.X,
+                    widget.Y,
+                    widget.Width * scale,
+                    widget.Height * scale))
+                .ToList();
+        }
 
         if (!_placementPlanner.TryAssignBounds(
                 plan,
@@ -395,6 +447,41 @@ public sealed class DesktopOrganizationCoordinator
             throw new InvalidOperationException(
                 _localizationService.T("DesktopOrganization.Error.NoLayoutSpace"));
         }
+    }
+
+    private WidgetScreenInfo? ResolveTargetPlacementScreen(IReadOnlyList<WidgetScreenInfo> screens)
+    {
+        if (screens.Count == 0)
+        {
+            return null;
+        }
+
+        string setting = SettingsService.NormalizeWidgetNewPlacementTarget(
+            _settingsService.Settings.WidgetLayout.WidgetNewPlacementTarget);
+        WidgetScreenInfo? target = setting switch
+        {
+            SettingsService.WidgetNewPlacementMainDisplay =>
+                screens.FirstOrDefault(screen => screen.IsPrimary) ?? screens.FirstOrDefault(),
+            SettingsService.WidgetNewPlacementSpecificDisplay =>
+                WidgetScreenCatalog.TryFindScreen(
+                    screens,
+                    _settingsService.Settings.WidgetLayout.WidgetDefaultBoundScreenId) ??
+                screens.FirstOrDefault(screen => screen.IsPrimary) ??
+                screens.FirstOrDefault(),
+            _ => ResolveCursorScreen(screens)
+        };
+        return target ?? screens.FirstOrDefault();
+    }
+
+    private static WidgetScreenInfo? ResolveCursorScreen(IReadOnlyList<WidgetScreenInfo> screens)
+    {
+        PointInt32 cursor = new(0, 0);
+        if (Win32Helper.GetCursorPos(out Win32Helper.POINT point))
+        {
+            cursor = new PointInt32(point.X, point.Y);
+        }
+
+        return WidgetScreenCatalog.FindScreenForPoint(screens, cursor) ?? screens.FirstOrDefault();
     }
 
     private static void TryDeleteEmptyDirectory(string path)

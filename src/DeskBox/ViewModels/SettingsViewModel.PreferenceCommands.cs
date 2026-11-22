@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -69,6 +69,7 @@ public partial class SettingsViewModel
         try
         {
             SettingsService.ApplyDefaultPreferences(_settingsService.Settings);
+            DesktopToastHudService.ClearDismissedHints(_settingsService.DataDirectoryPath);
 
             // The group-level defaults (nav style, title mode, wheel/hover
             // switch, switch animation, groups master switch) live in the
@@ -96,6 +97,7 @@ public partial class SettingsViewModel
             // gesture kept triggering search until the next restart
             // (batch R9).
             _hotkeyActions.RefreshSearchHotkeyRegistration();
+            _hotkeyActions.RefreshClipboardHotkeyRegistration();
             _appActions.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             _themeService.RefreshAppearance();

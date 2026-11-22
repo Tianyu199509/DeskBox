@@ -92,7 +92,7 @@ public sealed class SettingsForwardGuardAndChainTests : IDisposable
             new SettingsMigrationPipeline().RunMigrationsOnCopy(settings);
 
         Assert.True(applied);
-        Assert.Equal(15, migrated.SchemaVersion);
+        Assert.Equal(18, migrated.SchemaVersion);
 
         // 12→13 rewrote the key to the v4 identity hash and remapped active.
         string mergedKey = Assert.Single(migrated.WidgetTopologyLayouts).Key;

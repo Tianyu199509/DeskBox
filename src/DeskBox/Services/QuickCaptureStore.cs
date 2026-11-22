@@ -24,18 +24,26 @@ public sealed class QuickCaptureStore
     private const int CurrentVersion = 4;
 
     private readonly string _storePath;
+    private readonly string _exportDirectory;
 
     public QuickCaptureStore()
-        : this(Path.Combine(
-            DeskBoxDataPathService.Current.DataDirectory,
-            "quick-capture"))
+        : this(
+            Path.Combine(
+                DeskBoxDataPathService.Current.DataDirectory,
+                "quick-capture"),
+            DeskBoxDataPathService.Current.IsDevelopmentRoot
+                ? null
+                : Path.Combine(DeskBox.Platform.DropStagingFileOps.GetStagingRootDirectory(), "QuickCaptureExports"))
     {
     }
 
-    internal QuickCaptureStore(string dataDir)
+    internal QuickCaptureStore(string dataDir, string? exportDirectory = null)
     {
         Directory.CreateDirectory(dataDir);
         _storePath = Path.Combine(dataDir, "quick-capture.json");
+        _exportDirectory = string.IsNullOrWhiteSpace(exportDirectory)
+            ? Path.Combine(Path.GetDirectoryName(_storePath)!, "exports")
+            : Path.GetFullPath(exportDirectory);
     }
 
     internal string StorePath => _storePath;
@@ -44,24 +52,42 @@ public sealed class QuickCaptureStore
 
     internal string ThumbnailDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "thumbnails");
 
-    internal string ExportDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "exports");
+    internal string ExportDirectory => _exportDirectory;
 
     internal string AttachmentDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "attachments");
 
+    private bool _hasUnparseableFutureSchema;
+
     public async Task<QuickCaptureStoreData> LoadAsync()
     {
-        return await ResilientJsonStore.LoadAsync(
+        bool unparseableFuture = false;
+        QuickCaptureStoreData loaded = await ResilientJsonStore.LoadAsync(
             _storePath,
-            json => Normalize(JsonSerializer.Deserialize(
+            json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                _storePath,
                 json,
-                QuickCaptureJsonContext.Default.StoreData)),
+                CurrentVersion,
+                raw => JsonSerializer.Deserialize(raw, QuickCaptureJsonContext.Default.StoreData),
+                static d => d.Version,
+                Normalize,
+                static ver => new QuickCaptureStoreData { Version = ver },
+                out unparseableFuture),
             () => new QuickCaptureStoreData(),
             nameof(QuickCaptureStore));
+        _hasUnparseableFutureSchema = unparseableFuture;
+        return loaded;
     }
 
     public Task SaveAsync(QuickCaptureStoreData data)
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[QuickCaptureStore] Skipping write to preserve unparseable newer schema document '{_storePath}'.");
+            return Task.CompletedTask;
+        }
+
         data = Normalize(data);
+        data.Version = CurrentVersion;
         // Stream the UTF-8 directly into the temp file: materializing the
         // whole document as a string first doubles the transient footprint
         // on every save, and quick-capture autosave fires while the user
@@ -86,6 +112,9 @@ public sealed class QuickCaptureStore
     {
         data ??= new QuickCaptureStoreData();
         data.Version = CurrentVersion;
+        data.MirrorFolderPath = string.IsNullOrWhiteSpace(data.MirrorFolderPath)
+            ? null
+            : data.MirrorFolderPath.Trim();
         data.Items ??= [];
         data.RecentItems ??= [];
 

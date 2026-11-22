@@ -25,6 +25,7 @@ public sealed class WidgetGroupNavigationInteractionPolicyTests
 
     [Theory]
     [InlineData(WidgetGroupNavigationStyles.Tabs)]
+    [InlineData(WidgetGroupNavigationStyles.EqualTabs)]
     [InlineData(WidgetGroupNavigationStyles.Stack)]
     public void ExplicitStyle_DoesNotChangeAtResponsiveBreakpoint(string style)
     {

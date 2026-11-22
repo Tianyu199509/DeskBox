@@ -6,6 +6,8 @@ namespace DeskBox.Services;
 
 public static class FileOpenPickerService
 {
+    private static int s_pickInFlight;
+
     /// <summary>
     /// The add-file entrance. This deliberately uses the native common item
     /// dialog instead of the WinAppSDK picker: the picker wrapper cannot
@@ -14,7 +16,7 @@ public static class FileOpenPickerService
     /// entity itself (issue 458). The native dialog pins
     /// FOS_NODEREFERENCELINKS, so a selected shortcut is added as the .lnk.
     /// </summary>
-    public static Task<IReadOnlyList<string>> PickFilesAsync(
+    public static async Task<IReadOnlyList<string>> PickFilesAsync(
         IntPtr ownerHwnd,
         string? suggestedFolder = null)
     {
@@ -32,23 +34,39 @@ public static class FileOpenPickerService
             suggestedFolder = normalizedFolder;
         }
 
+        if (Interlocked.CompareExchange(ref s_pickInFlight, 1, 0) != 0)
+        {
+            _ = Task.Run(NativeFileOpenDialog.TryActivateActiveFileDialog);
+            App.Log("[FileOpenPicker] outcome=busy elapsedMs=0");
+            return [];
+        }
+
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            IReadOnlyList<string> paths = NativeFileOpenDialog.ShowPickFiles(
+            // Isolate modal IFileOpenDialog::Show on a dedicated STA thread
+            // (matching FolderPickerService) so third-party shell extensions
+            // never re-enter the WinUI 3 Mouse-in-Pointer UI thread.
+            IReadOnlyList<string> paths = await NativeFileOpenDialog.RunOnDedicatedStaAsync(
                 ownerHwnd,
-                suggestedFolder);
-            return Task.FromResult<IReadOnlyList<string>>(paths
+                staOwnerHwnd => NativeFileOpenDialog.ShowPickFiles(staOwnerHwnd, suggestedFolder),
+                NativeFileOpenDialog.DedicatedStaDialogKind.File)
+                .ConfigureAwait(false);
+            return paths
                 .Select(Path.GetFullPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray());
+                .ToArray();
         }
         catch (Exception ex)
         {
             // elapsedMs separates an environment-killed dialog (a
             // cancel-looking failure at near-zero ms) from a human-paced one.
             App.Log($"[FileOpenPicker] Failed to pick files (elapsedMs={stopwatch.ElapsedMilliseconds}): {ex}");
-            return Task.FromResult<IReadOnlyList<string>>([]);
+            return [];
+        }
+        finally
+        {
+            Volatile.Write(ref s_pickInFlight, 0);
         }
     }
 

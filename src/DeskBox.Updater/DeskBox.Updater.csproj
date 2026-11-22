@@ -3,29 +3,18 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>DeskBox.Updater</RootNamespace>
     <AssemblyName>DeskBox.Updater</AssemblyName>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Platforms>x64;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
-    <PublishSingleFile>false</PublishSingleFile>
+    <ApplicationManifest>..\DeskBox\app.manifest</ApplicationManifest>
     <IsAotCompatible>true</IsAotCompatible>
-    <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
     <!-- Switches the shared ShellUnelevatedLaunch source into this
          assembly's own namespace; see that file's header. -->
     <DefineConstants>$(DefineConstants);DESKBOX_UPDATER</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(DeskBoxAotAudit)' == 'true'">
-    <PublishAot>true</PublishAot>
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>false</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
-    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
-    <TrimmerSingleWarn>false</TrimmerSingleWarn>
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StackTraceSupport>false</StackTraceSupport>
   </PropertyGroup>
 
   <!-- Shared source with the app project: the shell-integrity restart

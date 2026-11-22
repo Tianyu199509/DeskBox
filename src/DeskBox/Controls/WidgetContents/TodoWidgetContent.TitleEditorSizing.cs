@@ -12,12 +12,15 @@ public sealed partial class TodoWidgetContent
     private bool _isDetailTitleHeightDragging;
     private double? _detailTitlePreferredHeight;
 
-    private void DetailTitleTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+    private void DetailTitleTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
         QueueDetailTitleHeightUpdate();
+        ScheduleDetailTitleAutoSave();
+    }
 
     private void QueueDetailTitleHeightUpdate()
     {
-        if (_isDetailTitleHeightUpdateQueued || _isDetailTitleHeightDragging)
+        if (_isDisposed || _isDetailTitleHeightUpdateQueued || _isDetailTitleHeightDragging)
         {
             return;
         }
@@ -26,6 +29,11 @@ public sealed partial class TodoWidgetContent
         if (!DispatcherQueue.TryEnqueue(() =>
             {
                 _isDetailTitleHeightUpdateQueued = false;
+                if (_isDisposed)
+                {
+                    return;
+                }
+
                 UpdateDetailTitleEditorHeight();
             }))
         {
@@ -35,7 +43,7 @@ public sealed partial class TodoWidgetContent
 
     private void UpdateDetailTitleEditorHeight()
     {
-        if (_isDetailTitleHeightDragging || DetailTitleTextBox is null)
+        if (_isDisposed || _isDetailTitleHeightDragging || DetailTitleTextBox is null)
         {
             return;
         }

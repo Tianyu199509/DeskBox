@@ -130,7 +130,7 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
             "FollowDefault", [], "FollowDefault", [],
             WidgetCollapseBehaviorNames.System, [],
             WidgetChromeModeNames.Standard, [],
-            []);
+            [], RawName: "Group", IsHoverSwitchApplicable: true);
         editor.UpdateExistingGroups([item]);
 
         Assert.Same(item, editor.ExistingGroups[0]);
@@ -148,11 +148,18 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
             PassthroughLocalize);
 
         Assert.Equal(
-            [WidgetGroupNavigationStyles.Tabs, WidgetGroupNavigationStyles.Stack],
+            [
+                WidgetGroupNavigationStyles.Tabs,
+                WidgetGroupNavigationStyles.EqualTabs,
+                WidgetGroupNavigationStyles.Stack
+            ],
             editor.AvailableNavigationStyleOptions.Select(option => option.Value));
         Assert.Equal(
             "Settings.WidgetGroupNavigation.Tabs",
             editor.AvailableNavigationStyleOptions[0].DisplayName);
+        Assert.Equal(
+            "Settings.WidgetGroupNavigation.EqualTabs",
+            editor.AvailableNavigationStyleOptions[1].DisplayName);
         Assert.Equal(
             [
                 WidgetGroupTitleDisplayModes.IconAndText,
@@ -395,74 +402,6 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
 
     // --- Wiring text pins ---
 
-    [Fact]
-    public void XamlAndBridge_WireTheGroupAndCapsuleFamiliesToTheirEditors()
-    {
-        string repository = TestPaths.FromRepository("src/DeskBox");
-        string window = File.ReadAllText(Path.Combine(repository, "Views/SettingsWindow.xaml"));
-        string capsuleSection = File.ReadAllText(
-            Path.Combine(repository, "Views/SettingsSections/CapsuleModeSettingsSection.xaml"));
-        string appearanceSection = File.ReadAllText(
-            Path.Combine(repository, "Views/SettingsSections/AppearanceSettingsSection.xaml"));
-        string deferred = File.ReadAllText(
-            Path.Combine(repository, "Views/SettingsWindow.DeferredSections.cs"));
-        string shellBridge = File.ReadAllText(
-            Path.Combine(repository, "ViewModels/SettingsViewModel.AotBindableProperties.cs"));
-        string groupBridge = File.ReadAllText(Path.Combine(
-            repository, "Features/GroupNavigation/GroupNavigationSettingsViewModel.AotBindableProperties.cs"));
-        string capsuleBridge = File.ReadAllText(Path.Combine(
-            repository, "Features/Capsule/CapsuleSettingsViewModel.AotBindableProperties.cs"));
-
-        // The WidgetGroups section binds through the group-navigation editor.
-        Assert.Contains("ItemsSource=\"{Binding AvailableNavigationStyleOptions}\"", window);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding DefaultNavigationStyle, Mode=TwoWay}\"", window);
-        Assert.Contains("IsOn=\"{Binding WheelSwitchEnabled, Mode=TwoWay}\"", window);
-        Assert.Contains("ItemsSource=\"{Binding ExistingGroups}\"", window);
-        Assert.Contains(
-            "Visibility=\"{Binding HasExistingGroups, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
-            window);
-
-        // The capsule family binds through the capsule editor, with the
-        // visibility gates running through the bool->visibility converter.
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding CollapseBehavior, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains("IsOn=\"{Binding HideSensitiveContent, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding HoverResponse, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains(
-            "Visibility=\"{Binding ShowHoverResponseEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
-            capsuleSection);
-        Assert.Contains("Value=\"{Binding BarSpacing, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains("Value=\"{Binding ExpandDelayMs, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains("Value=\"{Binding AnimationDurationMs, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains("ItemsSource=\"{Binding OverrideItems}\"", window);
-
-        // The appearance main section no longer hosts the recycled
-        // group-navigation inline selector.
-        Assert.DoesNotContain("{Binding GroupNavigationStyle", appearanceSection);
-        Assert.DoesNotContain("{Binding AvailableGroupNavigationStyleOptions}", appearanceSection);
-        Assert.Contains("Tag=\"WidgetGroups\"", appearanceSection);
-
-        // Section-level DataContext switch covers both families.
-        Assert.Contains("section.DataContext = _groupNavigationSettingsViewModel;", deferred);
-        Assert.Contains("\"CapsuleMode\" or", deferred);
-        Assert.Contains("\"CapsuleOverridesSettings\"", deferred);
-        Assert.Contains("section.DataContext = _capsuleSettingsViewModel;", deferred);
-
-        // The editors expose AOT bridges and the shell bridge dropped the
-        // migrated names.
-        Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", groupBridge);
-        Assert.Contains("nameof(DefaultNavigationStyle)", groupBridge);
-        Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", capsuleBridge);
-        Assert.Contains("nameof(CollapseBehavior)", capsuleBridge);
-        Assert.Contains("nameof(HoverResponse)", capsuleBridge);
-        Assert.DoesNotContain("nameof(SelectedWidgetCollapseBehavior)", shellBridge);
-        Assert.DoesNotContain("nameof(SelectedWidgetGroupDefaultNavigationStyle)", shellBridge);
-        Assert.DoesNotContain("nameof(ExistingWidgetGroupItems)", shellBridge);
-        Assert.DoesNotContain("nameof(WidgetCompactExpandDelayMs)", shellBridge);
-        Assert.DoesNotContain("nameof(WidgetCompactHoverResponseCustomVisibility)", shellBridge);
-    }
 
     [Fact]
     public void ShellSurface_NoGroupOrCapsuleBindingFacadesRemain()

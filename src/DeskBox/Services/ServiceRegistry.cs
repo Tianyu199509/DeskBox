@@ -1,49 +1,157 @@
-using Microsoft.Extensions.DependencyInjection;
+using DeskBox.Services.DesktopOrganization;
 
 namespace DeskBox.Services;
 
 /// <summary>
-/// Central DI registration for all core DeskBox services.
-/// These registrations have application lifetime. Feature/window factories
-/// own shorter-lived instances; App disposes this container after its consumers.
+/// Central zero-reflection composition root for all core DeskBox application-lifetime services.
+/// Eliminates runtime <c>ServiceCollection</c> constructor reflection and allows Native AOT
+/// to trim the entire <c>Microsoft.Extensions.DependencyInjection</c> graph while preserving
+/// lazy singleton resolution and deterministic reverse-creation disposal order.
 /// </summary>
 public static class ServiceRegistry
 {
-    /// <summary>
-    /// Registers all core application services into the given service collection.
-    /// </summary>
-    public static IServiceCollection AddDeskBoxServices(this IServiceCollection services)
+    public static DeskBoxServiceContainer CreateContainer() => new();
+}
+
+/// <summary>
+/// Strongly-typed, reflection-free application singleton container with thread-safe lazy
+/// initialization and reverse-instantiation <see cref="IDisposable"/> teardown.
+/// </summary>
+public sealed class DeskBoxServiceContainer : IDisposable
+{
+    private readonly object _gate = new();
+    private readonly List<IDisposable> _disposables = new(14);
+    private bool _disposed;
+
+    private SettingsService? _settingsService;
+    private DeskBoxDataBackupService? _dataBackupService;
+    private ICredentialStore? _credentialStore;
+    private CloudBackupService? _cloudBackupService;
+    private DeskBoxAttachmentHealthService? _attachmentHealthService;
+    private DeskBoxDiagnosticsBundleService? _diagnosticsBundleService;
+    private LocalizationService? _localizationService;
+    private ThemeService? _themeService;
+    private FileService? _fileService;
+    private ResizeGuideOverlayService? _resizeGuideOverlayService;
+    private ManagedStorageDesktopShortcutService? _managedStorageDesktopShortcutService;
+    private DesktopIconPositionService? _desktopIconPositionService;
+    private OrganizerService? _organizerService;
+    private QuickCaptureService? _quickCaptureService;
+    private IAppUpdateService? _appUpdateService;
+
+    public SettingsService SettingsService =>
+        GetOrCreate(ref _settingsService, static _ => new SettingsService());
+
+    public DeskBoxDataBackupService DataBackupService =>
+        GetOrCreate(ref _dataBackupService, static _ => new DeskBoxDataBackupService());
+
+    internal ICredentialStore CredentialStore =>
+        GetOrCreate(ref _credentialStore, static _ => new PasswordVaultCredentialStore());
+
+    internal CloudBackupService CloudBackupService =>
+        GetOrCreate(
+            ref _cloudBackupService,
+            static c => new CloudBackupService(c.DataBackupService, c.SettingsService, c.CredentialStore));
+
+    public DeskBoxAttachmentHealthService AttachmentHealthService =>
+        GetOrCreate(ref _attachmentHealthService, static _ => new DeskBoxAttachmentHealthService());
+
+    public DeskBoxDiagnosticsBundleService DiagnosticsBundleService =>
+        GetOrCreate(ref _diagnosticsBundleService, static _ => new DeskBoxDiagnosticsBundleService());
+
+    public LocalizationService LocalizationService =>
+        GetOrCreate(ref _localizationService, static c => new LocalizationService(c.SettingsService));
+
+    public ThemeService ThemeService =>
+        GetOrCreate(ref _themeService, static c => new ThemeService(c.SettingsService));
+
+    public FileService FileService =>
+        GetOrCreate(ref _fileService, static c => new FileService(c.LocalizationService));
+
+    public ResizeGuideOverlayService ResizeGuideOverlayService =>
+        GetOrCreate(ref _resizeGuideOverlayService, static _ => new ResizeGuideOverlayService());
+
+    public ManagedStorageDesktopShortcutService ManagedStorageDesktopShortcutService =>
+        GetOrCreate(
+            ref _managedStorageDesktopShortcutService,
+            static c => new ManagedStorageDesktopShortcutService(c.SettingsService));
+
+    public DesktopIconPositionService DesktopIconPositionService =>
+        GetOrCreate(ref _desktopIconPositionService, static _ => new DesktopIconPositionService());
+
+    public OrganizerService OrganizerService =>
+        GetOrCreate(
+            ref _organizerService,
+            static c => new OrganizerService(
+                c.SettingsService,
+                c.FileService,
+                desktopIconPositions: c.DesktopIconPositionService));
+
+    public QuickCaptureService QuickCaptureService =>
+        GetOrCreate(
+            ref _quickCaptureService,
+            static c => new QuickCaptureService(
+                recycleAttachmentFileAsync: path =>
+                    c.FileService.DeleteEntryAsync(path, recycle: true)));
+
+    public IAppUpdateService AppUpdateService =>
+        GetOrCreate(
+            ref _appUpdateService,
+            static _ => AppUpdateServiceFactory.Create(AppDistributionService.Current));
+
+    private T GetOrCreate<T>(ref T? slot, Func<DeskBoxServiceContainer, T> factory)
+        where T : class
     {
-        // ── Core infrastructure ──────────────────────────────────────────
-        services.AddSingleton<SettingsService>();
-        services.AddSingleton<DeskBoxDataBackupService>();
-        services.AddSingleton<ICredentialStore>(_ => new PasswordVaultCredentialStore());
-        services.AddSingleton<CloudBackupService>(sp =>
-            new CloudBackupService(
-                sp.GetRequiredService<DeskBoxDataBackupService>(),
-                sp.GetRequiredService<SettingsService>(),
-                sp.GetRequiredService<ICredentialStore>()));
-        services.AddSingleton<DeskBoxAttachmentHealthService>();
-        services.AddSingleton<DeskBoxDiagnosticsBundleService>();
-        services.AddSingleton<FileService>();
-        services.AddSingleton<ResizeGuideOverlayService>();
-        services.AddSingleton<ManagedStorageDesktopShortcutService>();
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (slot is not null)
+            {
+                return slot;
+            }
 
-        // ── Feature services ─────────────────────────────────────────────
-        services.AddSingleton<OrganizerService>(sp =>
-            new OrganizerService(
-                sp.GetRequiredService<SettingsService>(),
-                sp.GetRequiredService<FileService>()));
-        services.AddSingleton<QuickCaptureService>(sp => new QuickCaptureService(
-            recycleAttachmentFileAsync: path =>
-                sp.GetRequiredService<FileService>().DeleteEntryAsync(path, recycle: true)));
-        services.AddSingleton<LocalizationService>();
-        services.AddSingleton<ThemeService>();
+            T created = factory(this);
+            slot = created;
+            if (created is IDisposable disposable)
+            {
+                _disposables.Add(disposable);
+            }
 
-        // ── Update (factory-based) ───────────────────────────────────────
-        services.AddSingleton<IAppUpdateService>(_ =>
-            AppUpdateServiceFactory.Create(AppDistributionService.Current));
+            return created;
+        }
+    }
 
-        return services;
+    public void Dispose()
+    {
+        IDisposable[] toDispose;
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            toDispose = _disposables.ToArray();
+            _disposables.Clear();
+        }
+
+        List<Exception>? exceptions = null;
+        for (int i = toDispose.Length - 1; i >= 0; i--)
+        {
+            try
+            {
+                toDispose[i].Dispose();
+            }
+            catch (Exception ex)
+            {
+                (exceptions ??= []).Add(ex);
+            }
+        }
+
+        if (exceptions is { Count: > 0 })
+        {
+            throw new AggregateException(exceptions);
+        }
     }
 }

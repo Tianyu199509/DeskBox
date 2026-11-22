@@ -134,4 +134,28 @@ public sealed class DisplayTopologyGateTests
         gate.Open(DisplayTopologyGateReason.DisplayOff);
         Assert.False(gate.IsClosed);
     }
+
+    [Fact]
+    public void RemovalGrace_DoesNotRearmForSameActiveSetAfterExpiryUntilCleared()
+    {
+        var now = DateTimeOffset.Parse("2026-10-08T10:00:00Z");
+        var gate = new DisplayTopologyGate(() => now);
+
+        gate.StartRemovalGrace(["A", "B"], ["A"]);
+        Assert.True(gate.IsClosed);
+
+        now += TimeSpan.FromSeconds(5);
+        gate.ObserveDisplays(["A"]);
+        Assert.False(gate.IsClosed);
+
+        // Stray window/DPI signals arriving before ActivateCurrentTopology updates
+        // ActiveWidgetTopologyKey must NOT start another 4s grace loop.
+        gate.StartRemovalGrace(["A", "B"], ["A"]);
+        Assert.False(gate.IsClosed);
+
+        // Once the restore commits (or displays return), a future unplug arms normally.
+        gate.ClearCompletedRemovalGrace();
+        gate.StartRemovalGrace(["A", "B"], ["A"]);
+        Assert.True(gate.IsClosed);
+    }
 }

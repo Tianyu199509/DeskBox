@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -91,6 +91,18 @@ public sealed class LayoutWriteSyncTests : IDisposable
             CancellationToken.None);
         Assert.True(okCapsule);
         Assert.Contains(widget.Resets, r => r.Scope == CapsuleOverrideResetScope.All);
+
+        var (okPrefs, slicePrefs, _) = await router.DispatchAsync(
+            SettingsIpcMethods.WidgetApplyLayoutPreferences,
+            SettingsIpcPayload.Encode(
+                new LayoutPreferencesChange(DisplayScalingMode: SettingsService.WidgetDisplayScalingElasticScale),
+                SettingsIpcJsonContext.Default.LayoutPreferencesChange),
+            CancellationToken.None);
+        Assert.True(okPrefs);
+        Assert.False(string.IsNullOrEmpty(slicePrefs));
+        Assert.Contains(
+            widget.LayoutPreferences,
+            p => p.DisplayScalingMode == SettingsService.WidgetDisplayScalingElasticScale);
     }
 
     [Fact]
@@ -156,7 +168,12 @@ public sealed class LayoutWriteSyncTests : IDisposable
         }
 
         public Task ApplyGroupNavigationDefaults(GroupNavigationDefaultsChange change) => Task.CompletedTask;
-        public Task ApplyLayoutPreferences(LayoutPreferencesChange change) => Task.CompletedTask;
+        public List<LayoutPreferencesChange> LayoutPreferences { get; } = [];
+        public Task ApplyLayoutPreferences(LayoutPreferencesChange change)
+        {
+            LayoutPreferences.Add(change);
+            return Task.CompletedTask;
+        }
         public Task ResetCapsuleOverrides(CapsuleOverrideReset reset)
         {
             Resets.Add(reset);
@@ -189,9 +206,18 @@ public sealed class LayoutWriteSyncTests : IDisposable
         public Task SetGlanceWidgetInstanceEnabledAsync(string widgetId, bool enabled) => Task.CompletedTask;
         public Task<bool> LocateGlanceWidgetAsync(string widgetId) => Task.FromResult(true);
         public Task RemoveGlanceWidgetAsync(string widgetId) => Task.CompletedTask;
+        public Task<IReadOnlyList<Services.GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync() => Task.FromResult<IReadOnlyList<Services.GlanceWidgetInstanceInfo>>([]);
+        public Task<Services.GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec) => throw new NotImplementedException();
+        public Task<Services.GlanceWidgetInstanceInfo> CreateCustomWidgetWithSetupAsync(CustomWidgetCreateOptions options) => throw new NotImplementedException();
+        public Task ApplyCustomWidgetMutationAsync(CustomWidgetSettingsMutation mutation) => Task.CompletedTask;
+        public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) => Task.CompletedTask;
+        public Task<bool> LocateCustomWidgetAsync(string widgetId) => Task.FromResult(true);
+        public Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea) => Task.CompletedTask;
+        public Task RemoveCustomWidgetAsync(string widgetId) => Task.CompletedTask;
         public Task RenameWidgetAsync(string widgetId, string newName) => Task.CompletedTask;
         public Task<(int MovedCount, Services.WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(string displayStableId) => throw new NotImplementedException();
         public Task<bool> UndoMoveAllWidgetSurfacesAsync(Services.WidgetMoveAllUndoToken token) => Task.FromResult(true);
+        public Task<int> RecalibrateDisplayLayoutAsync() => Task.FromResult(0);
         public Task ApplyScreenBindingAsync(string widgetId, Models.WidgetScreenBindingMode mode, string? boundScreenId, bool persistImmediately = true) => Task.CompletedTask;
         public Models.OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry() => null;
         public Models.OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId) => null;

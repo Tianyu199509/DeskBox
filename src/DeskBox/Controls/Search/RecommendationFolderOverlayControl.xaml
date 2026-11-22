@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.Search.RecommendationFolderOverlayControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:DeskBox.Models"
+    xmlns:helpers="using:DeskBox.Helpers"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!-- Centered frosted overlays for Win11-style recommendation folders and hidden items. -->
+    <Grid x:Name="RecommendationOverlaysLayer" Visibility="Collapsed"
+          SizeChanged="RecommendationOverlaysLayer_SizeChanged">
+        <Grid.Resources>
+            <DataTemplate x:Key="OverlayAppTileTemplate" x:DataType="models:SearchResultItem">
+                <Grid HorizontalAlignment="Stretch" MinWidth="80" Height="84" Padding="6,6" Margin="0"
+                      Background="Transparent" CornerRadius="8"
+                      PointerPressed="OverlayAppCard_PointerPressed"
+                      PointerMoved="OverlayAppCard_PointerMoved"
+                      PointerReleased="OverlayAppCard_PointerReleased"
+                      PointerCaptureLost="OverlayAppCard_PointerCaptureLost"
+                      PointerEntered="OverlayAppCard_PointerEntered"
+                      PointerExited="OverlayAppCard_PointerExited">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Width="40" Height="40" HorizontalAlignment="Center">
+                        <Image Source="{x:Bind Icon, Mode=OneTime}" Width="36" Height="36"
+                               Stretch="Uniform"/>
+                    </Grid>
+                    <TextBlock Grid.Row="1" Text="{x:Bind AppDisplayName, Mode=OneTime}" FontSize="12"
+                               helpers:WidgetTextShadow.Cast="False"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                               TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                               MaxLines="1" TextWrapping="NoWrap"/>
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
+
+        <!-- Win11 Start Menu centered frosted folder overlay -->
+        <Grid x:Name="FolderOverlayHost" Visibility="Collapsed">
+            <Border x:Name="FolderOverlayScrim" Background="#48000000"
+                    PointerPressed="FolderOverlayScrim_PointerPressed"/>
+
+            <Border x:Name="FolderOverlayCard"
+                    MinHeight="208" MaxHeight="356"
+                    Margin="16,8,16,14" Padding="18,16,18,18"
+                    CornerRadius="12"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                    BorderThickness="1">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" HorizontalAlignment="Center" MinHeight="34">
+                        <Button svc:Localized.AutomationNameKey="Search.Recommend.RenameFolder"
+                                x:Name="FolderOverlayTitleButton"
+                                AllowFocusOnInteraction="False" IsTabStop="False"
+                                Padding="12,4" CornerRadius="6"
+                                Background="Transparent" BorderThickness="0"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Click="FolderOverlayTitleButton_Click">
+                            <TextBlock x:Name="FolderOverlayTitleText"
+                                       FontSize="20" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                       TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       MaxWidth="340" MaxLines="1"/>
+                        </Button>
+                        <TextBox svc:Localized.AutomationNameKey="Search.Recommend.RenameFolder"
+                                 x:Name="FolderOverlayTitleEditor"
+                                 Visibility="Collapsed"
+                                 MinWidth="160" MaxWidth="340"
+                                 FontSize="18" FontWeight="SemiBold"
+                                 TextAlignment="Center"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                                 KeyDown="FolderOverlayTitleEditor_KeyDown"
+                                 LostFocus="FolderOverlayTitleEditor_LostFocus"/>
+                    </Grid>
+
+                    <ScrollViewer x:Name="FolderOverlayScrollViewer" Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Background="Transparent"
+                                  RightTapped="FolderOverlayScrollViewer_RightTapped">
+                        <Grid x:Name="FolderOverlaySurface" Background="Transparent">
+                            <ItemsRepeater x:Name="FolderAppsRepeater"
+                                           ItemTemplate="{StaticResource OverlayAppTileTemplate}">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="84" MinItemHeight="84"
+                                                       MinColumnSpacing="6" MinRowSpacing="6"
+                                                       MaximumRowsOrColumns="4"
+                                                       ItemsStretch="Fill"
+                                                       ItemsJustification="Start"/>
+                                </ItemsRepeater.Layout>
+                            </ItemsRepeater>
+
+                            <Border x:Name="FolderDropInsertIndicator" Visibility="Collapsed" IsHitTestVisible="False"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top"
+                                    Width="3" Height="64" CornerRadius="1.5"
+                                    Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}">
+                                <Border.RenderTransform>
+                                    <TranslateTransform x:Name="FolderDropInsertTransform"/>
+                                </Border.RenderTransform>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <Border x:Name="FolderDragGhostBorder" Visibility="Collapsed" IsHitTestVisible="False"
+                    HorizontalAlignment="Left" VerticalAlignment="Top"
+                    Width="92" Height="84" Padding="6,6" CornerRadius="10" Opacity="0.92"
+                    Background="Transparent"
+                    BorderBrush="Transparent"
+                    BorderThickness="0">
+                <Border.RenderTransform>
+                    <TranslateTransform x:Name="FolderDragGhostTransform"/>
+                </Border.RenderTransform>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Image x:Name="FolderDragGhostImage" Grid.Row="0" Width="36" Height="36"
+                           Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="FolderDragGhostTitle" Grid.Row="1" FontSize="12"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                               TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                               MaxLines="1" TextWrapping="NoWrap"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Centered frosted hidden-items overlay -->
+        <Grid x:Name="HiddenAppsOverlayHost" Visibility="Collapsed">
+            <Border x:Name="HiddenAppsOverlayScrim" Background="#48000000"
+                    PointerPressed="HiddenAppsOverlayScrim_PointerPressed"/>
+
+            <Border x:Name="HiddenAppsOverlayCard"
+                    MinHeight="208" MaxHeight="356"
+                    Margin="16,8,16,14" Padding="18,16,18,18"
+                    CornerRadius="12"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                    BorderThickness="1">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock x:Name="HiddenOverlayTitleText"
+                                       FontSize="16" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                            <TextBlock x:Name="HiddenOverlaySubtitleText"
+                                       FontSize="11.5"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                        </StackPanel>
+                        <Button svc:Localized.AutomationNameKey="Search.Recommend.UnhideAll"
+                                x:Name="UnhideAllButton" Grid.Column="1"
+                                AllowFocusOnInteraction="False" IsTabStop="False"
+                                Padding="10,4" MinHeight="28" CornerRadius="6"
+                                Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                VerticalAlignment="Center"
+                                Click="UnhideAllButton_Click">
+                            <TextBlock x:Name="UnhideAllButtonText" FontSize="12"/>
+                        </Button>
+                        <Button svc:Localized.AutomationNameKey="Common.Close"
+                                x:Name="CloseHiddenOverlayButton" Grid.Column="2"
+                                AllowFocusOnInteraction="False" IsTabStop="False"
+                                Width="28" Height="28" Padding="0" CornerRadius="6"
+                                Background="Transparent" BorderThickness="0"
+                                VerticalAlignment="Center"
+                                Click="CloseHiddenOverlayButton_Click">
+                            <FontIcon Glyph="&#xE711;" FontSize="12"
+                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Button>
+                    </Grid>
+
+                    <ScrollViewer x:Name="HiddenOverlayScrollViewer" Grid.Row="1"
+                                  VerticalScrollBarVisibility="Auto"
+                                  Background="Transparent"
+                                  RightTapped="HiddenOverlayScrollViewer_RightTapped">
+                        <ItemsRepeater x:Name="HiddenAppsRepeater"
+                                       ItemTemplate="{StaticResource OverlayAppTileTemplate}">
+                            <ItemsRepeater.Layout>
+                                <UniformGridLayout MinItemWidth="84" MinItemHeight="84"
+                                                   MinColumnSpacing="6" MinRowSpacing="6"
+                                                   MaximumRowsOrColumns="4"
+                                                   ItemsStretch="Fill"
+                                                   ItemsJustification="Start"/>
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

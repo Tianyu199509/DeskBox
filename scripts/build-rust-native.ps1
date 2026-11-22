@@ -65,6 +65,10 @@ if ($Platform -eq "ARM64") {
 }
 
 if (-not $ValidateOnly.IsPresent) {
+    $defaultCargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath (Join-Path $defaultCargoBin "cargo.exe") -PathType Leaf)) {
+        $env:PATH = "$defaultCargoBin;$env:PATH"
+    }
     $cargo = (Get-Command cargo -ErrorAction Stop).Source
     $rustc = (Get-Command rustc -ErrorAction Stop).Source
     # PowerShell 5.1 wraps redirected native stderr as ErrorRecords, and
@@ -151,7 +155,9 @@ if (-not $ValidateOnly.IsPresent) {
             throw "Rust native build did not produce '$sourcePath'."
         }
 
-        Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $outputRoot $artifactName) -Force
+        $destinationPath = Join-Path $outputRoot $artifactName
+        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+        (Get-Item -LiteralPath $destinationPath).LastWriteTimeUtc = [DateTime]::UtcNow
     }
 }
 

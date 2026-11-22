@@ -1,57 +1,45 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
     <!-- Keep the compile-time SDK modern while declaring the supported Win10 floor explicitly. -->
-    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <RootNamespace>DeskBox</RootNamespace>
-    <Version>1.5.9</Version>
-    <AssemblyVersion>1.5.9.0</AssemblyVersion>
-    <FileVersion>1.5.9.0</FileVersion>
-    <InformationalVersion>1.5.9</InformationalVersion>
-    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <Platforms>x64;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <PublishSingleFile>false</PublishSingleFile>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <EnableMsixTooling>true</EnableMsixTooling>
     <AppxPackage>false</AppxPackage>
     <DeskBoxDistribution Condition="'$(DeskBoxDistribution)' == ''">Direct</DeskBoxDistribution>
-    <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
     <!-- Native AOT smoke scenarios are a test harness, never a retail default. -->
     <DeskBoxAotSmokeHarness Condition="'$(DeskBoxAotSmokeHarness)' == ''">false</DeskBoxAotSmokeHarness>
-    <!-- Build/package the selected native module for explicit JIT/AOT use;
-         ordinary JIT feature backends still default to C#. -->
-    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">false</DeskBoxRustNative>
+    <DeskBoxPgoInstrumentation Condition="'$(DeskBoxPgoInstrumentation)' == ''">false</DeskBoxPgoInstrumentation>
+    <!-- Build/package deskbox_native.dll by default across Debug, Release,
+         and NativeAOT builds. -->
+    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">true</DeskBoxRustNative>
     <!-- Stage 7C0 keeps CRT linkage explicit so A/B outputs cannot be reused
          across incompatible native dependency policies. -->
     <DeskBoxRustCrtLinkage Condition="'$(DeskBoxRustCrtLinkage)' == ''">Static</DeskBoxRustCrtLinkage>
     <DeskBoxShellThumbnailProxy Condition="'$(DeskBoxShellThumbnailProxy)' == ''">true</DeskBoxShellThumbnailProxy>
-    <EverythingSdkArchitecture Condition="'$(RuntimeIdentifier)' == 'win-arm64' or '$(Platform)' == 'ARM64'">ARM64</EverythingSdkArchitecture>
-    <EverythingSdkArchitecture Condition="'$(EverythingSdkArchitecture)' == ''">x64</EverythingSdkArchitecture>
+    <DeskBoxQjsNative Condition="'$(DeskBoxQjsNative)' == ''">true</DeskBoxQjsNative>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <DefineConstants Condition="'$(DeskBoxDistribution)' == 'Store'">$(DefineConstants);DESKBOX_STORE</DefineConstants>
+    <DefineConstants Condition="'$(DeskBoxPgoInstrumentation)' == 'true'">$(DefineConstants);DESKBOX_PGO_INSTRUMENTATION</DefineConstants>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
     <ApplicationIcon>Assets\deskbox.ico</ApplicationIcon>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\.mimosa\**</DefaultItemExcludes>
   </PropertyGroup>
 
-  <!--
-    Opt-in Native AOT audit profile. Keep ordinary Debug/Release behavior
-    unchanged until the application-level AOT compatibility work is complete.
-  -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="9" />
+  </ItemGroup>
+
   <PropertyGroup Condition="'$(DeskBoxAotAudit)' == 'true'">
-    <PublishAot>true</PublishAot>
-    <SelfContained>true</SelfContained>
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
-    <PublishSingleFile>false</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
-    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
-    <TrimmerSingleWarn>false</TrimmerSingleWarn>
-    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <!--
@@ -61,22 +49,80 @@
   -->
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
     <DefineConstants>$(DefineConstants);DESKBOX_NATIVE_AOT</DefineConstants>
+    <UseSystemResourceKeys Condition="'$(DeskBoxAotSmokeHarness)' != 'true'">true</UseSystemResourceKeys>
+    <StackTraceSupport>true</StackTraceSupport>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and Exists('$(MSBuildProjectDirectory)\Profiles')">
+    <MibcFile Include="$(MSBuildProjectDirectory)\Profiles\*.mibc" />
+  </ItemGroup>
 
   <PropertyGroup Condition="'$(PublishAot)' == 'true' and '$(DeskBoxAotSmokeHarness)' == 'true'">
     <DefineConstants>$(DefineConstants);DESKBOX_AOT_SMOKE_HARNESS</DefineConstants>
   </PropertyGroup>
 
   <!--
-    Keep the retained Native AOT smoke matrix available to explicit audit
-    builds, but remove its source files from every ordinary and retail compile.
-    The AOT bindable-property bridges are production code and intentionally do
-    not match these patterns.
+    Include the Native AOT smoke matrix only when explicitly requested via
+    DeskBoxAotSmokeHarness=true. Production source trees stay completely clean
+    of smoke fixtures in ordinary and retail builds.
   -->
-  <ItemGroup Condition="'$(DeskBoxAotSmokeHarness)' != 'true'">
-    <Compile Remove="**\*.Aot*Smoke.cs" />
-    <Compile Remove="Services\Aot*Fixture.cs" />
+  <ItemGroup Condition="'$(DeskBoxAotSmokeHarness)' == 'true'">
+    <Compile Include="..\..\tests\DeskBox.AotSmoke\**\*.cs" LinkBase="AotSmoke" />
   </ItemGroup>
+
+  <Target
+    Name="ExcludeUnusedWinUIExReferencesFromDeskBox"
+    AfterTargets="ResolvePackageAssets"
+    BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference
+        Remove="@(Reference)"
+        Condition="'%(Reference.Filename)' == 'WinUIEx'" />
+      <ResolvedCompileFileDefinitions
+        Remove="@(ResolvedCompileFileDefinitions)"
+        Condition="'%(ResolvedCompileFileDefinitions.Filename)' == 'WinUIEx'" />
+      <ReferenceCopyLocalPaths
+        Remove="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'WinUIEx'" />
+      <RuntimeCopyLocalItems
+        Remove="@(RuntimeCopyLocalItems)"
+        Condition="'%(RuntimeCopyLocalItems.Filename)' == 'WinUIEx'" />
+      <ReferenceRelatedPaths
+        Remove="@(ReferenceRelatedPaths)"
+        Condition="'%(ReferenceRelatedPaths.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="ExcludeUnusedWinUIExReferencePathsFromDeskBox"
+    AfterTargets="ResolveAssemblyReferences"
+    BeforeTargets="MarkupCompilePass1;CoreCompile;GenerateBuildDependencyFile;_GenerateProjectPriConfigurationFiles;GetCopyToOutputDirectoryItems">
+    <ItemGroup>
+      <ReferencePath
+        Remove="@(ReferencePath)"
+        Condition="'%(ReferencePath.Filename)' == 'WinUIEx'" />
+      <ReferenceDependencyPaths
+        Remove="@(ReferenceDependencyPaths)"
+        Condition="'%(ReferenceDependencyPaths.Filename)' == 'WinUIEx'" />
+      <ReferenceCopyLocalPaths
+        Remove="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'WinUIEx'" />
+      <ReferenceRelatedPaths
+        Remove="@(ReferenceRelatedPaths)"
+        Condition="'%(ReferenceRelatedPaths.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="ExcludeUnusedWinUIExPriFromDeskBox"
+    AfterTargets="_ComputeInputPriFiles"
+    BeforeTargets="_GenerateProjectPriConfigurationFiles">
+    <ItemGroup>
+      <_PriFile
+        Remove="@(_PriFile)"
+        Condition="'%(_PriFile.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
 
   <!--
     Native AOT compiles out the legacy shortcut, music-volume, Explorer-shell,
@@ -92,21 +138,14 @@
       Text="DeskBox Native AOT stage 7A requires a matching Platform/RuntimeIdentifier pair: x64/win-x64 or ARM64/win-arm64." />
     <Error
       Condition="'$(DeskBoxRustNative)' != 'true'"
-      Text="DeskBox Native AOT stage 5B-4C3B2B2B requires DeskBoxRustNative=true so the Rust-only shortcut, music-volume, Explorer-shell, Quick Access, and exact Recycle Bin recovery paths cannot be published without deskbox_native.dll; completed gates retained by this profile include the shortcut AOT-to-Rust smoke, Explorer and Quick Access read-only, Quick Access pin/unpin, music-volume read-only smoke, system master-volume setter, session-volume recovery, the 5B-4A basic managed UI matrix, the 5B-4B1 deep settings matrix, the 5B-4B2A settings/widget persistence restart matrix, the 5B-4B2B1 Quick Capture content-store persistence restart/delete matrix, the 5B-4B2B2A Todo core task/title/notes/completion/delete persistence restart matrix, the 5B-4B2B2B1 Todo steps create/edit/complete/reload/delete persistence restart matrix, the 5B-4B2B2B2 Todo managed attachments import/project/reload/delete persistence restart matrix, the 5B-4B2C1 Glance owned-local-image/preferences/reload/restore/postflight matrix, the 5B-4B2C2A Weather local settings/view-mode/reload/restore/postflight matrix, the 5B-4B2C2B deterministic non-empty WeatherData/current/hourly/week/skin/unit/view-mode/reload/restore/postflight real-surface matrix, the 5B-4C1A owned local-file surface/navigation/watcher/copy/move/rename/conflict/reload/restore/postflight matrix, the 5B-4C1B1 real single/multi File Widget menu deletion, watcher/UI removal, cross-process exact Recycle Bin query, Rust recovery, content-hash, compensation and postflight matrix, the 5B-4C1B2A real Move Back to Desktop menu, propagated owner HWND, actual SHFileOperationW, deterministic partial/cancel/late-return, persisted history, content-hash, compensation and postflight matrix, the 5B-4C1B2B real File Properties menu, exact owned target, propagated host HWND, actual SHObjectProperties dialog, owner-chain observation, controlled WM_CLOSE, content-hash, natural-exit and isolation matrix, the 5B-4C1C1 modern FileOpenPicker owner, real cancel/select dialog, isolated file import, file/folder StorageItems DataPackage parsing, restart, hash, postflight, natural-exit and no-global-clipboard-mutation matrix, the 5B-4C1C2A registered generated IDropTarget CCW, HDROP callback, native pointer/leave cleanup, copy/move, large-file progress-card layering/acrylic, restart and postflight matrix, the 5B-4C2A standard global/search RegisterHotKey dispatch, conflict rollback, disable/re-enable, reserved-hook lifecycle and cross-process release matrix, the 5B-4C3A deterministic Todo due-candidate, reminder-control, snooze, recurrence generation, completion, cross-process dismissal, restore and postflight matrix, the 5B-4C3B1 three-process Todo native-notification registration, single/aggregate payload, real display, cross-process history, exact tag/group cleanup, unregister and postflight matrix, the 5B-4C3B2A deterministic semicolon/ampersand activation grammar, body/open, complete, four snooze choices, legacy snooze10, invalid-input no-mutation, cross-process persistence/clear and postflight matrix, the 5B-4C3B2B1 source-generated typed activation envelope, atomic multi-entry spool, duplicate/corrupt/legacy handling, startup-ready drain, full UserInput preservation, cold-start recovery, real second-process single-instance forwarding, natural-exit and isolation matrix, the 5B-4C3B2B2A content-ready Todo body target plus Complete/Snooze visible-refresh real-surface matrix, and the 5B-4C3B2B2B genuine Notification Center body/Complete/Snooze running-process and cold-start click provenance matrix; physical Explorer mouse drag/drop, global clipboard session mutation, physical standard/Win+Space keyboard input and Settings/Onboarding recorder validation, real Windows notification click provenance is now covered for running and cold-start paths, while remaining target-device notification delivery variations, real Weather network/location, and online Glance images remain deferred; tray reflection, search-history XAML WMC1506, twenty-two prior leaf compiled bindings, fourteen typed DataTemplate bindings, the file-widget overview's three typed section-editor bridges, eight compiled search-result row bindings, and subsequent narrow generated ViewModel bridges are resolved in managed code, while AOT preview data-root isolation, normal application shutdown, owned-root cleanup, deterministic fixture-only Weather service injection, real Weather and File Widget HWND/XamlRoot and DataTemplate projection, independent owned-file hashing, exact recovery identity, system-dialog ownership and close gates, deferred-path log exclusion, and production-data fingerprint gates are enforced by the preview tooling." />
+      Text="DeskBox Native AOT requires DeskBoxRustNative=true so the Rust-only shortcut, music-volume, Explorer-shell, Quick Access, and Recycle Bin recovery paths cannot be published without deskbox_native.dll." />
+    <Error
+      Condition="'$(DeskBoxQjsNative)' != 'true'"
+      Text="DeskBox Native AOT requires DeskBoxQjsNative=true so Custom Widget QuickJS script sandboxing cannot be published without deskbox_qjs.dll." />
     <Error
       Condition="'$(DeskBoxAotSmokeHarness)' == 'true' and '$(DeskBoxAotAudit)' != 'true'"
       Text="DeskBoxAotSmokeHarness=true is reserved for explicit DeskBoxAotAudit builds and must not be enabled for retail publishing." />
-    <!-- Native AOT stage 5B-4C3B2B1 and Native AOT stage 5B-4C3B2B2A remain retained by the current profile. -->
   </Target>
-
-  <!--
-    .NET's COM-wrapper debugger table is intentionally append-only. WinUI apps
-    can otherwise retain every managed wrapper for the lifetime of the process,
-    so production builds disable that debugger-only tracking surface.
-  -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <DebuggerSupport>false</DebuggerSupport>
-  </PropertyGroup>
 
   <PropertyGroup Condition="'$(DeskBoxRustNative)' == 'true'">
     <DeskBoxRustNativePlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">x64</DeskBoxRustNativePlatform>
@@ -117,7 +156,7 @@
     <DeskBoxRustNativeBuildPlatform Condition="'$(Platform)' == ''">AnyCPU</DeskBoxRustNativeBuildPlatform>
     <DeskBoxRustNativeRuntimeSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</DeskBoxRustNativeRuntimeSegment>
     <DeskBoxRustNativeRuntimeSegment Condition="'$(RuntimeIdentifier)' == ''">no-rid</DeskBoxRustNativeRuntimeSegment>
-    <DeskBoxRustNativeIntermediateDir Condition="'$(DeskBoxRustNativeIntermediateDir)' == ''">$(MSBuildProjectDirectory)\obj\rust-native\$(Configuration)\$(DeskBoxRustNativeBuildPlatform)\$(DeskBoxRustNativeRuntimeSegment)\$(DeskBoxRustCrtLinkage)</DeskBoxRustNativeIntermediateDir>
+    <DeskBoxRustNativeIntermediateDir Condition="'$(DeskBoxRustNativeIntermediateDir)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'rust-native', '$(Configuration)', '$(DeskBoxRustNativeBuildPlatform)', '$(DeskBoxRustNativeRuntimeSegment)', '$(DeskBoxRustCrtLinkage)'))</DeskBoxRustNativeIntermediateDir>
     <DeskBoxRustNativeCargoTargetDir Condition="'$(DeskBoxRustNativeCargoTargetDir)' == ''">$(DeskBoxRustNativeIntermediateDir)\cargo-target</DeskBoxRustNativeCargoTargetDir>
     <DeskBoxRustNativeDll>$(DeskBoxRustNativeIntermediateDir)\deskbox_native.dll</DeskBoxRustNativeDll>
     <DeskBoxRustNativePdb>$(DeskBoxRustNativeIntermediateDir)\deskbox_native.pdb</DeskBoxRustNativePdb>
@@ -145,7 +184,7 @@
     <DeskBoxThumbnailProxyBuildPlatform Condition="'$(Platform)' == ''">AnyCPU</DeskBoxThumbnailProxyBuildPlatform>
     <DeskBoxThumbnailProxyRuntimeSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</DeskBoxThumbnailProxyRuntimeSegment>
     <DeskBoxThumbnailProxyRuntimeSegment Condition="'$(RuntimeIdentifier)' == ''">no-rid</DeskBoxThumbnailProxyRuntimeSegment>
-    <DeskBoxThumbnailProxyIntermediateDir Condition="'$(DeskBoxThumbnailProxyIntermediateDir)' == ''">$(MSBuildProjectDirectory)\obj\rust-thumbnail-proxy\$(Configuration)\$(DeskBoxThumbnailProxyBuildPlatform)\$(DeskBoxThumbnailProxyRuntimeSegment)\$(DeskBoxRustCrtLinkage)</DeskBoxThumbnailProxyIntermediateDir>
+    <DeskBoxThumbnailProxyIntermediateDir Condition="'$(DeskBoxThumbnailProxyIntermediateDir)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'rust-thumbnail-proxy', '$(Configuration)', '$(DeskBoxThumbnailProxyBuildPlatform)', '$(DeskBoxThumbnailProxyRuntimeSegment)', '$(DeskBoxRustCrtLinkage)'))</DeskBoxThumbnailProxyIntermediateDir>
     <DeskBoxThumbnailProxyCargoTargetDir Condition="'$(DeskBoxThumbnailProxyCargoTargetDir)' == ''">$(DeskBoxThumbnailProxyIntermediateDir)\cargo-target</DeskBoxThumbnailProxyCargoTargetDir>
     <DeskBoxThumbnailProxyExe>$(DeskBoxThumbnailProxyIntermediateDir)\DeskBox.ThumbnailProxy.exe</DeskBoxThumbnailProxyExe>
     <DeskBoxThumbnailProxyPdb>$(DeskBoxThumbnailProxyIntermediateDir)\DeskBox.ThumbnailProxy.pdb</DeskBoxThumbnailProxyPdb>
@@ -156,15 +195,43 @@
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\Cargo.toml" />
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\Cargo.lock" />
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-thumbnail-proxy\Cargo.toml" />
+    <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-thumbnail-proxy\build.rs" />
+    <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-thumbnail-proxy\DeskBox.ThumbnailProxy.manifest" />
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-thumbnail-proxy\src\**\*" />
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-rust-thumbnail-proxy.ps1" />
     <DeskBoxThumbnailProxyInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(DeskBoxQjsNative)' == 'true'">
+    <DeskBoxQjsPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">x64</DeskBoxQjsPlatform>
+    <DeskBoxQjsPlatform Condition="'$(RuntimeIdentifier)' == 'win-arm64'">ARM64</DeskBoxQjsPlatform>
+    <DeskBoxQjsPlatform Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">ARM64</DeskBoxQjsPlatform>
+    <DeskBoxQjsPlatform Condition="'$(RuntimeIdentifier)' == '' and ('$(Platform)' == 'x64' or '$(Platform)' == 'AnyCPU' or '$(Platform)' == '')">x64</DeskBoxQjsPlatform>
+    <DeskBoxQjsBuildPlatform Condition="'$(Platform)' != ''">$(Platform)</DeskBoxQjsBuildPlatform>
+    <DeskBoxQjsBuildPlatform Condition="'$(Platform)' == ''">AnyCPU</DeskBoxQjsBuildPlatform>
+    <DeskBoxQjsRuntimeSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</DeskBoxQjsRuntimeSegment>
+    <DeskBoxQjsRuntimeSegment Condition="'$(RuntimeIdentifier)' == ''">no-rid</DeskBoxQjsRuntimeSegment>
+    <DeskBoxQjsIntermediateDir Condition="'$(DeskBoxQjsIntermediateDir)' == ''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(BaseIntermediateOutputPath)', 'qjs-native', '$(Configuration)', '$(DeskBoxQjsBuildPlatform)', '$(DeskBoxQjsRuntimeSegment)', '$(DeskBoxRustCrtLinkage)'))</DeskBoxQjsIntermediateDir>
+    <DeskBoxQjsObjDir Condition="'$(DeskBoxQjsObjDir)' == ''">$(DeskBoxQjsIntermediateDir)\c-obj</DeskBoxQjsObjDir>
+    <DeskBoxQjsDll>$(DeskBoxQjsIntermediateDir)\deskbox_qjs.dll</DeskBoxQjsDll>
+    <DeskBoxQjsPdb>$(DeskBoxQjsIntermediateDir)\deskbox_qjs.pdb</DeskBoxQjsPdb>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(DeskBoxQjsNative)' == 'true'">
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\native\include\deskbox_qjs.h" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\deskbox_qjs_bridge.c" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs.h" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs-amalgam.c" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\scripts\native-pe-contract.ps1" />
+    <DeskBoxQjsInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(DeskBoxDistribution)' == 'Store'">
     <WindowsPackageType>MSIX</WindowsPackageType>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <DefaultLanguage>zh-CN</DefaultLanguage>
+    <BuildProjectReferences>false</BuildProjectReferences>
     <AppxPackageSigningEnabled Condition="'$(AppxPackageSigningEnabled)' == ''">false</AppxPackageSigningEnabled>
     <UapAppxPackageBuildMode Condition="'$(UapAppxPackageBuildMode)' == ''">SideloadOnly</UapAppxPackageBuildMode>
     <AppxPackage Condition="'$(DeskBoxCreateMsixPackage)' == 'true'">true</AppxPackage>
@@ -172,56 +239,46 @@
     <AppxBundle Condition="'$(DeskBoxCreateMsixPackage)' == 'true' and '$(AppxBundle)' == ''">Never</AppxBundle>
   </PropertyGroup>
 
+  <ItemGroup Condition="'$(PublishAot)' != 'true'">
+    <ProjectReference
+      Include="..\DeskBox.Updater\DeskBox.Updater.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.WinUI.Animations" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.ColorPicker" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
-    <!-- WinAppSDK 2.5 transitively ships an AI/ML inference stack
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.7.0" />
+    <!-- WinAppSDK 2.7 transitively ships an AI/ML inference stack
          (WindowsAppSDK.ML -> Microsoft.Windows.AI.MachineLearning:
          onnxruntime + DirectML, ~39 MB of native DLLs per architecture)
          that DeskBox never references; exclude it from every package.
          Drop this override if Windows AI features are ever adopted. -->
-    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.1.74" ExcludeAssets="all" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.5.96" ExcludeAssets="all" />
+    <!-- Same policy for the Windows AI APIs, App Content Search, and Widgets
+         provider components of the WinAppSDK 2.7 metapackage (~16 MB of
+         native DLLs per architecture in the self-contained payload: Phi
+         Silica/imaging/video, semantic index, NPU detection, widget host).
+         DeskBox references none of their namespaces; drop the matching
+         override if one of these features is ever adopted. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.7.0" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Search" Version="2.7.0" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.7.0" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2957" PrivateAssets="all" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />
-    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.1" />
+
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageReference Include="Markdig" Version="1.3.2" />
+    <PackageReference Include="Markdig" Version="1.6.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Remove="ThirdParty\Everything\Everything64.dll" />
-    <None Remove="ThirdParty\Everything\EverythingARM64.dll" />
-    <Content Include="ThirdParty\Everything\Everything64.dll" Condition="'$(EverythingSdkArchitecture)' == 'x64'">
-      <Link>EverythingSdk.dll</Link>
-      <TargetPath>EverythingSdk.dll</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <Content Include="ThirdParty\Everything\EverythingARM64.dll" Condition="'$(EverythingSdkArchitecture)' == 'ARM64'">
-      <Link>EverythingSdk.dll</Link>
-      <TargetPath>EverythingSdk.dll</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-    <None Update="ThirdParty\Everything\LICENSE.txt">
-      <TargetPath>ThirdParty\Everything\LICENSE.txt</TargetPath>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </None>
-  </ItemGroup>
-
-  <Target Name="ValidateEverythingSdkArchitecture" BeforeTargets="PrepareForBuild;Publish" Condition="'$(DesignTimeBuild)' != 'true'">
+  <Target Name="ValidatePlatformArchitectureMatch" BeforeTargets="PrepareForBuild;Publish" Condition="'$(DesignTimeBuild)' != 'true'">
     <Error
       Condition="('$(Platform)' == 'x64' and '$(RuntimeIdentifier)' == 'win-arm64') or ('$(Platform)' == 'ARM64' and '$(RuntimeIdentifier)' == 'win-x64')"
-      Text="Everything SDK requires matching Platform and RuntimeIdentifier architectures." />
-    <Error
-      Condition="'$(EverythingSdkArchitecture)' != 'x64' and '$(EverythingSdkArchitecture)' != 'ARM64'"
-      Text="Everything SDK supports only x64 and ARM64 DeskBox builds." />
+      Text="DeskBox requires matching Platform and RuntimeIdentifier architectures." />
   </Target>
 
   <ItemGroup>
@@ -233,87 +290,97 @@
     -->
     <Content Remove="Assets\wechat-qrcode.jpg" />
     <Content Remove="Assets\Support\*.png" />
-    <!-- city data is consumed exclusively through the embedded resource in
-         CitySearchService; the SDK wildcard Content copy is dead weight in
-         every package -->
-    <Content Remove="Assets\Cities\cities.json" />
-    <Content Include="Assets\deskbox.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-mark-slab-0.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-mark-slab-1.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-mark-slab-2.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\OnboardingScene\file-txt.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\OnboardingScene\file-zip.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\OnboardingScene\file-jpg.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-tray-light.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-tray-dark.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-tray-light.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\deskbox-tray-dark.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
+    <Content Remove="Assets\CustomWidgets\capability-registry.json" />
+    <EmbeddedResource Include="Assets\CustomWidgets\capability-registry.json" LogicalName="DeskBox.Assets.CustomWidgets.capability-registry.json" />
+    <!-- city data ships as external Content (Assets\Cities\cities.json) -->
+
+
+
     <Content Include="Assets\wechat-qrcode.jpg" Condition="'$(DeskBoxDistribution)' != 'Store'">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Assets\SettingsNavIcons\*.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\WeatherIcons\**\*.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\WeatherIcons\LICENSE-meteocons.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\WeatherIcons\LICENSE-fluent-emoji.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\WidgetTitleIcons\*.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Assets\Store\*.png" />
     <Content Include="Assets\Support\*.png" Condition="'$(DeskBoxDistribution)' != 'Store'">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
-    <EmbeddedResource Include="Assets\Cities\cities.json" />
-    <EmbeddedResource Include="Strings\zh-CN.json" />
-    <EmbeddedResource Include="Strings\zh-TW.json" />
-    <EmbeddedResource Include="Strings\en-US.json" />
-    <EmbeddedResource Include="Strings\ja-JP.json" />
-    <EmbeddedResource Include="Strings\de-DE.json" />
-    <EmbeddedResource Include="Strings\pt-BR.json" />
-    <EmbeddedResource Include="Strings\hi-IN.json" />
-    <EmbeddedResource Include="Strings\es-ES.json" />
-    <EmbeddedResource Include="Strings\fr-FR.json" />
-    <EmbeddedResource Include="Strings\ar-SA.json" />
-    <EmbeddedResource Include="Strings\bn-BD.json" />
-    <EmbeddedResource Include="Strings\ru-RU.json" />
-    <EmbeddedResource Include="Strings\ko-KR.json" />
+    <Content Include="Strings\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="Assets\deskbox.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-mark-slab-0.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-mark-slab-1.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-mark-slab-2.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\OnboardingScene\file-txt.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\OnboardingScene\file-zip.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\OnboardingScene\file-jpg.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-tray-light.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-tray-dark.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-tray-light.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\deskbox-tray-dark.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\SettingsNavIcons\*.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\WeatherIcons\**\*.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\WeatherIcons\LICENSE-meteocons.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\WeatherIcons\LICENSE-fluent-emoji.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\WidgetTitleIcons\*.svg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="Assets\Cities\cities.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Update="Assets\CustomWidgets\Templates\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="**\.mimosa\**" />
+    <Page Remove="**\.mimosa\**" />
+    <Content Remove="**\.mimosa\**" />
+    <None Remove="**\.mimosa\**" />
+    <PRIResource Remove="**\.mimosa\**" />
   </ItemGroup>
 
   <!-- PRI resources (.resw) in Resources/ subdirectories are auto-included by the .NET SDK -->
@@ -327,20 +394,19 @@
     <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
   </PropertyGroup>
 
-  <Target Name="BuildDeskBoxUpdater" BeforeTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' != 'Store' and '$(PublishAot)' != 'true'">
+  <Target Name="CopyDeskBoxUpdater" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' != 'Store' and '$(PublishAot)' != 'true'">
     <MSBuild
       Projects="..\DeskBox.Updater\DeskBox.Updater.csproj"
-      Targets="Build"
-      Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier)" />
-  </Target>
-
-  <Target Name="CopyDeskBoxUpdater" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' != 'Store' and '$(PublishAot)' != 'true'">
+      Targets="GetTargetPath"
+      Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier)">
+      <Output TaskParameter="TargetOutputs" ItemName="_DeskBoxUpdaterTargetPath" />
+    </MSBuild>
     <ItemGroup>
-      <DeskBoxUpdaterOutput Include="..\DeskBox.Updater\bin\$(Platform)\$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\DeskBox.Updater.*" Condition="'$(RuntimeIdentifier)' != ''" />
-      <DeskBoxUpdaterOutput Include="..\DeskBox.Updater\bin\$(Platform)\$(Configuration)\$(TargetFramework)\DeskBox.Updater.*" Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' != 'AnyCPU' and '$(Platform)' != ''" />
-      <DeskBoxUpdaterOutput Include="..\DeskBox.Updater\bin\$(Configuration)\$(TargetFramework)\DeskBox.Updater.*" Condition="'$(RuntimeIdentifier)' == '' and ('$(Platform)' == 'AnyCPU' or '$(Platform)' == '')" />
+      <DeskBoxUpdaterOutput Include="%(_DeskBoxUpdaterTargetPath.RootDir)%(_DeskBoxUpdaterTargetPath.Directory)DeskBox.Updater.*" Condition="'@(_DeskBoxUpdaterTargetPath)' != ''" />
     </ItemGroup>
-    <Copy SourceFiles="@(DeskBoxUpdaterOutput)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(DeskBoxUpdaterOutput)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
   </Target>
 
   <Target Name="PublishDeskBoxUpdater" AfterTargets="Publish" Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' != 'Store'">
@@ -354,7 +420,7 @@
     Name="BuildDeskBoxRustNative"
     BeforeTargets="CoreCompile"
     Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxRustNative)' == 'true'"
-    Inputs="@(DeskBoxRustNativeInput)"
+    Inputs="$(MSBuildAllProjects);@(DeskBoxRustNativeInput)"
     Outputs="$(DeskBoxRustNativeDll);$(DeskBoxRustNativePdb)">
     <Error
       Condition="'$(DeskBoxRustCrtLinkage)' != 'Dynamic' and '$(DeskBoxRustCrtLinkage)' != 'Static'"
@@ -383,7 +449,9 @@
     <Copy
       SourceFiles="$(DeskBoxRustNativeDll);$(DeskBoxRustNativePdb)"
       DestinationFolder="$(TargetDir)"
-      SkipUnchangedFiles="true" />
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
   </Target>
 
   <Target
@@ -409,20 +477,28 @@
     misleading managed-runtime metadata.
   -->
   <Target
-    Name="PrepareDeskBoxStoreNativeAotPayload"
+    Name="PrepareDeskBoxStoreRustNativePayload"
     BeforeTargets="_ComputeAppxPackagePayload"
     DependsOnTargets="BuildDeskBoxRustNative"
-    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' == 'Store' and '$(PublishAot)' == 'true' and '$(DeskBoxRustNative)' == 'true'">
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' == 'Store' and '$(DeskBoxRustNative)' == 'true'">
+    <ItemGroup>
+      <AppxPackagePayload Include="$(DeskBoxRustNativeDll)">
+        <TargetPath>deskbox_native.dll</TargetPath>
+      </AppxPackagePayload>
+      <AppxPackagePayload Include="$(DeskBoxRustNativePdb)" Condition="Exists('$(DeskBoxRustNativePdb)') and ('$(UapAppxPackageBuildMode)' == 'StoreUpload' or '$(AppxSymbolPackageEnabled)' == 'true')">
+        <TargetPath>deskbox_native.pdb</TargetPath>
+      </AppxPackagePayload>
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="PrepareDeskBoxStoreNativeAotPayload"
+    BeforeTargets="_ComputeAppxPackagePayload"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' == 'Store' and '$(PublishAot)' == 'true'">
     <ItemGroup>
       <PackagingOutputs
         Remove="@(PackagingOutputs)"
         Condition="'%(PackagingOutputs.TargetPath)' == 'DeskBox.deps.json' or '%(PackagingOutputs.TargetPath)' == 'DeskBox.runtimeconfig.json'" />
-      <AppxPackagePayload Include="$(DeskBoxRustNativeDll)">
-        <TargetPath>deskbox_native.dll</TargetPath>
-      </AppxPackagePayload>
-      <AppxPackagePayload Include="$(DeskBoxRustNativePdb)" Condition="Exists('$(DeskBoxRustNativePdb)')">
-        <TargetPath>deskbox_native.pdb</TargetPath>
-      </AppxPackagePayload>
     </ItemGroup>
   </Target>
 
@@ -430,8 +506,8 @@
     Name="BuildDeskBoxThumbnailProxy"
     BeforeTargets="CoreCompile"
     Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxShellThumbnailProxy)' == 'true'"
-    Inputs="@(DeskBoxThumbnailProxyInput)"
-    Outputs="$(DeskBoxThumbnailProxyExe)">
+    Inputs="$(MSBuildAllProjects);@(DeskBoxThumbnailProxyInput)"
+    Outputs="$(DeskBoxThumbnailProxyExe);$(DeskBoxThumbnailProxyPdb)">
     <Error
       Condition="'$(DeskBoxThumbnailProxyPlatform)' == ''"
       Text="DeskBox thumbnail proxy could not resolve an x64 or ARM64 target." />
@@ -447,12 +523,16 @@
     <Copy
       SourceFiles="$(DeskBoxThumbnailProxyExe)"
       DestinationFolder="$(TargetDir)"
-      SkipUnchangedFiles="true" />
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
     <Copy
       SourceFiles="$(DeskBoxThumbnailProxyPdb)"
       DestinationFolder="$(TargetDir)"
       SkipUnchangedFiles="true"
-      Condition="Exists('$(DeskBoxThumbnailProxyPdb)')" />
+      Condition="Exists('$(DeskBoxThumbnailProxyPdb)')">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
   </Target>
 
   <Target
@@ -480,8 +560,72 @@
       <AppxPackagePayload Include="$(DeskBoxThumbnailProxyExe)">
         <TargetPath>DeskBox.ThumbnailProxy.exe</TargetPath>
       </AppxPackagePayload>
-      <AppxPackagePayload Include="$(DeskBoxThumbnailProxyPdb)" Condition="Exists('$(DeskBoxThumbnailProxyPdb)')">
+      <AppxPackagePayload Include="$(DeskBoxThumbnailProxyPdb)" Condition="Exists('$(DeskBoxThumbnailProxyPdb)') and ('$(UapAppxPackageBuildMode)' == 'StoreUpload' or '$(AppxSymbolPackageEnabled)' == 'true')">
         <TargetPath>DeskBox.ThumbnailProxy.pdb</TargetPath>
+      </AppxPackagePayload>
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="BuildDeskBoxQjsNative"
+    BeforeTargets="CoreCompile"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxQjsNative)' == 'true'"
+    Inputs="$(MSBuildAllProjects);@(DeskBoxQjsInput)"
+    Outputs="$(DeskBoxQjsDll);$(DeskBoxQjsPdb)">
+    <Error
+      Condition="'$(DeskBoxQjsPlatform)' == ''"
+      Text="DeskBox QuickJS sandbox module could not resolve an x64 or ARM64 target." />
+    <Exec
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1&quot; -Platform $(DeskBoxQjsPlatform) -Configuration $(Configuration) -CrtLinkage $(DeskBoxRustCrtLinkage) -OutputDirectory &quot;$(DeskBoxQjsIntermediateDir)&quot; -IntermediateDirectory &quot;$(DeskBoxQjsObjDir)&quot;" />
+  </Target>
+
+  <Target
+    Name="CopyDeskBoxQjsNativeToOutput"
+    AfterTargets="Build"
+    DependsOnTargets="BuildDeskBoxQjsNative"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxQjsNative)' == 'true'">
+    <Copy
+      SourceFiles="$(DeskBoxQjsDll)"
+      DestinationFolder="$(TargetDir)"
+      SkipUnchangedFiles="true">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+    <Copy
+      SourceFiles="$(DeskBoxQjsPdb)"
+      DestinationFolder="$(TargetDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(DeskBoxQjsPdb)')">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
+  <Target
+    Name="CopyDeskBoxQjsNativeToPublish"
+    AfterTargets="Publish"
+    DependsOnTargets="BuildDeskBoxQjsNative"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxQjsNative)' == 'true'">
+    <Copy
+      SourceFiles="$(DeskBoxQjsDll)"
+      DestinationFolder="$(PublishDir)"
+      SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="$(DeskBoxQjsPdb)"
+      DestinationFolder="$(PublishDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(DeskBoxQjsPdb)')" />
+  </Target>
+
+  <Target
+    Name="PrepareDeskBoxStoreQjsPayload"
+    BeforeTargets="_ComputeAppxPackagePayload"
+    DependsOnTargets="BuildDeskBoxQjsNative"
+    Condition="'$(DesignTimeBuild)' != 'true' and '$(DeskBoxDistribution)' == 'Store' and '$(DeskBoxQjsNative)' == 'true'">
+    <ItemGroup>
+      <AppxPackagePayload Include="$(DeskBoxQjsDll)">
+        <TargetPath>deskbox_qjs.dll</TargetPath>
+      </AppxPackagePayload>
+      <AppxPackagePayload Include="$(DeskBoxQjsPdb)" Condition="Exists('$(DeskBoxQjsPdb)') and ('$(UapAppxPackageBuildMode)' == 'StoreUpload' or '$(AppxSymbolPackageEnabled)' == 'true')">
+        <TargetPath>deskbox_qjs.pdb</TargetPath>
       </AppxPackagePayload>
     </ItemGroup>
   </Target>

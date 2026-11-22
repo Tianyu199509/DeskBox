@@ -1,4 +1,4 @@
-; Messages for the direct uninstaller: the persistent managed-storage desktop
+﻿; Messages for the direct uninstaller: the persistent managed-storage desktop
 ; shortcut and the Microsoft Store edition coexistence warnings. Keep
 ; placeholders aligned across every installer locale.
 
@@ -6,52 +6,65 @@ english.ManagedStorageShortcutPrompt=To make these files easy to find after unin
 english.ManagedStorageShortcutCreateFailed=The desktop shortcut could not be created. Your files are still safe at:%n%1
 english.StoreEditionDataPreserved=The Microsoft Store edition of DeskBox is still installed. Its data lives in a separate location and will not be touched by this uninstall; the desktop-edition data is also kept for safety.
 english.StoreEditionStateUnknown=Unable to verify whether the Microsoft Store edition of DeskBox is installed. For safety, app data has been kept.%n%nPlease uninstall the Store edition first and retry, or choose to keep the data.
+english.StoreEditionInstallNotice=The Microsoft Store edition of DeskBox is already installed on this PC.%n%nRunning both editions can cause startup conflicts and split settings. After installing, DeskBox can import your Store edition data on first launch, and we recommend uninstalling the Store edition afterward.%n%nContinue installing the desktop edition?
 chinesesimplified.ManagedStorageShortcutPrompt=为避免卸载后找不到这些文件，是否在桌面创建“DeskBox Files”快捷方式？%n%n快捷方式将打开：%n%1
 chinesesimplified.ManagedStorageShortcutCreateFailed=未能创建桌面快捷方式。你的文件仍安全保存在：%n%1
 chinesesimplified.StoreEditionDataPreserved=检测到 Microsoft Store 版 DeskBox 仍在安装。它的数据保存在独立位置，本次卸载不会清除；直装版数据也将一并保留以确保安全。
 chinesesimplified.StoreEditionStateUnknown=无法确认 Microsoft Store 版 DeskBox 的安装状态，为安全起见已保留应用数据。%n%n请先卸载商店版后重试，或选择保留数据继续。
+chinesesimplified.StoreEditionInstallNotice=检测到本机已安装 Microsoft Store 版 DeskBox。%n%n同时保留两个版本可能导致开机自启冲突或配置不同步。安装完成后，桌面安装版可在首次启动时导入商店版数据，建议之后在系统设置中卸载商店版。%n%n是否继续安装桌面版？
 chinesetraditional.ManagedStorageShortcutPrompt=為避免解除安裝後找不到這些檔案，是否在桌面建立「DeskBox Files」捷徑？%n%n捷徑將開啟：%n%1
 chinesetraditional.ManagedStorageShortcutCreateFailed=無法建立桌面捷徑。你的檔案仍安全地儲存在：%n%1
 chinesetraditional.StoreEditionDataPreserved=偵測到 Microsoft Store 版 DeskBox 仍在安裝。它的資料儲存在獨立位置，本次解除安裝不會清除；直接安裝版資料也將一併保留以確保安全。
 chinesetraditional.StoreEditionStateUnknown=無法確認 Microsoft Store 版 DeskBox 的安裝狀態，為安全起見已保留應用程式資料。%n%n請先解除安裝商店版後重試，或選擇保留資料繼續。
+chinesetraditional.StoreEditionInstallNotice=偵測到本機已安裝 Microsoft Store 版 DeskBox。%n%n同時保留兩個版本可能導致開機自動啟動衝突或設定不同步。安裝完成後，桌面安裝版可在首次啟動時匯入商店版資料，建議之後在系統設定中解除安裝商店版。%n%n是否繼續安裝桌面版？
 japanese.ManagedStorageShortcutPrompt=アンインストール後もファイルを簡単に見つけられるよう、デスクトップに「DeskBox Files」ショートカットを作成しますか？%n%nショートカットで開く場所：%n%1
 japanese.ManagedStorageShortcutCreateFailed=デスクトップ ショートカットを作成できませんでした。ファイルは引き続き次の場所に安全に保存されています：%n%1
 japanese.StoreEditionDataPreserved=Microsoft Store 版の DeskBox がまだインストールされています。Store 版のデータは別の場所に保存されており、今回のアンインストールでは削除されません。安全のため、直接インストール版のデータも保持されます。
 japanese.StoreEditionStateUnknown=Microsoft Store 版 DeskBox のインストール状態を確認できませんでした。安全のため、アプリデータは保持されています。%n%n先に Store 版をアンインストールしてから再試行するか、データを保持したまま続行してください。
+japanese.StoreEditionInstallNotice=この PC には Microsoft Store 版の DeskBox が既にインストールされています。%n%n両方のエディションを併用すると、スタートアップの競合や設定の分断が起きる可能性があります。インストール後、初回起動時に Store 版のデータをインポートできます。完了後は Store 版のアンインストールをおすすめします。%n%nデスクトップ版のインストールを続行しますか？
 german.ManagedStorageShortcutPrompt=Soll eine Verknüpfung „DeskBox Files“ auf dem Desktop erstellt werden, damit diese Dateien nach der Deinstallation leicht auffindbar bleiben?%n%nDie Verknüpfung öffnet:%n%1
 german.ManagedStorageShortcutCreateFailed=Die Desktopverknüpfung konnte nicht erstellt werden. Ihre Dateien befinden sich weiterhin sicher unter:%n%1
 german.StoreEditionDataPreserved=Die Microsoft Store-Edition von DeskBox ist noch installiert. Ihre Daten liegen an einem eigenen Speicherort und werden von dieser Deinstallation nicht angetastet; die Daten der Direktinstallation werden aus Sicherheitsgründen ebenfalls aufbewahrt.
 german.StoreEditionStateUnknown=Der Installationsstatus der Microsoft Store-Edition von DeskBox konnte nicht überprüft werden. Die Anwendungsdaten wurden aus Sicherheitsgründen aufbewahrt.%n%nDeinstallieren Sie zuerst die Store-Edition und versuchen Sie es erneut, oder fahren Sie mit erhaltenen Daten fort.
+german.StoreEditionInstallNotice=Die Microsoft Store-Edition von DeskBox ist auf diesem PC bereits installiert.%n%nWenn beide Editionen installiert bleiben, kann es zu Autostart-Konflikten und getrennten Einstellungen kommen. Nach der Installation kann DeskBox beim ersten Start Ihre Store-Daten importieren; anschließend empfiehlt es sich, die Store-Edition zu deinstallieren.%n%nInstallation der Desktop-Edition fortsetzen?
 brazilianportuguese.ManagedStorageShortcutPrompt=Para facilitar a localização desses arquivos após a desinstalação, deseja criar um atalho "DeskBox Files" na área de trabalho?%n%nO atalho abrirá:%n%1
 brazilianportuguese.ManagedStorageShortcutCreateFailed=Não foi possível criar o atalho na área de trabalho. Seus arquivos continuam seguros em:%n%1
 brazilianportuguese.StoreEditionDataPreserved=A edição do DeskBox da Microsoft Store ainda está instalada. Os dados dela ficam em um local separado e não serão afetados por esta desinstalação; por segurança, os dados da edição de instalação direta também serão mantidos.
 brazilianportuguese.StoreEditionStateUnknown=Não foi possível verificar se a edição do DeskBox da Microsoft Store está instalada. Por segurança, os dados do aplicativo foram mantidos.%n%nDesinstale primeiro a edição da Store e tente novamente, ou continue mantendo os dados.
+brazilianportuguese.StoreEditionInstallNotice=A edição da Microsoft Store do DeskBox já está instalada neste PC.%n%nManter ambas as edições pode causar conflitos na inicialização e separar configurações. Após instalar, o DeskBox pode importar os dados da Store na primeira execução; recomendamos desinstalar a edição da Store em seguida.%n%nContinuar instalando a edição desktop?
 hindi.ManagedStorageShortcutPrompt=अनइंस्टॉल करने के बाद इन फ़ाइलों को आसानी से ढूँढने के लिए, क्या डेस्कटॉप पर "DeskBox Files" शॉर्टकट बनाया जाए?%n%nशॉर्टकट यह स्थान खोलेगा:%n%1
 hindi.ManagedStorageShortcutCreateFailed=डेस्कटॉप शॉर्टकट नहीं बनाया जा सका। आपकी फ़ाइलें अभी भी यहाँ सुरक्षित हैं:%n%1
 hindi.StoreEditionDataPreserved=DeskBox का Microsoft Store संस्करण अभी भी स्थापित है। इसका डेटा अलग स्थान पर संग्रहीत है और इस अनइंस्टॉल से प्रभावित नहीं होगा; सुरक्षा के लिए डायरेक्ट-इंस्टॉल संस्करण का डेटा भी रखा गया है।
 hindi.StoreEditionStateUnknown=यह सुनिश्चित नहीं किया जा सका कि DeskBox का Microsoft Store संस्करण स्थापित है या नहीं। सुरक्षा के लिए ऐप डेटा रखा गया है।%n%nपहले Store संस्करण अनइंस्टॉल करके पुनः प्रयास करें, या डेटा बनाए रखते हुए आगे बढ़ें।
+hindi.StoreEditionInstallNotice=इस पीसी पर DeskBox का Microsoft Store संस्करण पहले से स्थापित है।%n%nदोनों संस्करण रखने से स्टार्टअप टकराव और सेटिंग्स अलग-अलग हो सकती हैं। इंस्टॉल के बाद DeskBox पहली बार चलने पर Store डेटा आयात कर सकता है; इसके बाद Store संस्करण अनइंस्टॉल करने की सलाह दी जाती है।%n%nक्या डेस्कटॉप संस्करण का इंस्टॉलेशन जारी रखें?
 spanish.ManagedStorageShortcutPrompt=Para que estos archivos sean fáciles de encontrar después de desinstalar, ¿quieres crear un acceso directo "DeskBox Files" en el escritorio?%n%nEl acceso directo abrirá:%n%1
 spanish.ManagedStorageShortcutCreateFailed=No se pudo crear el acceso directo del escritorio. Tus archivos siguen estando seguros en:%n%1
 spanish.StoreEditionDataPreserved=La edición de DeskBox de Microsoft Store sigue instalada. Sus datos se guardan en una ubicación independiente y esta desinstalación no los tocará; por seguridad, los datos de la edición de instalación directa también se conservan.
 spanish.StoreEditionStateUnknown=No se pudo verificar si la edición de DeskBox de Microsoft Store está instalada. Por seguridad, se han conservado los datos de la aplicación.%n%nDesinstala primero la edición de la Store y vuelve a intentarlo, o continúa conservando los datos.
+spanish.StoreEditionInstallNotice=La edición de Microsoft Store de DeskBox ya está instalada en este equipo.%n%nMantener ambas ediciones puede causar conflictos de inicio y separar configuraciones. Al abrir por primera vez tras instalar, DeskBox podrá importar tus datos de la Store; después recomendamos desinstalar la edición de la Store.%n%n¿Deseas continuar instalando la edición de escritorio?
 french.ManagedStorageShortcutPrompt=Pour retrouver facilement ces fichiers après la désinstallation, créer un raccourci « DeskBox Files » sur le bureau ?%n%nLe raccourci ouvrira :%n%1
 french.ManagedStorageShortcutCreateFailed=Le raccourci sur le bureau n’a pas pu être créé. Vos fichiers sont toujours conservés ici :%n%1
 french.StoreEditionDataPreserved=L’édition Microsoft Store de DeskBox est encore installée. Ses données se trouvent dans un emplacement distinct et ne seront pas touchées par cette désinstallation ; par sécurité, les données de l’édition à installation directe sont également conservées.
 french.StoreEditionStateUnknown=Impossible de vérifier si l’édition Microsoft Store de DeskBox est installée. Par sécurité, les données de l’application ont été conservées.%n%nDésinstallez d’abord l’édition du Store puis réessayez, ou choisissez de conserver les données.
+french.StoreEditionInstallNotice=L’édition Microsoft Store de DeskBox est déjà installée sur ce PC.%n%nConserver les deux éditions peut entraîner des conflits au démarrage et dissocier vos paramètres. Au premier lancement, l’édition bureau pourra importer vos données du Store ; il est ensuite recommandé de désinstaller l’édition du Store.%n%nContinuer l’installation de l’édition bureau ?
 arabic.ManagedStorageShortcutPrompt=لتسهيل العثور على هذه الملفات بعد إزالة التثبيت، هل تريد إنشاء اختصار "DeskBox Files" على سطح المكتب؟%n%nسيفتح الاختصار:%n%1
 arabic.ManagedStorageShortcutCreateFailed=تعذر إنشاء اختصار سطح المكتب. لا تزال ملفاتك محفوظة بأمان في:%n%1
 arabic.StoreEditionDataPreserved=لا يزال إصدار DeskBox من Microsoft Store مثبتًا. تُحفظ بياناته في موقع منفصل ولن تتأثر بإزالة هذا التثبيت؛ وحفظًا على السلامة سيتم أيضًا الاحتفاظ ببيانات إصدار التثبيت المباشر.
 arabic.StoreEditionStateUnknown=تعذر التحقق من حالة تثبيت إصدار DeskBox من Microsoft Store. حفظًا على السلامة، تم الاحتفاظ ببيانات التطبيق.%n%nأزل تثبيت إصدار Store أولًا ثم أعد المحاولة، أو اختر الاحتفاظ بالبيانات والمتابعة.
+arabic.StoreEditionInstallNotice=إصدار Microsoft Store من DeskBox مثبت بالفعل على هذا الجهاز.%n%nقد يؤدي إبقاء الإصدارين معًا إلى تعارض بدء التشغيل وتفرق الإعدادات. بعد التثبيت يمكن لإصدار سطح المكتب استيراد بيانات إصدار Store عند أول تشغيل، ونوصي بإزالة إصدار Store بعد ذلك.%n%nهل تريد متابعة تثبيت إصدار سطح المكتب؟
 bengali.ManagedStorageShortcutPrompt=আনইনস্টল করার পরে এই ফাইলগুলো সহজে খুঁজে পেতে, ডেস্কটপে একটি "DeskBox Files" শর্টকাট তৈরি করবেন?%n%nশর্টকাটটি খুলবে:%n%1
 bengali.ManagedStorageShortcutCreateFailed=ডেস্কটপ শর্টকাট তৈরি করা যায়নি। আপনার ফাইলগুলো এখনও এখানে নিরাপদ আছে:%n%1
 bengali.StoreEditionDataPreserved=DeskBox-এর Microsoft Store সংস্করণ এখনও ইনস্টল করা আছে। এর ডেটা আলাদা অবস্থানে সংরক্ষিত এবং এই আনইনস্টলে মুছে ফেলা হবে না; নিরাপত্তার জন্য ডিরেক্ট-ইনস্টল সংস্করণের ডেটাও রাখা হবে।
 bengali.StoreEditionStateUnknown=DeskBox-এর Microsoft Store সংস্করণ ইনস্টল করা আছে কি না তা যাচাই করা যায়নি। নিরাপত্তার জন্য অ্যাপ ডেটা রাখা হয়েছে।%n%nপ্রথমে Store সংস্করণ আনইনস্টল করে আবার চেষ্টা করুন, অথবা ডেটা রেখেই চালিয়ে যান।
+bengali.StoreEditionInstallNotice=এই পিসিতে DeskBox-এর Microsoft Store সংস্করণ ইতিমধ্যেই ইনস্টল করা আছে।%n%nদুটি সংস্করণ একসাথে রাখলে স্টার্টআপ দ্বন্দ্ব ও সেটিংস বিভক্ত হতে পারে। ইনস্টলের পর প্রথমবার চালু করলে DeskBox আপনার Store ডেটা ইম্পোর্ট করতে পারবে; এরপর Store সংস্করণ আনইনস্টল করার পরামর্শ দেওয়া হচ্ছে।%n%nডেস্কটপ সংস্করণ ইনস্টল চালিয়ে যাবেন?
 russian.ManagedStorageShortcutPrompt=Чтобы эти файлы было легко найти после удаления программы, создать на рабочем столе ярлык «DeskBox Files»?%n%nЯрлык будет открывать:%n%1
 russian.ManagedStorageShortcutCreateFailed=Не удалось создать ярлык на рабочем столе. Ваши файлы по-прежнему находятся в безопасности здесь:%n%1
 russian.StoreEditionDataPreserved=Версия DeskBox из Microsoft Store всё ещё установлена. Её данные хранятся в отдельном месте и эта деинсталляция их не затронет; для безопасности данные версии с прямой установкой также сохраняются.
 russian.StoreEditionStateUnknown=Не удалось проверить, установлена ли версия DeskBox из Microsoft Store. Из соображений безопасности данные приложения сохранены.%n%nСначала удалите версию из Store и повторите попытку либо продолжите, сохранив данные.
+russian.StoreEditionInstallNotice=На этом ПК уже установлена версия DeskBox из Microsoft Store.%n%nНаличие обеих версий может привести к конфликтам автозапуска и разделению настроек. После установки настольная версия сможет импортировать данные из Store при первом запуске; затем рекомендуется удалить версию из Store.%n%nПродолжить установку настольной версии?
 
 korean.ManagedStorageShortcutPrompt=제거 후에 이 파일을 쉽게 찾을 수 있도록 바탕 화면에 "DeskBox Files" 바로 가기를 만드시겠습니까?%n%n바로 가기는 다음 위치를 엽니다:%n%1
 korean.ManagedStorageShortcutCreateFailed=바탕 화면 바로 가기를 만들지 못했습니다. 파일은 다음 위치에 그대로 안전하게 남아 있습니다:%n%1
 korean.StoreEditionDataPreserved=Microsoft Store 버전의 DeskBox가 아직 설치되어 있습니다. 해당 데이터는 별도 위치에 저장되어 있어 이번 제거 작업의 영향을 받지 않으며, 안전을 위해 데스크톱 버전의 데이터도 유지됩니다.
 korean.StoreEditionStateUnknown=Microsoft Store 버전의 DeskBox가 설치되어 있는지 확인하지 못했습니다. 안전을 위해 앱 데이터를 유지했습니다.%n%n먼저 Store 버전을 제거한 후 다시 시도하거나, 데이터 유지를 선택하세요.
+korean.StoreEditionInstallNotice=이 PC에 Microsoft Store 버전의 DeskBox가 이미 설치되어 있습니다.%n%n두 버전을 함께 유지하면 시작 프로그램 충돌이나 설정 분리가 발생할 수 있습니다. 설치 후 첫 실행 시 Store 버전 데이터를 가져올 수 있으며, 이후 Store 버전을 제거하는 것을 권장합니다.%n%n데스크톱 버전 설치를 계속하시겠습니까?

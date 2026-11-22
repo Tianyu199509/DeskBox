@@ -4,6 +4,7 @@ using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 
 namespace DeskBox.Views;
@@ -33,6 +34,14 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folderPath))
+        {
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.Diagnostics.FailedTitle"),
+                _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
+            return;
+        }
+
         ExportDiagnosticsButton.IsEnabled = false;
         try
         {
@@ -40,7 +49,7 @@ public sealed partial class SettingsWindow
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.Diagnostics.SuccessTitle"),
                 _localizationService.Format("Settings.Diagnostics.SuccessBody", archivePath));
-            Win32Helper.ShowInExplorer(archivePath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(archivePath);
         }
         catch (Exception ex)
         {
@@ -68,6 +77,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.AutoStart.Title"),
                 PrimaryButtonText = _localizationService.T(
                     "Settings.AutoStart.OpenSystemSettings"),
@@ -94,6 +104,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.DragDropPermission.RelaunchTitle"),
                 PrimaryButtonText = _localizationService.T("Settings.DragDropPermission.RelaunchButton"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -107,8 +118,8 @@ public sealed partial class SettingsWindow
 
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
-                if (_appActions.TryRelaunchAsExplorerUser(
-                        $"--await-parent-exit {Environment.ProcessId}"))
+                string relaunchArgs = $"--await-parent-exit {Environment.ProcessId}";
+                if (await Task.Run(() => _appActions.TryRelaunchAsExplorerUser(relaunchArgs)))
                 {
                     // Same trap as the elevation notice: a bare inline
                     // Application.Exit() is deferred through the XAML message
@@ -138,7 +149,8 @@ public sealed partial class SettingsWindow
 
     private async void OpenUacSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        await Task.Run(() => Win32Helper.OpenFile("UserAccountControlSettings.exe"));
+        IntPtr ownerHwnd = _hWnd;
+        await Task.Run(() => DragDropPermissionService.OpenUserAccountControlSettings(ownerHwnd));
     }
 
     private async void ExportDataBackupButton_Click(object sender, RoutedEventArgs e)
@@ -148,21 +160,104 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        bool includeClipboard = false;
+        ContentDialogResult dialogResult = await ShowDialogWhenFreeAsync(() =>
+        {
+            Brush? cardBg = NeutralInteractionBrush.ResolveThemedResource("CardBackgroundFillColorDefaultBrush", SettingsRoot);
+            Brush? cardBorder = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", SettingsRoot);
+            Brush? secondaryFg = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", SettingsRoot);
+
+            var includeClipboardCheckBox = new CheckBox
+            {
+                Content = _localizationService.T("Settings.DataBackup.ExportIncludeClipboard"),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                IsChecked = includeClipboard
+            };
+            includeClipboardCheckBox.Checked += (_, _) => includeClipboard = true;
+            includeClipboardCheckBox.Unchecked += (_, _) => includeClipboard = false;
+
+            var optionCard = new Border
+            {
+                Padding = new Thickness(14, 12, 14, 12),
+                CornerRadius = new CornerRadius(8),
+                BorderThickness = new Thickness(1),
+                Background = cardBg,
+                BorderBrush = cardBorder,
+                Child = new StackPanel
+                {
+                    Spacing = 4,
+                    Children =
+                    {
+                        includeClipboardCheckBox,
+                        new TextBlock
+                        {
+                            Text = _localizationService.T("Settings.DataBackup.ExportIncludeClipboardNote"),
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = secondaryFg,
+                            FontSize = 12.5,
+                            LineHeight = 19,
+                            Margin = new Thickness(28, 0, 0, 0)
+                        }
+                    }
+                }
+            };
+
+            return new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("Settings.DataBackup.ExportOptionsTitle"),
+                PrimaryButtonText = _localizationService.T("Settings.DataBackup.ExportChooseFolderButton"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Primary,
+                Content = new StackPanel
+                {
+                    Spacing = 12,
+                    MinWidth = 360,
+                    MaxWidth = 440,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = _localizationService.T("Settings.DataBackup.ExportOptionsSubtitle"),
+                            TextWrapping = TextWrapping.Wrap,
+                            Foreground = secondaryFg,
+                            FontSize = 13,
+                            LineHeight = 19
+                        },
+                        optionCard
+                    }
+                }
+            };
+        });
+        if (dialogResult != ContentDialogResult.Primary ||
+            _isClosed ||
+            _backupCommands.IsStopping)
+        {
+            return;
+        }
         string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
         if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || _backupCommands.IsStopping)
         {
             return;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folderPath))
+        {
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.DataBackup.FailedTitle"),
+                _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
+            return;
+        }
+
         ExportDataBackupButton.IsEnabled = false;
         try
         {
-            string backupPath = await _backupCommands.ExportAsync(folderPath);
+            string backupPath = await _backupCommands.ExportAsync(folderPath, includeClipboard: includeClipboard);
             if (_isClosed || _backupCommands.IsStopping) return;
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.DataBackup.SuccessTitle"),
                 _localizationService.Format("Settings.DataBackup.SuccessBody", backupPath));
-            Win32Helper.ShowInExplorer(backupPath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(backupPath);
         }
         catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
@@ -236,6 +331,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.DataBackup.RestoreConfirmTitle"),
                 PrimaryButtonText = _localizationService.T("Settings.DataBackup.RestoreConfirmButton"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -329,7 +425,7 @@ public sealed partial class SettingsWindow
             }
 
             await RefreshBackupSnapshotInventoryAsync();
-            Win32Helper.ShowInExplorer(snapshotPath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(snapshotPath);
         }
         catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
@@ -390,7 +486,7 @@ public sealed partial class SettingsWindow
         // default "automatic" snapshot folder.
         string directory = _backupSettingsViewModel.State.LocalOpenDirectory;
         Directory.CreateDirectory(directory);
-        Win32Helper.ShowInExplorer(directory);
+        ShellLaunchService.FireAndForgetRevealInExplorer(directory);
     }
 
     private async void RefreshBackupSnapshotsButton_Click(object sender, RoutedEventArgs e)
@@ -479,7 +575,7 @@ public sealed partial class SettingsWindow
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogWhenFreeAsync(() => dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -552,12 +648,19 @@ public sealed partial class SettingsWindow
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogWhenFreeAsync(() => dialog) != ContentDialogResult.Primary)
         {
             return;
         }
 
-        await ViewModel.RestoreDefaultPreferencesAsync();
+        try
+        {
+            await ViewModel.RestoreDefaultPreferencesAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] RestoreDefaultPreferences failed: {ex.Message}");
+        }
     }
 
 }

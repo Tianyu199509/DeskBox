@@ -72,7 +72,6 @@ public sealed class ContentWidgetWindowFactorySurfaceTests
     [InlineData(WidgetKind.Todo)]
     [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.Weather)]
-    [InlineData(WidgetKind.Search)]
     public void EveryCurrentlyAvailableKind_HasUnifiedSurfaceContent(
         WidgetKind kind)
     {
@@ -85,6 +84,17 @@ public sealed class ContentWidgetWindowFactorySurfaceTests
                 candidate => new StubContent(candidate));
 
         Assert.True(factory.CanCreateContentWindow(kind));
+    }
+
+    [Fact]
+    public void RetiredSearchKind_CannotCreateContentWindow()
+    {
+        var factory = new ContentWidgetWindowFactory(
+            TestServices.CreateWidgetContentFactory(),
+            new SettingsService());
+
+        Assert.False(factory.CanCreateContentWindow(WidgetKind.Search));
+        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Search));
     }
 
     private sealed class StubContent(WidgetConfig config) : IWidgetContent

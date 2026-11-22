@@ -20,7 +20,7 @@ internal sealed partial class GlanceImageCatalogJsonContext : JsonSerializerCont
 {
 }
 
-public sealed class GlanceImageService
+public sealed partial class GlanceImageService
 {
     private const int TargetCatalogSizePerCategory = 12;
     private const int MaximumCacheItemsPerCategory = 18;
@@ -418,7 +418,7 @@ public sealed class GlanceImageService
     {
         string categoryTitle = category switch
         {
-            GlanceOnlineImageCategory.Featured => $"Category:Pictures of the day ({DateTime.UtcNow:yyyy})",
+            GlanceOnlineImageCategory.Featured => $"Category:Pictures of the day ({DateTime.UtcNow.ToString("yyyy", System.Globalization.CultureInfo.InvariantCulture)})",
             GlanceOnlineImageCategory.Landscapes => "Category:Featured pictures of landscapes",
             GlanceOnlineImageCategory.Cities => "Category:Quality images of cityscapes",
             GlanceOnlineImageCategory.Architecture => "Category:Featured pictures of architecture",
@@ -659,10 +659,16 @@ public sealed class GlanceImageService
             return null;
         }
 
-        string withoutTags = Regex.Replace(value, "<[^>]+>", " ");
+        string withoutTags = HtmlTagStripRegex.Replace(value, " ");
         string decoded = WebUtility.HtmlDecode(withoutTags);
-        return Regex.Replace(decoded, @"\s+", " ").Trim();
+        return WhitespaceCollapseRegex.Replace(decoded, " ").Trim();
     }
+
+    [GeneratedRegex("<[^>]+>", RegexOptions.CultureInvariant)]
+    private static partial Regex HtmlTagStripRegex { get; }
+
+    [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex WhitespaceCollapseRegex { get; }
 
     private static string ToAbsoluteBingUrl(string? value)
     {
@@ -773,7 +779,13 @@ public sealed class GlanceImageService
 
     private static HttpClient CreateHttpClient()
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            AutomaticDecompression = DecompressionMethods.All
+        };
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(20) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("DeskBox/1.4.8 (https://deskbox.fun)");
         return client;
     }

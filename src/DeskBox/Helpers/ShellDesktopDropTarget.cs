@@ -99,13 +99,11 @@ internal static partial class ShellDesktopDropTarget
             return;
         }
 
-        var buffer = new StringBuilder(256);
-        if (Win32Helper.GetClassName(
-                window,
-                buffer,
-                buffer.Capacity) > 0)
+        Span<char> buffer = stackalloc char[256];
+        int length = Win32Helper.GetClassName(window, buffer);
+        if (length > 0)
         {
-            string className = buffer.ToString();
+            string className = new string(buffer[..length]);
             if (!classNames.Contains(
                     className,
                     StringComparer.OrdinalIgnoreCase))

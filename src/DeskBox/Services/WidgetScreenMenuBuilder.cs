@@ -121,14 +121,22 @@ internal static class WidgetScreenMenuBuilder
         return menu;
     }
 
-    private static WidgetScreenInfo? ResolveActualDisplay(
+    internal static WidgetScreenInfo? ResolveActualDisplay(
         WidgetConfig config,
         IReadOnlyList<WidgetScreenInfo> screens)
     {
-        Windows.Graphics.PointInt32 point = new(
-            (int)Math.Round(double.IsFinite(config.X) ? config.X : 0),
-            (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 0));
-        return WidgetScreenCatalog.FindScreenForPoint(screens, point);
+        if (screens.Count == 0)
+        {
+            return null;
+        }
+
+        int x = (int)Math.Round(double.IsFinite(config.X) ? config.X : 0);
+        int y = (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 0);
+        int width = Math.Max(1, (int)Math.Round(double.IsFinite(config.Width) ? config.Width : 1));
+        int height = Math.Max(1, (int)Math.Round(double.IsFinite(config.Height) ? config.Height : 1));
+        return WidgetManager.FindDisplayByMaxIntersection(
+            screens,
+            new Windows.Graphics.RectInt32(x, y, width, height));
     }
 
     private static RadioMenuFlyoutItem CreateRadioItem(

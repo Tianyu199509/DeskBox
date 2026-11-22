@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace DeskBox.Platform;
 
@@ -23,12 +22,12 @@ internal static partial class ElevatedLaunchNativeMethods
         [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
         uint processId);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", ExactSpelling = true, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool QueryFullProcessImageName(
+    internal static extern unsafe bool QueryFullProcessImageName(
         IntPtr processHandle,
         uint flags,
-        StringBuilder executableName,
+        char* executableName,
         ref uint size);
 
     [DllImport("kernel32.dll")]

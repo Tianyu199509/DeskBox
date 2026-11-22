@@ -14,7 +14,6 @@ public sealed class DesktopOrganizationCheckBoxStatesContractTests
 {
     [Theory]
     [InlineData("src/DeskBox/Controls/DesktopOrganizationTaskView.xaml", "NeutralSourceCheckBoxStyle")]
-    [InlineData("src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml", "GroupSelectionToggleStyle")]
     public void CheckboxStyles_KeepCheckAndPointerStatesInOneCartesianGroup(
         string path,
         string styleKey)

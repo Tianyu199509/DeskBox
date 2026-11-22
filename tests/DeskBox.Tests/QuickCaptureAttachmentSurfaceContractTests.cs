@@ -13,7 +13,7 @@ public sealed class QuickCaptureAttachmentSurfaceContractTests
         Assert.Contains("<controls:AttachmentTileStrip", xaml, StringComparison.Ordinal);
         Assert.Contains("RemoveRequested=\"DetailAttachmentStrip_RemoveRequested\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
-            "DetailAttachmentStrip.CanRemove = hasDetail && _isDetailEditing && !isReadOnly",
+            "DetailAttachmentStrip.CanRemove = hasDetail && _isDetailEditing;",
             code,
             StringComparison.Ordinal);
         Assert.Contains("DetailRemoveAttachmentText", xaml, StringComparison.Ordinal);

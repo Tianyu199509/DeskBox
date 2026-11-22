@@ -49,8 +49,6 @@ public partial class WidgetViewModel
 
     private void UpdateDependentProperties()
     {
-        string mappedFolderName = GetMappedFolderDisplayName();
-        string managedAction = GetManagedActionText();
         bool isManagedStorage = FollowsDefaultStoragePath;
 
         IconGlyph = isManagedStorage ? "\uE8B7" : "\uE71B";
@@ -67,34 +65,34 @@ public partial class WidgetViewModel
         ModeDescription = isManagedStorage
             ? _localizationService.T("Widget.Mode.ManagedDescription")
             : _localizationService.T("Widget.Mode.MappedDescription");
-        EmptyStateGlyph = IconGlyph;
-        EmptyStateTitle = isManagedStorage
-            ? _localizationService.T("Widget.Empty.ManagedTitle")
-            : _localizationService.T("Widget.Empty.MappedTitle");
-        EmptyStateText = isManagedStorage
-            ? _localizationService.Format("Widget.Empty.ManagedText", managedAction, mappedFolderName)
-            : _localizationService.Format("Widget.Empty.MappedText", mappedFolderName);
+        EmptyStateTitle = ResolveEmptyStateTitle(
+            _localizationService,
+            DragDropPermissionService.IsCurrentProcessElevatedAboveShellCached());
         OnPropertyChanged(nameof(SortModeLabel));
         UpdateFolderNavigationPresentation();
     }
 
-    private string GetManagedActionText()
+    internal static string ResolveEmptyStateTitle(
+        LocalizationService localizationService,
+        bool isElevatedAboveShell)
     {
-        return _settingsService.Settings.ManagedDropAction switch
-        {
-            SettingsService.ManagedDropActionMove =>
-                _localizationService.T("Common.Move"),
-            SettingsService.ManagedDropActionFollowWindows =>
-                _localizationService.T("Settings.DropAction.System"),
-            _ => _localizationService.T("Common.Copy")
-        };
+        return isElevatedAboveShell
+            ? localizationService.T("Widget.Empty.ElevatedWarning")
+            : localizationService.T("Widget.Empty.FolderEmpty");
     }
 
     private bool ShouldMoveManagedItems(
         IEnumerable<string>? sourcePaths = null,
         string? destinationFolderPath = null)
     {
-        string action = _settingsService.Settings.ManagedDropAction;
+        string[]? materializedSources = sourcePaths?.ToArray();
+        if (materializedSources is { Length: > 0 } &&
+            Platform.PathOriginClassifier.ClassifySources(materializedSources).IsProtectedCopyByDefault)
+        {
+            return false;
+        }
+
+        string action = _settingsService.Settings.FileWidget.ManagedDropAction;
         if (string.Equals(
                 action,
                 SettingsService.ManagedDropActionMove,
@@ -107,7 +105,7 @@ public partial class WidgetViewModel
                 action,
                 SettingsService.ManagedDropActionFollowWindows,
                 StringComparison.Ordinal) ||
-            sourcePaths is null ||
+            materializedSources is null ||
             string.IsNullOrWhiteSpace(destinationFolderPath))
         {
             return false;
@@ -116,8 +114,8 @@ public partial class WidgetViewModel
         // Explorer moves within one volume and copies across volumes. If a
         // provider exposes an unknown root, AreAllOnSameVolume deliberately
         // returns false so the safer copy path is selected.
-        return FileDropIntentPolicy.AreAllOnSameVolume(
-            sourcePaths,
+        return Platform.PathOriginClassifier.AreAllOnSameVolume(
+            materializedSources,
             destinationFolderPath);
     }
 
@@ -224,29 +222,11 @@ public partial class WidgetViewModel
         return true;
     }
 
-    private string GetMappedFolderDisplayName()
-    {
-        if (string.IsNullOrWhiteSpace(MappedFolderPath))
-        {
-            return _localizationService.T("Common.CurrentLocation");
-        }
-
-        var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();
-        if (MappedFolderPath.Equals(userDesktop, StringComparison.OrdinalIgnoreCase) ||
-            MappedFolderPath.Equals(publicDesktop, StringComparison.OrdinalIgnoreCase))
-        {
-            return _localizationService.T("Common.Desktop");
-        }
-
-        string folderName = Path.GetFileName(MappedFolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return string.IsNullOrWhiteSpace(folderName) ? MappedFolderPath : folderName;
-    }
-
     private void OnSettingsChanged()
     {
         bool appearanceOnly =
             _settingsService.LastNotifiedChangeKind == SettingsChangeKind.Appearance;
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             ApplySettingsChanges(appearanceOnly);
             return;
@@ -273,7 +253,7 @@ public partial class WidgetViewModel
 
     private void OnLanguageChanged()
     {
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             UpdateDependentProperties();
             RebuildStackDisplayItems();

@@ -223,15 +223,18 @@ public sealed class ContextMenuWin11AlignmentContractTests
     [Fact]
     public void MenuMaterial_DirectAcrylic()
     {
-        // Direct acrylic: an explicit DesktopAcrylicBackdrop on the implicit
-        // presenter style (the default SystemBackdrop is null, which reads
-        // as solid) with the platform's own near-transparent default
-        // background. No first-paint solid override and no reveal animation
-        // — both retired by choice (2026-10-21); if first-frame bare text
-        // ever shows up, the lever is a constant low-alpha Background, not
-        // an animation.
+        // Direct acrylic: ThemedMenuAcrylicBackdrop on the implicit presenter
+        // styles (MenuFlyoutPresenter and CommandBarFlyoutCommandBar) resolves
+        // Light/Dark from the presenter / owning XamlRoot.Content instead of
+        // WinUI's built-in DesktopAcrylicBackdrop, whose PopupRoot-scoped
+        // GetDefaultSystemBackdropConfiguration stays pinned to the startup OS
+        // theme (painting dark #2C2C2C acrylic behind black Light-mode text).
         string appXaml = ReadRepositoryFile("src/DeskBox/App.xaml");
         Assert.Contains(
+            "<helpers:ThemedMenuAcrylicBackdrop />",
+            appXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
             "<media:DesktopAcrylicBackdrop />",
             appXaml,
             StringComparison.Ordinal);
@@ -239,6 +242,38 @@ public sealed class ContextMenuWin11AlignmentContractTests
             "DeskBoxMenuFallbackBackgroundBrush",
             appXaml,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Light, true, Microsoft.UI.Xaml.ElementTheme.Light, true, false)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Dark, true, Microsoft.UI.Xaml.ElementTheme.Light, true, false)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Dark, true, Microsoft.UI.Xaml.ElementTheme.Dark, false, true)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Dark, true, Microsoft.UI.Xaml.ElementTheme.Light, false, true)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Light, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Dark, Microsoft.UI.Xaml.ElementTheme.Light, true, Microsoft.UI.Xaml.ElementTheme.Dark, true, false)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, false, Microsoft.UI.Xaml.ElementTheme.Light, true, false)]
+    [InlineData(Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, Microsoft.UI.Xaml.ElementTheme.Default, false, Microsoft.UI.Xaml.ElementTheme.Default, true, true)]
+    public void ThemedMenuAcrylicBackdrop_ResolvesThemeAcrossAppAndOsMismatch(
+        Microsoft.UI.Xaml.ElementTheme presenterRequested,
+        Microsoft.UI.Xaml.ElementTheme popupRequested,
+        Microsoft.UI.Xaml.ElementTheme rootRequested,
+        Microsoft.UI.Xaml.ElementTheme rootActual,
+        Microsoft.UI.Xaml.ElementTheme presenterActual,
+        bool presenterIsLoaded,
+        Microsoft.UI.Xaml.ElementTheme appEffective,
+        bool systemIsDark,
+        bool expectedIsDark)
+    {
+        bool actual = DeskBox.Helpers.ThemedMenuAcrylicBackdrop.ResolveIsDarkTheme(
+            presenterRequested,
+            popupRequested,
+            rootRequested,
+            rootActual,
+            presenterActual,
+            presenterIsLoaded,
+            appEffective,
+            systemIsDark);
+
+        Assert.Equal(expectedIsDark, actual);
     }
 
     [Fact]
@@ -352,7 +387,7 @@ public sealed class ContextMenuWin11AlignmentContractTests
     public void SearchResultsMenu_KeepsRunAsAdministratorEntry()
     {
         string searchWindow = ReadRepositoryFile(
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs");
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs");
 
         Assert.Contains(
             "ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath",

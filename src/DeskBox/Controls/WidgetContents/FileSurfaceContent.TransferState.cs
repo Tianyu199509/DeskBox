@@ -207,4 +207,52 @@ public sealed partial class FileSurfaceContent
             WidgetFeedbackSeverity.Warning,
             "file-transfer-busy"));
     }
+
+    private bool TryBlockStoreVirtualizedDestination(string? destinationPath)
+    {
+        if (!Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(destinationPath))
+        {
+            return false;
+        }
+
+        ShowStoreVirtualizedDestinationBlockedFeedback();
+        return true;
+    }
+
+    private bool TryBlockStoreVirtualizedDestination(IEnumerable<WidgetItem> items)
+    {
+        foreach (WidgetItem item in items)
+        {
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(item.Path))
+            {
+                ShowStoreVirtualizedDestinationBlockedFeedback();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ShowStoreVirtualizedDestinationBlockedFeedback()
+    {
+        ShowFeedback(new WidgetFeedbackRequest(
+            T("Widget.DropBlocked.StoreVirtualizedAppData"),
+            WidgetFeedbackSeverity.Warning,
+            "store-virtualized-appdata-drop-blocked"));
+    }
+
+    private void ShowMaterializationSkippedWarning(int skippedCount)
+    {
+        if (skippedCount <= 0)
+        {
+            return;
+        }
+
+        ShowFeedback(new WidgetFeedbackRequest(
+            _localizationService.Format(
+                "Widget.ImportPartialMaterializationSkipped",
+                skippedCount),
+            WidgetFeedbackSeverity.Warning,
+            "file-import-partial-materialization-skipped"));
+    }
 }

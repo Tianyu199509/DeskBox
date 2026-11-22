@@ -1,0 +1,761 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.hydration",
+  "version": "4.0.0",
+  "name": "${$i18n.widgetName}",
+  "description": "${$i18n.widgetDescription}",
+  "author": "DeskBox",
+  "origin": "official",
+  "icon": "💧",
+  "minSize": {
+    "width": 296,
+    "height": 340
+  },
+  "defaultSize": {
+    "width": 332,
+    "height": 392
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 60000
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "overview:1,logs:1,heatmap:1",
+      "options": [
+        {
+          "value": "overview",
+          "label": "${$i18n.modOverview}"
+        },
+        {
+          "value": "logs",
+          "label": "${$i18n.modLogs}"
+        },
+        {
+          "value": "heatmap",
+          "label": "${$i18n.modHeatmap}"
+        }
+      ]
+    },
+    {
+      "key": "dailyGoalMl",
+      "type": "number",
+      "label": "${$i18n.setGoal}",
+      "default": 2000,
+      "min": 500,
+      "max": 6000,
+      "step": 100
+    },
+    {
+      "key": "cupSmallMl",
+      "type": "number",
+      "label": "${$i18n.setCupSmall}",
+      "default": 250,
+      "min": 50,
+      "max": 1000,
+      "step": 25
+    },
+    {
+      "key": "cupLargeMl",
+      "type": "number",
+      "label": "${$i18n.setCupLarge}",
+      "default": 350,
+      "min": 100,
+      "max": 1500,
+      "step": 50
+    },
+    {
+      "key": "reminderMinutes",
+      "type": "choice",
+      "label": "${$i18n.setReminder}",
+      "default": "60",
+      "options": [
+        {
+          "value": "0",
+          "label": "${$i18n.remOff}"
+        },
+        {
+          "value": "45",
+          "label": "${$i18n.rem45}"
+        },
+        {
+          "value": "60",
+          "label": "${$i18n.rem60}"
+        },
+        {
+          "value": "90",
+          "label": "${$i18n.rem90}"
+        },
+        {
+          "value": "120",
+          "label": "${$i18n.rem120}"
+        }
+      ]
+    },
+    {
+      "key": "soundCue",
+      "type": "toggle",
+      "label": "${$i18n.setSoundCue}",
+      "default": true
+    }
+  ],
+  "state": {
+    "activeTab": "today",
+    "todayMl": 0,
+    "drinkKind": "water",
+    "customMl": 300,
+    "customNote": "",
+    "lastDate": "",
+    "dayStartedAtMs": 0,
+    "lastReminderAt": "",
+    "seeded": false
+  },
+  "collections": {
+    "logs": {
+      "maxItems": 400,
+      "sort": "newestFirst"
+    }
+  },
+  "capsule": {
+    "dir": "ltr",
+    "title": "${$i18n.capTitlePrefix}${$computed.todayMlDisplay} / ${$settings.dailyGoalMl} ml",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "💧",
+    "badge": "${$computed.percentText}",
+    "badgeIsWarning": "${$settings.reminderMinutes != '0' && $computed.reminderActive == 'true'}",
+    "progress": "${$computed.pctClamped}",
+    "enableBounceOnUpdate": true,
+    "primaryAction": {
+      "icon": "add",
+      "tooltip": "${$i18n.capQuickAddTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logPresetVessel",
+          "args": {
+            "vessel": "smallWater",
+            "sound": "${$settings.soundCue}"
+          }
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "customPourPopover": {
+      "title": "${$i18n.popTitle}",
+      "width": 288,
+      "placement": "bottom",
+      "root": "pop_custom_pour_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Tabs",
+      "bind": "state.activeTab",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "today",
+        "stats"
+      ]
+    },
+    "today": {
+      "title": "${$i18n.tabToday}",
+      "type": "ModuleStack",
+      "bind": "settings.modules",
+      "spacing": 8,
+      "children": [
+        "overview",
+        "logs"
+      ]
+    },
+    "overview": {
+      "type": "Stack",
+      "spacing": 8,
+      "children": [
+        "hydration_summary_card",
+        "quick_vessels_grid"
+      ]
+    },
+    "hydration_summary_card": {
+      "type": "Card",
+      "tone": "cyan",
+      "padding": "12,10",
+      "children": [
+        "hydration_summary_grid"
+      ]
+    },
+    "hydration_summary_grid": {
+      "type": "Grid",
+      "columns": "60,*,Auto",
+      "columnSpacing": 12,
+      "verticalAlignment": "center",
+      "children": [
+        "hydration_ring_gauge",
+        "hydration_metrics_stack",
+        "btn_undo_last_drink"
+      ]
+    },
+    "hydration_ring_gauge": {
+      "type": "RingGauge",
+      "column": 0,
+      "style": "full",
+      "size": 58,
+      "value": "${$computed.pctClamped}",
+      "max": 100,
+      "unit": "%",
+      "color": "cyan"
+    },
+    "hydration_metrics_stack": {
+      "type": "Stack",
+      "column": 1,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "hydration_volume_row",
+        "hydration_status_line"
+      ]
+    },
+    "hydration_volume_row": {
+      "type": "Stack",
+      "dir": "ltr",
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "bottom",
+      "children": [
+        "hydration_today_ml_text",
+        "hydration_goal_ml_text"
+      ]
+    },
+    "hydration_today_ml_text": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "${$computed.todayMlDisplay}",
+      "style": "hero"
+    },
+    "hydration_goal_ml_text": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "/ ${$settings.dailyGoalMl} ml",
+      "style": "caption",
+      "color": "secondary",
+      "margin": "0,0,0,3"
+    },
+    "hydration_status_line": {
+      "type": "Text",
+      "text": "${$computed.statusLine}",
+      "style": "caption",
+      "color": "${$computed.statusColor}",
+      "maxLines": 1
+    },
+    "btn_undo_last_drink": {
+      "type": "IconButton",
+      "column": 2,
+      "icon": "undo",
+      "size": 26,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipUndo}",
+      "when": "${$computed.todayCups > 0}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "undoLastToday"
+        }
+      ]
+    },
+    "quick_vessels_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "columnSpacing": 6,
+      "children": [
+        "vessel_water_card",
+        "vessel_bottle_card",
+        "vessel_tea_card",
+        "vessel_coffee_card"
+      ]
+    },
+    "vessel_water_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "default",
+      "padding": "6,7",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logPresetVessel",
+          "args": {
+            "vessel": "smallWater"
+          }
+        }
+      ],
+      "children": [
+        "vessel_water_stack"
+      ]
+    },
+    "vessel_water_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "vessel_water_emoji",
+        "vessel_water_label",
+        "vessel_water_amount"
+      ]
+    },
+    "vessel_water_emoji": {
+      "type": "Text",
+      "text": "💧",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "vessel_water_label": {
+      "type": "Text",
+      "text": "${$i18n.drinkWater}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_water_amount": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "+${$settings.cupSmallMl}",
+      "style": "caption",
+      "color": "cyan",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_bottle_card": {
+      "type": "Card",
+      "column": 1,
+      "tone": "default",
+      "padding": "6,7",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logPresetVessel",
+          "args": {
+            "vessel": "largeBottle"
+          }
+        }
+      ],
+      "children": [
+        "vessel_bottle_stack"
+      ]
+    },
+    "vessel_bottle_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "vessel_bottle_emoji",
+        "vessel_bottle_label",
+        "vessel_bottle_amount"
+      ]
+    },
+    "vessel_bottle_emoji": {
+      "type": "Text",
+      "text": "🥤",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "vessel_bottle_label": {
+      "type": "Text",
+      "text": "${$i18n.vesselBottleTitle}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_bottle_amount": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "+${$settings.cupLargeMl}",
+      "style": "caption",
+      "color": "cyan",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_tea_card": {
+      "type": "Card",
+      "column": 2,
+      "tone": "default",
+      "padding": "6,7",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logPresetVessel",
+          "args": {
+            "vessel": "teaCup"
+          }
+        }
+      ],
+      "children": [
+        "vessel_tea_stack"
+      ]
+    },
+    "vessel_tea_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "vessel_tea_emoji",
+        "vessel_tea_label",
+        "vessel_tea_amount"
+      ]
+    },
+    "vessel_tea_emoji": {
+      "type": "Text",
+      "text": "🍵",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "vessel_tea_label": {
+      "type": "Text",
+      "text": "${$i18n.drinkTea}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_tea_amount": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "+300",
+      "style": "caption",
+      "color": "emerald",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_coffee_card": {
+      "type": "Card",
+      "column": 3,
+      "tone": "default",
+      "padding": "6,7",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logPresetVessel",
+          "args": {
+            "vessel": "coffeeMug"
+          }
+        }
+      ],
+      "children": [
+        "vessel_coffee_stack"
+      ]
+    },
+    "vessel_coffee_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "vessel_coffee_emoji",
+        "vessel_coffee_label",
+        "vessel_coffee_amount"
+      ]
+    },
+    "vessel_coffee_emoji": {
+      "type": "Text",
+      "text": "☕",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "vessel_coffee_label": {
+      "type": "Text",
+      "text": "${$i18n.drinkCoffee}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "vessel_coffee_amount": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "+200",
+      "style": "caption",
+      "color": "secondary",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "logs": {
+      "type": "Stack",
+      "spacing": 4,
+      "children": [
+        "logs_header_grid",
+        "logs_list_card"
+      ]
+    },
+    "logs_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "margin": "2,0",
+      "children": [
+        "logs_section_title",
+        "btn_open_custom_pour"
+      ]
+    },
+    "logs_section_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.logsTitle}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "btn_open_custom_pour": {
+      "type": "Button",
+      "column": 1,
+      "variant": "subtle",
+      "padding": "6,1",
+      "icon": "add",
+      "text": "${$i18n.btnCustom}",
+      "popover": "customPourPopover"
+    },
+    "logs_list_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,4",
+      "children": [
+        "today_logs_list"
+      ]
+    },
+    "today_logs_list": {
+      "type": "List",
+      "items": "${$computed.todayLogs}",
+      "variant": "divided",
+      "emptyState": {
+        "icon": "💧",
+        "title": "${$i18n.emptyTitle}",
+        "subtitle": "${$i18n.emptyHint}"
+      },
+      "itemTemplate": "drink_log_row",
+      "hoverActions": [
+        "btn_delete_drink_log"
+      ]
+    },
+    "drink_log_row": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "drink_log_emoji",
+        "drink_log_label",
+        "drink_log_amount",
+        "drink_log_time"
+      ]
+    },
+    "drink_log_emoji": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.emoji}",
+      "style": "caption",
+      "verticalAlignment": "center"
+    },
+    "drink_log_label": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.noteOrLabel}",
+      "style": "body",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "drink_log_amount": {
+      "type": "Text",
+      "column": 2,
+      "dir": "ltr",
+      "text": "+${$item.amountMl} ml",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "color": "cyan",
+      "verticalAlignment": "center"
+    },
+    "drink_log_time": {
+      "type": "Text",
+      "column": 3,
+      "dir": "ltr",
+      "text": "${$item.drinkTime}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "btn_delete_drink_log": {
+      "type": "IconButton",
+      "icon": "delete",
+      "size": 22,
+      "variant": "subtle",
+      "tooltip": "${$i18n.delTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "deleteLog",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "stats": {
+      "title": "${$i18n.tabStats}",
+      "type": "ModuleStack",
+      "bind": "settings.modules",
+      "spacing": 8,
+      "children": [
+        "heatmap"
+      ]
+    },
+    "heatmap": {
+      "type": "Stack",
+      "spacing": 8,
+      "children": [
+        "trend_chart_card",
+        "heatmap_card"
+      ]
+    },
+    "trend_chart_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10",
+      "children": [
+        "chart_weekly_trend"
+      ]
+    },
+    "chart_weekly_trend": {
+      "type": "Chart",
+      "chartKind": "bar",
+      "title": "${$i18n.trendTitle}",
+      "subtitle": "${$computed.avg7Text}",
+      "items": "${$computed.trend7Days}",
+      "xField": "label",
+      "valueField": "value",
+      "unit": " ml",
+      "height": 116,
+      "color": "cyan",
+      "showLegend": false,
+      "showGrid": true
+    },
+    "heatmap_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10",
+      "spacing": 6,
+      "children": [
+        "heatmap_header_grid",
+        "hydration_heatmap_grid"
+      ]
+    },
+    "heatmap_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "heatmap_section_title",
+        "heatmap_summary_text"
+      ]
+    },
+    "heatmap_section_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.heatmapTitle}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "heatmap_summary_text": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.heatSummaryText}",
+      "style": "caption",
+      "color": "cyan",
+      "fontWeight": "semiBold"
+    },
+    "hydration_heatmap_grid": {
+      "type": "HeatmapGrid",
+      "collection": "logs",
+      "dateField": "day",
+      "valueField": "amountMl",
+      "days": 28,
+      "size": 13,
+      "color": "cyan"
+    },
+    "pop_custom_pour_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "select_drink_kind",
+        "slider_custom_ml",
+        "input_custom_note",
+        "btn_confirm_custom_pour"
+      ]
+    },
+    "select_drink_kind": {
+      "type": "Select",
+      "title": "${$i18n.popKindLabel}",
+      "bind": "state.drinkKind",
+      "options": [
+        {
+          "value": "water",
+          "label": "${$i18n.drinkWater}"
+        },
+        {
+          "value": "tea",
+          "label": "${$i18n.drinkTea}"
+        },
+        {
+          "value": "coffee",
+          "label": "${$i18n.drinkCoffee}"
+        },
+        {
+          "value": "milk",
+          "label": "${$i18n.drinkMilk}"
+        }
+      ]
+    },
+    "slider_custom_ml": {
+      "type": "Slider",
+      "title": "${$i18n.popAmountLabel}",
+      "bind": "state.customMl",
+      "min": 50,
+      "max": 1000,
+      "step": 25,
+      "unit": " ml"
+    },
+    "input_custom_note": {
+      "type": "Input",
+      "bind": "state.customNote",
+      "placeholder": "${$i18n.popNotePlaceholder}",
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "logCustomCup"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "customPourPopover"
+        }
+      ]
+    },
+    "btn_confirm_custom_pour": {
+      "type": "Button",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "icon": "add",
+      "text": "${$i18n.popConfirm} (+${state.customMl} ml)",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "logCustomCup"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "customPourPopover"
+        }
+      ]
+    }
+  }
+}

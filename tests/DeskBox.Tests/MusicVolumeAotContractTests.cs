@@ -7,21 +7,13 @@ namespace DeskBox.Tests;
 
 public sealed class MusicVolumeAotContractTests
 {
-    [Theory]
-    [InlineData(null, true, 0)]
-    [InlineData("", true, 0)]
-    [InlineData("rust", true, 1)]
-    [InlineData(" RUST ", true, 1)]
-    [InlineData("csharp", true, 0)]
-    [InlineData(null, false, 1)]
-    public void MusicVolumeBackendPolicy_PreservesJitDefaultAndForcesRustWithoutDynamicCode(
-        string? configuredValue,
-        bool isDynamicCodeSupported,
-        int expected)
+    [Fact]
+    public void MusicVolumeBackendPolicy_UnconditionallySelectsRust()
     {
+        Assert.Equal(MusicVolumeBackendMode.Rust, MusicVolumeBackendPolicy.Current);
         Assert.Equal(
-            (MusicVolumeBackendMode)expected,
-            MusicVolumeBackendPolicy.Resolve(configuredValue, isDynamicCodeSupported));
+            [MusicVolumeBackendMode.Rust],
+            Enum.GetValues<MusicVolumeBackendMode>());
     }
 
     [Fact]
@@ -88,22 +80,15 @@ public sealed class MusicVolumeAotContractTests
     }
 
     [Fact]
-    public void MusicVolumeService_UsesRustForAotAndCompileTimeExcludesLegacyCom()
+    public void MusicVolumeService_UsesRustUnconditionallyAndExcludesLegacyCom()
     {
         string source = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Services/MusicVolumeService.cs"));
 
         Assert.Contains("MusicVolumeBackendPolicy.Current", source, StringComparison.Ordinal);
         Assert.Contains("MusicVolumeNativeBackend", source, StringComparison.Ordinal);
-        Assert.Contains("#if !DESKBOX_NATIVE_AOT", source, StringComparison.Ordinal);
-        var legacyComBlock = new Regex(
-            @"#if !DESKBOX_NATIVE_AOT\s+private static double GetSystemMasterVolume\(\)[\s\S]*?private interface ISimpleAudioVolume[\s\S]*?#endif",
-            RegexOptions.CultureInvariant);
-        Assert.Matches(legacyComBlock, source);
-        Assert.DoesNotContain(
-            "[ComImport]",
-            legacyComBlock.Replace(source, string.Empty),
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("#if !DESKBOX_NATIVE_AOT", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("[ComImport]", source, StringComparison.Ordinal);
     }
 
     [Fact]

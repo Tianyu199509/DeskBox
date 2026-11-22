@@ -14,13 +14,50 @@ internal static class AppLifecycleRecoverySignalClassifier
     internal const uint WmWtsSessionChange = 0x02B1;
     internal const uint WmDisplayChange = 0x007E;
     internal const uint WmDpiChanged = 0x02E0;
+    internal const uint WmTimeChange = 0x001E;
 
     private const uint PbtResumeAutomatic = 0x0012;
     private const uint PbtResumeSuspend = 0x0007;
     private const uint PbtResumeCritical = 0x0006;
-    private const uint WtsSessionUnlock = 0x0008;
-    private const uint WtsSessionLogon = 0x0005;
-    private const uint WtsSessionRemoteConnect = 0x0009;
+    internal const uint WtsSessionLogon = 0x0005;
+    internal const uint WtsSessionLogoff = 0x0006;
+    internal const uint WtsSessionLock = 0x0007;
+    internal const uint WtsSessionUnlock = 0x0008;
+    internal const uint WtsSessionRemoteConnect = 0x0009;
+    internal const uint WtsSessionRemoteDisconnect = 0x000A;
+
+    internal static string? ResolveGateEvent(
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam = default)
+    {
+        uint eventValue = unchecked((uint)wParam.ToUInt64());
+        if (message == WmPowerBroadcast &&
+            eventValue == Win32Helper.PbtPowerSettingChange)
+        {
+            return ResolveConsoleDisplayState(lParam) switch
+            {
+                1 => "display-power-on",
+                0 => "display-power-off",
+                _ => null
+            };
+        }
+
+        if (message == WmWtsSessionChange)
+        {
+            if (eventValue is WtsSessionUnlock or WtsSessionLogon or WtsSessionRemoteConnect)
+            {
+                return "session-unlocked";
+            }
+
+            if (eventValue is WtsSessionLock or WtsSessionLogoff or WtsSessionRemoteDisconnect)
+            {
+                return "session-locked";
+            }
+        }
+
+        return null;
+    }
 
     internal static string? ResolveRecoveryReason(
         uint message,
@@ -68,6 +105,11 @@ internal static class AppLifecycleRecoverySignalClassifier
         if (message is WmDisplayChange or WmDpiChanged)
         {
             return "display-message";
+        }
+
+        if (message == WmTimeChange)
+        {
+            return "time-change";
         }
 
         return message == taskbarCreatedMessage

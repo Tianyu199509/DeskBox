@@ -175,7 +175,7 @@ public sealed class FeedbackServiceTests : IDisposable
 
         Assert.False(blocked.Ok);
         Assert.Equal("rate_limited", blocked.Error);
-        Assert.Equal(10, blocked.RetryAfterMinutes);
+        Assert.Equal(5, blocked.RetryAfterMinutes);
         Assert.Single(handler.Requests);
     }
 
@@ -253,7 +253,7 @@ public sealed class FeedbackServiceTests : IDisposable
             startTime.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture),
             File.ReadAllText(cooldownPath).Trim());
 
-        utcNow = startTime.AddMinutes(10).AddSeconds(1);
+        utcNow = startTime.AddMinutes(5).AddSeconds(1);
         FeedbackService restarted = CreateService(handler, () => utcNow);
         DeskBoxFeedbackSubmissionResult result = await restarted.SubmitAsync(
             DeskBoxFeedbackKind.Bug,
@@ -476,6 +476,100 @@ public sealed class FeedbackServiceTests : IDisposable
 
         Assert.False(result.Ok);
         Assert.Empty(result.Items);
+    }
+
+    [Fact]
+    public async Task Submit_DailyCapRateLimitDoesNotRotateClientIdWithinTwentyFourHours()
+    {
+        var responses = new Queue<HttpResponseMessage>(new[]
+        {
+            Json(HttpStatusCode.Created, """{"ok":true,"id":200}"""),
+            Json(HttpStatusCode.TooManyRequests, """{"ok":false,"error":"rate_limited","retry_after_minutes":60}"""),
+            Json(HttpStatusCode.TooManyRequests, """{"ok":false,"error":"rate_limited","retry_after_minutes":60}"""),
+            Json(HttpStatusCode.Created, """{"ok":true,"id":201}"""),
+        });
+        var handler = new RecordingHandler(_ => responses.Dequeue());
+        DateTimeOffset utcNow = new(2026, 11, 4, 8, 0, 0, TimeSpan.Zero);
+        FeedbackService service = CreateService(handler, () => utcNow);
+
+        Assert.True((await service.SubmitAsync(DeskBoxFeedbackKind.Bug, "Tenth daily submission body.")).Ok);
+        string originalClientId = service.ClientId;
+
+        // 90 minutes later: inside the 24-hour daily cap window, so ClientId must NOT rotate.
+        utcNow = utcNow.AddMinutes(90);
+        DeskBoxFeedbackSubmissionResult dailyCapped = await service.SubmitAsync(
+            DeskBoxFeedbackKind.Bug,
+            "Eleventh submission inside 24h daily cap.");
+        Assert.False(dailyCapped.Ok);
+        Assert.Equal(60, dailyCapped.RetryAfterMinutes);
+        Assert.Equal(originalClientId, service.ClientId);
+        Assert.Equal(2, handler.Requests.Count);
+
+        // 25 hours after the last recorded success: server claiming 60m is now provably stale -> rotates and recovers.
+        utcNow = utcNow.AddHours(24);
+        DeskBoxFeedbackSubmissionResult recovered = await service.SubmitAsync(
+            DeskBoxFeedbackKind.Bug,
+            "Submission after 25h recovers from wedged server state.");
+        Assert.True(recovered.Ok);
+        Assert.Equal(201, recovered.Id);
+        Assert.NotEqual(originalClientId, service.ClientId);
+    }
+
+    [Fact]
+    public async Task GetMyFeedback_ParsesMultiTurnMessagesAndPostReplyAppendsFollowUp()
+    {
+        const string mineBody = """
+            {"ok":true,"items":[
+              {"id":88,"type":"suggestion","status":"in_progress","content":"Support multi-turn feedback thread.",
+               "reply":"Shipped in 1.6.0","app_version":"1.6.0","channel":"direct",
+               "created_at":"2026-11-04T08:00:00Z",
+               "messages":[
+                 {"id":501,"author_role":"official","author_nickname":"DeskBox Team","content":"Can you share your scaling setting?","created_at":"2026-11-04T08:05:00Z"},
+                 {"id":502,"author_role":"op","author_nickname":null,"content":"150% on primary 4K display.","created_at":"2026-11-04T08:10:00Z"}
+               ]}
+            ]}
+            """;
+        var responses = new Queue<HttpResponseMessage>(new[]
+        {
+            Json(HttpStatusCode.OK, mineBody),
+            Json(HttpStatusCode.Created, """{"ok":true,"message":{"id":503,"author_role":"op","author_nickname":null,"content":"Tested and confirmed!","created_at":"2026-11-04T08:15:00Z"}}"""),
+            Json(HttpStatusCode.TooManyRequests, """{"ok":false,"error":"rate_limited","retry_after_minutes":1}"""),
+        });
+        var handler = new RecordingHandler(_ => responses.Dequeue());
+        FeedbackService service = CreateService(handler);
+
+        DeskBoxFeedbackMineResult mine = await service.GetMyFeedbackAsync();
+        Assert.True(mine.Ok);
+        DeskBoxFeedbackItem item = Assert.Single(mine.Items);
+        Assert.NotNull(item.Messages);
+        Assert.Equal(2, item.Messages!.Count);
+        Assert.Equal("official", item.Messages[0].AuthorRole);
+        Assert.Equal("op", item.Messages[1].AuthorRole);
+
+        // Short reply (< 2 chars) is rejected locally without calling the API.
+        DeskBoxFeedbackReplyResult tooShort = await service.PostReplyAsync(88, "a");
+        Assert.False(tooShort.Ok);
+        Assert.Equal("content_too_short", tooShort.Error);
+        Assert.Single(handler.Requests);
+
+        // Valid follow-up reply posts to /feedback/88/messages.
+        DeskBoxFeedbackReplyResult posted = await service.PostReplyAsync(88, "  Tested and confirmed!  ");
+        Assert.True(posted.Ok);
+        Assert.NotNull(posted.Message);
+        Assert.Equal(503, posted.Message!.Id);
+        Assert.Equal("Tested and confirmed!", posted.Message.Content);
+        Assert.Equal("https://example.test/stats/api/feedback/88/messages", handler.Requests[1].Uri);
+        using (JsonDocument replyDoc = JsonDocument.Parse(handler.Requests[1].Body!))
+        {
+            Assert.Equal(service.ClientId, replyDoc.RootElement.GetProperty("client_id").GetString());
+            Assert.Equal("Tested and confirmed!", replyDoc.RootElement.GetProperty("content").GetString());
+        }
+
+        // 429 rate-limit on rapid follow-up surfaces retry_after_minutes.
+        DeskBoxFeedbackReplyResult rateLimited = await service.PostReplyAsync(88, "Another rapid reply");
+        Assert.False(rateLimited.Ok);
+        Assert.Equal("rate_limited", rateLimited.Error);
+        Assert.Equal(1, rateLimited.RetryAfterMinutes);
     }
 
     private FeedbackService CreateService(

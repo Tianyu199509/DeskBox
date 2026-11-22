@@ -40,8 +40,27 @@ public static class WidgetPositioningService
         return ResolveBoundsCore(
             config,
             fallbackWorkArea,
-            availableWorkAreas.Select(workArea => new AvailableMonitorWorkArea(
-                workArea, null, null, false, workArea, 1.0)).ToList());
+            MapToAvailableMonitorWorkAreas(availableWorkAreas));
+    }
+
+    private static IReadOnlyList<AvailableMonitorWorkArea> MapToAvailableMonitorWorkAreas(
+        IReadOnlyList<RectInt32> availableWorkAreas)
+    {
+        if (availableWorkAreas.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<AvailableMonitorWorkArea> liveAreas = GetAvailableMonitorWorkAreas();
+        var mapped = new List<AvailableMonitorWorkArea>(availableWorkAreas.Count);
+        foreach (RectInt32 workArea in availableWorkAreas)
+        {
+            mapped.Add(
+                FindMonitorForWorkArea(workArea, liveAreas) ??
+                new AvailableMonitorWorkArea(workArea, null, null, false, workArea, 1.0));
+        }
+
+        return mapped;
     }
 
     internal static RectInt32 ResolveBoundsForTest(
@@ -131,14 +150,29 @@ public static class WidgetPositioningService
     {
         int x = (int)Math.Round(double.IsFinite(config.X) ? config.X : 100);
         int y = (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 100);
-        var fallbackWorkArea = DisplayArea.GetFromPoint(
-            new PointInt32(x, y),
-            DisplayAreaFallback.Nearest).WorkArea;
+        int width = (int)Math.Round(double.IsFinite(config.Width) && config.Width > 0 ? config.Width : SettingsService.DefaultWidgetWidth);
+        int height = (int)Math.Round(double.IsFinite(config.Height) && config.Height > 0 ? config.Height : SettingsService.DefaultWidgetHeight);
+        var center = new PointInt32(
+            x + Math.Max(1, width) / 2,
+            y + Math.Max(1, height) / 2);
+        IReadOnlyList<AvailableMonitorWorkArea> availableWorkAreas = GetAvailableMonitorWorkAreas();
+        RectInt32? resolvedFallback = DisplayArea.GetFromPoint(
+            center,
+            DisplayAreaFallback.Nearest)?.WorkArea;
+        if (resolvedFallback is null && availableWorkAreas.Count == 0)
+        {
+            fellBack = true;
+            return new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height));
+        }
+
+        var fallbackWorkArea = resolvedFallback ?? availableWorkAreas[0].WorkArea;
+
+
 
         return ResolveBoundsCore(
             config,
             fallbackWorkArea,
-            GetAvailableMonitorWorkAreas(),
+            availableWorkAreas,
             out fellBack);
     }
 
@@ -336,7 +370,7 @@ public static class WidgetPositioningService
 
     public static string CreateMonitorKey(RectInt32 workArea)
     {
-        return $"{workArea.X}:{workArea.Y}:{workArea.Width}:{workArea.Height}";
+        return FormattableString.Invariant($"{workArea.X}:{workArea.Y}:{workArea.Width}:{workArea.Height}");
     }
 
     public static IReadOnlyList<RectInt32> GetAvailableWorkAreas()
@@ -472,10 +506,70 @@ public static class WidgetPositioningService
             ToPhysicalPixels(SettingsService.MinWidgetHeight, scale));
     }
 
-    public static SizeInt32 GetPhysicalMinimumSizeForBounds(RectInt32 bounds)
+    public static SizeInt32 GetPhysicalMinimumSizeForBounds(RectInt32 bounds) =>
+        GetPhysicalMinimumSizeForBounds(bounds, null, null);
+
+    public static SizeInt32 GetPhysicalMinimumSize(
+        RectInt32 workArea,
+        double? minLogicalWidth,
+        double? minLogicalHeight)
+    {
+        double scale = GetDpiScale(workArea);
+        double effectiveMinW = minLogicalWidth is > 0 && double.IsFinite(minLogicalWidth.Value)
+            ? Math.Max(SettingsService.MinWidgetWidth, minLogicalWidth.Value)
+            : SettingsService.MinWidgetWidth;
+        double effectiveMinH = minLogicalHeight is > 0 && double.IsFinite(minLogicalHeight.Value)
+            ? Math.Max(SettingsService.MinWidgetHeight, minLogicalHeight.Value)
+            : SettingsService.MinWidgetHeight;
+        return new SizeInt32(
+            ToPhysicalPixels(effectiveMinW, scale),
+            ToPhysicalPixels(effectiveMinH, scale));
+    }
+
+    public static SizeInt32 GetPhysicalMinimumSizeForBounds(
+        RectInt32 bounds,
+        double? minLogicalWidth,
+        double? minLogicalHeight)
     {
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
-        return GetPhysicalMinimumSize(workArea);
+        return GetPhysicalMinimumSize(workArea, minLogicalWidth, minLogicalHeight);
+    }
+
+    public static RectInt32 CalculateCrossDpiDragBounds(
+        PointInt32 initialWindowPos,
+        SizeInt32 initialWindowSize,
+        PointInt32 initialPointerPt,
+        double initialDpiScale,
+        PointInt32 currentPointerPt,
+        double targetDpiScale)
+    {
+        double srcScale = double.IsFinite(initialDpiScale) && initialDpiScale > 0 ? initialDpiScale : 1.0;
+        double dstScale = double.IsFinite(targetDpiScale) && targetDpiScale > 0 ? targetDpiScale : srcScale;
+        double scaleRatio = dstScale / srcScale;
+        int initW = Math.Max(1, initialWindowSize.Width);
+        int initH = Math.Max(1, initialWindowSize.Height);
+
+        if (Math.Abs(scaleRatio - 1.0) < 0.001)
+        {
+            return new RectInt32(
+                initialWindowPos.X + (currentPointerPt.X - initialPointerPt.X),
+                initialWindowPos.Y + (currentPointerPt.Y - initialPointerPt.Y),
+                initW,
+                initH);
+        }
+
+        int scaledWidth = Math.Max(1, (int)Math.Round(initW * scaleRatio, MidpointRounding.AwayFromZero));
+        int scaledHeight = Math.Max(1, (int)Math.Round(initH * scaleRatio, MidpointRounding.AwayFromZero));
+        int grabOffsetX = initialPointerPt.X - initialWindowPos.X;
+        int grabOffsetY = initialPointerPt.Y - initialWindowPos.Y;
+        int scaledGrabX = (int)Math.Round(grabOffsetX * ((double)scaledWidth / initW), MidpointRounding.AwayFromZero);
+        int scaledGrabY = (int)Math.Round(grabOffsetY * ((double)scaledHeight / initH), MidpointRounding.AwayFromZero);
+
+        return new RectInt32(
+            currentPointerPt.X - scaledGrabX,
+            currentPointerPt.Y - scaledGrabY,
+            scaledWidth,
+            scaledHeight);
     }
 
     public static int ToPhysicalPixels(double logicalPixels, double scale)
@@ -500,7 +594,7 @@ public static class WidgetPositioningService
     private static int ResolvePhysicalWidth(WidgetConfig config, double scale)
     {
         double width = double.IsFinite(config.Width)
-            ? Math.Max(SettingsService.MinWidgetWidth, config.Width)
+            ? Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Width)
             : SettingsService.DefaultWidgetWidth;
         return UsesLogicalBounds(config)
             ? ToPhysicalPixels(width, scale)
@@ -510,7 +604,7 @@ public static class WidgetPositioningService
     private static int ResolvePhysicalHeight(WidgetConfig config, double scale)
     {
         double height = double.IsFinite(config.Height)
-            ? Math.Max(SettingsService.MinWidgetHeight, config.Height)
+            ? Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Height)
             : SettingsService.DefaultWidgetHeight;
         return UsesLogicalBounds(config)
             ? ToPhysicalPixels(height, scale)
@@ -588,15 +682,38 @@ public static class WidgetPositioningService
         workArea = default;
         var parts = value.Split(':');
         if (parts.Length != 4 ||
-            !int.TryParse(parts[0], out int x) ||
-            !int.TryParse(parts[1], out int y) ||
-            !int.TryParse(parts[2], out int width) ||
-            !int.TryParse(parts[3], out int height))
+            !TryParseMonitorCoordinate(parts[0], out int x) ||
+            !TryParseMonitorCoordinate(parts[1], out int y) ||
+            !TryParseMonitorCoordinate(parts[2], out int width) ||
+            !TryParseMonitorCoordinate(parts[3], out int height))
         {
             return false;
         }
 
         workArea = new RectInt32(x, y, width, height);
         return width > 0 && height > 0;
+    }
+
+    private static bool TryParseMonitorCoordinate(string rawPart, out int value)
+    {
+        if (int.TryParse(
+                rawPart,
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value))
+        {
+            return true;
+        }
+
+        string cleaned = rawPart
+            .Replace("\u061C", string.Empty, StringComparison.Ordinal)
+            .Replace("\u200E", string.Empty, StringComparison.Ordinal)
+            .Replace("\u200F", string.Empty, StringComparison.Ordinal)
+            .Replace('\u2212', '-');
+        return int.TryParse(
+            cleaned,
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out value);
     }
 }

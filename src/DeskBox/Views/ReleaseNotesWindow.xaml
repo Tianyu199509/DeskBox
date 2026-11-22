@@ -20,6 +20,7 @@
 
         <Grid
             x:Name="AppTitleBar"
+            FlowDirection="LeftToRight"
             Padding="16,0,140,0">
             <StackPanel
                 Orientation="Horizontal"

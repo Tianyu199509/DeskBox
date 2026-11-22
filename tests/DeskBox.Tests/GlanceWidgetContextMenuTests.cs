@@ -95,7 +95,7 @@ public sealed class GlanceWidgetContextMenuTests
     }
 
     [Fact]
-    public void ContextMenu_KeepsOnlyDisplayAndLayoutBeforeSharedWidgetCommands()
+    public void ContextMenu_KeepsOnlyStyleAndDisplayBeforeSharedWidgetCommands()
     {
         string builder = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/GlanceWidgetContextMenuBuilder.cs"));
@@ -110,7 +110,8 @@ public sealed class GlanceWidgetContextMenuTests
         Assert.DoesNotContain("Glance.Actions.OpenSource", builder, StringComparison.Ordinal);
         Assert.DoesNotContain("Glance.Actions.ShowInExplorer", builder, StringComparison.Ordinal);
         Assert.Contains("Glance.Display.Title", builder, StringComparison.Ordinal);
-        Assert.Contains("Glance.Layout.Title", builder, StringComparison.Ordinal);
+        Assert.Contains("Glance.Display.Seconds", builder, StringComparison.Ordinal);
+        Assert.Contains("Glance.Style.Title", builder, StringComparison.Ordinal);
         Assert.Contains("CurrentContent is GlanceWidgetContentAdapter", host, StringComparison.Ordinal);
         Assert.True(
             host.IndexOf("GlanceWidgetContextMenuBuilder.Append", StringComparison.Ordinal) <
@@ -125,6 +126,7 @@ public sealed class GlanceWidgetContextMenuTests
         {
             using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
             Assert.True(document.RootElement.TryGetProperty("Widget.Settings.Glance", out _), path);
+            Assert.True(document.RootElement.TryGetProperty("Glance.Display.Seconds", out _), path);
             Assert.True(document.RootElement.TryGetProperty("Glance.Display.Year", out _), path);
             Assert.True(document.RootElement.TryGetProperty("Glance.Speed.Title", out _), path);
         }

@@ -1,9 +1,11 @@
 namespace DeskBox.Services;
 
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
+using DeskBox.Services.Ipc;
 
 /// <summary>
 /// Client half of the settings-host IPC pipe (batch 3b). Runs in the
@@ -106,8 +108,17 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             // while the main process kept migrating/restoring (the migrate
             // dialog even lost its progress subscription mid-flight).
             [SettingsIpcMethods.RestorePrepare] = TimeSpan.FromMinutes(10),
-            [SettingsIpcMethods.WidgetMigratePreview] = TimeSpan.FromMinutes(10),
-            [SettingsIpcMethods.WidgetMigrateRoot] = TimeSpan.FromMinutes(10),
+            // Storage migration preview & copy can walk/copy tens of gigabytes
+            // on slow or external media. A fixed client ceiling caused split-brain:
+            // the settings dialog reported failure at 10m while the main process
+            // kept copying and later committed the new root behind the user's back.
+            // Explicit cancellation rides WidgetMigrateCancel; pipe loss faults
+            // pending calls via StartReader's FailPending.
+            [SettingsIpcMethods.WidgetMigratePreview] = Timeout.InfiniteTimeSpan,
+            [SettingsIpcMethods.WidgetMigrateRoot] = Timeout.InfiniteTimeSpan,
+            [SettingsIpcMethods.WidgetMigrateTryEmptySwitch] = TimeSpan.FromMinutes(2),
+            [SettingsIpcMethods.WidgetMigrateRetrySourceCleanup] = Timeout.InfiniteTimeSpan,
+            [SettingsIpcMethods.WidgetMigrateCleanupCopies] = Timeout.InfiniteTimeSpan,
             [SettingsIpcMethods.WidgetRestoreOrphans] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetMoveOrphanToDesktop] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetDeleteOrphan] = TimeSpan.FromMinutes(10),
@@ -124,7 +135,10 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             [SettingsIpcMethods.DataQuickCaptureClear] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.DataQuickCaptureClearRecent] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.AppForceExternalRecovery] = TimeSpan.FromSeconds(60),
-        };
+            [Studio.StudioIpcMethods.CreateWidget] = TimeSpan.FromSeconds(60),
+            [Studio.StudioIpcMethods.UpdateWidgetManifest] = TimeSpan.FromSeconds(60),
+            [Studio.StudioIpcMethods.CommitAgentStage] = TimeSpan.FromSeconds(60),
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static TimeSpan TimeoutFor(string method) =>
         MethodTimeouts.TryGetValue(method, out TimeSpan timeout)
@@ -135,21 +149,23 @@ public sealed class SettingsIpcClient : IAsyncDisposable
     {
         _ = Task.Run(async () =>
         {
-            var reader = new StreamReader(_stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
+            const int MaxEnvelopeChars = 32 * 1024 * 1024;
+            using var reader = new PipeBoundedLineReader(_stream);
             try
             {
                 while (!_cts.IsCancellationRequested)
                 {
-                    string? line = await reader.ReadLineAsync(_cts.Token).ConfigureAwait(false);
-                    if (line is null)
+                    bool oversized = false;
+                    string? line = await reader.ReadLineAsync(
+                        MaxEnvelopeChars,
+                        _cts.Token,
+                        onOversizedLine: length =>
+                        {
+                            oversized = true;
+                            App.Log($"[SettingsIpc] Main process sent a {length}-char envelope; treating the pipe as broken");
+                        }).ConfigureAwait(false);
+                    if (line is null || oversized)
                     {
-                        break;
-                    }
-
-                    // Batch R12: same 32MB runaway guard as the server side.
-                    if (line.Length > 32 * 1024 * 1024)
-                    {
-                        App.Log($"[SettingsIpc] Main process sent a {line.Length}-char envelope; treating the pipe as broken");
                         break;
                     }
 
@@ -237,10 +253,6 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             Ok: true,
             payload,
             Error: null);
-        string line = JsonSerializer.Serialize(
-            envelope,
-            SettingsIpcJsonContext.Default.SettingsIpcEnvelope);
-        byte[] bytes = Encoding.UTF8.GetBytes(line + '\n');
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
@@ -256,8 +268,10 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             await _writeGate.WaitAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);
-                await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
+                await PipeEnvelopeSerializer.WriteEnvelopeAsync(
+                    _stream,
+                    jsonWriter => JsonSerializer.Serialize(jsonWriter, envelope, SettingsIpcJsonContext.Default.SettingsIpcEnvelope),
+                    linked.Token).ConfigureAwait(false);
             }
             finally
             {

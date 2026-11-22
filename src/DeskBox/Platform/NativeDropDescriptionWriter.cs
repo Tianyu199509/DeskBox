@@ -20,6 +20,7 @@ internal static partial class NativeDropDescriptionWriter
     private const uint GmemZeroInit = 0x0040;
     private const uint WmUser = 0x0400;
     private const uint DdwmUpdateWindow = WmUser + 3;
+    private const uint SpiGetDragFullWindows = 0x0026;
     private const int MaxPath = 260;
     private const int DropImageInvalid = -1;
     private const int DropImageNone = 0;
@@ -64,6 +65,60 @@ internal static partial class NativeDropDescriptionWriter
         uint message,
         nuint wParam,
         nint lParam);
+
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SystemParametersInfoW(
+        uint uiAction,
+        uint uiParam,
+        out int pvParam,
+        uint fWinIni);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(nint hWnd);
+
+    internal static bool IsDragFullWindowsEnabled() =>
+        !SystemParametersInfoW(SpiGetDragFullWindows, 0, out int enabled, 0) ||
+        enabled != 0;
+
+    internal static bool HasDragWindow(nint dataObjectPointer)
+    {
+        if (dataObjectPointer == 0 || !IsDragFullWindowsEnabled())
+        {
+            return false;
+        }
+
+        return TryGetDragWindowHandleCore(dataObjectPointer) != 0;
+    }
+
+    /// <summary>
+    /// Policy-independent probe: the shell publishes the drag window handle even when
+    /// the "show window contents while dragging" setting is off (CI server defaults).
+    /// </summary>
+    internal static nint TryGetDragWindowHandleForDiagnostics(nint dataObjectPointer)
+    {
+        if (dataObjectPointer == 0)
+        {
+            return 0;
+        }
+
+        return TryGetDragWindowHandleCore(dataObjectPointer);
+    }
+
+    private static nint TryGetDragWindowHandleCore(nint dataObjectPointer)
+    {
+        try
+        {
+            nint dragWindow = TryGetDragWindowHandle(
+                new NativeOleDataObject(dataObjectPointer));
+            return dragWindow != 0 && IsWindow(dragWindow) ? dragWindow : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     internal static bool TryApply(
         nint dataObjectPointer,
@@ -177,7 +232,7 @@ internal static partial class NativeDropDescriptionWriter
         }
     }
 
-    private static void WriteBoundedUnicode(string value, nint destination)
+    private static unsafe void WriteBoundedUnicode(string value, nint destination)
     {
         int length = Math.Min(value.Length, MaxPath - 1);
         if (length <= 0)
@@ -185,11 +240,23 @@ internal static partial class NativeDropDescriptionWriter
             return;
         }
 
-        char[] characters = value.AsSpan(0, length).ToArray();
-        Marshal.Copy(characters, 0, destination, characters.Length);
+        value.AsSpan(0, length).CopyTo(new Span<char>((void*)destination, length));
     }
 
     private static void NotifyDragWindow(NativeOleDataObject dataObject)
+    {
+        nint dragWindow = TryGetDragWindowHandle(dataObject);
+        if (dragWindow != 0)
+        {
+            _ = PostMessageW(
+                dragWindow,
+                DdwmUpdateWindow,
+                0,
+                0);
+        }
+    }
+
+    private static nint TryGetDragWindowHandle(NativeOleDataObject dataObject)
     {
         var format = new NativeFormatEtc
         {
@@ -201,7 +268,7 @@ internal static partial class NativeDropDescriptionWriter
         };
         if (dataObject.GetData(ref format, out NativeStorageMedium medium) < 0)
         {
-            return;
+            return 0;
         }
 
         try
@@ -210,33 +277,23 @@ internal static partial class NativeDropDescriptionWriter
                 medium.Content == 0 ||
                 GlobalSize(medium.Content) < sizeof(uint))
             {
-                return;
+                return 0;
             }
 
             nint payload = GlobalLock(medium.Content);
             if (payload == 0)
             {
-                return;
+                return 0;
             }
 
-            nint dragWindow;
             try
             {
-                dragWindow = new IntPtr(
+                return new IntPtr(
                     unchecked((long)(uint)Marshal.ReadInt32(payload)));
             }
             finally
             {
                 _ = GlobalUnlock(medium.Content);
-            }
-
-            if (dragWindow != 0)
-            {
-                _ = PostMessageW(
-                    dragWindow,
-                    DdwmUpdateWindow,
-                    0,
-                    0);
             }
         }
         finally

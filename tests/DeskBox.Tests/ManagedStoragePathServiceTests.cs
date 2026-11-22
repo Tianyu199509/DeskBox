@@ -1,5 +1,6 @@
 using System.IO;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -7,21 +8,59 @@ namespace DeskBox.Tests;
 public sealed class ManagedStoragePathServiceTests
 {
     [Fact]
-    public void GetRecommendedPath_AlwaysStaysUnderUserProfile()
+    public void SelectRecommendedPath_PrefersConciseDDeskBoxWhenDDriveIsSuitable()
     {
-        // The default for new profiles must not depend on whatever hardware
-        // happens to be attached at first launch (e.g. a USB drive).
-        string expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "DeskBox");
+        ManagedStorageDriveCandidate[] drives =
+        [
+            new(@"C:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, 20L * 1024 * 1024 * 1024, false),
+            new(@"E:\", DriveType.Fixed, true, 800L * 1024 * 1024 * 1024, false)
+        ];
 
-        Assert.Equal(expected, ManagedStoragePathService.GetRecommendedPath());
+        string selected = ManagedStoragePathService.SelectRecommendedPath(
+            @"C:\Users\Simon",
+            @"C:\",
+            drives);
+
+        Assert.Equal(@"D:\DeskBox", selected);
     }
 
     [Fact]
-    public void SelectSuitableNonSystemDrive_PrefersLargestInternalNonSystemDrive()
+    public void SelectRecommendedPath_SkipsInvalidCandidateAndFallsBackToUserProfileWhenOnlySystemDriveQualifies()
     {
         ManagedStorageDriveCandidate[] drives =
+        [
+            new(@"C:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, false),
+            // Portable USB SSD reporting as fixed must not become the automatic default.
+            new(@"D:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, true)
+        ];
+
+        string singleInternal = ManagedStoragePathService.SelectRecommendedPath(
+            @"C:\Users\Simon",
+            @"C:\",
+            drives);
+        Assert.Equal(@"C:\Users\Simon\DeskBox", singleInternal);
+
+        // If the user redirected their Windows Desktop directly to D:\ so D:\DeskBox
+        // fails root validation, SelectRecommendedPath moves on to E:\DeskBox.
+        ManagedStorageDriveCandidate[] withDesktopOnD =
+        [
+            new(@"C:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, false),
+            new(@"E:\", DriveType.Fixed, true, 150L * 1024 * 1024 * 1024, false)
+        ];
+        string skippedInvalidD = ManagedStoragePathService.SelectRecommendedPath(
+            @"C:\Users\Simon",
+            @"C:\",
+            withDesktopOnD,
+            candidatePath => !string.Equals(candidatePath, @"D:\DeskBox", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(@"E:\DeskBox", skippedInvalidD);
+    }
+
+    [Fact]
+    public void SelectSuitableNonSystemDrive_PrefersDDriveFirstThenLargestInternalNonSystemDrive()
+    {
+        ManagedStorageDriveCandidate[] drivesWithD =
         [
             new(@"C:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, false),
             new(@"D:\", DriveType.Fixed, true, 20L * 1024 * 1024 * 1024, false),
@@ -31,11 +70,65 @@ public sealed class ManagedStoragePathServiceTests
             new(@"G:\", DriveType.Removable, true, 100L * 1024 * 1024 * 1024, true)
         ];
 
-        ManagedStorageDriveCandidate? selected = ManagedStoragePathService.SelectSuitableNonSystemDrive(
+        ManagedStorageDriveCandidate? selectedWithD = ManagedStoragePathService.SelectSuitableNonSystemDrive(
             @"C:\",
-            drives);
+            drivesWithD);
+        Assert.Equal(@"D:\", selectedWithD?.RootPath);
 
-        Assert.Equal(@"E:\", selected?.RootPath);
+        ManagedStorageDriveCandidate[] drivesWhereDIsUsb =
+        [
+            new(@"C:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, true),
+            new(@"E:\", DriveType.Fixed, true, 40L * 1024 * 1024 * 1024, false),
+            new(@"F:\", DriveType.Fixed, true, 120L * 1024 * 1024 * 1024, false)
+        ];
+
+        ManagedStorageDriveCandidate? selectedFallback = ManagedStoragePathService.SelectSuitableNonSystemDrive(
+            @"C:\",
+            drivesWhereDIsUsb);
+        Assert.Equal(@"F:\", selectedFallback?.RootPath);
+    }
+
+    [Fact]
+    public void BuildSelectableStorageDriveOptions_IncludesSystemProfileAndInternalFixedDrivesInOrder()
+    {
+        ManagedStorageDriveCandidate[] drives =
+        [
+            new(@"E:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, false),
+            new(@"C:\", DriveType.Fixed, true, 80L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, 5L * 1024 * 1024 * 1024, false),
+            // Tiny OEM recovery partition (< 1 GB) and USB drives are excluded from quick pills.
+            new(@"F:\", DriveType.Fixed, true, 500L * 1024 * 1024, false),
+            new(@"G:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, true),
+            new(@"H:\", DriveType.CDRom, true, 0, true)
+        ];
+
+        IReadOnlyList<ManagedStorageSelectableDriveOption> options =
+            ManagedStoragePathService.BuildSelectableStorageDriveOptions(
+                @"C:\Users\Simon",
+                @"C:\",
+                drives);
+
+        Assert.Collection(
+            options,
+            c =>
+            {
+                Assert.Equal("C:", c.DriveLabel);
+                Assert.Equal(@"C:\Users\Simon\DeskBox", c.TargetRootPath);
+                Assert.True(c.IsSystemDrive);
+            },
+            d =>
+            {
+                Assert.Equal("D:", d.DriveLabel);
+                Assert.Equal(@"D:\DeskBox", d.TargetRootPath);
+                Assert.False(d.IsSystemDrive);
+            },
+            e =>
+            {
+                Assert.Equal("E:", e.DriveLabel);
+                Assert.Equal(@"E:\DeskBox", e.TargetRootPath);
+                Assert.False(e.IsSystemDrive);
+            });
     }
 
     [Fact]

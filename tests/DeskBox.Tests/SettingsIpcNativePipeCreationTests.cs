@@ -53,16 +53,8 @@ public sealed class SettingsIpcNativePipeCreationTests
         await client.FlushAsync();
 
         using var clientReader = new StreamReader(client, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: false);
-        string? echoed;
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        try
-        {
-            echoed = await clientReader.ReadLineAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            echoed = null;
-        }
+        string? echoed = await clientReader.ReadLineAsync(timeoutCts.Token);
 
         await serverEcho.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal("echo:ping", echoed);

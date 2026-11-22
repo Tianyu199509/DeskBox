@@ -10,67 +10,146 @@
     AutomationProperties.Name="{x:Bind Item.Title, Mode=OneTime}"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <Style x:Key="RowQuickActionButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="AllowFocusOnInteraction" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ActionPill"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="PointerOver">
+                                        <Storyboard>
+                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionPill"
+                                                                           Storyboard.TargetProperty="Background">
+                                                <DiscreteObjectKeyFrame KeyTime="0"
+                                                                        Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                                            </ObjectAnimationUsingKeyFrames>
+                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionContent"
+                                                                           Storyboard.TargetProperty="Foreground">
+                                                <DiscreteObjectKeyFrame KeyTime="0"
+                                                                        Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                            </ObjectAnimationUsingKeyFrames>
+                                        </Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <Storyboard>
+                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionPill"
+                                                                           Storyboard.TargetProperty="Background">
+                                                <DiscreteObjectKeyFrame KeyTime="0"
+                                                                        Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
+                                            </ObjectAnimationUsingKeyFrames>
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter x:Name="ActionContent"
+                                              Content="{TemplateBinding Content}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
     <!--
-        Flat result row: selection bar, shell icon (or glyph fallback), title + path,
-        then the sortable size/date columns. Hover and keyboard-selection visuals are
-        owned by the control itself (see code-behind); the shell icon visibility is
-        synced by the popup window via RefreshIconVisuals because the icon arrives
-        lazily and is not observable.
+        CmdPal-inspired compact single-line result row (10px concentric inner radius inside 16px popup):
+        flush left accent pill selection bar, crisp 24px icon, single-line horizontal Title + muted Subtitle
+        baseline, and metadata delegated to the right-side Details sidebar.
     -->
-    <Grid x:Name="RowRoot" Padding="4,5" Margin="0,1" CornerRadius="4" Background="Transparent"
+    <Grid x:Name="RowRoot" Padding="10,0" Margin="0,1" CornerRadius="10" Height="44" MinHeight="44"
+          Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
           IsTabStop="False">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="22"/>
             <ColumnDefinition Width="34"/>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition x:Name="TypeColumn" Width="75"/>
-            <ColumnDefinition x:Name="SizeColumn" Width="90"/>
-            <ColumnDefinition x:Name="DateColumn" Width="110"/>
+            <ColumnDefinition x:Name="TypeColumn" Width="0"/>
+            <ColumnDefinition x:Name="SizeColumn" Width="0"/>
+            <ColumnDefinition x:Name="DateColumn" Width="0"/>
         </Grid.ColumnDefinitions>
-        <!-- Selection chrome is neutral: the row is selected, which is a
-             pointer-driven state, not a semantic emphasis. -->
-        <Rectangle x:Name="SelectionBar" Grid.Column="0" Width="3" RadiusX="1.5" RadiusY="1.5"
-                   Fill="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
-                   Visibility="Collapsed" VerticalAlignment="Stretch"
-                   HorizontalAlignment="Left" Margin="0,7,0,7"/>
-        <Border x:Name="MultiSelectedIcon" Grid.Column="0" Width="16" Height="16" CornerRadius="8"
-                Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
-                HorizontalAlignment="Center" VerticalAlignment="Center"
-                Visibility="Collapsed" IsHitTestVisible="False">
-            <FontIcon Glyph="&#xE73E;" FontSize="9"
-                      Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
-        </Border>
-        <Grid x:Name="IconColumn" Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0" IsTabStop="False">
-            <Border x:Name="GlyphBlock" Width="28" Height="28" CornerRadius="4"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+
+        <Rectangle x:Name="SelectionBar" Grid.Column="0" Width="3" Height="16" RadiusX="1.5" RadiusY="1.5"
+                   Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                   Margin="-6,0,0,0"
+                   Visibility="Collapsed" VerticalAlignment="Center"
+                   HorizontalAlignment="Left"/>
+
+        <Grid x:Name="IconColumn" Grid.Column="0" Width="26" Height="26"
+              HorizontalAlignment="Left" VerticalAlignment="Center" IsTabStop="False">
+            <Border x:Name="GlyphBlock" Width="26" Height="26"
+                    Background="Transparent"
                     HorizontalAlignment="Center" VerticalAlignment="Center">
-                <FontIcon Glyph="{x:Bind Item.DisplayGlyph, Mode=OneTime}" FontSize="13"
+                <FontIcon Glyph="{x:Bind Item.DisplayGlyph, Mode=OneTime}" FontSize="17"
                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
-            <Image x:Name="FileIcon" Source="{x:Bind Item.Icon, Mode=OneTime}" Width="26" Height="26"
-                   Visibility="Collapsed"
+            <Image x:Name="FileIcon" Source="{x:Bind Item.Icon, Mode=OneTime}" Width="24" Height="24"
+                   Stretch="Uniform" Visibility="Collapsed"
                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Grid>
-        <StackPanel Grid.Column="2" VerticalAlignment="Center">
-            <TextBlock x:Name="TitleText" Text="{x:Bind Item.Title, Mode=OneTime}" FontSize="14"
+
+        <Grid Grid.Column="1" VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="TitleText" Grid.Column="0" Text="{x:Bind Item.Title, Mode=OneTime}" FontSize="14"
                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                       TextTrimming="CharacterEllipsis"/>
-            <TextBlock x:Name="SubtitleText" Text="{x:Bind Item.Subtitle, Mode=OneTime}" FontSize="12"
-                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" MaxLines="1"/>
+            <TextBlock x:Name="SubtitleText" Grid.Column="1" Text="{x:Bind Item.Subtitle, Mode=OneTime}" FontSize="13"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       Margin="10,0,0,0" VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis" MaxLines="1"
                        ToolTipService.ToolTip="{x:Bind Item.DetailPath, Mode=OneTime}"/>
-        </StackPanel>
-        <TextBlock x:Name="TypeText" Grid.Column="3" Text="{x:Bind Item.TypeDisplay, Mode=OneTime}" FontSize="12"
+        </Grid>
+
+        <TextBlock x:Name="TypeText" Grid.Column="2" Text="{x:Bind Item.TypeDisplay, Mode=OneTime}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                   VerticalAlignment="Center" Margin="4,0,6,0"
+                   VerticalAlignment="Center" Margin="6,0,6,0"
                    TextTrimming="CharacterEllipsis"/>
-        <TextBlock x:Name="SizeText" Grid.Column="4" Text="{x:Bind Item.SizeDisplay, Mode=OneTime}" FontSize="12"
+        <TextBlock x:Name="SizeText" Grid.Column="3" Text="{x:Bind Item.SizeDisplay, Mode=OneTime}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                    VerticalAlignment="Center" Margin="6,0,6,0"/>
-        <TextBlock x:Name="DateText" Grid.Column="5" Text="{x:Bind Item.DateDisplay, Mode=OneTime}" FontSize="12"
+        <TextBlock x:Name="DateText" Grid.Column="4" Text="{x:Bind Item.DateDisplay, Mode=OneTime}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                   VerticalAlignment="Center"/>
+                   VerticalAlignment="Center" Margin="6,0,0,0"/>
+
+        <StackPanel x:Name="QuickActionsPanel" Grid.Column="1" Grid.ColumnSpan="4"
+                    HorizontalAlignment="Right" Orientation="Horizontal" Spacing="2"
+                    VerticalAlignment="Center" Margin="8,0,0,0" Visibility="Collapsed">
+            <Button x:Name="QuickOpenLocationButton" Style="{StaticResource RowQuickActionButtonStyle}"
+                    Click="QuickOpenLocationButton_Click">
+                <FontIcon Glyph="&#xEC50;" FontSize="13.5"/>
+            </Button>
+            <Button x:Name="QuickPrimaryButton" Style="{StaticResource RowQuickActionButtonStyle}"
+                    Click="QuickPrimaryButton_Click">
+                <FontIcon x:Name="QuickPrimaryGlyph" Glyph="&#xE8A7;" FontSize="13.5"/>
+            </Button>
+            <Button x:Name="QuickMoreButton" Style="{StaticResource RowQuickActionButtonStyle}"
+                    Click="QuickMoreButton_Click">
+                <FontIcon Glyph="&#xE712;" FontSize="13.5"/>
+            </Button>
+        </StackPanel>
     </Grid>
 </UserControl>

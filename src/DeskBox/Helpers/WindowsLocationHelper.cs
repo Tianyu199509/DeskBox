@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Windows.Devices.Geolocation;
 
@@ -6,19 +7,36 @@ namespace DeskBox.Helpers;
 /// <summary>
 /// Uses the Windows Geolocation API (Windows.Devices.Geolocation.Geolocator)
 /// to get the current device location.
-/// Falls back to multiple IP-based geolocation services.
+/// Falls back sequentially to HTTPS IP-based geolocation services.
 /// Returns null if all methods fail, allowing the caller to guide the user
 /// to manually select a city.
 /// </summary>
 public static class WindowsLocationHelper
 {
+    private const string IpSbEndpointUrl = "https://api.ip.sb/geoip";
+    private const string IpApiCoEndpointUrl = "https://ipapi.co/json/";
+
     internal static readonly TimeSpan SuccessfulResultReuseDuration = TimeSpan.FromHours(6);
     internal static readonly TimeSpan FailedResultReuseDuration = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan DefaultProviderTimeout = TimeSpan.FromSeconds(4);
     private static readonly object s_locationGate = new();
-    private static readonly HttpClient s_httpClient = new()
+    private static readonly HttpClient s_httpClient = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient()
     {
-        Timeout = TimeSpan.FromSeconds(6)
-    };
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            AutomaticDecompression = DecompressionMethods.All
+        };
+        var client = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(6)
+        };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("DeskBox/1.0");
+        return client;
+    }
     private static Task<(double Lat, double Lon, string Name)?>? s_inFlightLocationTask;
     private static (double Lat, double Lon, string Name)? s_cachedLocation;
     private static DateTimeOffset s_cachedLocationAtUtc;
@@ -71,31 +89,29 @@ public static class WindowsLocationHelper
         try
         {
             (double Lat, double Lon, string Name)? result =
-                await ResolveLocationAsync(localizationService);
-            if (result is not null)
+                await ResolveLocationAsync(localizationService).ConfigureAwait(false);
+            lock (s_locationGate)
             {
-                lock (s_locationGate)
+                if (result is not null)
                 {
                     s_cachedLocation = result;
                     s_cachedLocationAtUtc = DateTimeOffset.UtcNow;
                     s_lastFailureAtUtc = default;
                 }
-            }
-            else
-            {
-                lock (s_locationGate)
+                else
                 {
                     s_lastFailureAtUtc = DateTimeOffset.UtcNow;
+                }
+
+                if (ReferenceEquals(s_inFlightLocationTask, completion.Task))
+                {
+                    s_inFlightLocationTask = null;
                 }
             }
 
             completion.TrySetResult(result);
         }
         catch (Exception ex)
-        {
-            completion.TrySetException(ex);
-        }
-        finally
         {
             lock (s_locationGate)
             {
@@ -104,16 +120,69 @@ public static class WindowsLocationHelper
                     s_inFlightLocationTask = null;
                 }
             }
+
+            completion.TrySetException(ex);
         }
+    }
+
+    private static readonly TimeSpan GeolocationAccessTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan GeopositionHardTimeout = TimeSpan.FromSeconds(12);
+
+    internal static async Task<GeolocationAccessStatus?> RequestAccessWithTimeoutAsync(
+        Func<Task<GeolocationAccessStatus>> requestAccess,
+        TimeSpan? timeout = null)
+    {
+        TimeSpan effectiveTimeout = timeout ?? GeolocationAccessTimeout;
+        Task<GeolocationAccessStatus> accessTask = requestAccess();
+        using var delayCts = new CancellationTokenSource();
+        Task delayTask = Task.Delay(effectiveTimeout, delayCts.Token);
+        Task completed = await Task.WhenAny(accessTask, delayTask).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, accessTask))
+        {
+            // Observe any late exception so a hung WinRT consent/lfsvc task
+            // never surfaces as an unobserved TaskException.
+            _ = accessTask.ContinueWith(
+                static t => _ = t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted);
+            return null;
+        }
+
+        delayCts.Cancel();
+        return await accessTask.ConfigureAwait(false);
+    }
+
+    private static async Task<Geoposition?> GetGeopositionWithTimeoutAsync(
+        Func<Task<Geoposition>> getPosition,
+        TimeSpan? timeout = null)
+    {
+        TimeSpan effectiveTimeout = timeout ?? GeopositionHardTimeout;
+        Task<Geoposition> positionTask = getPosition();
+        using var delayCts = new CancellationTokenSource();
+        Task delayTask = Task.Delay(effectiveTimeout, delayCts.Token);
+        Task completed = await Task.WhenAny(positionTask, delayTask).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, positionTask))
+        {
+            _ = positionTask.ContinueWith(
+                static t => _ = t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted);
+            return null;
+        }
+
+        delayCts.Cancel();
+        return await positionTask.ConfigureAwait(false);
     }
 
     private static async Task<(double Lat, double Lon, string Name)?> ResolveLocationAsync(
         Services.LocalizationService? localizationService)
     {
-        // 1. Try Windows Geolocation API (requires user permission)
+        // 1. Try Windows Geolocation API (requires user permission). Guard
+        // RequestAccessAsync with a bounded timeout so a hung Win10 lfsvc or
+        // CoreWindow-less Store consent call cannot poison s_inFlightLocationTask
+        // and block HTTPS IP geolocation fallback for the rest of the session.
         try
         {
-            var accessStatus = await Geolocator.RequestAccessAsync();
+            GeolocationAccessStatus? accessStatus = await RequestAccessWithTimeoutAsync(
+                static () => Geolocator.RequestAccessAsync().AsTask()).ConfigureAwait(false);
             if (accessStatus == GeolocationAccessStatus.Allowed)
             {
                 var geolocator = new Geolocator
@@ -122,233 +191,233 @@ public static class WindowsLocationHelper
                     DesiredAccuracyInMeters = 1000
                 };
 
-                var position = await geolocator.GetGeopositionAsync(
-                    maximumAge: TimeSpan.FromMinutes(10),
-                    timeout: TimeSpan.FromSeconds(10));
+                Geoposition? position = await GetGeopositionWithTimeoutAsync(
+                    () => geolocator.GetGeopositionAsync(
+                        maximumAge: TimeSpan.FromMinutes(10),
+                        timeout: TimeSpan.FromSeconds(10)).AsTask()).ConfigureAwait(false);
 
-                double lat = position.Coordinate.Point.Position.Latitude;
-                double lon = position.Coordinate.Point.Position.Longitude;
+                if (position is not null)
+                {
+                    double lat = position.Coordinate.Point.Position.Latitude;
+                    double lon = position.Coordinate.Point.Position.Longitude;
 
-                bool isEnglish = localizationService?.IsEnglish ?? false;
-                string name = isEnglish
-                    ? "Current Location"
-                    : localizationService?.T("Weather.CurrentLocation") ?? "Current Location";
+                    if (IsValidCoordinate(lat, lon))
+                    {
+                        string name = NormalizeLocationName(
+                            lat,
+                            lon,
+                            GetFallbackCurrentLocationName(localizationService),
+                            localizationService);
 
-                App.Log($"[WindowsLocation] Got GPS location lat={lat:F4} lon={lon:F4}");
-                return (lat, lon, name);
+                        App.Log($"[WindowsLocation] Got GPS location lat={lat:F4} lon={lon:F4}");
+                        return (lat, lon, name);
+                    }
+                }
+
+                App.Log("[WindowsLocation] GPS returned invalid or timed-out coordinates, trying IP fallback");
             }
-
-            App.Log($"[WindowsLocation] Access not allowed: {accessStatus}, trying IP fallback");
+            else
+            {
+                App.Log($"[WindowsLocation] Access not allowed: {accessStatus}, trying IP fallback");
+            }
         }
         catch (Exception ex)
         {
             App.Log($"[WindowsLocation] GPS failed: {ex.Message}, trying IP fallback");
         }
 
-        // 2. Try multiple IP geolocation services
-        return await TryMultiSourceIpLocationAsync(localizationService);
+        // 2. Try sequential HTTPS IP geolocation services
+        return await ResolveIpLocationCoreAsync(s_httpClient, localizationService).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Tries multiple IP geolocation services concurrently.
-    /// Returns the first successful result, or null if all fail.
+    /// Queries HTTPS IP geolocation providers sequentially so normal lookups
+    /// contact only one third-party service and never fall back to cleartext HTTP.
     /// </summary>
-    private static async Task<(double Lat, double Lon, string Name)?> TryMultiSourceIpLocationAsync(
-        Services.LocalizationService? localizationService)
+    internal static async Task<(double Lat, double Lon, string Name)?> ResolveIpLocationCoreAsync(
+        HttpClient httpClient,
+        Services.LocalizationService? localizationService = null,
+        TimeSpan? providerTimeout = null,
+        CancellationToken cancellationToken = default)
     {
-        using var cancellation = new CancellationTokenSource();
-        var pending = new List<Task<(double Lat, double Lon, string Name)?>>
-        {
-            TryIpApiComAsync(localizationService, cancellation.Token),
-            TryIpApiCoAsync(localizationService, cancellation.Token),
-            TryIpSbAsync(localizationService, cancellation.Token)
-        };
+        ArgumentNullException.ThrowIfNull(httpClient);
+        TimeSpan timeout = providerTimeout ?? DefaultProviderTimeout;
 
-        while (pending.Count > 0)
+        var primary = await TryIpSbAsync(
+            httpClient,
+            localizationService,
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+        if (primary is not null)
         {
-            Task<(double Lat, double Lon, string Name)?> completed =
-                await Task.WhenAny(pending);
-            pending.Remove(completed);
-            (double Lat, double Lon, string Name)? result = await completed;
-            if (result is not null)
-            {
-                await cancellation.CancelAsync();
-                return result;
-            }
+            return primary;
         }
 
-        App.Log("[WindowsLocation] All IP location sources failed");
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var secondary = await TryIpApiCoAsync(
+            httpClient,
+            localizationService,
+            timeout,
+            cancellationToken).ConfigureAwait(false);
+        if (secondary is not null)
+        {
+            return secondary;
+        }
+
+        App.Log("[WindowsLocation] All HTTPS IP location sources failed");
         return null;
     }
 
     /// <summary>
-    /// ip-api.com — free tier, returns city + coordinates.
-    /// Supports Chinese city names via language parameter.
+    /// ip.sb — lightweight HTTPS primary source, works well globally and in China.
     /// </summary>
-    private static async Task<(double Lat, double Lon, string Name)?> TryIpApiComAsync(
+    private static Task<(double Lat, double Lon, string Name)?> TryIpSbAsync(
+        HttpClient httpClient,
         Services.LocalizationService? localizationService,
-        CancellationToken cancellationToken)
+        TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        TryJsonGeoIpProviderAsync(
+            httpClient,
+            providerName: "ip.sb",
+            requestUrl: IpSbEndpointUrl,
+            localizationService,
+            timeout,
+            cancellationToken,
+            checkErrorProperty: false);
+
+    /// <summary>
+    /// ipapi.co — HTTPS fallback source.
+    /// </summary>
+    private static Task<(double Lat, double Lon, string Name)?> TryIpApiCoAsync(
+        HttpClient httpClient,
+        Services.LocalizationService? localizationService,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        TryJsonGeoIpProviderAsync(
+            httpClient,
+            providerName: "ipapi.co",
+            requestUrl: IpApiCoEndpointUrl,
+            localizationService,
+            timeout,
+            cancellationToken,
+            checkErrorProperty: true);
+
+    private static async Task<(double Lat, double Lon, string Name)?> TryJsonGeoIpProviderAsync(
+        HttpClient httpClient,
+        string providerName,
+        string requestUrl,
+        Services.LocalizationService? localizationService,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        bool checkErrorProperty)
     {
+        using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestCts.CancelAfter(timeout);
+
         try
         {
-            string lang = localizationService?.ApiLanguageCode ?? "en";
-            string json = await s_httpClient.GetStringAsync(
-                $"http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country&lang={lang}",
-                cancellationToken);
-
-            using var doc = JsonDocument.Parse(json);
+            await using Stream stream = await httpClient.GetStreamAsync(
+                requestUrl,
+                requestCts.Token).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: requestCts.Token).ConfigureAwait(false);
             var root = doc.RootElement;
 
-            if (root.TryGetProperty("status", out var statusElem) &&
-                statusElem.GetString() != "success")
+            if (checkErrorProperty &&
+                root.TryGetProperty("error", out var errorElem) &&
+                errorElem.ValueKind == JsonValueKind.True)
             {
-                App.Log($"[WindowsLocation] ip-api.com returned status: {statusElem.GetString()}");
+                App.Log($"[WindowsLocation] {providerName} returned error payload");
                 return null;
             }
 
-            if (root.TryGetProperty("lat", out var latElem) &&
-                root.TryGetProperty("lon", out var lonElem) &&
-                latElem.TryGetDouble(out double lat) &&
-                lonElem.TryGetDouble(out double lon))
-            {
-                string cityName = ExtractCityName(root, localizationService);
-                App.Log($"[WindowsLocation] ip-api.com: lat={lat:F4} lon={lon:F4} city={cityName}");
-                return (lat, lon, cityName);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[WindowsLocation] ip-api.com failed: {ex.Message}");
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// ipapi.co — fallback source.
-    /// </summary>
-    private static async Task<(double Lat, double Lon, string Name)?> TryIpApiCoAsync(
-        Services.LocalizationService? localizationService,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            string json = await s_httpClient.GetStringAsync(
-                "https://ipapi.co/json/",
-                cancellationToken);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
             if (root.TryGetProperty("latitude", out var latElem) &&
                 root.TryGetProperty("longitude", out var lonElem) &&
                 latElem.TryGetDouble(out double lat) &&
-                lonElem.TryGetDouble(out double lon))
+                lonElem.TryGetDouble(out double lon) &&
+                IsValidCoordinate(lat, lon))
             {
-                bool isEnglish = localizationService?.IsEnglish ?? false;
-                string cityName = string.Empty;
-
-                if (isEnglish && root.TryGetProperty("city", out var cityElem))
-                {
-                    cityName = cityElem.GetString() ?? string.Empty;
-                }
-                else if (root.TryGetProperty("region", out var regionElem))
-                {
-                    cityName = regionElem.GetString() ?? string.Empty;
-                }
-
-                if (string.IsNullOrWhiteSpace(cityName))
-                {
-                    cityName = isEnglish ? "Current Location" : localizationService?.T("Weather.CurrentLocation") ?? "Current Location";
-                }
-
-                App.Log($"[WindowsLocation] ipapi.co: lat={lat:F4} lon={lon:F4} city={cityName}");
+                string? rawCity = TryGetNonEmptyString(root, "city")
+                    ?? TryGetNonEmptyString(root, "region");
+                string cityName = NormalizeLocationName(lat, lon, rawCity, localizationService);
+                App.Log($"[WindowsLocation] {providerName}: lat={lat:F4} lon={lon:F4} city={cityName}");
                 return (lat, lon, cityName);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            return null;
         }
         catch (Exception ex)
         {
-            App.Log($"[WindowsLocation] ipapi.co failed: {ex.Message}");
+            App.Log($"[WindowsLocation] {providerName} failed: {ex.Message}");
         }
 
         return null;
     }
 
-    /// <summary>
-    /// ip.sb — lightweight fallback, works well in China.
-    /// </summary>
-    private static async Task<(double Lat, double Lon, string Name)?> TryIpSbAsync(
-        Services.LocalizationService? localizationService,
-        CancellationToken cancellationToken)
+    internal static string NormalizeLocationName(
+        double lat,
+        double lon,
+        string? rawName,
+        Services.LocalizationService? localizationService)
     {
+        string language = localizationService?.CurrentCultureName
+            ?? System.Globalization.CultureInfo.CurrentUICulture.Name;
+
         try
         {
-            string json = await s_httpClient.GetStringAsync(
-                "https://api.ip.sb/geoip",
-                cancellationToken);
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("latitude", out var latElem) &&
-                root.TryGetProperty("longitude", out var lonElem) &&
-                latElem.TryGetDouble(out double lat) &&
-                lonElem.TryGetDouble(out double lon))
+            string? nearest = Services.CitySearchService.GetNearestCityName(lat, lon, language);
+            if (!string.IsNullOrWhiteSpace(nearest))
             {
-                bool isEnglish = localizationService?.IsEnglish ?? false;
-                string cityName = string.Empty;
-
-                if (root.TryGetProperty("city", out var cityElem))
-                {
-                    cityName = cityElem.GetString() ?? string.Empty;
-                }
-                else if (root.TryGetProperty("region", out var regionElem))
-                {
-                    cityName = regionElem.GetString() ?? string.Empty;
-                }
-
-                if (string.IsNullOrWhiteSpace(cityName))
-                {
-                    cityName = isEnglish ? "Current Location" : localizationService?.T("Weather.CurrentLocation") ?? "Current Location";
-                }
-
-                App.Log($"[WindowsLocation] ip.sb: lat={lat:F4} lon={lon:F4} city={cityName}");
-                return (lat, lon, cityName);
+                return nearest;
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
         }
         catch (Exception ex)
         {
-            App.Log($"[WindowsLocation] ip.sb failed: {ex.Message}");
+            App.Log($"[WindowsLocation] NormalizeLocationName lookup failed: {ex.Message}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(rawName))
+        {
+            return rawName.Trim();
+        }
+
+        return GetFallbackCurrentLocationName(localizationService);
+    }
+
+    private static string GetFallbackCurrentLocationName(
+        Services.LocalizationService? localizationService)
+    {
+        bool isEnglish = localizationService?.IsEnglish ?? false;
+        return isEnglish
+            ? "Current Location"
+            : localizationService?.T("Weather.CurrentLocation") ?? "Current Location";
+    }
+
+    private static bool IsValidCoordinate(double lat, double lon) =>
+        double.IsFinite(lat) &&
+        double.IsFinite(lon) &&
+        lat is >= -90.0 and <= 90.0 &&
+        lon is >= -180.0 and <= 180.0;
+
+    private static string? TryGetNonEmptyString(JsonElement root, string propertyName)
+    {
+        if (root.TryGetProperty(propertyName, out JsonElement elem) &&
+            elem.ValueKind == JsonValueKind.String)
+        {
+            string? value = elem.GetString();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Extracts the best available city name from ip-api.com response.
-    /// </summary>
-    private static string ExtractCityName(JsonElement root, Services.LocalizationService? localizationService)
-    {
-        // ip-api.com returns city/regionName in the requested language
-        if (root.TryGetProperty("city", out var cityElem) &&
-            !string.IsNullOrWhiteSpace(cityElem.GetString()))
-        {
-            return cityElem.GetString()!;
-        }
-
-        if (root.TryGetProperty("regionName", out var regionElem) &&
-            !string.IsNullOrWhiteSpace(regionElem.GetString()))
-        {
-            return regionElem.GetString()!;
-        }
-
-        return localizationService?.T("Weather.CurrentLocation") ?? "Current Location";
     }
 }

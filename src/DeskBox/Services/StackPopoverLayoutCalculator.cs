@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Services;
+namespace DeskBox.Services;
 
 internal readonly record struct StackPopoverLayout(
     double Width,
@@ -170,11 +170,15 @@ internal static class StackFolderPreviewMetricsCalculator
             7,
             isListMode ? 8.5 : 10);
 
+        double maxCornerRadius = Math.Clamp(Math.Round(hostSize * 0.28, 1), 5.0, 10.0);
+        double cornerRadius = Math.Min(
+            WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(cornerPreference),
+            maxCornerRadius);
+
         return new StackFolderPreviewMetrics(
             hostSize,
             backdropMargin,
-            WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
-                cornerPreference),
+            cornerRadius,
             miniatureScale,
             miniatureOffset,
             badgeSize,

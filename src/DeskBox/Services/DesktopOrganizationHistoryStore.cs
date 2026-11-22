@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -18,6 +18,7 @@ internal sealed partial class DesktopOrganizationHistoryJsonContext : JsonSerial
 
 internal sealed class DesktopOrganizationHistoryData
 {
+    public int Version { get; set; } = 1;
     public List<OrganizationHistoryEntry> Items { get; set; } = [];
 }
 
@@ -69,15 +70,30 @@ public sealed class DesktopOrganizationHistoryStore
         // tried next and restored as primary, and only a total miss falls
         // through — the same protection settings.json had when the receipts
         // lived inside it.
+        bool unparseableFuture = false;
         ResilientJsonLoadResult<DesktopOrganizationHistoryData> result =
             await ResilientJsonStore.LoadWithResultAsync(
                 _historyPath,
-                static json => JsonSerializer.Deserialize(
+                json => ResilientJsonStore.DeserializeWithFutureSchemaFallback(
+                    _historyPath,
                     json,
-                    DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData)
-                    ?? new DesktopOrganizationHistoryData(),
+                    currentVersion: 1,
+                    raw => JsonSerializer.Deserialize(
+                        raw,
+                        DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData),
+                    static d => d.Version,
+                    static d => d ?? new DesktopOrganizationHistoryData(),
+                    static ver => new DesktopOrganizationHistoryData { Version = ver },
+                    out unparseableFuture),
                 static () => new DesktopOrganizationHistoryData(),
                 "DesktopOrganizationHistory");
+
+        _hasUnparseableFutureSchema = unparseableFuture;
+        if (_hasUnparseableFutureSchema)
+        {
+            Entries = [];
+            return true;
+        }
 
         if (result.Source is ResilientJsonLoadSource.Primary or ResilientJsonLoadSource.Backup)
         {
@@ -95,13 +111,23 @@ public sealed class DesktopOrganizationHistoryStore
         return Entries.Count == 0 || await SaveCheckedAsync();
     }
 
+    private bool _hasUnparseableFutureSchema;
+
     /// <summary>
     /// Persists via <see cref="ResilientJsonStore"/>: unique temp file, atomic
     /// replace, verified <c>.bak</c> backup, and the in-place fallback — the
     /// same commit protocol settings.json had.
     /// </summary>
-    public Task SaveAsync() =>
-        ResilientJsonStore.SaveAsync(_historyPath, WriteTempFileAsync);
+    public Task SaveAsync()
+    {
+        if (_hasUnparseableFutureSchema)
+        {
+            App.Log($"[DesktopOrganizationHistoryStore] Skipping write to preserve unparseable newer schema document '{_historyPath}'.");
+            return Task.CompletedTask;
+        }
+
+        return ResilientJsonStore.SaveAsync(_historyPath, WriteTempFileAsync);
+    }
 
 
     /// <summary>
@@ -111,6 +137,11 @@ public sealed class DesktopOrganizationHistoryStore
     /// </summary>
     public async Task<bool> SaveCheckedAsync()
     {
+        if (_hasUnparseableFutureSchema)
+        {
+            return false;
+        }
+
         try
         {
             await SaveAsync();
@@ -121,6 +152,132 @@ public sealed class DesktopOrganizationHistoryStore
             App.Log($"[DesktopOrganization] History save failed: {ex}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Rebases persisted target and receipt paths for <paramref name="widgetId"/> when its
+    /// managed folder is renamed or migrated to a new storage root. When
+    /// <paramref name="refreshCopiedDestinationIdentities"/> is <see langword="true"/>
+    /// (storage copy-migration where untouched originals still match the undo receipt),
+    /// refreshes <see cref="OrganizationHistoryItem.DestinationIdentity"/> to the verified
+    /// copied file at <paramref name="newFolderPath"/> so Undo preserves identity authority.
+    /// </summary>
+    public bool RebaseWidgetDirectory(
+        string widgetId,
+        string? oldFolderPath,
+        string? newFolderPath,
+        bool refreshCopiedDestinationIdentities = false)
+    {
+        if (string.IsNullOrWhiteSpace(widgetId) ||
+            string.IsNullOrWhiteSpace(oldFolderPath) ||
+            string.IsNullOrWhiteSpace(newFolderPath))
+        {
+            return false;
+        }
+
+        string oldRoot;
+        string newRoot;
+        try
+        {
+            oldRoot = Path.GetFullPath(oldFolderPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            newRoot = Path.GetFullPath(newFolderPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (string.Equals(oldRoot, newRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        bool changed = false;
+        foreach (OrganizationHistoryEntry entry in Entries)
+        {
+            if (entry.Targets is not null)
+            {
+                foreach (OrganizationHistoryTarget target in entry.Targets)
+                {
+                    if (!string.Equals(target.WidgetId, widgetId, StringComparison.Ordinal) ||
+                        string.IsNullOrWhiteSpace(target.DirectoryPath))
+                    {
+                        continue;
+                    }
+
+                    string rebasedDir = WidgetPathRebaseHelper.RebasePath(
+                        target.DirectoryPath,
+                        oldRoot,
+                        newRoot);
+                    if (!string.Equals(target.DirectoryPath, rebasedDir, StringComparison.Ordinal))
+                    {
+                        target.DirectoryPath = rebasedDir;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (entry.Items is null)
+            {
+                continue;
+            }
+
+            bool isMoveBackToDesktop = string.Equals(
+                entry.ActionType,
+                OrganizationActionType.MoveBackToDesktop,
+                StringComparison.Ordinal);
+
+            foreach (OrganizationHistoryItem item in entry.Items)
+            {
+                string effectiveWidgetId = string.IsNullOrWhiteSpace(item.TargetWidgetId)
+                    ? entry.WidgetId
+                    : item.TargetWidgetId;
+                if (!string.Equals(effectiveWidgetId, widgetId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (isMoveBackToDesktop && !string.IsNullOrWhiteSpace(item.SourcePath))
+                {
+                    string rebasedSource = WidgetPathRebaseHelper.RebasePath(
+                        item.SourcePath,
+                        oldRoot,
+                        newRoot);
+                    if (!string.Equals(item.SourcePath, rebasedSource, StringComparison.Ordinal))
+                    {
+                        item.SourcePath = rebasedSource;
+                        changed = true;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(item.DestinationPath))
+                {
+                    string oldDestination = item.DestinationPath;
+                    string rebasedDestination = WidgetPathRebaseHelper.RebasePath(
+                        oldDestination,
+                        oldRoot,
+                        newRoot);
+                    if (!string.Equals(oldDestination, rebasedDestination, StringComparison.Ordinal))
+                    {
+                        if (refreshCopiedDestinationIdentities &&
+                            !item.IsRestored &&
+                            item.DestinationIdentity is not null &&
+                            FileService.UndoReceiptStillMatches(oldDestination, item.DestinationIdentity) &&
+                            (File.Exists(rebasedDestination) || Directory.Exists(rebasedDestination)))
+                        {
+                            item.DestinationIdentity = FileService.CaptureUndoReceiptIdentity(rebasedDestination);
+                        }
+
+                        item.DestinationPath = rebasedDestination;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        return changed;
     }
 
     private async Task WriteTempFileAsync(string temporaryPath)

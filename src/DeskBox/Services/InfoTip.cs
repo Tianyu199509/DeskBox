@@ -35,18 +35,30 @@ namespace DeskBox.Services;
 public static class InfoTip
 {
     public static readonly DependencyProperty TitleKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "TitleKey",
-            typeof(string),
-            typeof(InfoTip),
-            new PropertyMetadata(null, OnKeyChanged));
+        RegisterAttachedSafe("TitleKey", typeof(string), typeof(InfoTip), OnKeyChanged);
 
     public static readonly DependencyProperty BodyKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "BodyKey",
-            typeof(string),
-            typeof(InfoTip),
-            new PropertyMetadata(null, OnKeyChanged));
+        RegisterAttachedSafe("BodyKey", typeof(string), typeof(InfoTip), OnKeyChanged);
+
+    private static DependencyProperty RegisterAttachedSafe(
+        string name,
+        Type propertyType,
+        Type ownerType,
+        PropertyChangedCallback callback)
+    {
+        try
+        {
+            return DependencyProperty.RegisterAttached(
+                name,
+                propertyType,
+                ownerType,
+                new PropertyMetadata(null, callback));
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null!;
+        }
+    }
 
     public static string? GetTitleKey(DependencyObject obj)
     {
@@ -88,7 +100,7 @@ public static class InfoTip
         // the Localized pipeline applies the header). Wrapping eagerly would
         // bake a partially-attached state into the badge. Defer the wrap to
         // after the parse batch, when all keys are present.
-        if (d is SettingsCard or SettingsExpander)
+        if (IsSettingsHeaderElement(d))
         {
             if (d is FrameworkElement { DispatcherQueue: { } queue } element)
             {
@@ -99,8 +111,7 @@ public static class InfoTip
                         return;
                     }
 
-                    string? current = (element as SettingsCard)?.Header as string
-                        ?? (element as SettingsExpander)?.Header as string;
+                    string? current = TryGetSettingsElementHeaderText(element);
                     if (current is null)
                     {
                         return;
@@ -112,16 +123,32 @@ public static class InfoTip
                         return;
                     }
 
-                    if (element is SettingsCard card)
-                    {
-                        card.Header = composite;
-                    }
-                    else if (element is SettingsExpander expander)
-                    {
-                        expander.Header = composite;
-                    }
+                    TrySetSettingsElementHeader(element, composite);
                 });
             }
+        }
+    }
+
+    private static bool IsSettingsHeaderElement(DependencyObject d) =>
+        d is SettingsCard or SettingsExpander;
+
+    private static string? TryGetSettingsElementHeaderText(FrameworkElement element) =>
+        element switch
+        {
+            SettingsCard card => card.Header as string,
+            SettingsExpander expander => expander.Header as string,
+            _ => null,
+        };
+
+    private static void TrySetSettingsElementHeader(FrameworkElement element, object composite)
+    {
+        if (element is SettingsCard card)
+        {
+            card.Header = composite;
+        }
+        else if (element is SettingsExpander expander)
+        {
+            expander.Header = composite;
         }
     }
 
@@ -167,7 +194,7 @@ public static class InfoTip
     /// circle — bare glyph anchors were rejected, but inside the tinted
     /// badge it renders pixel-hinted and native at this size.
     /// </summary>
-    private static Button CreateAnchorButton(string? titleKey, string? bodyKey)
+    public static Button CreateAnchorButton(string? titleKey, string? bodyKey)
     {
         var button = new Button();
         if (button.TryFindResource("InfoTipButtonStyle") is Style style)
@@ -224,7 +251,17 @@ public static class InfoTip
         FillBody(s_sharedBodyHost!, string.IsNullOrWhiteSpace(bodyKey) ? string.Empty : Localized.T(bodyKey!));
 
         // Reset per show: anchors can live in different windows/roots, and a
-        // stale XamlRoot from a closed settings window would break ShowAt.
+        // stale XamlRoot or startup-pinned PopupRoot theme would break ShowAt
+        // or invert colors on Win10 after a live theme switch.
+        ElementTheme effectiveTheme = DeskBox.Helpers.NeutralInteractionBrush.ResolveEffectiveElementTheme(button);
+        if (flyout.Content is FrameworkElement contentElement)
+        {
+            contentElement.RequestedTheme = effectiveTheme;
+        }
+
+        Style presenterStyle = new(typeof(FlyoutPresenter));
+        presenterStyle.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, effectiveTheme));
+        flyout.FlyoutPresenterStyle = presenterStyle;
         flyout.XamlRoot = button.XamlRoot;
         flyout.ShowAt(button);
     }

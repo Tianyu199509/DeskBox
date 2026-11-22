@@ -8,7 +8,7 @@ namespace DeskBox.Services;
 /// and runtime replacement run on the host UI thread; notifications may arrive
 /// on a worker thread and are marshalled by the settings editor.
 /// </summary>
-public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureSettings, IDisposable
+public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
 {
     private readonly SettingsService _settings;
     private readonly LocalizationService _localization;
@@ -16,11 +16,8 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
     private readonly Func<ISearchConnectionClient?> _ensureConnection;
     private readonly Func<ISearchHotkeyController?> _getHotkey;
     private readonly Action<bool> _setContentSearchEnabled;
-    private readonly Func<bool, bool, Task> _applyWidget;
-    private readonly Action<bool> _setRuntimeEnabled;
     private readonly Func<Action, bool> _tryEnqueue;
     private readonly Action<Exception> _reportError;
-    private readonly SemaphoreSlim _enableGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _requestLock = new();
     private readonly HashSet<Task> _requests = [];
@@ -29,9 +26,6 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
     private CancellationTokenSource _connectionLifetime = new();
     private bool _runtimeStopping;
     private bool _stopping;
-    private bool _desiredEnabled;
-    private bool _applyingWindow;
-    private int _enableGeneration;
     private Task? _stopTask;
     private bool _disposed;
 
@@ -42,8 +36,6 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         Func<ISearchConnectionClient?> ensureConnection,
         Func<ISearchHotkeyController?> getHotkey,
         Action<bool> setContentSearchEnabled,
-        Func<bool, bool, Task>? applyWidget = null,
-        Action<bool>? setRuntimeEnabled = null,
         Func<Action, bool>? tryEnqueue = null,
         Action<Exception>? reportError = null)
     {
@@ -53,20 +45,14 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         _ensureConnection = ensureConnection;
         _getHotkey = getHotkey;
         _setContentSearchEnabled = setContentSearchEnabled;
-        _applyWidget = applyWidget ?? ((_, _) => _settings.SaveAsync());
-        _setRuntimeEnabled = setRuntimeEnabled ?? (_ => { });
         _tryEnqueue = tryEnqueue ?? (action => { action(); return true; });
         _reportError = reportError ?? (_ => { });
-        _desiredEnabled = FeatureWidgetSettings.IsEnabled(_settings.Settings, WidgetKind.Search);
         _settings.SettingsChanged += OnSettingsChanged;
     }
 
     public event Action? StateChanged;
-    public event Action? FeatureChanged;
-    public bool Enabled => FeatureWidgetSettings.IsEnabled(_settings.Settings, WidgetKind.Search);
 
-    private bool FeatureEnabled => !_disposed && !_stopping && !_runtimeStopping &&
-        FeatureWidgetSettings.IsEnabled(_settings.Settings, WidgetKind.Search);
+    private bool FeatureEnabled => !_disposed && !_stopping && !_runtimeStopping;
 
     public EverythingConnectionSnapshot Connection => FeatureEnabled
         ? _connection?.CurrentSnapshot ?? EverythingConnectionSnapshot.Unknown
@@ -74,13 +60,20 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
 
     public SearchSettingsSnapshot Read()
     {
-        SearchSettingsSlice search = _settings.Settings.Search;
-        GlobalHotkeyGesture gesture = GlobalHotkeyService.NormalizeGesture(
+        AppSettings appSettings = _settings.Settings;
+        SearchSettingsSlice search = appSettings.Search;
+        GlobalHotkeyActivation activation = GlobalHotkeyService.NormalizeActivation(
+            search.SearchHotkeyActivationKind,
             search.SearchHotkeyModifiers, search.SearchHotkeyKey);
         ISearchHotkeyController? hotkey = FeatureEnabled ? _getHotkey() : null;
-        return new(FeatureEnabled, ReadPreferences(), new(
-            hotkey is not null, search.SearchHotkeyEnabled, hotkey?.IsRegistered == true,
-            gesture, GlobalHotkeyService.FormatGesture(gesture, _localization)));
+        return new(
+            FeatureEnabled,
+            ReadPreferences(),
+            new(
+                hotkey is not null, search.SearchHotkeyEnabled, hotkey?.IsRegistered == true,
+                activation.Gesture, GlobalHotkeyService.FormatActivation(activation, _localization), activation.Kind),
+            TodoFeatureEnabled: FeatureWidgetSettings.IsEnabled(appSettings, WidgetKind.Todo),
+            QuickCaptureFeatureEnabled: FeatureWidgetSettings.IsEnabled(appSettings, WidgetKind.QuickCapture));
     }
 
     private SearchPreferences ReadPreferences()
@@ -88,80 +81,15 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         SearchSettingsSlice search = _settings.Settings.Search;
         return new(search.SearchEverythingEnabled, search.SearchEverythingAdvancedSyntaxEnabled,
             search.SearchIncludeDeskBoxContent, search.SearchShowRecommendations,
-            search.SearchDefaultTab, search.SearchAppIconAnimation);
-    }
-
-    public async Task SetEnabledAsync(bool enabled, bool reveal = true,
-        CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_stopping || _disposed, this);
-        cancellationToken.ThrowIfCancellationRequested();
-        int generation = ++_enableGeneration;
-        WriteEnabled(enabled);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken, _lifetime.Token);
-        await _enableGate.WaitAsync(linked.Token);
-        try
-        {
-            if (generation != _enableGeneration || _stopping) return;
-            if (enabled) _setRuntimeEnabled(true);
-            _applyingWindow = true;
-            try { await _applyWidget(enabled, reveal); }
-            finally { _applyingWindow = false; }
-            if (generation != _enableGeneration || _stopping) return;
-            if (!enabled)
-            {
-                await DrainRequestsAsync();
-                _setRuntimeEnabled(false);
-            }
-            await _settings.SaveAsync();
-        }
-        finally { _enableGate.Release(); }
-    }
-
-    /// <summary>Used by direct widget creation and reset after their window work.</summary>
-    public async Task CommitEnabledStateAsync(bool enabled,
-        CancellationToken cancellationToken = default)
-    {
-        if (_stopping || _disposed) return;
-        if (_applyingWindow)
-        {
-            if (enabled == _desiredEnabled) WriteEnabled(enabled);
-            return;
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        int generation = ++_enableGeneration;
-        WriteEnabled(enabled);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken, _lifetime.Token);
-        await _enableGate.WaitAsync(linked.Token);
-        try
-        {
-            if (generation != _enableGeneration || _stopping) return;
-            if (enabled) _setRuntimeEnabled(true);
-            else
-            {
-                await DrainRequestsAsync();
-                _setRuntimeEnabled(false);
-            }
-            await _settings.SaveAsync();
-        }
-        finally { _enableGate.Release(); }
-    }
-
-    private void WriteEnabled(bool enabled)
-    {
-        bool changed = Enabled != enabled || _desiredEnabled != enabled;
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, enabled);
-        _desiredEnabled = enabled;
-        _runtimeStopping = !enabled;
-        if (!enabled) ObserveConnection(null);
-        if (changed)
-        {
-            _settings.SaveDebounced();
-            FeatureChanged?.Invoke();
-        }
-        StateChanged?.Invoke();
+            search.SearchDefaultTab, search.SearchAppIconAnimation,
+            search.SearchCategoryBarMode, search.SearchShowSortHeader,
+            search.SearchDefaultSortColumn, search.SearchIncludeClipboard,
+            search.SearchIncludeCalculator, search.SearchShowDetailsPane,
+            search.SearchIncludeWebFallback, search.SearchDefaultWebEngine,
+            search.SearchCustomWebUrl,
+            search.SearchQuickCreateTodoEnabled, search.SearchQuickCreateNoteEnabled,
+            search.SearchQuickCreateDisplayMode, search.SearchQuickCreateDefaultTarget,
+            search.SearchQuickCreateShowHud);
     }
 
     private async Task DrainRequestsAsync(bool forShutdown = false)
@@ -183,6 +111,9 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
     public string FormatHotkey(GlobalHotkeyGesture gesture) =>
         GlobalHotkeyService.FormatGesture(gesture, _localization);
 
+    public string FormatHotkeyActivation(GlobalHotkeyActivation activation) =>
+        GlobalHotkeyService.FormatActivation(activation, _localization);
+
     public void UpdatePreferences(SearchPreferenceChange change)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -198,6 +129,43 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
             search.SearchDefaultTab = tab is "all" or "app" or "file" or "deskbox" ? tab : "all";
         }
         if (change.IconAnimation is { } animation) search.SearchAppIconAnimation = Math.Clamp(animation, 0, 3);
+        if (change.CategoryBarMode is { } barMode)
+        {
+            barMode = barMode.Trim().ToLowerInvariant();
+            search.SearchCategoryBarMode = barMode is "auto" or "always" or "hidden" ? barMode : "auto";
+        }
+        if (change.ShowSortHeader is { } showSort) search.SearchShowSortHeader = showSort;
+        if (change.DefaultSortColumn is { } sortCol)
+        {
+            sortCol = sortCol.Trim().ToLowerInvariant();
+            search.SearchDefaultSortColumn = sortCol is "relevance" or "date" or "name" or "size" ? sortCol : "relevance";
+        }
+        if (change.IncludeClipboard is { } clip) search.SearchIncludeClipboard = clip;
+        if (change.IncludeCalculator is { } calc) search.SearchIncludeCalculator = calc;
+        if (change.ShowDetailsPane is { } details) search.SearchShowDetailsPane = details;
+        if (change.IncludeWebFallback is { } web) search.SearchIncludeWebFallback = web;
+        if (change.DefaultWebEngine is { } webEngine)
+        {
+            search.SearchDefaultWebEngine = SearchWebAndUrlEvaluator.NormalizeEngineId(webEngine);
+        }
+        if (change.CustomWebUrl is { } customUrl)
+        {
+            string trimmedUrl = customUrl.Trim();
+            search.SearchCustomWebUrl = trimmedUrl.Length > 1024 ? trimmedUrl[..1024] : trimmedUrl;
+        }
+        if (change.QuickCreateTodoEnabled is { } qcTodo) search.SearchQuickCreateTodoEnabled = qcTodo;
+        if (change.QuickCreateNoteEnabled is { } qcNote) search.SearchQuickCreateNoteEnabled = qcNote;
+        if (change.QuickCreateDisplayMode is { } qcMode)
+        {
+            qcMode = qcMode.Trim().ToLowerInvariant();
+            search.SearchQuickCreateDisplayMode = qcMode is "always" or "fallback" or "prefix" ? qcMode : "always";
+        }
+        if (change.QuickCreateDefaultTarget is { } qcTarget)
+        {
+            qcTarget = qcTarget.Trim().ToLowerInvariant();
+            search.SearchQuickCreateDefaultTarget = qcTarget is "todo" or "note" ? qcTarget : "todo";
+        }
+        if (change.QuickCreateShowHud is { } qcHud) search.SearchQuickCreateShowHud = qcHud;
         SearchPreferences after = ReadPreferences();
         if (before == after) return;
         _settings.SaveDebounced();
@@ -232,6 +200,34 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
 
     public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
         _getHotkey()?.IsGestureOwnedByMainHotkey(gesture) == true;
+
+    public SearchHotkeyUpdateResult ApplyHotkeyActivation(GlobalHotkeyActivation activation)
+    {
+        ISearchHotkeyController? hotkey = GetHotkeyForUserAction();
+        if (hotkey is null) return UnavailableHotkey();
+        bool applied = hotkey.TryApplyActivation(activation, out string? error);
+        StateChanged?.Invoke();
+        return applied ? new(true) : FailedHotkey(error);
+    }
+
+    public bool IsActivationOwnedByMainHotkey(GlobalHotkeyActivation activation) =>
+        _getHotkey()?.IsActivationOwnedByMainHotkey(activation) == true;
+
+    public bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation)
+    {
+        AppSettings settings = _settings.Settings;
+        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) ||
+            !settings.Clipboard.ClipboardHotkeyEnabled)
+        {
+            return false;
+        }
+
+        GlobalHotkeyActivation clipboardActivation = GlobalHotkeyService.NormalizeActivation(
+            settings.Clipboard.ClipboardHotkeyActivationKind,
+            settings.Clipboard.ClipboardHotkeyModifiers,
+            settings.Clipboard.ClipboardHotkeyKey);
+        return GlobalHotkeyService.DoActivationsConflict(activation, clipboardActivation);
+    }
 
     private SearchHotkeyUpdateResult UnavailableHotkey() =>
         new(false, _localization.T("Settings.Search.Hotkey.Status.Disabled"));
@@ -339,21 +335,8 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         _tryEnqueue(() =>
         {
             if (_disposed || _stopping) return;
-            bool enabled = Enabled;
-            if (enabled == _desiredEnabled)
-            {
-                StateChanged?.Invoke();
-                return;
-            }
-            _ = ApplyExternalChangeAsync(enabled);
+            StateChanged?.Invoke();
         });
-    }
-
-    private async Task ApplyExternalChangeAsync(bool enabled)
-    {
-        try { await SetEnabledAsync(enabled, reveal: enabled); }
-        catch (OperationCanceledException) when (_stopping) { }
-        catch (Exception ex) { _reportError(ex); }
     }
 
     public Task StopAsync() => _stopTask ??= StopCoreAsync();
@@ -361,19 +344,15 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
     private async Task StopCoreAsync()
     {
         _stopping = true;
-        ++_enableGeneration;
         _settings.SettingsChanged -= OnSettingsChanged;
         _lifetime.Cancel();
         ObserveConnection(null);
-        await _enableGate.WaitAsync();
         // App owns the shutdown deadline. Reporting completion here means no
         // request can still use a connection after search services are released.
         try { await DrainRequestsAsync(forShutdown: true); }
         finally
         {
-            _enableGate.Release();
             Dispose();
-            _enableGate.Dispose();
             _lifetime.Dispose();
         }
     }

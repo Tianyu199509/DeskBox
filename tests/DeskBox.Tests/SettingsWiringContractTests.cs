@@ -208,7 +208,7 @@ public sealed class SettingsWiringContractTests
                         string header = text[declarationStart..(declarationStart + brace.Index)];
                         foreach (Match parameter in Regex.Matches(
                                      header,
-                                     @"([A-Za-z_]\w*)\s*(?:,|\))"))
+                                     @"([A-Za-z_]\w*)\s*(?:=[^,)]*)?(?:,|\))"))
                         {
                             names.Add(parameter.Groups[1].Value);
                         }

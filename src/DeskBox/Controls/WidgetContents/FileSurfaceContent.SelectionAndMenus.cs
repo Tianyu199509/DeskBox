@@ -1,4 +1,4 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -57,7 +57,6 @@ public sealed partial class FileSurfaceContent
             e.GetCurrentPoint(pointerSurface).Properties.IsRightButtonPressed;
         _selectionPressOnRowBlank = false;
         if ((!isLeftButtonPressed && !isRightButtonPressed) ||
-            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift) ||
             !CanStartBoxSelection(e.OriginalSource, e))
         {
             return;
@@ -82,14 +81,15 @@ public sealed partial class FileSurfaceContent
         _selectionStartPoint =
             e.GetCurrentPoint(selectionOverlay).Position;
         _selectionCurrentPoint = _selectionStartPoint;
-        _selectionSnapshot =
-            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
-                ? GetSelectedItems().ToList()
-                : [];
+        bool additiveMarquee =
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+        _selectionSnapshot = additiveMarquee
+            ? listView.SelectedItems.OfType<WidgetItem>().Distinct().ToList()
+            : [];
         _selectionHits = [];
 
-        if (!Win32Helper.IsKeyPressed(
-                Windows.System.VirtualKey.Control))
+        if (!additiveMarquee)
         {
             listView.SelectedItems.Clear();
             UpdateSelectionCommandBar();
@@ -111,6 +111,11 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
+        if (TryHandleElevatedPointerMoved(e) || TryHandleWin10ShellPointerMoved(e))
+        {
+            return;
+        }
+
         if (!_selectionPointerPressed)
         {
             return;
@@ -132,6 +137,7 @@ public sealed partial class FileSurfaceContent
             _isBoxSelecting = true;
             pointerSurface.CapturePointer(e.Pointer);
             CacheSelectionHits(listView, selectionOverlay);
+            BeginMarqueeAutoScroll(listView);
         }
 
         UpdateSelectionRectangle(listView);
@@ -154,6 +160,12 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
+        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
+        if (TryHandleElevatedPointerReleased(e))
+        {
+            return;
+        }
+
         bool wasBoxSelecting = _isBoxSelecting;
         bool completedRightMarquee =
             wasBoxSelecting && _selectionStartedWithRightButton;
@@ -197,6 +209,7 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
+        HandleElevatedPointerCaptureLost(e.Pointer.PointerId);
         if (sender is ListViewBase listView)
         {
             HandleItemsPointerCaptureLost(listView);
@@ -205,6 +218,7 @@ public sealed partial class FileSurfaceContent
 
     private void HandleItemsPointerCaptureLost(ListViewBase listView)
     {
+        DisarmWin10ShellDragCandidate();
         FinishBoxSelection(listView);
         // Capture loss ends the gesture that staged the drag snapshot. A
         // stale snapshot keeps the deactivation selection clear guarded
@@ -256,7 +270,7 @@ public sealed partial class FileSurfaceContent
         _selectionHits = [];
         foreach (WidgetItem item in listView.Items
                      .OfType<WidgetItem>()
-                     .Where(item => item is not WidgetStackItem))
+                     .Where(item => item is not WidgetStackItem { IsExpanded: true }))
         {
             if (listView.ContainerFromItem(item) is not SelectorItem container ||
                 container.Visibility != Visibility.Visible ||
@@ -384,8 +398,39 @@ public sealed partial class FileSurfaceContent
             ? popoverRectangle
             : SelectionRectangle;
 
+    private void CancelBoxSelection(ListViewBase listView)
+    {
+        if (!_isBoxSelecting && !_selectionPointerPressed)
+        {
+            return;
+        }
+
+        WidgetItem[] snapshot = _selectionSnapshot.ToArray();
+        ResetBoxSelectionState();
+        _isSynchronizingSelection = true;
+        try
+        {
+            listView.SelectedItems.Clear();
+            foreach (WidgetItem item in snapshot)
+            {
+                if (listView.Items.Contains(item))
+                {
+                    listView.SelectedItems.Add(item);
+                }
+            }
+        }
+        finally
+        {
+            _isSynchronizingSelection = false;
+        }
+
+        UpdateSelectionCommandBar();
+        RefreshItemSelectionVisuals();
+    }
+
     private void ResetBoxSelectionState()
     {
+        StopInteractiveAutoScroll(InteractiveAutoScrollMode.MarqueeSelection);
         _selectionPointerPressed = false;
         _isBoxSelecting = false;
         _selectionSnapshot = [];
@@ -640,15 +685,27 @@ public sealed partial class FileSurfaceContent
         };
         chooseApp.Click += (_, _) =>
         {
-            if (!ShellOpenWithHelper.ShowChooseAppDialog(
-                    _hostWindowHandle,
-                    item.Path))
+            UiDispatch.PostAfterCallback(async () =>
             {
-                ShowFeedback(new WidgetFeedbackRequest(
-                    T("Widget.Error.OperationIncomplete"),
-                    WidgetFeedbackSeverity.Warning,
-                    "open-with-choose"));
-            }
+                if (_isDisposed)
+                {
+                    return;
+                }
+
+                bool shown = await RunWithDialogOwnerAsync(
+                    item,
+                    ownerHwnd => ShellLaunchService.ShowChooseAppDialogAsync(
+                        ownerHwnd,
+                        item.Path,
+                        _lifetimeCancellation.Token));
+                if (!shown && !_isDisposed)
+                {
+                    ShowFeedback(new WidgetFeedbackRequest(
+                        T("Widget.Error.OperationIncomplete"),
+                        WidgetFeedbackSeverity.Warning,
+                        "open-with-choose"));
+                }
+            });
         };
         items.Add(chooseApp);
 
@@ -839,15 +896,27 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (!ShellContextMenuHelper.ShowProperties(
-                _hostWindowHandle,
-                item.Path))
+        UiDispatch.PostAfterCallback(async () =>
         {
-            ShowFeedback(new WidgetFeedbackRequest(
-                T("Widget.Error.OperationIncomplete"),
-                WidgetFeedbackSeverity.Warning,
-                "file-properties"));
-        }
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            bool shown = await RunWithDialogOwnerAsync(
+                item,
+                ownerHwnd => ShellLaunchService.ShowFilePropertiesAsync(
+                    ownerHwnd,
+                    item.Path,
+                    _lifetimeCancellation.Token));
+            if (!shown && !_isDisposed)
+            {
+                ShowFeedback(new WidgetFeedbackRequest(
+                    T("Widget.Error.OperationIncomplete"),
+                    WidgetFeedbackSeverity.Warning,
+                    "file-properties"));
+            }
+        });
     }
 
     /// <summary>
@@ -859,7 +928,8 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private async Task CreateItemShortcutAsync(WidgetItem item)
     {
-        if (TryBlockTransferMutation(new[] { item }))
+        if (TryBlockTransferMutation(new[] { item }) ||
+            TryBlockStoreVirtualizedDestination(Path.GetDirectoryName(item.Path)))
         {
             return;
         }
@@ -872,10 +942,20 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
+            bool isDirectory = Directory.Exists(item.Path);
             string linkPath = FileService.GetAvailablePath(
-                Path.Combine(directory, GetShortcutDisplayName(item.Path)));
+                Path.Combine(directory, GetShortcutDisplayName(item.Path, isDirectory)));
 
-            if (item.NamespaceShortcutKind != NamespaceShortcutKind.None &&
+            if (!isDirectory &&
+                ShortcutHelper.IsShortcutPath(item.Path) &&
+                File.Exists(item.Path))
+            {
+                DropStagingFileOps.CopyShortcutFilePreservingStreams(
+                    item.Path,
+                    linkPath);
+                ShortcutHelper.InvalidateStoredMetadataCache(linkPath);
+            }
+            else if (item.NamespaceShortcutKind != NamespaceShortcutKind.None &&
                 !string.IsNullOrWhiteSpace(item.NamespaceShortcutParsingName))
             {
                 ShortcutHelper.CreateShellNamespaceShortcut(
@@ -883,7 +963,7 @@ public sealed partial class FileSurfaceContent
                     item.NamespaceShortcutParsingName,
                     T("Widget.CreateShortcut"));
             }
-            else if (Directory.Exists(item.Path))
+            else if (isDirectory)
             {
                 ShortcutHelper.CreateOrUpdateFolderShortcut(
                     linkPath,
@@ -1091,10 +1171,17 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        ElevatedFileLaunchResult result =
-            ElevatedFileLauncher.RunAsAdministrator(
-            _hostWindowHandle,
-            item);
+        ElevatedFileLaunchResult result = await RunWithDialogOwnerAsync(
+            item,
+            ownerHwnd => ShellLaunchService.RunAsAdministratorAsync(
+                ownerHwnd,
+                item,
+                _lifetimeCancellation.Token));
+        if (_isDisposed)
+        {
+            return;
+        }
+
         switch (result.Status)
         {
             case ElevatedFileLaunchStatus.Launched:
@@ -1307,7 +1394,9 @@ public sealed partial class FileSurfaceContent
                         out string resolvedPath)
                     ? resolvedPath
                     : mappedFolderPath;
-                Win32Helper.OpenFile(pathToOpen);
+                ShellLaunchService.FireAndForgetOpenPath(
+                    pathToOpen,
+                    _hostWindowHandle);
             }
         };
         flyout.Items.Add(openFolder);
@@ -1450,7 +1539,8 @@ public sealed partial class FileSurfaceContent
     {
         string? folderPath = ViewModel.CurrentFolderPath;
         if (string.IsNullOrWhiteSpace(folderPath) ||
-            TryBlockTransferMutation(folderPath))
+            TryBlockTransferMutation(folderPath) ||
+            TryBlockStoreVirtualizedDestination(folderPath))
         {
             return;
         }
@@ -1474,7 +1564,7 @@ public sealed partial class FileSurfaceContent
             // Shortcut tab is where the user completes it (Explorer's own
             // New→Shortcut uses its in-process wizard for the same step).
             // Modal — the refresh below also picks up a rename made there.
-            _ = Win32Helper.ShowFileProperties(_hostWindowHandle, targetPath);
+            _ = await ShellLaunchService.ShowFilePropertiesAsync(_hostWindowHandle, targetPath);
             await ViewModel.RefreshFolderContentsAsync();
         });
     }
@@ -1484,7 +1574,8 @@ public sealed partial class FileSurfaceContent
     {
         string? folderPath = ViewModel.CurrentFolderPath;
         if (string.IsNullOrWhiteSpace(folderPath) ||
-            TryBlockTransferMutation(folderPath))
+            TryBlockTransferMutation(folderPath) ||
+            TryBlockStoreVirtualizedDestination(folderPath))
         {
             return;
         }
@@ -1507,13 +1598,10 @@ public sealed partial class FileSurfaceContent
             }
 
             await ViewModel.RefreshFolderContentsAsync();
-            if (ViewModel.Items.FirstOrDefault(item =>
-                    string.Equals(
-                        item.Path,
-                        createdPath,
-                        StringComparison.OrdinalIgnoreCase)) is { } newFile)
+            TryJoinCreatedPathIntoOpenManualStackPopover(createdPath);
+            if (FindCreatedItemForInlineRename(createdPath) is { } newFile)
             {
-                await StartItemRenameAsync(newFile);
+                await RenameItemAsync(newFile);
             }
         });
     }
@@ -1555,7 +1643,8 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (TryBlockTransferMutation(ViewModel.CurrentFolderPath))
+        if (TryBlockTransferMutation(ViewModel.CurrentFolderPath) ||
+            TryBlockStoreVirtualizedDestination(ViewModel.CurrentFolderPath))
         {
             return;
         }
@@ -1568,15 +1657,48 @@ public sealed partial class FileSurfaceContent
                     T("Widget.NewFolderName")));
             Directory.CreateDirectory(folderPath);
             await ViewModel.RefreshFolderContentsAsync();
-            if (ViewModel.Items.FirstOrDefault(item =>
-                    string.Equals(
-                        item.Path,
-                        folderPath,
-                        StringComparison.OrdinalIgnoreCase)) is { } newFolder)
+            TryJoinCreatedPathIntoOpenManualStackPopover(folderPath);
+            if (FindCreatedItemForInlineRename(folderPath) is { } newFolder)
             {
-                await StartItemRenameAsync(newFolder);
+                await RenameItemAsync(newFolder);
             }
         });
+    }
+
+    private void TryJoinCreatedPathIntoOpenManualStackPopover(string createdPath)
+    {
+        if (!_stackPopoverPopupOpen ||
+            _stackPopoverKey is not { Length: > 0 } openStackKey ||
+            ViewModel.FindStackByKey(openStackKey) is not { IsManual: true })
+        {
+            return;
+        }
+
+        WidgetItem? createdItem = ViewModel.Items.FirstOrDefault(item =>
+            item is not WidgetStackItem &&
+            string.Equals(item.Path, createdPath, StringComparison.OrdinalIgnoreCase));
+        if (createdItem is null)
+        {
+            return;
+        }
+
+        ApplyStackProjectionChange(() =>
+            _ = ViewModel.AddItemsToStack(openStackKey, [createdItem]));
+    }
+
+    private WidgetItem? FindCreatedItemForInlineRename(string createdPath)
+    {
+        if (_stackPopoverPopupOpen &&
+            _stackPopoverItemsView is { } popoverView &&
+            popoverView.Items.OfType<WidgetItem>().FirstOrDefault(item =>
+                string.Equals(item.Path, createdPath, StringComparison.OrdinalIgnoreCase)) is { } popoverItem)
+        {
+            return popoverItem;
+        }
+
+        return ViewModel.Items.FirstOrDefault(item =>
+            item is not WidgetStackItem &&
+            string.Equals(item.Path, createdPath, StringComparison.OrdinalIgnoreCase));
     }
 
     private void AddSortItem(
@@ -1587,7 +1709,7 @@ public sealed partial class FileSurfaceContent
         var item = new ToggleMenuFlyoutItem
         {
             Text = T(localizationKey),
-            IsChecked = ViewModel.Config.SortMode == mode
+            IsChecked = ViewModel.EffectiveSortMode == mode
         };
         item.Click += (_, _) =>
         {

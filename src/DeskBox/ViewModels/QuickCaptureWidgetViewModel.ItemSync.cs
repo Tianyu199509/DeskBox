@@ -18,64 +18,154 @@ public sealed partial class QuickCaptureWidgetViewModel
             return Task.CompletedTask;
         }
 
-        var activeItems = data.Items
+        MirrorFolderPath = data.MirrorFolderPath;
+
+        var nonDeletedItems = data.Items
             .Where(item => !item.IsDeleted)
-            .OrderBy(item => item.SortOrder)
-            .ThenByDescending(item => item.UpdatedAt)
             .ToList();
-        var recentItems = data.RecentItems
-            .Where(item => !item.IsDeleted)
+
+        var archivedItems = nonDeletedItems
+            .Where(item => item.ArchivedAt.HasValue)
+            .OrderByDescending(item => item.ArchivedAt ?? item.UpdatedAt)
+            .ThenBy(item => item.SortOrder)
+            .ToList();
+
+        var activeItems = nonDeletedItems
+            .Where(item => !item.ArchivedAt.HasValue)
             .OrderBy(item => item.SortOrder)
             .ThenByDescending(item => item.UpdatedAt)
             .ToList();
 
         RecordCount = activeItems.Count;
         PinnedCount = activeItems.Count(item => item.IsPinned);
-        RecentCount = recentItems.Count;
+        ArchivedCount = archivedItems.Count;
         OnPropertyChanged(nameof(RecordsTabText));
         OnPropertyChanged(nameof(PinnedTabText));
-        OnPropertyChanged(nameof(RecentTabText));
 
-        bool canShowPinnedSortControls = SelectedView == QuickCaptureViewMode.Pinned && !HasSearchText;
-        var visibleItems = SelectedView switch
+        if (ShowArchived && ArchivedCount == 0)
         {
-            QuickCaptureViewMode.Pinned => activeItems
-                .Where(item => item.IsPinned)
-                .OrderBy(item => item.PinnedSortOrder < 0 ? int.MaxValue : item.PinnedSortOrder)
-                .ThenBy(item => item.SortOrder)
-                .ThenByDescending(item => item.UpdatedAt)
-                .ToList(),
-            QuickCaptureViewMode.Recent => recentItems,
-            _ => activeItems
-        };
+            _showArchived = false;
+            OnPropertyChanged(nameof(ShowArchived));
+            OnPropertyChanged(nameof(HasActiveFilter));
+        }
 
+        var sourcePoolForTags = ShowArchived ? archivedItems : activeItems;
+        var tagCounts = new Dictionary<string, int>(StringComparer.CurrentCultureIgnoreCase);
+        foreach (QuickCaptureItem item in sourcePoolForTags)
+        {
+            foreach (string tag in item.Tags ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    continue;
+                }
+
+                if (tagCounts.TryGetValue(tag, out int existing))
+                {
+                    tagCounts[tag] = existing + 1;
+                }
+                else
+                {
+                    tagCounts[tag] = 1;
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ActiveTagFilter) &&
+            !sourcePoolForTags.Any(item => ItemMatchesTagFilter(item, ActiveTagFilter)))
+        {
+            _activeTagFilter = null;
+            OnPropertyChanged(nameof(ActiveTagFilter));
+            OnPropertyChanged(nameof(HasActiveFilter));
+        }
+
+        var chips = new List<QuickCaptureFilterChipDescriptor>(tagCounts.Count + 1);
+        foreach (var pair in tagCounts
+                     .OrderByDescending(entry => entry.Value)
+                     .ThenBy(entry => entry.Key, StringComparer.CurrentCultureIgnoreCase)
+                     .Take(16))
+        {
+            bool selected = string.Equals(
+                ActiveTagFilter,
+                pair.Key,
+                StringComparison.CurrentCultureIgnoreCase);
+            chips.Add(new QuickCaptureFilterChipDescriptor(
+                pair.Key,
+                $"#{pair.Key}",
+                pair.Value,
+                selected,
+                IsArchiveChip: false));
+        }
+
+        if (ArchivedCount > 0)
+        {
+            chips.Add(new QuickCaptureFilterChipDescriptor(
+                "__archived__",
+                _localizationService.T("QuickCapture.ArchivedFilter"),
+                ArchivedCount,
+                ShowArchived,
+                IsArchiveChip: true));
+        }
+
+        FilterChips = chips;
+
+        bool canShowPinnedSortControls =
+            SelectedView == QuickCaptureViewMode.Pinned &&
+            !HasSearchText &&
+            !HasActiveFilter;
+
+        List<QuickCaptureItem> baseItems;
+        if (ShowArchived)
+        {
+            baseItems = SelectedView == QuickCaptureViewMode.Pinned
+                ? archivedItems.Where(item => item.IsPinned).ToList()
+                : archivedItems;
+        }
+        else
+        {
+            baseItems = SelectedView switch
+            {
+                QuickCaptureViewMode.Pinned => activeItems
+                    .Where(item => item.IsPinned)
+                    .OrderBy(item => item.PinnedSortOrder < 0 ? int.MaxValue : item.PinnedSortOrder)
+                    .ThenBy(item => item.SortOrder)
+                    .ThenByDescending(item => item.UpdatedAt)
+                    .ToList(),
+                _ => activeItems
+            };
+        }
+
+        var visibleItems = baseItems;
         if (HasSearchText)
         {
-            visibleItems = activeItems
-                .Concat(recentItems)
+            var searchPool = ShowArchived ? archivedItems : activeItems;
+            visibleItems = searchPool
                 .Where(item => MatchesSearch(item, SearchText))
                 .OrderByDescending(item => item.UpdatedAt)
-                .ThenBy(item => item.IsRecent ? 1 : 0)
                 .ThenBy(item => item.SortOrder)
                 .ToList();
         }
 
+        if (!string.IsNullOrWhiteSpace(ActiveTagFilter))
+        {
+            visibleItems = visibleItems
+                .Where(item => ItemMatchesTagFilter(item, ActiveTagFilter))
+                .ToList();
+        }
+
         SyncVisibleItems(visibleItems, canShowPinnedSortControls);
+        _cachedVisibleItemsSource = null;
         OnPropertyChanged(nameof(VisibleItemsSource));
 
         UpdateEmptyStateText();
         bool hasItems = Items.Count > 0;
-        bool showEmptyAddSurface =
-            (IsRecordsView || IsPinnedView) && !HasSearchText;
+        bool showEmptyAddSurface = !HasSearchText;
         EmptyStateVisibility = hasItems
             ? Visibility.Collapsed
             : Visibility.Visible;
         ListVisibility = hasItems || showEmptyAddSurface
             ? Visibility.Visible
             : Visibility.Collapsed;
-        OnPropertyChanged(nameof(RecentCaptureStatusText));
-        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
-        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
         SetViewSwitchLoading(false);
         ItemsViewTransitionToken++;
         return Task.CompletedTask;
@@ -210,7 +300,6 @@ public sealed partial class QuickCaptureWidgetViewModel
 
         HashSet<string> retainedIds = _cachedData is { } data
             ? data.Items
-                .Concat(data.RecentItems)
                 .Where(item => !item.IsDeleted)
                 .Select(item => item.Id)
                 .ToHashSet(StringComparer.Ordinal)
@@ -226,7 +315,7 @@ public sealed partial class QuickCaptureWidgetViewModel
 
     private void UpdateEmptyStateText()
     {
-        if (HasSearchText)
+        if (HasSearchText || HasActiveFilter)
         {
             EmptyStateTitle = _localizationService.T("QuickCapture.Empty.SearchTitle");
             EmptyStateText = _localizationService.T("QuickCapture.Empty.SearchText");
@@ -240,29 +329,8 @@ public sealed partial class QuickCaptureWidgetViewModel
             return;
         }
 
-        if (SelectedView == QuickCaptureViewMode.Recent)
-        {
-            if (!IsRecentCaptureEnabled())
-            {
-                EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecentDisabledTitle");
-                EmptyStateText = _localizationService.T("QuickCapture.Empty.RecentDisabledText");
-                return;
-            }
-
-            EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecentTitle");
-            EmptyStateText = _settingsService.Settings.QuickCaptureImageClipboardEnabled
-                ? _localizationService.T("QuickCapture.Empty.RecentTextWithImages")
-                : _localizationService.T("QuickCapture.Empty.RecentText");
-            return;
-        }
-
         EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecordsTitle");
         EmptyStateText = _localizationService.T("QuickCapture.Empty.RecordsText");
-    }
-
-    private bool IsRecentCaptureEnabled()
-    {
-        return _settingsService.Settings.QuickCaptureClipboardEnabled;
     }
 
     private bool MatchesSearch(QuickCaptureItem item, string searchText)
@@ -278,9 +346,18 @@ public sealed partial class QuickCaptureWidgetViewModel
             return true;
         }
 
+        if (keyword.StartsWith('#') && keyword.Length > 1)
+        {
+            string tagQuery = keyword[1..];
+            if ((item.Tags ?? []).Any(tag => tag.Contains(tagQuery, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
         bool matchesMetadata = (!string.IsNullOrWhiteSpace(item.Title) &&
                                 item.Title.Contains(keyword, StringComparison.CurrentCultureIgnoreCase)) ||
-                               item.Tags.Any(tag => tag.Contains(keyword, StringComparison.CurrentCultureIgnoreCase));
+                               (item.Tags ?? []).Any(tag => tag.Contains(keyword, StringComparison.CurrentCultureIgnoreCase));
 
         if (item.Type == QuickCaptureItemType.Image)
         {

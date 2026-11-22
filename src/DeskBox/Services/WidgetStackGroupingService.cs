@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -32,36 +33,48 @@ public sealed record WidgetStackGroup(
 
 public static class WidgetStackGroupingService
 {
-    private static readonly HashSet<string> s_applicationExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".msi", ".msix", ".appx", ".appref-ms", ".bat", ".cmd", ".ps1"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_applicationExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".exe", ".msi", ".msix", ".appx", ".appref-ms", ".bat", ".cmd", ".ps1"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_documentExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".rtf", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".csv", ".odt", ".ods", ".odp", ".json", ".xml", ".html", ".htm"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_documentExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".txt", ".md", ".rtf", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".csv", ".odt", ".ods", ".odp", ".json", ".xml", ".html", ".htm"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_imageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif", ".svg"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_imageExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif", ".svg"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_videoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v", ".flv"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_videoExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v", ".flv"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_audioExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_audioExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".wma"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_archiveExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".cab", ".iso"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_archiveExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".cab", ".iso"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<WidgetStackGroup> Group(
         IEnumerable<WidgetItem> items,
@@ -277,7 +290,7 @@ public static class WidgetStackGroupingService
         IOrderedEnumerable<IndexedItem> ordered = orderBy switch
         {
             SettingsService.FileStackOrderByName => members
-                .OrderBy(entry => entry.Item.Name, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(entry => entry.Item.Name, NaturalStringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(entry => entry.Index),
             SettingsService.FileStackOrderByDateAdded => members
                 .OrderByDescending(entry => entry.Item.AddedAt)

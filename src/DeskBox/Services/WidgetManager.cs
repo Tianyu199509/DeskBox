@@ -1,4 +1,4 @@
-﻿﻿using DeskBox.Models;
+using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
@@ -97,8 +97,10 @@ internal interface IDesktopWidgetWindow
     void ClearCompactArrangementConstraint();
     void PreviewCompactArrangement(Windows.Graphics.RectInt32 bounds);
     void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY);
+    void SetTrayAnimationOptionsOverride(WidgetAnimationOptions? optionsOverride);
     void CancelTrayAnimationAndRestorePosition();
     void PrepareTrayShowAnimation();
+    void PrepareSingleWidgetShowAnimation();
     void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
     void ShowPreparedRaisedFromTray(bool persistVisibility = true);
     void PlayTrayShowAnimation();
@@ -106,8 +108,9 @@ internal interface IDesktopWidgetWindow
     void RevealFromTray(bool autoRestore = true);
     bool PrepareTrayHideAnimation(bool persistVisibility = true);
     void PlayPreparedTrayHideAnimation();
-    WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation();
-    WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation();
+    WidgetTrayAnimationProfile GetPlannedTrayAnimationProfile(bool isShowing);
+    WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation(int delayMs = 0);
+    WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation(int delayMs = 0);
     void SimplifyBackdropForInteraction();
     void RestoreBackdropAfterInteraction();
     void ActivateRaisedFromTrayBatch();
@@ -120,12 +123,16 @@ internal interface IDesktopWidgetWindow
     void CompleteCoordinatedMoveParticipation(bool hasMoved, bool isSource);
     void ForceRestoreDesktopLayerFromManager();
     void RestoreDesktopLayerFromManager();
+    void PrepareForGroupDesktopRestoreFromManager();
+    void CompleteGroupDesktopRestoreFromManager(bool placedAtDesktopLayer);
+    void MarkRaisedAboveDesktopLayerFromManager();
     Task WaitForFirstPresentedFrameAsync(CancellationToken cancellationToken);
-    void SetGroupDropPreview(
-        bool visible,
-        bool ready,
-        string? messageKey = null);
+    void PrewarmGroupDropPreview();
+    void SetGroupDropPreview(WidgetGroupDropPreviewState state);
+    void SetGroupDragSourcePreview(bool active, double anchorNormalizedX = 0.5, double anchorNormalizedY = 0.06);
+    void SetGroupDragSourceCommitting(bool committing);
     Windows.Graphics.RectInt32? GetGroupMergeTitleScreenBounds();
+    Windows.Graphics.RectInt32? GetGroupMergeSurfaceScreenBounds();
     void HideWindow();
     void CloseWindow();
 }
@@ -137,7 +144,6 @@ public sealed partial class WidgetManager
 {
     private readonly TodoSettingsCoordinator? _todoSettings;
     private readonly IQuickCaptureSettings? _quickCaptureSettings;
-    private readonly ISearchFeatureSettings? _searchFeatureSettings;
     private const string ManagedShortcutDescriptionPrefix = "DeskBox mapped widget shortcut:";
 
     /// <summary>
@@ -174,6 +180,9 @@ public sealed partial class WidgetManager
     /// commits, context-menu moves, move-all / undo).
     /// </summary>
     internal Action? NotifyScreenHomeChangedAction { get; set; }
+    internal Action<string>? RequestDisplayTopologyRestoreAction { get; set; }
+    internal Action? EnsureXamlLoopLifelineAction { get; set; }
+    internal Func<ClipboardHistoryService?>? ClipboardHistoryServiceProvider { get; set; }
     private readonly FileWidgetHostDiagnostics _fileWidgetHostDiagnostics;
     private readonly WidgetTopologyLayoutService _topologyLayoutService = new();
     private readonly Dictionary<string, FileWidgetSession> _fileWidgets = new();
@@ -187,6 +196,10 @@ public sealed partial class WidgetManager
     private readonly SemaphoreSlim _trayVisibilityOperationGate = new(1, 1);
     private readonly TrayToggleRequestQueue _trayToggleRequestQueue;
     private EffectivePerformanceSettings _lastPerformanceSettings;
+    private bool _lastIdleWorkingSetTrimEnabled =
+        PerformanceSettingsPolicy.DefaultIdleWorkingSetTrimEnabled;
+    private bool _lastKeepCapsuleContentWarm =
+        PerformanceSettingsPolicy.DefaultKeepCapsuleContentWarm;
     private bool? _lastNativeWidgetVisibilityForMemoryCleanup;
 
     /// <summary>
@@ -237,6 +250,15 @@ public sealed partial class WidgetManager
                 window.Visible &&
                 window.CurrentContent is FileWidgetContentAdapter);
 
+    internal bool HasVisibleExpandedFileWidgets =>
+        _fileWidgets.Values.Any(session =>
+            session.Host is { Visible: true, IsTargetCollapsed: false }) ||
+        _contentWidgets.Values
+            .Distinct()
+            .Any(window =>
+                window is { Visible: true, IsTargetCollapsed: false } &&
+                window.CurrentContent is FileWidgetContentAdapter);
+
     internal int LoadedWidgetCount => _widgetSurfaces.Count;
 
     internal int VisibleWidgetCount => GetLoadedDesktopWindows().Count(window => window.Visible);
@@ -264,12 +286,21 @@ public sealed partial class WidgetManager
             nativeVisibleCount);
     }
 
+    private int _batchHideReconcileSuppressionDepth;
+
     internal void ReconcileBackgroundMemoryCleanupForWidgetVisibility(
         string reason,
         bool forceScheduleWhenHidden = false,
         bool? observedNativeVisibility = null)
     {
         if (App.IsShuttingDown)
+        {
+            return;
+        }
+
+        if (_batchHideReconcileSuppressionDepth > 0 &&
+            !forceScheduleWhenHidden &&
+            observedNativeVisibility == false)
         {
             return;
         }
@@ -297,7 +328,9 @@ public sealed partial class WidgetManager
         App.Current.ObserveWidgetVisibilityForImmediateWorkingSetTrim(visibility, reason);
 
         if (!stateChanged &&
-            !(forceScheduleWhenHidden && !hasNativeVisibleWidgets))
+            !(forceScheduleWhenHidden &&
+              !hasNativeVisibleWidgets &&
+              !App.IsBackgroundMemoryCleanupArmed))
         {
             return;
         }
@@ -343,6 +376,17 @@ public sealed partial class WidgetManager
             ?.WindowContentRoot;
     }
 
+    internal WidgetWindowBase? FindWidgetWindowByHandle(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        return GetLoadedDesktopWindows()
+            .FirstOrDefault(window => window.WindowHandle == hwnd) as WidgetWindowBase;
+    }
+
     private IReadOnlyList<IDesktopWidgetWindow> GetLoadedDesktopWindows()
     {
         return _widgetSurfaces.GetSessions()
@@ -370,6 +414,7 @@ public sealed partial class WidgetManager
             RestoreTemporarilyRaisedWidgetsToDesktopLayer(
                 $"{reason}-interaction-ended");
             QueueIdleWidgetZOrderNormalization(reason);
+            App.Current.ReconcileQuiescenceWorkingSetTrimSchedule();
         }
     }
 
@@ -494,8 +539,7 @@ public sealed partial class WidgetManager
         QuickCaptureService quickCaptureService,
         LocalizationService? localizationService = null,
         TodoSettingsCoordinator? todoSettings = null,
-        IQuickCaptureSettings? quickCaptureSettings = null,
-        ISearchFeatureSettings? searchFeatureSettings = null)
+        IQuickCaptureSettings? quickCaptureSettings = null)
         : this(
             settingsService,
             fileService,
@@ -506,8 +550,7 @@ public sealed partial class WidgetManager
             () => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             recycleManagedFolderDeletes: true,
             todoSettings,
-            quickCaptureSettings,
-            searchFeatureSettings)
+            quickCaptureSettings)
     {
     }
 
@@ -541,8 +584,7 @@ public sealed partial class WidgetManager
         Func<string> desktopPathProvider,
         bool recycleManagedFolderDeletes,
         TodoSettingsCoordinator? todoSettings = null,
-        IQuickCaptureSettings? quickCaptureSettings = null,
-        ISearchFeatureSettings? searchFeatureSettings = null)
+        IQuickCaptureSettings? quickCaptureSettings = null)
     {
         _settingsService = settingsService;
         _fileSessionRegistration = new(_fileWidgets,
@@ -551,7 +593,6 @@ public sealed partial class WidgetManager
             window => window.WindowHandle);
         _todoSettings = todoSettings;
         _quickCaptureSettings = quickCaptureSettings;
-        _searchFeatureSettings = searchFeatureSettings;
         _fileService = fileService;
         _organizerService = organizerService;
         _themeService = themeService;
@@ -574,9 +615,15 @@ public sealed partial class WidgetManager
         _lastWidgetLayerMode = SettingsService.NormalizeWidgetLayerModeSetting(_settingsService.Settings.WidgetLayerMode);
         _lastPerformanceSettings =
             PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
+        _lastIdleWorkingSetTrimEnabled =
+            _settingsService.Settings.Performance.IdleWorkingSetTrimEnabled;
         IconHelper.ConfigurePerformanceCacheBudget(
             _lastPerformanceSettings.CacheBudget);
+        _lastKeepCapsuleContentWarm =
+            PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
         InitializeWidgetGroupPresentationDefaults();
+        CustomWidgetHostSnapshotService.RegisterTodoWidgetRefresher(RefreshTodoWidgetAsync);
+        CustomWidgetHostSnapshotService.RegisterTodoLiveMutationBridge(CreateTodoLiveMutationBridge());
         _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
         _themeService.AppearanceChanged += ApplyAppearancePreview;
@@ -611,15 +658,20 @@ public sealed partial class WidgetManager
                 SetWeatherFeatureWidgetEnabledAsync,
                 () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather)),
             new(
-                WidgetKind.Search,
-                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Search),
-                SetSearchFeatureWidgetEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Search)),
+                WidgetKind.Clipboard,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Clipboard),
+                SetClipboardFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Clipboard)),
             new(
                 WidgetKind.Glance,
                 CreateOrShowGlanceWidgetsAsync,
                 SetGlanceFeatureWidgetEnabledAsync,
-                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance))
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance)),
+            new(
+                WidgetKind.Custom,
+                CreateOrShowCustomWidgetsAsync,
+                SetCustomFeatureWidgetEnabledAsync,
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Custom))
         ];
 
         return handlers.ToDictionary(handler => handler.WidgetKind);
@@ -629,6 +681,14 @@ public sealed partial class WidgetManager
     {
         WidgetWindowProvider[] providers =
         [
+            new(
+                WidgetKind.Clipboard,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing,
+                    request.CancellationToken)),
             new(
                 WidgetKind.File,
                 async request => await CreateContentWidgetFromConfigAsync(
@@ -670,7 +730,7 @@ public sealed partial class WidgetManager
                     request.ShowRaisedWhileInitializing,
                     request.CancellationToken)),
             new(
-                WidgetKind.Search,
+                WidgetKind.Glance,
                 async request => await CreateContentWidgetFromConfigAsync(
                     request.Config,
                     request.KeepPreparedForAnimation,
@@ -678,7 +738,7 @@ public sealed partial class WidgetManager
                     request.ShowRaisedWhileInitializing,
                     request.CancellationToken)),
             new(
-                WidgetKind.Glance,
+                WidgetKind.Custom,
                 async request => await CreateContentWidgetFromConfigAsync(
                     request.Config,
                     request.KeepPreparedForAnimation,
@@ -715,8 +775,6 @@ public sealed partial class WidgetManager
             _lastFeatureWidgetEnabledStates[kind] = enabled;
             if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
                 continue; // the coordinator handles external enablement and listener state
-            if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-                continue; // the coordinator orders widget teardown before runtime release
             ApplyFeatureWidgetEnabledState(kind, enabled);
         }
 
@@ -734,16 +792,32 @@ public sealed partial class WidgetManager
 
         EffectivePerformanceSettings current =
             PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
-        if (current == _lastPerformanceSettings)
+        bool idleTrimEnabled =
+            _settingsService.Settings.Performance.IdleWorkingSetTrimEnabled;
+        bool policyChanged = current != _lastPerformanceSettings;
+        bool keepCapsuleContentWarm =
+            PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
+        bool trimChanged = idleTrimEnabled != _lastIdleWorkingSetTrimEnabled;
+        bool keepWarmChanged = keepCapsuleContentWarm != _lastKeepCapsuleContentWarm;
+        if (!policyChanged && !trimChanged && !keepWarmChanged)
         {
             return;
         }
 
         _lastPerformanceSettings = current;
-        IconHelper.ConfigurePerformanceCacheBudget(current.CacheBudget);
-        foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+        _lastIdleWorkingSetTrimEnabled = idleTrimEnabled;
+        _lastKeepCapsuleContentWarm = keepCapsuleContentWarm;
+        if (policyChanged)
         {
-            window.ApplyPerformanceSettings();
+            IconHelper.ConfigurePerformanceCacheBudget(current.CacheBudget);
+        }
+
+        if (policyChanged || keepWarmChanged)
+        {
+            foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+            {
+                window.ApplyPerformanceSettings();
+            }
         }
 
         App.NotifyPerformanceSettingsChanged();
@@ -834,7 +908,7 @@ public sealed partial class WidgetManager
 
     private void ApplyAppearancePreview()
     {
-        if (_isApplyingAppearancePreview)
+        if (_isApplyingAppearancePreview || _settingsService.LastAppearancePreviewWasAnimationOnly)
         {
             return;
         }
@@ -870,6 +944,7 @@ public sealed partial class WidgetManager
         // graph under the same lock, and an ungated write lands on an
         // orphaned slice (R15-2 gated one of four write sites; these are the
         // remaining three).
+        string startupTopologySignature = DisplayAreaWatcherService.CaptureCurrentSignature();
         bool activated = false;
         _settingsService.MutateGraphUnderLock(() =>
         {
@@ -969,6 +1044,14 @@ public sealed partial class WidgetManager
         RestoreLoadedWidgetBoundsAfterStartup();
 
         QueueDeferredStartupWidgetBoundsReconciliation();
+        string postRestoreTopologySignature = DisplayAreaWatcherService.CaptureCurrentSignature();
+        if (!string.Equals(startupTopologySignature, postRestoreTopologySignature, StringComparison.Ordinal))
+        {
+            App.Log(
+                $"[WidgetManager] Display topology drifted during startup restore " +
+                $"('{startupTopologySignature}' -> '{postRestoreTopologySignature}'); scheduling topology restore.");
+            RequestDisplayTopologyRestoreAction?.Invoke("startup-restore-drift");
+        }
 
         PlacePendingInitialWidgets();
 
@@ -1011,11 +1094,16 @@ public sealed partial class WidgetManager
 
     internal Task CreateInitialManagedWidgetAsync(string? name = null)
     {
-        return CreateManagedWidgetCoreAsync(name, placeForFirstRun: true);
+        return CreateInitialManagedWidgetWithFallbackAsync(name);
     }
 
     private async Task CreateManagedWidgetCoreAsync(string? name, bool placeForFirstRun)
     {
+        if (_isStorageMigrationRunning)
+        {
+            throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+        }
+
         name = string.IsNullOrWhiteSpace(name)
             ? _localizationService.T("Widget.DefaultName")
             : name;
@@ -1073,6 +1161,9 @@ public sealed partial class WidgetManager
             case WidgetKind.Glance:
                 await CreateGlanceWidgetAsync();
                 break;
+            case WidgetKind.Custom:
+                await CreateCustomWidgetAsync();
+                break;
             default:
                 if (IsContentFeatureWidgetKind(widgetKind))
                 {
@@ -1091,6 +1182,12 @@ public sealed partial class WidgetManager
                     Height = _settingsService.Settings.DefaultWidgetHeight
                 };
                 ApplyNewWidgetPlacement(config);
+                if (!_settingsService.Settings.WidgetLayout.Widgets.Any(w => string.Equals(w.Id, config.Id, StringComparison.Ordinal)))
+                {
+                    _settingsService.Settings.WidgetLayout.Widgets.Add(config);
+                    await _settingsService.SaveAsync();
+                }
+
                 await CreateRegisteredWidgetFromConfigAsync(config, revealAfterCreate: true);
                 break;
         }
@@ -1099,12 +1196,27 @@ public sealed partial class WidgetManager
     /// <summary>
     /// Create a widget mapped to an arbitrary folder.
     /// </summary>
-    public async Task CreateFolderWidgetAsync(string folderPath)
+    private static readonly BoundedStaOperationRunner s_mappedShortcutRunner =
+        new(
+            maxConcurrency: 1,
+            maxQueued: 8,
+            queueTimeout: TimeSpan.FromSeconds(5),
+            threadName: "DeskBox Mapped Shortcut");
+
+    public Task CreateFolderWidgetAsync(string folderPath) =>
+        CreateFolderWidgetCoreAsync(folderPath, skipConflictCheck: false);
+
+    internal async Task CreateFolderWidgetCoreAsync(
+        string folderPath,
+        bool skipConflictCheck)
     {
         string normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
-        EnsureFileWidgetPathAvailable(
-            normalizedPath,
-            candidateFollowsDefaultStoragePath: false);
+        if (!skipConflictCheck)
+        {
+            EnsureFileWidgetPathAvailable(
+                normalizedPath,
+                candidateFollowsDefaultStoragePath: false);
+        }
 
         string folderName = Path.GetFileName(normalizedPath);
         if (string.IsNullOrWhiteSpace(folderName))
@@ -1124,7 +1236,7 @@ public sealed partial class WidgetManager
 
         ApplyNewWidgetPlacement(config);
         _settingsService.Settings.Widgets.Add(config);
-        SyncMappedWidgetShortcut(config);
+        await SyncMappedWidgetShortcutAsync(config);
         await _settingsService.SaveAsync();
 
         await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
@@ -1200,9 +1312,18 @@ public sealed partial class WidgetManager
     internal string FormatFileWidgetPathConflictMessage(
         string candidatePath,
         string otherDisplayName,
+        string otherFolderPath) =>
+        FormatFileWidgetPathConflictMessage(
+            DescribeFileWidgetPathRelation(candidatePath, otherFolderPath),
+            otherDisplayName,
+            otherFolderPath);
+
+    internal string FormatFileWidgetPathConflictMessage(
+        FileWidgetPathRelation relation,
+        string otherDisplayName,
         string otherFolderPath)
     {
-        string key = DescribeFileWidgetPathRelation(candidatePath, otherFolderPath) switch
+        string key = relation switch
         {
             FileWidgetPathRelation.SameDirectory => "Widget.Error.FileWidgetPathConflictSameFolder",
             FileWidgetPathRelation.CandidateInsideOther => "Widget.Error.FileWidgetPathConflictInsideOther",
@@ -1212,40 +1333,84 @@ public sealed partial class WidgetManager
         return _localizationService.Format(key, otherDisplayName, otherFolderPath);
     }
 
+    internal Task<(FileWidgetPathConflict? Conflict, FileWidgetPathRelation Relation, string StorageRoot)>
+        EvaluateExternalMappingConflictAsync(string folderPath)
+    {
+        string managedStorageRoot = SettingsService.NormalizeManagedStorageRootPath(
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        WidgetConfig[] candidates = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                !IsDeleted(widget.Id) &&
+                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+            .ToArray();
+
+        return Task.Run(() =>
+        {
+            FileWidgetPathConflict? conflict = EvaluateFileWidgetPathConflict(
+                folderPath,
+                candidateFollowsDefaultStoragePath: false,
+                managedStorageRoot,
+                candidates);
+            if (conflict is null)
+            {
+                return ((FileWidgetPathConflict?)null, FileWidgetPathRelation.SameDirectory, managedStorageRoot);
+            }
+
+            string otherPath = conflict.Kind == FileWidgetPathConflictKind.ExistingWidget &&
+                conflict.ConflictingWidget?.MappedFolderPath is { } mappedPath
+                    ? mappedPath
+                    : managedStorageRoot;
+            FileWidgetPathRelation relation = DescribeFileWidgetPathRelation(folderPath, otherPath);
+            return (conflict, relation, managedStorageRoot);
+        });
+    }
+
     public bool TryGetFileWidgetPathConflict(
         string folderPath,
         out FileWidgetPathConflict? conflict,
         string? excludedWidgetId = null,
         bool candidateFollowsDefaultStoragePath = false)
     {
+        string managedStorageRoot = SettingsService.NormalizeManagedStorageRootPath(
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        IEnumerable<WidgetConfig> candidates = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                !IsDeleted(widget.Id) &&
+                !string.Equals(widget.Id, excludedWidgetId, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(widget.MappedFolderPath));
+        conflict = EvaluateFileWidgetPathConflict(
+            folderPath,
+            candidateFollowsDefaultStoragePath,
+            managedStorageRoot,
+            candidates);
+        return conflict is not null;
+    }
+
+    private static FileWidgetPathConflict? EvaluateFileWidgetPathConflict(
+        string folderPath,
+        bool candidateFollowsDefaultStoragePath,
+        string managedStorageRoot,
+        IEnumerable<WidgetConfig> candidates)
+    {
         string normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
-        if (!candidateFollowsDefaultStoragePath)
+        if (!candidateFollowsDefaultStoragePath &&
+            FileService.PathsOverlap(normalizedPath, managedStorageRoot))
         {
-            string managedStorageRoot =
-                SettingsService.NormalizeManagedStorageRootPath(
-                    _settingsService.Settings.DefaultManagedStorageRootPath);
-            if (FileService.PathsOverlap(normalizedPath, managedStorageRoot))
-            {
-                conflict = new FileWidgetPathConflict(
-                    FileWidgetPathConflictKind.ManagedStorageRoot,
-                    null);
-                return true;
-            }
+            return new FileWidgetPathConflict(
+                FileWidgetPathConflictKind.ManagedStorageRoot,
+                null);
         }
 
-        WidgetConfig? conflictingWidget = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
-            widget.WidgetKind == WidgetKind.File &&
-            !IsDeleted(widget.Id) &&
-            !string.Equals(widget.Id, excludedWidgetId, StringComparison.Ordinal) &&
-            !string.IsNullOrWhiteSpace(widget.MappedFolderPath) &&
+        WidgetConfig? conflictingWidget = candidates.FirstOrDefault(widget =>
             IsFileWidgetPathConflict(
                 normalizedPath,
                 candidateFollowsDefaultStoragePath,
                 widget));
-        conflict = conflictingWidget is null
+        return conflictingWidget is null
             ? null
             : new FileWidgetPathConflict(FileWidgetPathConflictKind.ExistingWidget, conflictingWidget);
-        return conflictingWidget is not null;
     }
 
     internal static bool IsFileWidgetPathConflict(
@@ -1267,9 +1432,10 @@ public sealed partial class WidgetManager
                 candidatePath,
                 out bool existingUnderCandidate))
         {
-            // Mapping aliases that cannot be resolved safely must not bypass
-            // exact-path or managed-storage isolation.
-            return true;
+            return IsUnresolvableFileWidgetPathConflict(
+                candidatePath,
+                candidateFollowsDefaultStoragePath,
+                existingWidget);
         }
 
         if (!candidateUnderExisting && !existingUnderCandidate)
@@ -1289,6 +1455,75 @@ public sealed partial class WidgetManager
         // its tree so migration and cleanup cannot touch an overlapping widget.
         return candidateFollowsDefaultStoragePath ||
                existingWidget.FollowsDefaultStoragePath;
+    }
+
+    private static bool IsUnresolvableFileWidgetPathConflict(
+        string candidatePath,
+        bool candidateFollowsDefaultStoragePath,
+        WidgetConfig existingWidget)
+    {
+        // When an existing mapped widget points to an unplugged drive,
+        // BitLocker-locked volume, or offline SMB/NAS share, TryResolvePathIdentity
+        // fails with IOException on that widget's path. Returning true blindly
+        // for every existing widget rejected every unrelated local folder
+        // mapping and falsely blamed the offline widget. Compare all known
+        // lexical and resolved representations on each side instead.
+        List<string> candidateForms = CollectComparablePathForms(candidatePath);
+        List<string> existingForms = CollectComparablePathForms(existingWidget.MappedFolderPath!);
+        if (candidateForms.Count == 0 || existingForms.Count == 0)
+        {
+            return candidateFollowsDefaultStoragePath ||
+                   existingWidget.FollowsDefaultStoragePath;
+        }
+
+        bool requiresTreeExclusivity =
+            candidateFollowsDefaultStoragePath ||
+            existingWidget.FollowsDefaultStoragePath;
+        foreach (string candidate in candidateForms)
+        {
+            foreach (string existing in existingForms)
+            {
+                if (requiresTreeExclusivity)
+                {
+                    if (FileService.IsPathUnderDirectory(candidate, existing) ||
+                        FileService.IsPathUnderDirectory(existing, candidate))
+                    {
+                        return true;
+                    }
+                }
+                else if (string.Equals(candidate, existing, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static List<string> CollectComparablePathForms(string rawPath)
+    {
+        var forms = new List<string>(capacity: 2);
+        try
+        {
+            string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rawPath));
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                forms.Add(normalized);
+            }
+        }
+        catch
+        {
+        }
+
+        if (FileService.TryResolvePathIdentity(rawPath, out string resolved) &&
+            !string.IsNullOrWhiteSpace(resolved) &&
+            !forms.Contains(resolved, StringComparer.OrdinalIgnoreCase))
+        {
+            forms.Add(resolved);
+        }
+
+        return forms;
     }
 
     /// <summary>
@@ -1408,14 +1643,15 @@ public sealed partial class WidgetManager
         if (_contentWidgets.TryGetValue(config.Id, out var contentWindow))
         {
             contentWindow.RestoreBoundsForCurrentTopology();
-            contentWindow.PrepareTrayShowAnimation();
             if (reveal)
             {
+                contentWindow.PrepareSingleWidgetShowAnimation();
                 contentWindow.ShowPreparedRaisedFromTray();
                 contentWindow.PlayTrayShowAnimation();
             }
             else
             {
+                contentWindow.PrepareTrayShowAnimation();
                 contentWindow.ShowPreparedAtDesktopLayer();
                 contentWindow.CompleteTrayShowWithoutAnimation();
             }
@@ -1517,9 +1753,9 @@ public sealed partial class WidgetManager
 
             PlayPreparedTrayShowAnimations(windowsToAnimate);
             _sessionManager.MarkDesktopResting("set-all-visible");
-            NormalizeIdleWidgetZOrder("set-all-visible");
-            SaveBatchVisibilityState();
+            QueueIdleWidgetZOrderNormalization("set-all-visible");
             await _trayBatchAnimationDriver.WaitForIdleAsync();
+            SaveBatchVisibilityState();
             // Reveal re-shows each window from its own persisted placement
             // without re-running the bar arrangement; overlapping capsules
             // then only healed on the next drag. Verify the bar once the
@@ -1564,21 +1800,29 @@ public sealed partial class WidgetManager
                 $"[QuickReveal] Holding topmost through hide animation count={orderedWindows.Count}");
         }
 
-        PlayPreparedTrayHideAnimations(windowsToHide);
+        _batchHideReconcileSuppressionDepth++;
+        try
+        {
+            PlayPreparedTrayHideAnimations(windowsToHide);
 
-        ClearTemporaryRaiseLease("set-all-hidden");
-        SetWidgetsRaisedFromTray(false);
-        _sessionManager.MarkHidden("set-all-hidden");
-        long endedRaiseGeneration = _trayRaiseBatchGeneration;
-        _trayRaiseBatchGeneration++;
-        StopTrayLayerRestoreMonitor();
-        SaveBatchVisibilityState();
-        await _trayBatchAnimationDriver.WaitForIdleAsync();
-        // Guests are demoted only after the hide animations settle: doing it
-        // at the flag flip would sink them below widgets that are still
-        // fading out in the topmost band. The generation guard keeps guests
-        // re-held by a fast reraise during the await.
-        SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
+            ClearTemporaryRaiseLease("set-all-hidden");
+            SetWidgetsRaisedFromTray(false);
+            _sessionManager.MarkHidden("set-all-hidden");
+            long endedRaiseGeneration = _trayRaiseBatchGeneration;
+            _trayRaiseBatchGeneration++;
+            StopTrayLayerRestoreMonitor();
+            await _trayBatchAnimationDriver.WaitForIdleAsync();
+            SaveBatchVisibilityState();
+            // Guests are demoted only after the hide animations settle: doing it
+            // at the flag flip would sink them below widgets that are still
+            // fading out in the topmost band. The generation guard keeps guests
+            // re-held by a fast reraise during the await.
+            SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
+        }
+        finally
+        {
+            _batchHideReconcileSuppressionDepth--;
+        }
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
 
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
@@ -1657,7 +1901,7 @@ public sealed partial class WidgetManager
         PlacePendingInitialWidgets();
         ApplyDisconnectCollapsePolicy(
             Win32Helper.GetMonitorWorkAreaInfos()
-                .Select(area => Win32Helper.ResolveStableMonitorId(area.DeviceName))
+                .Select(area => string.IsNullOrWhiteSpace(area.StableId) ? Win32Helper.ResolveStableMonitorId(area.DeviceName) : area.StableId)
                 .ToList());
         // Per-window restore can strand two bar members on one slot with no
         // later event to heal it (feedback 327). The debounced check
@@ -1718,6 +1962,10 @@ public sealed partial class WidgetManager
         // (spec 5.6 user action).
         EndRemovalGraceByUserAction?.Invoke();
         _placementGeneration++;
+        DateTimeOffset placedAtUtc = DateTimeOffset.UtcNow;
+        string? activeTopologyKey = _settingsService.Settings.WidgetLayout.ActiveWidgetTopologyKey;
+        config.LastUserPlacementUtc = placedAtUtc;
+        config.LastUserPlacementTopologyKey = activeTopologyKey;
         config.ScreenBindingMode = mode;
         config.BoundScreenId = normalizedBound;
         string? boundLabel = ResolveBoundScreenLabel(mode, normalizedBound);
@@ -1735,6 +1983,8 @@ public sealed partial class WidgetManager
             group.ScreenBindingMode = mode;
             group.BoundScreenId = normalizedBound;
             group.BoundScreenLabel = boundLabel;
+            group.LastUserPlacementUtc = placedAtUtc;
+            group.LastUserPlacementTopologyKey = activeTopologyKey;
             foreach (string memberId in group.MemberIds)
             {
                 surfaceMemberIds.Add(memberId);
@@ -1743,6 +1993,8 @@ public sealed partial class WidgetManager
                     member.ScreenBindingMode = mode;
                     member.BoundScreenId = normalizedBound;
                     member.BoundScreenLabel = boundLabel;
+                    member.LastUserPlacementUtc = placedAtUtc;
+                    member.LastUserPlacementTopologyKey = activeTopologyKey;
                 }
             }
 
@@ -1781,7 +2033,8 @@ public sealed partial class WidgetManager
         // the resulting entry becomes authoritative.
         MarkSurfaceEntryAuthoritative(
             config,
-            stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null);
+            stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null,
+            authoredAtUtc: placedAtUtc);
         // persistImmediately=false: a batch caller (move-all) saves the whole
         // batch once at its end; the in-memory binding, window reposition,
         // and topology capture above are already complete at this point.
@@ -2018,9 +2271,20 @@ public sealed partial class WidgetManager
         WidgetRemovalAction removalAction = WidgetRemovalAction.RemoveWidgetOnly,
         IntPtr ownerWindowHandle = default)
     {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => RemoveWidgetAsync(widgetId, removalAction, ownerWindowHandle));
+            return;
+        }
+
         var config = FindConfig(widgetId);
         if (config is not null)
         {
+            if (_isStorageMigrationRunning && config.FollowsDefaultStoragePath)
+            {
+                throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+            }
+
             // Managed-folder cleanup runs before any irreversible removal
             // step: a failed move-back or recycle throws here and leaves the
             // widget fully intact, so the close flow can surface the error
@@ -2049,6 +2313,14 @@ public sealed partial class WidgetManager
         {
             App.Log($"[WidgetManager] Retiring content widget window for delete: {widgetId}");
             _contentWindowRegistration.UnregisterIfMatch(widgetId, contentWindow);
+            try
+            {
+                await contentWindow.PlayDeleteExitAnimationAsync();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Delete exit animation failed: {ex.Message}");
+            }
             // Explicitly dispose content (e.g. MusicWidgetViewModel) BEFORE
             // closing the window.  The Closed event handler also calls
             // DisposeContent, but if the event is delayed or fails, the
@@ -2056,13 +2328,11 @@ public sealed partial class WidgetManager
             // singleton would keep the old ViewModel alive indefinitely.
             try
             {
-                if (contentWindow.CurrentContent is IDisposable disposableContent)
-                {
-                    disposableContent.Dispose();
-                }
+                contentWindow.DisposeHostedContentEarly();
             }
             catch (Exception ex) { App.Log($"[WidgetManager] Content dispose failed during delete: {ex.Message}"); }
             try { contentWindow.HideWindow(); } catch (Exception ex) { App.Log($"[WidgetManager] HideWindow failed during delete: {ex.Message}"); }
+            EnsureXamlLoopLifelineAction?.Invoke();
             try { contentWindow.Close(); } catch (Exception ex) { App.Log($"[WidgetManager] Close failed during delete: {ex.Message}"); }
         }
 
@@ -2088,6 +2358,17 @@ public sealed partial class WidgetManager
                 if (!hasRemainingGlanceWidget)
                 {
                     SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
+                }
+            }
+            else if (config.WidgetKind == WidgetKind.Custom)
+            {
+                DeleteCustomWidgetStorageSecretsAndStages(config.Id);
+                bool hasRemainingCustomWidget = _settingsService.Settings.WidgetLayout.Widgets.Any(widget =>
+                    widget.WidgetKind == WidgetKind.Custom &&
+                    !IsDeleted(widget.Id));
+                if (!hasRemainingCustomWidget)
+                {
+                    SetFeatureWidgetEnabledState(WidgetKind.Custom, false);
                 }
             }
             else if (config.WidgetKind == WidgetKind.Todo)
@@ -2144,6 +2425,11 @@ public sealed partial class WidgetManager
 
         if (config.FollowsDefaultStoragePath)
         {
+            if (_isStorageMigrationRunning)
+            {
+                throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+            }
+
             await RenameManagedWidgetFolderAsync(config, newName);
         }
         else
@@ -2470,20 +2756,34 @@ public sealed partial class WidgetManager
         {
             try
             {
-                window.ForceRestoreDesktopLayerFromManager();
+                window.PrepareForGroupDesktopRestoreFromManager();
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to restore widget desktop layer {FormatHostWindow(window)}: {ex}");
+                App.Log($"[WidgetManager] Failed to prepare widget desktop layer restore {FormatHostWindow(window)}: {ex}");
             }
         }
 
-        // Invalidate the defensive delayed normalizations queued by individual
-        // hosts, then establish one shared external boundary for the group.
+        // Establish one shared external boundary for the group in a single
+        // DeferWindowPos transaction rather than N per-window restores.
         _idlePeerOrderGeneration++;
         bool applied = WidgetLayerService.RestoreGroupPreservingForeground(
             windows.Select(window => window.WindowHandle).ToList(),
-            "raised-session-restored");
+            "raised-session-restored",
+            out RelativeLayerRestoreDisposition disposition);
+        bool placedAtDesktopLayer =
+            disposition != RelativeLayerRestoreDisposition.PreservePeerOrder;
+        foreach (IDesktopWidgetWindow window in windows)
+        {
+            try
+            {
+                window.CompleteGroupDesktopRestoreFromManager(placedAtDesktopLayer);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to finalize widget desktop layer restore {FormatHostWindow(window)}: {ex}");
+            }
+        }
         App.LogVerbose(
             $"[TrayBatch] RestoreDesktopLayer group-applied={applied} " +
             $"count={windows.Count} order={FormatIdlePeerOrder(windows)}");
@@ -2623,28 +2923,57 @@ public sealed partial class WidgetManager
             !IsDeleted(widget.Id));
     }
 
-    public async Task RefreshFileWidgetAsync(string widgetId)
+    private Controls.WidgetContents.FileWidgetContentAdapter? FindLoadedFileWidgetAdapter(string widgetId)
+    {
+        if (_fileWidgets.TryGetValue(widgetId, out FileWidgetSession? fileEntry) &&
+            !fileEntry.Content.IsDisposed)
+        {
+            return fileEntry.Content;
+        }
+
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
+        {
+            if (window.CurrentContent is Controls.WidgetContents.FileWidgetContentAdapter currentAdapter &&
+                !currentAdapter.IsDisposed &&
+                string.Equals(currentAdapter.WidgetId, widgetId, StringComparison.Ordinal))
+            {
+                return currentAdapter;
+            }
+
+            foreach (Contracts.IWidgetContent cached in window.CachedGroupContents)
+            {
+                if (cached is Controls.WidgetContents.FileWidgetContentAdapter cachedAdapter &&
+                    !cachedAdapter.IsDisposed &&
+                    string.Equals(cachedAdapter.WidgetId, widgetId, StringComparison.Ordinal))
+                {
+                    return cachedAdapter;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public async Task RefreshFileWidgetAsync(
+        string widgetId,
+        IReadOnlyCollection<string>? restoredPaths = null,
+        IReadOnlyDictionary<string, string>? sourceToRestoredPathMap = null)
     {
         if (!HasUiThreadAccess())
         {
-            await RunOnUiThreadAsync(() => RefreshFileWidgetAsync(widgetId));
+            await RunOnUiThreadAsync(() => RefreshFileWidgetAsync(widgetId, restoredPaths, sourceToRestoredPathMap));
             return;
         }
 
-        if (_fileWidgets.TryGetValue(widgetId, out var fileEntry))
-        {
-            await fileEntry.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
-            return;
-        }
-
-        ContentWidgetWindow? contentWindow = _contentWidgets.Values
-            .Distinct()
-            .FirstOrDefault(window =>
-                window.CurrentContent is FileWidgetContentAdapter surface &&
-                string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-        if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
+        if (FindLoadedFileWidgetAdapter(widgetId) is { } fileSurface)
         {
             await fileSurface.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
+            if (restoredPaths is { Count: > 0 } || sourceToRestoredPathMap is { Count: > 0 })
+            {
+                _ = fileSurface.ViewModel.RestoreDepartedStackMemberships(
+                    restoredPaths ?? Array.Empty<string>(),
+                    sourceToRestoredPathMap);
+            }
         }
     }
 
@@ -2661,27 +2990,29 @@ public sealed partial class WidgetManager
 
         foreach (string widgetId in widgetIds.Distinct(StringComparer.Ordinal))
         {
-            if (_fileWidgets.TryGetValue(widgetId, out var fileEntry))
-            {
-                fileEntry.SetDesktopOrganizationBusy(isBusy);
-                continue;
-            }
-
-            ContentWidgetWindow? contentWindow = _contentWidgets.Values
-                .Distinct()
-                .FirstOrDefault(window =>
-                    window.CurrentContent is FileWidgetContentAdapter surface &&
-                    string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-            if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
-            {
-                fileSurface.SetDesktopOrganizationBusy(isBusy);
-            }
+            FindLoadedFileWidgetAdapter(widgetId)?.SetDesktopOrganizationBusy(isBusy);
         }
     }
 
     private WidgetConfig? FindConfig(string widgetId)
     {
         return _settingsService.Settings.Widgets.FirstOrDefault(widget => widget.Id == widgetId);
+    }
+
+    private async Task SyncMappedWidgetShortcutAsync(WidgetConfig config)
+    {
+        StaOperationResult<bool> result = await s_mappedShortcutRunner.RunAsync(
+            () =>
+            {
+                SyncMappedWidgetShortcut(config);
+                return true;
+            },
+            CancellationToken.None).ConfigureAwait(false);
+        if (!result.Started)
+        {
+            App.Log(
+                $"[MappedShortcut] Skipped shortcut sync because STA worker queue was full for '{config.Id}'.");
+        }
     }
 
     private void SyncMappedWidgetShortcut(WidgetConfig config, string? displayNameOverride = null)
@@ -2739,6 +3070,8 @@ public sealed partial class WidgetManager
             WidgetKind.Music => (380, 190),
             WidgetKind.Weather => (200, 200),
             WidgetKind.Glance => (360, 260),
+            WidgetKind.Custom => (360, 460),
+            WidgetKind.Clipboard => (320, 420),
             _ => (
                 _settingsService.Settings.DefaultWidgetWidth,
                 _settingsService.Settings.DefaultWidgetHeight)
@@ -2868,6 +3201,7 @@ public sealed partial class WidgetManager
         {
             _themeService.TrackWindow(window);
             _contentWindowRegistration.Register(config.Id, window);
+            window.LongHiddenCleanupElapsed += OnContentWindowLongHiddenCleanupElapsed;
             RegisterStandaloneUnifiedFileSessionIfNeeded(
                 config,
                 window,
@@ -2878,8 +3212,9 @@ public sealed partial class WidgetManager
                 prepareSurfacePromotionCandidate);
             ApplyCapsuleArrangementIfChanged(force: true);
 
-            window.Closed += (_, _) =>
+            App.SubscribeWindowClosedOnce(window, () =>
             {
+                window.LongHiddenCleanupElapsed -= OnContentWindowLongHiddenCleanupElapsed;
                 IReadOnlyList<string> registeredIds = _contentWindowRegistration.Unregister(window);
 
                 RemoveFileWidgetSessionsForHost(window);
@@ -2908,31 +3243,36 @@ public sealed partial class WidgetManager
                 closedConfig.IsVisible = false;
                 SetWidgetGroupVisibility(closedConfig, isVisible: false);
                 _settingsService.SaveDebounced();
-            };
+            });
 
             if (keepPreparedForAnimation && showRaisedWhileInitializing)
             {
-                window.PrepareTrayShowAnimation();
+                window.PrepareTrayShowAnimationForCurrentTopology();
                 QueueDeferredContentInitialization(config, window);
                 return window;
             }
 
             await window.ContentReadyTask.WaitAsync(cancellationToken);
             RestoreWidgetGroupTransientState(config.Id);
-            window.PrepareTrayShowAnimation();
             if (revealAfterCreate)
             {
                 // A newly-created window has exactly one first-presentation
                 // path. Showing it at the desktop layer first and immediately
                 // raising it detached/re-attached the Explorer owner while the
                 // HWND was already visible, which could flash the whole desktop.
+                window.PrepareSingleWidgetShowAnimation();
                 window.ShowPreparedRaisedFromTray();
                 window.PlayTrayShowAnimation();
             }
             else if (!keepPreparedForAnimation)
             {
+                window.PrepareTrayShowAnimationForCurrentTopology();
                 window.ShowPreparedAtDesktopLayer();
                 window.CompleteTrayShowWithoutAnimation();
+            }
+            else
+            {
+                window.PrepareTrayShowAnimationForCurrentTopology();
             }
         }
         catch
@@ -3039,6 +3379,7 @@ public sealed partial class WidgetManager
                 {
                     _contentWindowRegistration.UnregisterIfMatch(config.Id, window);
                     RemoveFileWidgetSessionsForHost(window);
+                    EnsureXamlLoopLifelineAction?.Invoke();
                     try
                     {
                         window.Close();

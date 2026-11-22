@@ -130,7 +130,16 @@ public sealed record DeskBoxHotkeyDiagnostic(
     bool SearchEnabled,
     bool SearchRegistered,
     int SearchModifiers,
-    int SearchVirtualKey);
+    int SearchVirtualKey,
+    bool ClipboardEnabled = false,
+    bool ClipboardRegistered = false,
+    int ClipboardModifiers = 0,
+    int ClipboardVirtualKey = 0,
+    long ClipboardReceivedCount = 0,
+    long ClipboardInvocationCount = 0,
+    long ClipboardDispatchFailureCount = 0,
+    bool ClipboardUsesReservedHook = false,
+    bool ClipboardRegistrationFailed = false);
 
 /// <summary>
 /// Field-wide observability for the callback-isolation invariant (drag-freeze
@@ -215,8 +224,17 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         """;
 
     [GeneratedRegex(
-        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline)[a-z0-9_]*)\\s*=\\s*(?<value>'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
+        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline|token|secret|apikey|api_key|password|authorization)[a-z0-9_]*)\\s*=\\s*(?<value>'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
     private static partial Regex SensitiveAssignmentRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:Bearer\s+[A-Za-z0-9\._\-]{12,}|sk-[A-Za-z0-9_\-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[A-Za-z0-9_\-]{30,})\b")]
+    private static partial Regex InlineCredentialTokenRegex();
+
+    [GeneratedRegex(@"(?i)""(apiKey|api_key|secret|token|password|authorization)""\s*:\s*""[^""]*""")]
+    private static partial Regex JsonSecretPropertyRegex();
+
+    [GeneratedRegex(@"(?i)(https?://[^\s\x27""<>?]+)\?[^\s\x27""<>]+")]
+    private static partial Regex UrlQueryParametersRegex();
 
     [GeneratedRegex("(?i)(?<quote>['\"])(?:[a-z]:[\\\\/]|\\\\\\\\)[^\\r\\n]*?\\k<quote>")]
     private static partial Regex QuotedWindowsPathRegex();
@@ -267,6 +285,8 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                     sanitizedLog,
                     cancellationToken);
 
+                await WriteOptionalCompanionArtifactsAsync(archive, logFilePath, cancellationToken);
+
                 var crashEventCollector = new WindowsCrashEventCollector();
                 WindowsCrashEventReport crashEvents = await crashEventCollector.CollectAsync(
                     SanitizeDiagnosticsValue,
@@ -288,6 +308,61 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         }
     }
 
+    private static async Task WriteOptionalCompanionArtifactsAsync(
+        ZipArchive archive,
+        string? logFilePath,
+        CancellationToken cancellationToken)
+    {
+        string appRoot = Path.GetFullPath(DeskBoxDataPathService.Current.RootPath);
+        string? resolvedLogRoot = !string.IsNullOrWhiteSpace(logFilePath)
+            ? Path.GetDirectoryName(Path.GetFullPath(logFilePath))
+            : appRoot;
+        bool isAppRootExport = string.IsNullOrWhiteSpace(logFilePath) ||
+            (resolvedLogRoot is not null &&
+             string.Equals(
+                 Path.TrimEndingDirectorySeparator(resolvedLogRoot),
+                 Path.TrimEndingDirectorySeparator(appRoot),
+                 StringComparison.OrdinalIgnoreCase));
+
+        (string EntryName, string? FilePath)[] optionalLogs =
+        [
+            ("DeskBox.Settings-sanitized.log", isAppRootExport
+                ? DeskBoxDataPathService.Current.SettingsHostLogFilePath
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "DeskBox.Settings.log") : null)),
+            ("DeskBox.Studio-sanitized.log", isAppRootExport
+                ? DeskBoxDataPathService.Current.StudioHostLogFilePath
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "DeskBox.Studio.log") : null)),
+            ("deskbox-settings-host-sanitized.log", isAppRootExport
+                ? Path.Combine(Path.GetTempPath(), "deskbox-settings-host.log")
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "deskbox-settings-host.log") : null)),
+            ("studio-ai-recent.json", isAppRootExport
+                ? Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "cache", CustomWidgetDiagnosticArchive.FileName)
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "data", "cache", CustomWidgetDiagnosticArchive.FileName) : null))
+        ];
+
+        foreach ((string entryName, string? candidatePath) in optionalLogs)
+        {
+            if (string.IsNullOrWhiteSpace(candidatePath) || !File.Exists(candidatePath))
+            {
+                continue;
+            }
+
+            try
+            {
+                string sanitized = await ReadSanitizedLogTailAsync(candidatePath, cancellationToken);
+                await WriteTextEntryAsync(archive, entryName, sanitized, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Best-effort companion artifact; never fail primary support export.
+            }
+        }
+    }
+
     internal static string SanitizeLog(string value)
     {
         if (string.IsNullOrEmpty(value))
@@ -306,8 +381,11 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                     ? match.Value
                     : $"{match.Groups[1].Value}=<REDACTED>";
             });
+        sanitized = JsonSecretPropertyRegex().Replace(sanitized, "\"$1\":\"<REDACTED>\"");
         sanitized = QuotedWindowsPathRegex().Replace(sanitized, "'<PATH>'");
         sanitized = UnquotedWindowsPathRegex().Replace(sanitized, "<PATH>");
+        sanitized = InlineCredentialTokenRegex().Replace(sanitized, "<SECRET>");
+        sanitized = UrlQueryParametersRegex().Replace(sanitized, "$1?<QUERY_REDACTED>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");
         sanitized = SecurityIdentifierRegex().Replace(sanitized, "<SID>");
 
@@ -343,6 +421,8 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                 string fileName = Path.GetFileName(match.Value.TrimEnd('.', ','));
                 return string.IsNullOrEmpty(fileName) ? "<PATH>" : $"<PATH>\\{fileName}";
             });
+        sanitized = InlineCredentialTokenRegex().Replace(sanitized, "<SECRET>");
+        sanitized = UrlQueryParametersRegex().Replace(sanitized, "$1?<QUERY_REDACTED>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");
         sanitized = SecurityIdentifierRegex().Replace(sanitized, "<SID>");
 
@@ -443,7 +523,7 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         string destinationDirectory,
         DateTimeOffset generatedAtUtc)
     {
-        string stem = $"DeskBox-Diagnostics-{generatedAtUtc.ToLocalTime():yyyyMMdd-HHmmss}";
+        string stem = FormattableString.Invariant($"DeskBox-Diagnostics-{generatedAtUtc.ToLocalTime():yyyyMMdd-HHmmss}");
         string path = Path.Combine(destinationDirectory, stem + ".zip");
         for (int suffix = 2; File.Exists(path) || File.Exists(path + ".tmp"); suffix++)
         {

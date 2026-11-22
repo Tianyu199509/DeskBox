@@ -1,0 +1,14 @@
+#!/bin/sh
+# Block internal operations, architecture, requirement, press-kit, and local
+# publishing tooling from entering Git commits (while allowing 'D' index removals).
+
+forbidden_regex='^(AGENTS\.md|CLAUDE\.md|docs/(architecture|acceptance|requirements|press-kit|baselines|audit|analysis|archive|wechat)(/|$)|docs/seo-content\.md$|scripts/([^/]*-protocol\.md|publish_widget_catalog\.py|store-[^/]*\.py)$|deskbox-site/|store-assets(-html)?/|store-listing/)'
+
+staged_leaks=$(git -c core.quotepath=false diff --cached --name-only --diff-filter=ACMR | grep -E "$forbidden_regex" || true)
+
+if [ -n "$staged_leaks" ]; then
+    echo "pre-commit: blocked internal/local-only files from being committed to GitHub:" >&2
+    echo "$staged_leaks" | sed 's/^/  - /' >&2
+    echo "Keep these files local only (unstage with 'git rm --cached <path>')." >&2
+    exit 1
+fi

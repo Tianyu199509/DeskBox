@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -15,7 +16,10 @@ public static class AttachmentStorageService
         }
 
         string normalizedSourcePath = Path.GetFullPath(sourcePath);
-        if (!copyToManagedStorage)
+        if (!copyToManagedStorage ||
+            StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(normalizedSourcePath) ||
+            StorageMigrationNativeMethods.IsAppExecutionAliasReparsePoint(normalizedSourcePath) ||
+            DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(normalizedSourcePath))
         {
             return CreateAttachment(normalizedSourcePath, TodoAttachment.LinkedStorageMode);
         }
@@ -23,7 +27,15 @@ public static class AttachmentStorageService
         Directory.CreateDirectory(managedDirectory);
         string destinationPath = FileService.GetAvailablePath(
             Path.Combine(managedDirectory, Path.GetFileName(normalizedSourcePath)));
-        await Task.Run(() => File.Copy(normalizedSourcePath, destinationPath, overwrite: false));
+        try
+        {
+            await Task.Run(() => ClipboardStorageFileOps.CopyFileOverwrite(normalizedSourcePath, destinationPath));
+        }
+        catch
+        {
+            return null;
+        }
+
         return CreateAttachment(destinationPath, TodoAttachment.ManagedStorageMode);
     }
 
@@ -42,7 +54,7 @@ public static class AttachmentStorageService
         string normalizedName = FileService.SanitizeFileSystemName(Path.GetFileName(fileName));
         if (string.IsNullOrWhiteSpace(normalizedName))
         {
-            normalizedName = $"Attachment-{DateTime.Now:yyyyMMdd-HHmmss}";
+            normalizedName = FormattableString.Invariant($"Attachment-{DateTime.Now:yyyyMMdd-HHmmss}");
         }
 
         string destinationPath = FileService.GetAvailablePath(Path.Combine(managedDirectory, normalizedName));
@@ -113,6 +125,41 @@ public static class AttachmentStorageService
             App.Log($"[AttachmentStorage] Failed to delete managed attachment '{filePath}': {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Recycles unreferenced managed attachment copies under
+    /// <paramref name="managedRootDirectory"/> via <paramref name="recycleFileAsync"/>
+    /// and prunes any emptied <c>&lt;itemId&gt;</c> bucket directories.
+    /// </summary>
+    public static async Task<int> RecycleUnreferencedManagedCopiesAsync(
+        string managedRootDirectory,
+        IReadOnlySet<string> referencedPaths,
+        Func<string, Task<bool>>? recycleFileAsync,
+        IReadOnlySet<string>? knownTombstoneItemIds = null,
+        TimeSpan? unknownDirectoryGracePeriod = null)
+    {
+        if (recycleFileAsync is null || string.IsNullOrWhiteSpace(managedRootDirectory))
+        {
+            return 0;
+        }
+
+        IReadOnlyList<string> candidates = AttachmentCleanupFileOps.FindUnreferencedManagedFiles(
+            managedRootDirectory,
+            referencedPaths,
+            knownTombstoneItemIds,
+            unknownDirectoryGracePeriod);
+        int recycledCount = 0;
+        foreach (string candidate in candidates)
+        {
+            if (await TryDeleteManagedCopyAsync(candidate, managedRootDirectory, recycleFileAsync))
+            {
+                recycledCount++;
+            }
+        }
+
+        AttachmentCleanupFileOps.RemoveEmptyManagedSubdirectories(managedRootDirectory);
+        return recycledCount;
     }
 
     private static TodoAttachment CreateAttachment(string path, string storageMode)

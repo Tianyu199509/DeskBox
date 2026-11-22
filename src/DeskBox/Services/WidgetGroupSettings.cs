@@ -197,7 +197,7 @@ public static class WidgetGroupSettings
                 changed = true;
             }
             if (candidate.WheelSwitchEnabled is null &&
-                normalizedNavigationStyle == WidgetGroupNavigationStyles.Tabs)
+                WidgetGroupNavigationStyles.UsesTabStrip(normalizedNavigationStyle))
             {
                 candidate.WheelSwitchEnabled = false;
                 changed = true;

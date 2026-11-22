@@ -6,13 +6,17 @@ namespace DeskBox.Features.ManagedStorage;
 // properties used by that XAML surface in NativeAOT builds, mirroring the
 // GlanceWidgetViewModel bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(AvailableDragInBehaviorOptionItems),
     nameof(AvailableDragOutActionOptions),
+    nameof(AvailableDragOutBehaviorOptionItems),
     nameof(AvailableDropActionOptions),
     nameof(CanInvokeQuickAccessAction),
+    nameof(DragBehaviorSummaryText),
     nameof(DragOutAction),
     nameof(DragOutModifierTipEnabled),
     nameof(DragOutResultHintEnabled),
     nameof(DropAction),
+    nameof(IsDragOutCustomized),
     nameof(PinQuickAccessButtonText),
     nameof(PinQuickAccessToolTipText),
     nameof(QuickAccessStatusText),

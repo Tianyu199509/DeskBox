@@ -31,29 +31,35 @@ public sealed class RemoteBackupSettings : IBackupSettings
 
     public BackupSettingsSnapshot Read()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.BackupSettingsRead)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.BackupSettingsRead);
         return SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.BackupSettingsSnapshot)
             ?? new BackupSettingsSnapshot(
                 false, 0, 0, string.Empty, string.Empty, string.Empty, false,
                 string.Empty, string.Empty, string.Empty, string.Empty,
                 false, false, false, 0, 0, 0, 0, 0,
                 new BackupEndpoint(string.Empty, string.Empty, string.Empty, string.Empty),
-                HasEndpoint: false);
+                HasEndpoint: false,
+                CloudCustomWidgetsEnabled: false);
     }
 
     public void Update(BackupSettingsChange change) =>
-        _client.RequestAsync(
-                SettingsIpcMethods.BackupSettingsUpdate,
-                SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.BackupSettingsChange))
-            .GetAwaiter().GetResult();
+        _ = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.BackupSettingsUpdate,
+            SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.BackupSettingsChange));
+
+    public Task UpdateAsync(BackupSettingsChange change, CancellationToken cancellationToken = default) =>
+        RequestVoidAsync(
+            SettingsIpcMethods.BackupSettingsUpdate,
+            SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.BackupSettingsChange),
+            cancellationToken);
 
     public bool IsValidLocalDirectory(string path, out string? rejectionReasonKey)
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.BackupSettingsIsValidLocalDir,
-                path)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.BackupSettingsIsValidLocalDir,
+            path);
         SettingsIpcLocalDirCheck check =
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcLocalDirCheck)
             ?? new SettingsIpcLocalDirCheck(false, null);

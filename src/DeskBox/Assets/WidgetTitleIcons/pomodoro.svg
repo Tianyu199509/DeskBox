@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+  <defs>
+    <linearGradient id="pomo_crown" x1="8" y1="2" x2="15.5" y2="6" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24" />
+      <stop offset="1" stop-color="#EA580C" />
+    </linearGradient>
+    <linearGradient id="pomo_body" x1="5" y1="5.2" x2="15.2" y2="16.8" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FB923C" />
+      <stop offset="0.55" stop-color="#EA580C" />
+      <stop offset="1" stop-color="#C2410C" />
+    </linearGradient>
+    <linearGradient id="pomo_ring" x1="6.5" y1="7" x2="13.5" y2="15" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.32" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.1" />
+    </linearGradient>
+  </defs>
+  <rect x="7.75" y="1.75" width="4.5" height="1.6" rx="0.8" fill="url(#pomo_crown)" />
+  <rect x="9.3" y="2.9" width="1.4" height="1.8" fill="#EA580C" />
+  <path d="M14.35 4.35a.7.7 0 0 1 .99 0l.86.86a.7.7 0 0 1-.99.99l-.86-.86a.7.7 0 0 1 0-.99Z" fill="url(#pomo_crown)" />
+  <circle cx="10" cy="11.15" r="6.6" fill="url(#pomo_body)" />
+  <circle cx="10" cy="11.15" r="4.85" stroke="url(#pomo_ring)" stroke-width="1.1" />
+  <path d="M10 7.65v3.55l2.35 1.45" stroke="#FFFFFF" stroke-opacity="0.96" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

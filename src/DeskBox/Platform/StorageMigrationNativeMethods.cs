@@ -5,39 +5,786 @@ using System.Runtime.InteropServices;
 namespace DeskBox.Platform;
 
 /// <summary>Windows copy and stream enumeration for verified, non-destructive storage copies.</summary>
-internal static unsafe class StorageMigrationNativeMethods
+internal static partial class StorageMigrationNativeMethods
 {
-    internal static void PublishCopy(string source, string destination) =>
-        File.Move(source, destination, overwrite: false);
+    private const uint OpenExisting = 3;
+    private const uint FileShareAll = 0x00000001 | 0x00000002 | 0x00000004;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int FileAttributeTagInfoClass = 9;
+    private const uint CloudReparseTagMask = 0xFFFF0FFFu;
+    private const uint IoReparseTagCloud = 0x9000001Au;
+    private const uint FileAttributeReparsePoint = 0x00000400u;
+    private const uint ReparseTagNameSurrogateBit = 0x20000000u;
+    private const uint IoReparseTagAppExecLink = 0x8000001Bu;
+    private const int ErrorFileNotFound = 2;
+    private const int ErrorPathNotFound = 3;
+    private const uint UnhydratedCloudAttributeMask =
+        0x00001000u | // FILE_ATTRIBUTE_OFFLINE
+        0x00040000u | // FILE_ATTRIBUTE_RECALL_ON_OPEN
+        0x00400000u;  // FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr CreateFileW(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CopyFileExW(
+    private static partial bool GetFileInformationByHandleEx(
+        IntPtr hFile,
+        int fileInformationClass,
+        out FileAttributeTagInfo lpFileInformation,
+        uint dwBufferSize);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CloseHandle(IntPtr hObject);
+
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool MoveFileExW(
+        string lpExistingFileName,
+        string lpNewFileName,
+        uint dwFlags);
+
+    internal static bool TryRenameCaseOnlyInPlace(
+        string sourcePath,
+        string destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) ||
+            string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return false;
+        }
+
+        return MoveFileExW(
+            Extended(sourcePath),
+            Extended(destinationPath),
+            dwFlags: 0);
+    }
+
+    internal static bool IsAllowedStorageReparseAttributes(
+        uint fileAttributes,
+        uint reparseTag,
+        out bool isUnhydratedCloudPlaceholder)
+    {
+        bool isCloudTag = (reparseTag & CloudReparseTagMask) == IoReparseTagCloud;
+        if (!isCloudTag)
+        {
+            isUnhydratedCloudPlaceholder = false;
+            return false;
+        }
+
+        isUnhydratedCloudPlaceholder = (fileAttributes & UnhydratedCloudAttributeMask) != 0;
+        return !isUnhydratedCloudPlaceholder;
+    }
+
+    internal static unsafe bool IsAppExecutionAliasReparsePoint(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            return GetFileInformationByHandleEx(
+                       handle,
+                       FileAttributeTagInfoClass,
+                       out FileAttributeTagInfo tagInfo,
+                       (uint)sizeof(FileAttributeTagInfo)) &&
+                   (tagInfo.FileAttributes & FileAttributeReparsePoint) != 0 &&
+                   tagInfo.ReparseTag == IoReparseTagAppExecLink;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    internal static unsafe bool IsHydratedCloudReparsePoint(
+        string path,
+        out bool isUnhydratedCloudPlaceholder)
+    {
+        isUnhydratedCloudPlaceholder = false;
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!GetFileInformationByHandleEx(
+                    handle,
+                    FileAttributeTagInfoClass,
+                    out FileAttributeTagInfo tagInfo,
+                    (uint)sizeof(FileAttributeTagInfo)))
+            {
+                return false;
+            }
+
+            return IsAllowedStorageReparseAttributes(
+                tagInfo.FileAttributes,
+                tagInfo.ReparseTag,
+                out isUnhydratedCloudPlaceholder);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    internal static unsafe bool HasCloudReparseTag(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            return GetFileInformationByHandleEx(
+                       handle,
+                       FileAttributeTagInfoClass,
+                       out FileAttributeTagInfo tagInfo,
+                       (uint)sizeof(FileAttributeTagInfo)) &&
+                   (tagInfo.FileAttributes & FileAttributeReparsePoint) != 0 &&
+                   (tagInfo.ReparseTag & 0xFFFF0000u) == 0x90000000u;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="path"/> exists and is
+    /// either a normal non-reparse entry or a locally hydrated cloud reparse
+    /// point (<c>IO_REPARSE_TAG_CLOUD*</c>), rejecting symlinks, junctions, and
+    /// unhydrated cloud placeholders.
+    /// </summary>
+    internal static unsafe bool IsSafeTraversablePath(string path)
+    {
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!GetFileInformationByHandleEx(
+                    handle,
+                    FileAttributeTagInfoClass,
+                    out FileAttributeTagInfo tagInfo,
+                    (uint)sizeof(FileAttributeTagInfo)))
+            {
+                return false;
+            }
+
+            if ((tagInfo.FileAttributes & FileAttributeReparsePoint) == 0)
+            {
+                return (tagInfo.FileAttributes & UnhydratedCloudAttributeMask) == 0;
+            }
+
+            return IsAllowedStorageReparseAttributes(
+                tagInfo.FileAttributes,
+                tagInfo.ReparseTag,
+                out _);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    internal static bool IsDisallowedLinkReparseTag(
+        uint fileAttributes,
+        uint reparseTag)
+    {
+        if ((fileAttributes & FileAttributeReparsePoint) == 0)
+        {
+            return false;
+        }
+
+        // Name-surrogate reparse points cover file/directory symbolic links,
+        // directory junctions, NTFS volume mount points (\??\Volume{GUID}\),
+        // and WSL symlinks. AppExecLink aliases are also non-file redirections.
+        return (reparseTag & ReparseTagNameSurrogateBit) != 0 ||
+               reparseTag == IoReparseTagAppExecLink;
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="path"/> itself is a filesystem link or
+    /// mount point (symbolic link, junction, NTFS volume mount point, WSL link,
+    /// or AppExecLink) by inspecting the reparse tag directly without traversing
+    /// the target. Fails closed (<see langword="true"/>) if an existing reparse
+    /// point's tag cannot be inspected.
+    /// </summary>
+    internal static unsafe bool IsFileSystemLinkOrMountPoint(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string normalizedPath;
+        try
+        {
+            normalizedPath = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(normalizedPath);
+        }
+        catch (Exception ex) when (
+            ex is FileNotFoundException or DirectoryNotFoundException or
+            ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or
+            System.Security.SecurityException)
+        {
+            attributes = FileAttributes.ReparsePoint;
+        }
+
+        if ((attributes & FileAttributes.ReparsePoint) == 0)
+        {
+            return false;
+        }
+
+        IntPtr handle = CreateFileW(
+            Extended(normalizedPath),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            int error = Marshal.GetLastWin32Error();
+            return error is not (ErrorFileNotFound or ErrorPathNotFound);
+        }
+
+        try
+        {
+            if (!GetFileInformationByHandleEx(
+                    handle,
+                    FileAttributeTagInfoClass,
+                    out FileAttributeTagInfo tagInfo,
+                    (uint)sizeof(FileAttributeTagInfo)))
+            {
+                return true;
+            }
+
+            return IsDisallowedLinkReparseTag(
+                tagInfo.FileAttributes,
+                tagInfo.ReparseTag);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    internal static void PublishCopy(string source, string destination) =>
+        File.Move(Extended(source), Extended(destination), overwrite: false);
+
+    /// <summary>
+    /// Atomically moves a directory on the same volume without copy fallback
+    /// (<c>MOVEFILE_COPY_ALLOWED</c> is intentionally omitted).
+    /// </summary>
+    internal static void MoveDirectoryAtomic(string sourcePath, string destinationPath)
+    {
+        if (!MoveFileExW(Extended(sourcePath), Extended(destinationPath), dwFlags: 0))
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new IOException(
+                $"Cannot atomically move directory '{sourcePath}' to '{destinationPath}' (win32={error}).",
+                new Win32Exception(error));
+        }
+    }
+
+    internal static void TryDeleteJournalFiles(string journalPath, string backupPath)
+    {
+        try
+        {
+            if (File.Exists(journalPath)) File.Delete(journalPath);
+        }
+        catch { }
+
+        try
+        {
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+        }
+        catch { }
+    }
+
+    internal static void TryDeleteTemporaryPartialFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            string extended = Extended(path);
+            if (!File.Exists(extended))
+            {
+                return;
+            }
+
+            FileAttributes attrs = File.GetAttributes(extended);
+            if ((attrs & FileAttributes.ReparsePoint) != 0)
+            {
+                return;
+            }
+
+            if ((attrs & (FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System)) != 0)
+            {
+                File.SetAttributes(extended, FileAttributes.Normal);
+            }
+
+            File.Delete(extended);
+        }
+        catch
+        {
+            // Best-effort cleanup of task-owned partial files.
+        }
+    }
+
+    internal static void TryCleanTaskTemporaryFiles(string? temporaryDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(temporaryDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            string fullTaskTemp = Path.GetFullPath(temporaryDirectory);
+            string extendedTaskTemp = Extended(fullTaskTemp);
+            if (Directory.Exists(extendedTaskTemp) &&
+                (File.GetAttributes(extendedTaskTemp) & FileAttributes.ReparsePoint) == 0)
+            {
+                foreach (string partial in Directory.EnumerateFiles(extendedTaskTemp, "*.partial"))
+                {
+                    TryDeleteTemporaryPartialFile(partial);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+
+        TryPruneEmptyMigrationWorkspace(temporaryDirectory);
+    }
+
+    internal static bool TryDeleteEmptyDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string extended = Extended(path);
+        if (!Directory.Exists(extended))
+        {
+            return true;
+        }
+
+        FileAttributes originalAttributes;
+        try
+        {
+            originalAttributes = File.GetAttributes(extended);
+            if ((originalAttributes & FileAttributes.ReparsePoint) != 0 ||
+                Directory.EnumerateFileSystemEntries(extended).Any())
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        bool clearedReadOnly = false;
+        try
+        {
+            if ((originalAttributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(extended, originalAttributes & ~FileAttributes.ReadOnly);
+                clearedReadOnly = true;
+            }
+
+            Directory.Delete(extended, recursive: false);
+            return true;
+        }
+        catch
+        {
+            if (clearedReadOnly)
+            {
+                try { File.SetAttributes(extended, originalAttributes); }
+                catch { }
+            }
+
+            return false;
+        }
+    }
+
+    private const uint FileReadAttributes = 0x0080u;
+    private const uint FsctlReadFileUsnData = 0x000900EBu;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ReadFileUsnDataInput
+    {
+        public ushort MinMajorVersion;
+        public ushort MaxMajorVersion;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static unsafe partial bool DeviceIoControl(
+        IntPtr hDevice,
+        uint dwIoControlCode,
+        ref ReadFileUsnDataInput lpInBuffer,
+        uint nInBufferSize,
+        byte* lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static unsafe partial bool DeviceIoControl(
+        IntPtr hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        byte* lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+
+    /// <summary>
+    /// Reads the monotonic NTFS/ReFS MFT Update Sequence Number (<c>FSCTL_READ_FILE_USN_DATA</c>)
+    /// without requiring elevation. Any data, alternate stream, or metadata mutation bumps USN
+    /// even when timestamps and file size are restored.
+    /// </summary>
+    internal static unsafe bool TryReadFileUsn(string path, out long usn)
+    {
+        usn = 0;
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            FileReadAttributes,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            byte* buffer = stackalloc byte[512];
+            var input = new ReadFileUsnDataInput { MinMajorVersion = 2, MaxMajorVersion = 3 };
+            if (!DeviceIoControl(
+                    handle,
+                    FsctlReadFileUsnData,
+                    ref input,
+                    (uint)sizeof(ReadFileUsnDataInput),
+                    buffer,
+                    512,
+                    out uint bytesReturned,
+                    IntPtr.Zero) &&
+                !DeviceIoControl(
+                    handle,
+                    FsctlReadFileUsnData,
+                    IntPtr.Zero,
+                    0,
+                    buffer,
+                    512,
+                    out bytesReturned,
+                    IntPtr.Zero))
+            {
+                return false;
+            }
+
+            if (bytesReturned < 32)
+            {
+                return false;
+            }
+
+            ReadOnlySpan<byte> span = new(buffer, (int)bytesReturned);
+            ushort major = MemoryMarshal.Read<ushort>(span.Slice(4, 2));
+            if (major == 2)
+            {
+                usn = MemoryMarshal.Read<long>(span.Slice(24, 8));
+                return true;
+            }
+
+            if (major == 3 && bytesReturned >= 48)
+            {
+                usn = MemoryMarshal.Read<long>(span.Slice(40, 8));
+                return true;
+            }
+
+            return false;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    /// <summary>
+    /// Copies the default data stream and any NTFS alternate data streams in a single
+    /// streaming pass while computing the exact framed SHA-256 digest in-flight.
+    /// </summary>
+    internal static string CopyStreamsAndHash(
+        string source,
+        string temporaryDestination,
+        Action<long> copyProgress,
+        CancellationToken token)
+    {
+        string extendedSource = Extended(source);
+        string extendedDestination = Extended(temporaryDestination);
+        FileAttributes sourceAttributes = File.GetAttributes(extendedSource);
+        DateTime creationUtc = File.GetCreationTimeUtc(extendedSource);
+        DateTime lastWriteUtc = File.GetLastWriteTimeUtc(extendedSource);
+
+        var streams = ReadStreams(source)
+            .OrderBy(static s => s.Name, StringComparer.Ordinal)
+            .ToList();
+        if (streams.Count == 0)
+        {
+            streams.Add(("::$DATA", 0));
+        }
+
+        // Exclusively reserve the base file first (matching COPY_FILE_FAIL_IF_EXISTS)
+        // before opening any alternate stream that might sort lexically before "::$DATA".
+        using (new FileStream(extendedDestination, FileMode.CreateNew, FileAccess.Write, FileShare.Read))
+        {
+        }
+
+        using var aggregate = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
+        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(1024 * 1024);
+        long totalTransferred = 0;
+        bool completed = false;
+        try
+        {
+            foreach (var stream in streams)
+            {
+                token.ThrowIfCancellationRequested();
+                aggregate.AppendData(
+                    System.Text.Encoding.UTF8.GetBytes(stream.Name + "\0" + stream.Length + "\0"));
+                string inputPath = stream.Name == "::$DATA"
+                    ? extendedSource
+                    : extendedSource + stream.Name;
+                string outputPath = stream.Name == "::$DATA"
+                    ? extendedDestination
+                    : extendedDestination + stream.Name;
+
+                using var input = new FileStream(
+                    inputPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    bufferSize: 128 * 1024,
+                    FileOptions.SequentialScan);
+                using var output = new FileStream(
+                    outputPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.Read,
+                    bufferSize: 128 * 1024,
+                    FileOptions.SequentialScan);
+                if (stream.Length > 0)
+                {
+                    output.SetLength(stream.Length);
+                }
+
+                int read;
+                while ((read = input.Read(buffer)) != 0)
+                {
+                    token.ThrowIfCancellationRequested();
+                    ReadOnlySpan<byte> chunk = buffer.AsSpan(0, read);
+                    aggregate.AppendData(chunk);
+                    output.Write(chunk);
+                    totalTransferred += read;
+                    copyProgress(totalTransferred);
+                }
+
+                output.Flush();
+                if (stream.Length == 0)
+                {
+                    copyProgress(totalTransferred);
+                }
+            }
+
+            File.SetCreationTimeUtc(extendedDestination, creationUtc);
+            File.SetLastWriteTimeUtc(extendedDestination, lastWriteUtc);
+            const FileAttributes PreservedAttributeMask =
+                FileAttributes.ReadOnly |
+                FileAttributes.Hidden |
+                FileAttributes.System |
+                FileAttributes.Archive |
+                FileAttributes.NotContentIndexed;
+            FileAttributes targetAttributes = sourceAttributes & PreservedAttributeMask;
+            File.SetAttributes(
+                extendedDestination,
+                targetAttributes == 0 ? FileAttributes.Normal : targetAttributes);
+
+            completed = true;
+            return Convert.ToHexString(aggregate.GetHashAndReset());
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            if (!completed)
+            {
+                TryDeleteTemporaryPartialFile(temporaryDestination);
+            }
+        }
+    }
+
+    internal static void TryPruneEmptyMigrationWorkspace(string? temporaryDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(temporaryDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            string fullTaskTemp = Path.GetFullPath(temporaryDirectory);
+            if (Directory.Exists(fullTaskTemp) &&
+                !Directory.EnumerateFileSystemEntries(fullTaskTemp).Any())
+            {
+                Directory.Delete(fullTaskTemp, recursive: false);
+            }
+
+            string? migrationWorkspace = Path.GetDirectoryName(fullTaskTemp);
+            if (!string.IsNullOrWhiteSpace(migrationWorkspace) &&
+                Directory.Exists(migrationWorkspace) &&
+                !Directory.EnumerateFileSystemEntries(migrationWorkspace).Any())
+            {
+                Directory.Delete(migrationWorkspace, recursive: false);
+            }
+        }
+        catch
+        {
+            // Non-empty or busy workspace directories are intentionally left intact.
+        }
+    }
+
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CopyFileExW(
         string source, string destination, IntPtr progress, IntPtr state,
         IntPtr cancel, uint flags);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FlushFileBuffers(IntPtr handle);
+    private static partial bool FlushFileBuffers(IntPtr handle);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct StreamData
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct StreamData
     {
+        public const int MaxStreamNameLength = 296;
         public long Size;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)]
-        public string Name;
+        public fixed char Name[MaxStreamNameLength];
+
+        internal readonly string GetName()
+        {
+            fixed (char* ptr = Name)
+            {
+                var span = new ReadOnlySpan<char>(ptr, MaxStreamNameLength);
+                int nul = span.IndexOf('\0');
+                return new string(nul >= 0 ? span[..nul] : span);
+            }
+        }
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr FindFirstStreamW(string path, int level, out StreamData data, uint flags);
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr FindFirstStreamW(string path, int level, out StreamData data, uint flags);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FindNextStreamW(IntPtr find, out StreamData data);
+    private static partial bool FindNextStreamW(IntPtr find, out StreamData data);
 
-    [DllImport("kernel32.dll")]
+    [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FindClose(IntPtr find);
+    private static partial bool FindClose(IntPtr find);
 
     internal static IReadOnlyList<(string Name, long Length)> ReadStreams(string path)
     {
@@ -46,14 +793,14 @@ internal static unsafe class StorageMigrationNativeMethods
         if (find == new IntPtr(-1))
         {
             int error = Marshal.GetLastWin32Error();
-            // 38: no named data stream. 87 (invalid parameter): FAT32/exFAT
-            // volumes do not support the stream enumeration at all.
-            if (error is 38 or 87) return result;
+            // 1/50/87/123: non-NTFS or virtual volumes do not support stream
+            // enumeration; 38: EOF (no named data stream).
+            if (error is 1 or 38 or 50 or 87 or 123) return result;
             throw new IOException($"Cannot inspect file streams: '{path}'.", new Win32Exception(error));
         }
         try
         {
-            do { result.Add((data.Name, data.Size)); }
+            do { result.Add((data.GetName(), data.Size)); }
             while (FindNextStreamW(find, out data));
             int error = Marshal.GetLastWin32Error();
             if (error != 38) throw new IOException($"Cannot inspect file streams: '{path}'.", new Win32Exception(error));
@@ -62,7 +809,135 @@ internal static unsafe class StorageMigrationNativeMethods
         return result;
     }
 
-    internal static void Copy(string source, string destination, Action<long> progress, CancellationToken token)
+    /// <summary>
+    /// Copies all non-default NTFS <c>:$DATA</c> alternate data streams (such as
+    /// <c>:favicon:$DATA</c> on browser <c>.url</c> shortcuts) onto an existing
+    /// destination file. Uses <c>FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE</c>
+    /// so it coexists with the exclusive FCB delete-lock handles held by
+    /// <c>FileService</c> during chunked cross-volume moves. Silently skips
+    /// destination volumes that do not support named streams (FAT32/exFAT).
+    /// </summary>
+    internal static async Task CopyAlternateDataStreamsAsync(
+        string sourceFilePath,
+        string destinationFilePath,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<(string Name, long Length)> streams;
+        try
+        {
+            streams = ReadStreams(sourceFilePath);
+        }
+        catch (IOException)
+        {
+            return;
+        }
+
+        if (streams.Count == 0)
+        {
+            return;
+        }
+
+        const uint genericRead = 0x8000_0000;
+        const uint genericWrite = 0x4000_0000;
+        const uint shareReadWriteDelete = 0x0000_0001 | 0x0000_0002 | 0x0000_0004;
+        const uint createAlways = 2;
+        const uint openExisting = 3;
+        const uint fileFlagOverlapped = 0x4000_0000;
+        const int bufferSize = 64 * 1024;
+
+        string extendedSource = Extended(Path.GetFullPath(sourceFilePath));
+        string extendedDestination = Extended(Path.GetFullPath(destinationFilePath));
+
+        byte[]? rentedBuffer = null;
+        try
+        {
+            foreach ((string streamName, _) in streams)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(streamName) ||
+                    !streamName.StartsWith(':') ||
+                    string.Equals(streamName, "::$DATA", StringComparison.OrdinalIgnoreCase) ||
+                    !streamName.EndsWith(":$DATA", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var sourceStreamHandle = FileTransferNativeMethods.CreateFileW(
+                    extendedSource + streamName,
+                    genericRead,
+                    shareReadWriteDelete,
+                    IntPtr.Zero,
+                    openExisting,
+                    fileFlagOverlapped,
+                    IntPtr.Zero);
+                if (sourceStreamHandle.IsInvalid)
+                {
+                    continue;
+                }
+
+                using var destinationStreamHandle = FileTransferNativeMethods.CreateFileW(
+                    extendedDestination + streamName,
+                    genericWrite,
+                    shareReadWriteDelete,
+                    IntPtr.Zero,
+                    createAlways,
+                    fileFlagOverlapped,
+                    IntPtr.Zero);
+                if (destinationStreamHandle.IsInvalid)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    // Non-NTFS destination volume (FAT32/exFAT/SMB without ADS):
+                    // keep the primary file transfer intact.
+                    if (error is 1 or 50 or 87 or 123)
+                    {
+                        return;
+                    }
+
+                    throw new IOException(
+                        $"Cannot create alternate stream '{streamName}' on '{destinationFilePath}'.",
+                        new Win32Exception(error));
+                }
+
+                rentedBuffer ??= System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
+                await using var sourceStream = new FileStream(
+                    sourceStreamHandle,
+                    FileAccess.Read,
+                    4096,
+                    isAsync: true);
+                await using var destinationStream = new FileStream(
+                    destinationStreamHandle,
+                    FileAccess.Write,
+                    4096,
+                    isAsync: true);
+
+                while (true)
+                {
+                    int read = await sourceStream.ReadAsync(
+                        rentedBuffer.AsMemory(0, bufferSize),
+                        cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    await destinationStream.WriteAsync(
+                        rentedBuffer.AsMemory(0, read),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                await destinationStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (rentedBuffer is not null)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rentedBuffer);
+            }
+        }
+    }
+
+    internal static unsafe void Copy(string source, string destination, Action<long> progress, CancellationToken token)
     {
         var state = new CopyState(progress, token);
         GCHandle handle = GCHandle.Alloc(state);
@@ -110,6 +985,75 @@ internal static unsafe class StorageMigrationNativeMethods
         internal Exception? Error { get; set; }
     }
 
-    private static string Extended(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal)
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static unsafe partial uint GetLongPathNameW(
+        string lpszShortPath,
+        char* lpszLongPath,
+        uint cchBuffer);
+
+    internal static unsafe bool TryExpandShortPathExceedingMaxPath(
+        string candidatePath,
+        out string expandedLongPath)
+    {
+        expandedLongPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(candidatePath) ||
+            candidatePath.Contains('%') ||
+            !candidatePath.Contains('~'))
+        {
+            return false;
+        }
+
+        try
+        {
+            string queryPath = Path.IsPathFullyQualified(candidatePath)
+                ? Extended(candidatePath)
+                : candidatePath;
+            char[] buffer = new char[1024];
+            uint length;
+            fixed (char* ptr = buffer)
+            {
+                length = GetLongPathNameW(queryPath, ptr, (uint)buffer.Length);
+            }
+
+            if (length >= buffer.Length)
+            {
+                buffer = new char[(int)length + 1];
+                fixed (char* ptr = buffer)
+                {
+                    length = GetLongPathNameW(queryPath, ptr, (uint)buffer.Length);
+                }
+            }
+
+            if (length == 0 || length >= buffer.Length)
+            {
+                return false;
+            }
+
+            string resolved = new(buffer, 0, (int)length);
+            if (resolved.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                resolved = @"\\" + resolved[@"\\?\UNC\".Length..];
+            }
+            else if (resolved.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                resolved = resolved[@"\\?\".Length..];
+            }
+
+            if (resolved.Length < 258)
+            {
+                return false;
+            }
+
+            expandedLongPath = resolved;
+            return true;
+        }
+        catch
+        {
+            expandedLongPath = string.Empty;
+            return false;
+        }
+    }
+
+    internal static string Extended(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal)
         ? path : path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
 }

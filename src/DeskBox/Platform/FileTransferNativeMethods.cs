@@ -4,28 +4,11 @@ using Microsoft.Win32.SafeHandles;
 namespace DeskBox.Platform;
 
 /// <summary>
-/// shell32 shell-copy and kernel32 file-handle identity/disposition entry
-/// points used by the file transfer engine that used to declare them
-/// privately inside <c>FileService</c>. Signatures moved verbatim.
+/// kernel32 file-handle identity and disposition entry points used by the file
+/// transfer engine.
 /// </summary>
 internal static unsafe partial class FileTransferNativeMethods
 {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    internal unsafe struct ShFileOperation
-    {
-        public IntPtr WindowHandle;
-        public uint Function;
-        public char* From;
-        public char* To;
-        public ushort Flags;
-        public int AnyOperationsAborted;
-        public IntPtr NameMappings;
-        public char* ProgressTitle;
-    }
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    internal static extern int SHFileOperation(ref ShFileOperation fileOperation);
-
     [StructLayout(LayoutKind.Sequential)]
     internal struct ByHandleFileInformation
     {
@@ -44,22 +27,28 @@ internal static unsafe partial class FileTransferNativeMethods
         public uint FileIndexLow;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern bool GetFileInformationByHandle(
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetFileInformationByHandle(
         SafeFileHandle file,
         out ByHandleFileInformation information);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct FileDispositionInfo
     {
-        // FILE_DISPOSITION_INFO carries a 1-byte BOOLEAN, not a 4-byte BOOL:
-        // without U1 marshaling the native call sees garbage.
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Delete;
+        // FILE_DISPOSITION_INFO carries a 1-byte BOOLEAN, not a 4-byte BOOL.
+        // Back with a blittable byte so [LibraryImport] requires no runtime marshalling.
+        private byte _delete;
+
+        public bool Delete
+        {
+            readonly get => _delete != 0;
+            set => _delete = value ? (byte)1 : (byte)0;
+        }
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern SafeFileHandle CreateFileW(
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    internal static partial SafeFileHandle CreateFileW(
         string lpFileName,
         uint dwDesiredAccess,
         uint dwShareMode,
@@ -68,8 +57,9 @@ internal static unsafe partial class FileTransferNativeMethods
         uint dwFlagsAndAttributes,
         IntPtr hTemplateFile);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern bool SetFileInformationByHandle(
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetFileInformationByHandle(
         SafeFileHandle hFile,
         int fileInformationClass,
         ref FileDispositionInfo lpFileInformation,
@@ -85,8 +75,9 @@ internal static unsafe partial class FileTransferNativeMethods
         public uint FileAttributes;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetFileInformationByHandle")]
-    internal static extern bool SetFileBasicInfoByHandle(
+    [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "SetFileInformationByHandle")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool SetFileBasicInfoByHandle(
         SafeFileHandle hFile,
         int fileInformationClass,
         ref FileBasicInfo lpFileInformation,
@@ -102,10 +93,26 @@ internal static unsafe partial class FileTransferNativeMethods
         public fixed byte FileId[16];
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern unsafe bool GetFileInformationByHandleEx(
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static unsafe partial bool GetFileInformationByHandleEx(
         SafeFileHandle hFile,
         int fileInformationClass,
         out FileIdInfo lpFileInformation,
+        int dwBufferSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileInformationByHandleEx")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetFileAttributeTagByHandle(
+        SafeFileHandle hFile,
+        int fileInformationClass,
+        out FileAttributeTagInfo lpFileInformation,
         int dwBufferSize);
 }

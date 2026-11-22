@@ -1,0 +1,1731 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.countdown",
+  "name": "${$i18n.widgetName}",
+  "version": "5.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "📅",
+  "minSize": {
+    "width": 292,
+    "height": 280
+  },
+  "defaultSize": {
+    "width": 344,
+    "height": 356
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "hero:1,list:1,yearProgress:1",
+      "options": [
+        {
+          "value": "hero",
+          "label": "${$i18n.modHero}"
+        },
+        {
+          "value": "list",
+          "label": "${$i18n.modList}"
+        },
+        {
+          "value": "yearProgress",
+          "label": "${$i18n.modYearProgress}"
+        }
+      ]
+    },
+    {
+      "key": "expiredMode",
+      "type": "choice",
+      "label": "${$i18n.setExpired}",
+      "default": "countup",
+      "options": [
+        {
+          "value": "countup",
+          "label": "${$i18n.optExpCountup}"
+        },
+        {
+          "value": "archive",
+          "label": "${$i18n.optExpArchive}"
+        }
+      ]
+    },
+    {
+      "key": "sortMode",
+      "type": "choice",
+      "label": "${$i18n.setSort}",
+      "default": "smart",
+      "options": [
+        {
+          "value": "smart",
+          "label": "${$i18n.optSortSmart}"
+        },
+        {
+          "value": "custom",
+          "label": "${$i18n.optSortCustom}"
+        }
+      ]
+    },
+    {
+      "key": "progressScope",
+      "type": "choice",
+      "label": "${$i18n.setProgressScope}",
+      "default": "workAndYear",
+      "options": [
+        {
+          "value": "workAndYear",
+          "label": "${$i18n.optScopeWorkYear}"
+        },
+        {
+          "value": "allFour",
+          "label": "${$i18n.optScopeAllFour}"
+        },
+        {
+          "value": "year",
+          "label": "${$i18n.optScopeYear}"
+        },
+        {
+          "value": "month",
+          "label": "${$i18n.optScopeMonth}"
+        },
+        {
+          "value": "both",
+          "label": "${$i18n.optScopeBoth}"
+        }
+      ]
+    },
+    {
+      "key": "workHours",
+      "type": "choice",
+      "label": "${$i18n.setWorkHours}",
+      "default": "09:00-18:00",
+      "options": [
+        {
+          "value": "08:30-17:30",
+          "label": "${$i18n.optWork1}"
+        },
+        {
+          "value": "09:00-18:00",
+          "label": "${$i18n.optWork2}"
+        },
+        {
+          "value": "09:30-18:30",
+          "label": "${$i18n.optWork3}"
+        },
+        {
+          "value": "10:00-19:00",
+          "label": "${$i18n.optWork4}"
+        },
+        {
+          "value": "day24h",
+          "label": "${$i18n.optWorkDay24h}"
+        }
+      ]
+    },
+    {
+      "key": "urgentDays",
+      "type": "choice",
+      "label": "${$i18n.setUrgentDays}",
+      "default": "7",
+      "options": [
+        {
+          "value": "3",
+          "label": "${$i18n.optUrgent3}"
+        },
+        {
+          "value": "7",
+          "label": "${$i18n.optUrgent7}"
+        },
+        {
+          "value": "14",
+          "label": "${$i18n.optUrgent14}"
+        },
+        {
+          "value": "30",
+          "label": "${$i18n.optUrgent30}"
+        }
+      ]
+    },
+    {
+      "key": "showNextHoliday",
+      "type": "toggle",
+      "label": "${$i18n.setShowNextHoliday}",
+      "default": true
+    },
+    {
+      "key": "notifyDueToday",
+      "type": "toggle",
+      "label": "${$i18n.setNotifyDueToday}",
+      "default": true
+    }
+  ],
+  "state": {
+    "editingEventId": "",
+    "draftTitle": "",
+    "draftDate": "",
+    "draftEmoji": "📅",
+    "draftKind": "",
+    "draftCategory": "",
+    "draftCalendar": "solar",
+    "draftRepeat": "none",
+    "draftWeekendRule": "none",
+    "draftPinned": false,
+    "draftLunarYear": "2026",
+    "draftLunarMonth": "01",
+    "draftLunarDay": "01",
+    "draftLunarLeap": false
+  },
+  "collections": {
+    "events": {
+      "maxItems": 200,
+      "sort": "newestFirst"
+    }
+  },
+  "sources": [
+    {
+      "type": "countdown",
+      "intervalMs": 60000
+    }
+  ],
+  "capsule": {
+    "title": "${$countdown.hasHero ? $countdown.hero.title : $countdown.capsuleTitle}",
+    "summary": "${$countdown.hasHero ? $countdown.hero.subtitle : $countdown.capsuleSummary}",
+    "glyph": "📅",
+    "badge": "${$countdown.hasHero ? $countdown.hero.badge : $countdown.capsuleBadge}",
+    "badgeIsWarning": "${$countdown.capsuleIsWarning}",
+    "progress": "${$countdown.capsuleProgress}"
+  },
+  "root": "main",
+  "popovers": {
+    "addEventPop": {
+      "title": "${state.editingEventId != '' ? $i18n.popEditTitle : $i18n.popAddTitle}",
+      "width": 320,
+      "placement": "bottom",
+      "root": "pop_add_event_body"
+    },
+    "timeProgressPop": {
+      "title": "${$i18n.popProgressTitle}",
+      "width": 308,
+      "placement": "top",
+      "root": "pop_time_progress_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "ModuleStack",
+      "bind": "settings.modules",
+      "spacing": 8,
+      "padding": "12,12,12,10",
+      "children": [
+        "hero",
+        "event_list_module",
+        "year_progress_module"
+      ]
+    },
+    "hero": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10,12,10",
+      "spacing": 8,
+      "children": [
+        "hero_content_grid",
+        "hero_empty_stack"
+      ]
+    },
+    "hero_content_grid": {
+      "type": "Grid",
+      "when": "${$countdown.hasHero}",
+      "columns": "76,*",
+      "rows": "Auto",
+      "columnSpacing": 12,
+      "children": [
+        "hero_days_card",
+        "hero_details_stack"
+      ]
+    },
+    "hero_days_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "default",
+      "padding": "8,7,8,7",
+      "spacing": 1,
+      "verticalAlignment": "center",
+      "children": [
+        "hero_status_word",
+        "hero_days_number",
+        "hero_days_unit"
+      ]
+    },
+    "hero_status_word": {
+      "type": "Text",
+      "text": "${$countdown.hero.statusWord}",
+      "style": "caption",
+      "color": "${$countdown.hero.tone}",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "hero_days_number": {
+      "type": "Text",
+      "text": "${$countdown.hero.isToday ? '0' : $countdown.hero.days}",
+      "fontFamily": "mono",
+      "fontSize": 28,
+      "fontWeight": "bold",
+      "color": "${$countdown.hero.isToday ? 'accent' : 'default'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "hero_days_unit": {
+      "type": "Text",
+      "text": "${$i18n.daysUnitShort}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "hero_details_stack": {
+      "type": "Stack",
+      "column": 1,
+      "spacing": 5,
+      "verticalAlignment": "center",
+      "children": [
+        "hero_header_grid",
+        "hero_subtitle_text",
+        "hero_milestone_text",
+        "hero_progress_bar"
+      ]
+    },
+    "hero_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "columnSpacing": 6,
+      "children": [
+        "hero_title_row",
+        "hero_actions_row"
+      ]
+    },
+    "hero_title_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "hero_title_text",
+        "hero_lunar_badge",
+        "hero_yearly_badge"
+      ]
+    },
+    "hero_title_text": {
+      "type": "Text",
+      "text": "${$countdown.hero.title}",
+      "style": "subtitle",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "hero_lunar_badge": {
+      "type": "Badge",
+      "when": "${$countdown.hero.isLunar == 'true'}",
+      "text": "${$i18n.optLunar}",
+      "tone": "cyan"
+    },
+    "hero_yearly_badge": {
+      "type": "Badge",
+      "when": "${$countdown.hero.isLunar != 'true' && $countdown.hero.recurrence == 'yearly'}",
+      "text": "${$i18n.optRepeatYearly}",
+      "tone": "subtle"
+    },
+    "hero_actions_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_pin_hero",
+        "btn_edit_hero",
+        "btn_add_event"
+      ]
+    },
+    "btn_pin_hero": {
+      "type": "IconButton",
+      "when": "${$countdown.hero.id != ''}",
+      "icon": "pin",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$countdown.hero.isPinned == 'true' ? $i18n.unpinTooltip : $i18n.pinTooltip}",
+      "onClick": {
+        "type": "countdown.pin",
+        "targetId": "${$countdown.hero.id}"
+      }
+    },
+    "btn_edit_hero": {
+      "type": "IconButton",
+      "when": "${$countdown.hero.id != ''}",
+      "icon": "edit",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.popEditTitle}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": "${$countdown.hero.id}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": "${$countdown.hero.title}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": "${$countdown.hero.rawDate}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftEmoji",
+          "value": "📅"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": "${$countdown.hero.kind}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": "${$countdown.hero.category}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftCalendar",
+          "value": "${$countdown.hero.isLunar == 'true' ? 'lunar' : 'solar'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftRepeat",
+          "value": "${$countdown.hero.recurrence != '' ? $countdown.hero.recurrence : 'none'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftWeekendRule",
+          "value": "${$countdown.hero.weekendRule != '' ? $countdown.hero.weekendRule : 'none'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftPinned",
+          "value": "${$countdown.hero.isPinned == 'true'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarYear",
+          "value": "${$countdown.hero.lunarYear != '' ? $countdown.hero.lunarYear : '2026'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarMonth",
+          "value": "${$countdown.hero.lunarMonth != '' ? $countdown.hero.lunarMonth : '01'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarDay",
+          "value": "${$countdown.hero.lunarDay != '' ? $countdown.hero.lunarDay : '01'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarLeap",
+          "value": "${$countdown.hero.isLunarLeap == 'true'}"
+        }
+      ],
+      "popover": "addEventPop"
+    },
+    "btn_add_event": {
+      "type": "IconButton",
+      "icon": "add",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.addEventTooltip}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftEmoji",
+          "value": "📅"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCalendar",
+          "value": "solar"
+        },
+        {
+          "type": "state.set",
+          "key": "draftRepeat",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftWeekendRule",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftPinned",
+          "value": false
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarYear",
+          "value": "2026"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarMonth",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarDay",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarLeap",
+          "value": false
+        }
+      ],
+      "popover": "addEventPop"
+    },
+    "hero_subtitle_text": {
+      "type": "Text",
+      "text": "${$countdown.hero.subtitle}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "hero_milestone_text": {
+      "type": "Text",
+      "when": "${$countdown.hero.milestone != ''}",
+      "text": "${$countdown.hero.milestone}",
+      "style": "caption",
+      "color": "accent",
+      "maxLines": 1
+    },
+    "hero_progress_bar": {
+      "type": "ProgressBar",
+      "progress": "${$countdown.hero.progress}",
+      "color": "accent",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    },
+    "hero_empty_stack": {
+      "type": "Stack",
+      "when": "${!$countdown.hasHero}",
+      "spacing": 6,
+      "children": [
+        "hero_empty_title",
+        "hero_empty_subtitle",
+        "btn_add_first_event"
+      ]
+    },
+    "hero_empty_title": {
+      "type": "Text",
+      "text": "${$i18n.emptyHeroTitle}",
+      "style": "bodyStrong"
+    },
+    "hero_empty_subtitle": {
+      "type": "Text",
+      "text": "${$i18n.emptyHeroSub}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 2
+    },
+    "btn_add_first_event": {
+      "type": "Button",
+      "icon": "add",
+      "text": "${$i18n.addFirstBtn}",
+      "variant": "standard",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftEmoji",
+          "value": "📅"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCalendar",
+          "value": "solar"
+        },
+        {
+          "type": "state.set",
+          "key": "draftRepeat",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftWeekendRule",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftPinned",
+          "value": false
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarYear",
+          "value": "2026"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarMonth",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarDay",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarLeap",
+          "value": false
+        }
+      ],
+      "popover": "addEventPop"
+    },
+    "event_list_module": {
+      "id": "list",
+      "type": "Stack",
+      "spacing": 5,
+      "children": [
+        "secondary_events_list"
+      ]
+    },
+    "secondary_events_list": {
+      "type": "List",
+      "items": "$countdown.secondaryItems",
+      "maxHeight": 168,
+      "spacing": 5,
+      "emptyState": {
+        "icon": "calendar",
+        "title": "${$i18n.emptyListTitle}",
+        "subtitle": "${$i18n.emptyListSub}"
+      },
+      "hoverActions": [
+        "btn_pin_event",
+        "btn_delete_event"
+      ],
+      "itemTemplate": "secondary_event_item"
+    },
+    "btn_pin_event": {
+      "type": "IconButton",
+      "icon": "pin",
+      "size": 22,
+      "variant": "subtle",
+      "tooltip": "${$i18n.pinTooltip}",
+      "onClick": {
+        "type": "countdown.pin",
+        "targetId": "${$item.id}"
+      }
+    },
+    "btn_delete_event": {
+      "type": "IconButton",
+      "icon": "delete",
+      "size": 22,
+      "variant": "subtle",
+      "tooltip": "${$i18n.deleteTooltip}",
+      "onClick": {
+        "type": "countdown.delete",
+        "targetId": "${$item.id}"
+      }
+    },
+    "secondary_event_item": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "0",
+      "background": "transparent",
+      "borderWidth": "0",
+      "horizontalAlignment": "stretch",
+      "popover": "addEventPop",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": "${$item.id}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": "${$item.title}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": "${$item.rawDate}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftEmoji",
+          "value": "${$item.emoji}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCalendar",
+          "value": "${$item.calendar}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftRepeat",
+          "value": "${$item.repeat}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftWeekendRule",
+          "value": "${$item.weekendRule}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftPinned",
+          "value": "${$item.isPinned == 'true'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarYear",
+          "value": "${$item.lunarYear != '' ? $item.lunarYear : '2026'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarMonth",
+          "value": "${$item.lunarMonth != '' ? $item.lunarMonth : '01'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarDay",
+          "value": "${$item.lunarDay != '' ? $item.lunarDay : '01'}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarLeap",
+          "value": "${$item.isLunarLeap == 'true'}"
+        }
+      ],
+      "children": [
+        "event_item_grid"
+      ]
+    },
+    "event_item_grid": {
+      "type": "Grid",
+      "horizontalAlignment": "stretch",
+      "columns": "Auto,*,Auto",
+      "rows": "Auto",
+      "columnSpacing": 10,
+      "children": [
+        "event_item_dot",
+        "event_item_text_stack",
+        "event_item_delta_badge"
+      ]
+    },
+    "event_item_dot": {
+      "type": "Text",
+      "column": 0,
+      "text": "●",
+      "fontSize": 10,
+      "color": "${$item.isUrgent == 'true' ? 'danger' : ($item.isCountUp == 'true' ? 'emerald' : 'accent')}",
+      "verticalAlignment": "center"
+    },
+    "event_item_text_stack": {
+      "type": "Stack",
+      "column": 1,
+      "spacing": 1,
+      "verticalAlignment": "center",
+      "children": [
+        "event_item_title",
+        "event_item_subtitle"
+      ]
+    },
+    "event_item_title": {
+      "type": "Text",
+      "text": "${$item.title}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "event_item_subtitle": {
+      "type": "Text",
+      "text": "${$item.subtitle}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "event_item_delta_badge": {
+      "type": "Badge",
+      "column": 2,
+      "text": "${$item.deltaText}",
+      "tone": "${$item.isUrgent == 'true' ? 'danger' : ($item.isCountUp == 'true' ? 'emerald' : 'accent')}",
+      "verticalAlignment": "center"
+    },
+    "year_progress_module": {
+      "id": "yearProgress",
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,6,10,6",
+      "popover": "timeProgressPop",
+      "children": [
+        "footer_progress_grid"
+      ]
+    },
+    "footer_progress_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "rows": "Auto",
+      "columnSpacing": 8,
+      "children": [
+        "footer_left_row",
+        "footer_year_percent_text"
+      ]
+    },
+    "footer_left_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "footer_holiday_icon",
+        "footer_holiday_text",
+        "footer_workday_text"
+      ]
+    },
+    "footer_holiday_icon": {
+      "type": "Text",
+      "when": "${$countdown.hasHoliday && $settings.showNextHoliday != 'false'}",
+      "text": "🏖️",
+      "style": "caption",
+      "verticalAlignment": "center"
+    },
+    "footer_holiday_text": {
+      "type": "Text",
+      "when": "${$countdown.hasHoliday && $settings.showNextHoliday != 'false'}",
+      "text": "${$countdown.holiday.inProgress ? t('holidayOngoingFmt', $countdown.holiday.title) : t('holidayFooterFmt', $countdown.holiday.title, $countdown.holiday.days)}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "footer_workday_text": {
+      "type": "Text",
+      "when": "${!$countdown.hasHoliday || $settings.showNextHoliday == 'false'}",
+      "text": "${$countdown.work.title} · ${$countdown.work.summary}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "footer_year_percent_text": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$settings.progressScope == 'month' ? t('monthProgressShort', $countdown.month.percent) : t('yearProgressShort', $countdown.year.percent)}",
+      "style": "caption",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "pop_add_event_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "input_event_title",
+        "picker_solar_date",
+        "lunar_date_section",
+        "seg_calendar_type",
+        "seg_repeat_mode",
+        "weekend_rule_section",
+        "btn_save_event",
+        "btn_delete_editing_event"
+      ]
+    },
+    "input_event_title": {
+      "type": "Input",
+      "bind": "state.draftTitle",
+      "placeholder": "${$i18n.popTitlePlaceholder}"
+    },
+    "picker_solar_date": {
+      "type": "DatePicker",
+      "when": "${state.draftCalendar != 'lunar'}",
+      "bind": "state.draftDate",
+      "value": "${state.draftDate != '' ? state.draftDate : $time.date}"
+    },
+    "lunar_date_section": {
+      "type": "Stack",
+      "when": "${state.draftCalendar == 'lunar'}",
+      "spacing": 6,
+      "children": [
+        "lunar_current_date_text",
+        "lunar_selectors_grid",
+        "toggle_lunar_leap"
+      ]
+    },
+    "lunar_current_date_text": {
+      "type": "Text",
+      "when": "${state.editingEventId != '' && state.draftDate != '' && state.draftLunarMonth == ''}",
+      "text": "${$i18n.lunarCurrentDatePrefix}: ${state.draftDate}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "lunar_selectors_grid": {
+      "type": "Grid",
+      "columns": "80,*,*",
+      "rows": "Auto",
+      "columnSpacing": 6,
+      "children": [
+        "select_lunar_year",
+        "select_lunar_month",
+        "select_lunar_day"
+      ]
+    },
+    "select_lunar_year": {
+      "type": "Select",
+      "column": 0,
+      "bind": "state.draftLunarYear",
+      "placeholder": "${$i18n.lunarYearLabel}",
+      "options": [
+        {
+          "value": "1960",
+          "label": "1960"
+        },
+        {
+          "value": "1961",
+          "label": "1961"
+        },
+        {
+          "value": "1962",
+          "label": "1962"
+        },
+        {
+          "value": "1963",
+          "label": "1963"
+        },
+        {
+          "value": "1964",
+          "label": "1964"
+        },
+        {
+          "value": "1965",
+          "label": "1965"
+        },
+        {
+          "value": "1966",
+          "label": "1966"
+        },
+        {
+          "value": "1967",
+          "label": "1967"
+        },
+        {
+          "value": "1968",
+          "label": "1968"
+        },
+        {
+          "value": "1969",
+          "label": "1969"
+        },
+        {
+          "value": "1970",
+          "label": "1970"
+        },
+        {
+          "value": "1971",
+          "label": "1971"
+        },
+        {
+          "value": "1972",
+          "label": "1972"
+        },
+        {
+          "value": "1973",
+          "label": "1973"
+        },
+        {
+          "value": "1974",
+          "label": "1974"
+        },
+        {
+          "value": "1975",
+          "label": "1975"
+        },
+        {
+          "value": "1976",
+          "label": "1976"
+        },
+        {
+          "value": "1977",
+          "label": "1977"
+        },
+        {
+          "value": "1978",
+          "label": "1978"
+        },
+        {
+          "value": "1979",
+          "label": "1979"
+        },
+        {
+          "value": "1980",
+          "label": "1980"
+        },
+        {
+          "value": "1981",
+          "label": "1981"
+        },
+        {
+          "value": "1982",
+          "label": "1982"
+        },
+        {
+          "value": "1983",
+          "label": "1983"
+        },
+        {
+          "value": "1984",
+          "label": "1984"
+        },
+        {
+          "value": "1985",
+          "label": "1985"
+        },
+        {
+          "value": "1986",
+          "label": "1986"
+        },
+        {
+          "value": "1987",
+          "label": "1987"
+        },
+        {
+          "value": "1988",
+          "label": "1988"
+        },
+        {
+          "value": "1989",
+          "label": "1989"
+        },
+        {
+          "value": "1990",
+          "label": "1990"
+        },
+        {
+          "value": "1991",
+          "label": "1991"
+        },
+        {
+          "value": "1992",
+          "label": "1992"
+        },
+        {
+          "value": "1993",
+          "label": "1993"
+        },
+        {
+          "value": "1994",
+          "label": "1994"
+        },
+        {
+          "value": "1995",
+          "label": "1995"
+        },
+        {
+          "value": "1996",
+          "label": "1996"
+        },
+        {
+          "value": "1997",
+          "label": "1997"
+        },
+        {
+          "value": "1998",
+          "label": "1998"
+        },
+        {
+          "value": "1999",
+          "label": "1999"
+        },
+        {
+          "value": "2000",
+          "label": "2000"
+        },
+        {
+          "value": "2001",
+          "label": "2001"
+        },
+        {
+          "value": "2002",
+          "label": "2002"
+        },
+        {
+          "value": "2003",
+          "label": "2003"
+        },
+        {
+          "value": "2004",
+          "label": "2004"
+        },
+        {
+          "value": "2005",
+          "label": "2005"
+        },
+        {
+          "value": "2006",
+          "label": "2006"
+        },
+        {
+          "value": "2007",
+          "label": "2007"
+        },
+        {
+          "value": "2008",
+          "label": "2008"
+        },
+        {
+          "value": "2009",
+          "label": "2009"
+        },
+        {
+          "value": "2010",
+          "label": "2010"
+        },
+        {
+          "value": "2011",
+          "label": "2011"
+        },
+        {
+          "value": "2012",
+          "label": "2012"
+        },
+        {
+          "value": "2013",
+          "label": "2013"
+        },
+        {
+          "value": "2014",
+          "label": "2014"
+        },
+        {
+          "value": "2015",
+          "label": "2015"
+        },
+        {
+          "value": "2016",
+          "label": "2016"
+        },
+        {
+          "value": "2017",
+          "label": "2017"
+        },
+        {
+          "value": "2018",
+          "label": "2018"
+        },
+        {
+          "value": "2019",
+          "label": "2019"
+        },
+        {
+          "value": "2020",
+          "label": "2020"
+        },
+        {
+          "value": "2021",
+          "label": "2021"
+        },
+        {
+          "value": "2022",
+          "label": "2022"
+        },
+        {
+          "value": "2023",
+          "label": "2023"
+        },
+        {
+          "value": "2024",
+          "label": "2024"
+        },
+        {
+          "value": "2025",
+          "label": "2025"
+        },
+        {
+          "value": "2026",
+          "label": "2026"
+        },
+        {
+          "value": "2027",
+          "label": "2027"
+        },
+        {
+          "value": "2028",
+          "label": "2028"
+        },
+        {
+          "value": "2029",
+          "label": "2029"
+        },
+        {
+          "value": "2030",
+          "label": "2030"
+        },
+        {
+          "value": "2031",
+          "label": "2031"
+        },
+        {
+          "value": "2032",
+          "label": "2032"
+        },
+        {
+          "value": "2033",
+          "label": "2033"
+        },
+        {
+          "value": "2034",
+          "label": "2034"
+        },
+        {
+          "value": "2035",
+          "label": "2035"
+        },
+        {
+          "value": "2036",
+          "label": "2036"
+        }
+      ]
+    },
+    "select_lunar_month": {
+      "type": "Select",
+      "column": 1,
+      "bind": "state.draftLunarMonth",
+      "placeholder": "${$i18n.lunarMonthPlaceholder}",
+      "options": [
+        {
+          "value": "01",
+          "label": "${t('lunarMonthFmt', '1')}"
+        },
+        {
+          "value": "02",
+          "label": "${t('lunarMonthFmt', '2')}"
+        },
+        {
+          "value": "03",
+          "label": "${t('lunarMonthFmt', '3')}"
+        },
+        {
+          "value": "04",
+          "label": "${t('lunarMonthFmt', '4')}"
+        },
+        {
+          "value": "05",
+          "label": "${t('lunarMonthFmt', '5')}"
+        },
+        {
+          "value": "06",
+          "label": "${t('lunarMonthFmt', '6')}"
+        },
+        {
+          "value": "07",
+          "label": "${t('lunarMonthFmt', '7')}"
+        },
+        {
+          "value": "08",
+          "label": "${t('lunarMonthFmt', '8')}"
+        },
+        {
+          "value": "09",
+          "label": "${t('lunarMonthFmt', '9')}"
+        },
+        {
+          "value": "10",
+          "label": "${t('lunarMonthFmt', '10')}"
+        },
+        {
+          "value": "11",
+          "label": "${t('lunarMonthFmt', '11')}"
+        },
+        {
+          "value": "12",
+          "label": "${t('lunarMonthFmt', '12')}"
+        }
+      ]
+    },
+    "select_lunar_day": {
+      "type": "Select",
+      "column": 2,
+      "bind": "state.draftLunarDay",
+      "placeholder": "${$i18n.lunarDayPlaceholder}",
+      "options": [
+        {
+          "value": "01",
+          "label": "${t('lunarDayFmt', '1')}"
+        },
+        {
+          "value": "02",
+          "label": "${t('lunarDayFmt', '2')}"
+        },
+        {
+          "value": "03",
+          "label": "${t('lunarDayFmt', '3')}"
+        },
+        {
+          "value": "04",
+          "label": "${t('lunarDayFmt', '4')}"
+        },
+        {
+          "value": "05",
+          "label": "${t('lunarDayFmt', '5')}"
+        },
+        {
+          "value": "06",
+          "label": "${t('lunarDayFmt', '6')}"
+        },
+        {
+          "value": "07",
+          "label": "${t('lunarDayFmt', '7')}"
+        },
+        {
+          "value": "08",
+          "label": "${t('lunarDayFmt', '8')}"
+        },
+        {
+          "value": "09",
+          "label": "${t('lunarDayFmt', '9')}"
+        },
+        {
+          "value": "10",
+          "label": "${t('lunarDayFmt', '10')}"
+        },
+        {
+          "value": "11",
+          "label": "${t('lunarDayFmt', '11')}"
+        },
+        {
+          "value": "12",
+          "label": "${t('lunarDayFmt', '12')}"
+        },
+        {
+          "value": "13",
+          "label": "${t('lunarDayFmt', '13')}"
+        },
+        {
+          "value": "14",
+          "label": "${t('lunarDayFmt', '14')}"
+        },
+        {
+          "value": "15",
+          "label": "${t('lunarDayFmt', '15')}"
+        },
+        {
+          "value": "16",
+          "label": "${t('lunarDayFmt', '16')}"
+        },
+        {
+          "value": "17",
+          "label": "${t('lunarDayFmt', '17')}"
+        },
+        {
+          "value": "18",
+          "label": "${t('lunarDayFmt', '18')}"
+        },
+        {
+          "value": "19",
+          "label": "${t('lunarDayFmt', '19')}"
+        },
+        {
+          "value": "20",
+          "label": "${t('lunarDayFmt', '20')}"
+        },
+        {
+          "value": "21",
+          "label": "${t('lunarDayFmt', '21')}"
+        },
+        {
+          "value": "22",
+          "label": "${t('lunarDayFmt', '22')}"
+        },
+        {
+          "value": "23",
+          "label": "${t('lunarDayFmt', '23')}"
+        },
+        {
+          "value": "24",
+          "label": "${t('lunarDayFmt', '24')}"
+        },
+        {
+          "value": "25",
+          "label": "${t('lunarDayFmt', '25')}"
+        },
+        {
+          "value": "26",
+          "label": "${t('lunarDayFmt', '26')}"
+        },
+        {
+          "value": "27",
+          "label": "${t('lunarDayFmt', '27')}"
+        },
+        {
+          "value": "28",
+          "label": "${t('lunarDayFmt', '28')}"
+        },
+        {
+          "value": "29",
+          "label": "${t('lunarDayFmt', '29')}"
+        },
+        {
+          "value": "30",
+          "label": "${t('lunarDayFmt', '30')}"
+        }
+      ]
+    },
+    "toggle_lunar_leap": {
+      "type": "Toggle",
+      "bind": "state.draftLunarLeap",
+      "label": "${$i18n.lunarLeapLabel}"
+    },
+    "seg_calendar_type": {
+      "type": "Segmented",
+      "bind": "state.draftCalendar",
+      "options": [
+        {
+          "value": "solar",
+          "label": "${$i18n.optSolar}"
+        },
+        {
+          "value": "lunar",
+          "label": "${$i18n.optLunar}"
+        }
+      ]
+    },
+    "seg_repeat_mode": {
+      "type": "Segmented",
+      "bind": "state.draftRepeat",
+      "options": [
+        {
+          "value": "none",
+          "label": "${$i18n.optRepeatOnce}"
+        },
+        {
+          "value": "yearly",
+          "label": "${$i18n.optRepeatYearly}"
+        },
+        {
+          "value": "monthly",
+          "label": "${$i18n.optRepeatMonthly}"
+        }
+      ]
+    },
+    "weekend_rule_section": {
+      "type": "Stack",
+      "when": "${state.draftRepeat == 'monthly'}",
+      "spacing": 4,
+      "children": [
+        "weekend_rule_label",
+        "seg_weekend_rule"
+      ]
+    },
+    "weekend_rule_label": {
+      "type": "Text",
+      "text": "${$i18n.paydayRuleLabel}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "seg_weekend_rule": {
+      "type": "Segmented",
+      "bind": "state.draftWeekendRule",
+      "options": [
+        {
+          "value": "none",
+          "label": "${$i18n.paydayNone}"
+        },
+        {
+          "value": "friday",
+          "label": "${$i18n.paydayFri}"
+        },
+        {
+          "value": "monday",
+          "label": "${$i18n.paydayMon}"
+        }
+      ]
+    },
+    "btn_save_event": {
+      "type": "Button",
+      "icon": "check",
+      "text": "${$i18n.popSaveBtn}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "state.set",
+          "guard": "${state.draftTitle != '' && state.draftCalendar == 'lunar' && state.draftLunarYear == ''}",
+          "key": "draftLunarYear",
+          "value": "2026"
+        },
+        {
+          "type": "state.set",
+          "guard": "${state.draftTitle != '' && state.draftCalendar == 'lunar' && state.draftLunarMonth != '' && state.draftLunarDay == ''}",
+          "key": "draftLunarDay",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "guard": "${state.draftTitle != '' && state.draftCalendar == 'lunar' && state.draftLunarDay != '' && state.draftLunarMonth == ''}",
+          "key": "draftLunarMonth",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "guard": "${state.draftTitle != '' && state.draftCalendar == 'lunar' && state.draftLunarMonth != '' && state.draftLunarDay != ''}",
+          "key": "draftDate",
+          "value": "${state.draftLunarYear}-${state.draftLunarMonth}-${state.draftLunarDay}"
+        },
+        {
+          "type": "countdown.upsert",
+          "guard": "${state.draftTitle != ''}",
+          "targetId": "${state.editingEventId}",
+          "item": {
+            "title": "${state.draftTitle}",
+            "date": "${state.draftDate != '' ? state.draftDate : $time.date}",
+            "emoji": "${state.draftEmoji}",
+            "kind": "${state.draftKind}",
+            "category": "${state.draftCategory}",
+            "calendar": "${state.draftCalendar}",
+            "repeat": "${state.draftRepeat}",
+            "weekendRule": "${state.draftWeekendRule}",
+            "pinned": "${state.draftPinned}",
+            "lunarLeap": "${state.draftLunarLeap}"
+          }
+        },
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftEmoji",
+          "value": "📅"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCalendar",
+          "value": "solar"
+        },
+        {
+          "type": "state.set",
+          "key": "draftRepeat",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftWeekendRule",
+          "value": "none"
+        },
+        {
+          "type": "state.set",
+          "key": "draftPinned",
+          "value": false
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarYear",
+          "value": "2026"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarMonth",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarDay",
+          "value": "01"
+        },
+        {
+          "type": "state.set",
+          "key": "draftLunarLeap",
+          "value": false
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "addEventPop"
+        }
+      ]
+    },
+    "btn_delete_editing_event": {
+      "type": "Button",
+      "when": "${state.editingEventId != ''}",
+      "icon": "delete",
+      "text": "${$i18n.deleteTooltip}",
+      "variant": "danger",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "countdown.delete",
+          "guard": "${state.editingEventId != ''}",
+          "targetId": "${state.editingEventId}"
+        },
+        {
+          "type": "state.set",
+          "key": "editingEventId",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftDate",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftCategory",
+          "value": ""
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "addEventPop"
+        }
+      ]
+    },
+    "pop_time_progress_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 10,
+      "children": [
+        "progress_row_year",
+        "progress_row_month",
+        "progress_row_week",
+        "progress_row_workday"
+      ]
+    },
+    "progress_row_year": {
+      "type": "ProgressRow",
+      "title": "${$countdown.year.title}",
+      "value": "${$countdown.year.summary}",
+      "progress": "${$countdown.year.percent}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    },
+    "progress_row_month": {
+      "type": "ProgressRow",
+      "title": "${$countdown.month.title}",
+      "value": "${$countdown.month.summary}",
+      "progress": "${$countdown.month.percent}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    },
+    "progress_row_week": {
+      "type": "ProgressRow",
+      "title": "${$countdown.week.title}",
+      "value": "${$countdown.week.summary}",
+      "progress": "${$countdown.week.percent}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    },
+    "progress_row_workday": {
+      "type": "ProgressRow",
+      "title": "${$countdown.work.title}",
+      "value": "${$countdown.work.summary}",
+      "progress": "${$countdown.work.percent}",
+      "warningThreshold": 999,
+      "dangerThreshold": 999
+    }
+  }
+}

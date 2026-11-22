@@ -45,7 +45,7 @@ internal sealed class DesktopAutoOrganizationSuppressionRegistry
     // into a multi-megabyte store. Real activity stays in the tens of
     // entries; eviction order is closest-to-expiry-first, which only ever
     // drops claims with the least remaining protection.
-    internal const int MaxEntries = 1000;
+    internal const int MaxEntries = 2048;
 
     private readonly object _gate = new();
     private readonly Dictionary<string, SuppressionEntry> _entries =
@@ -250,14 +250,18 @@ internal sealed class DesktopAutoOrganizationSuppressionRegistry
                  fingerprint != entry.Fingerprint))
             {
                 // The registered fingerprint no longer matches (file was
-                // replaced or edited after registration). For a completed
-                // entry the destination's creation time is not distinctive —
-                // it always lands near the registration — so the only
-                // evidence that discriminates "our moved file, edited" from
-                // "an unrelated occupant" is the source having vanished.
+                // replaced or edited after registration). Accept if:
+                // 1. The source vanished (moved file later edited), OR
+                // 2. For a drag-out Copy+Replace where an older occupant existed at
+                //    registration and Explorer later overwrote it with the dragged
+                //    source, the destination fingerprint now matches the source's
+                //    fingerprint (Length + LastWriteTimeUtc).
                 if (entry.SourcePath is { Length: > 0 } sourcePath &&
-                    !File.Exists(sourcePath) &&
-                    !Directory.Exists(sourcePath))
+                    ((!File.Exists(sourcePath) && !Directory.Exists(sourcePath)) ||
+                     (string.Equals(entry.OperationId, DraggedArrivalOperationId, StringComparison.Ordinal) &&
+                      TryCaptureFingerprint(normalized, out FileFingerprint updatedDestFp) &&
+                      TryCaptureFingerprint(sourcePath, out FileFingerprint sourceFp) &&
+                      updatedDestFp.MatchesCopiedContent(sourceFp))))
                 {
                     _entries.Remove(normalized);
                     PersistLedgerLocked();
@@ -309,8 +313,26 @@ internal sealed class DesktopAutoOrganizationSuppressionRegistry
                 return true;
             }
 
-            return File.GetCreationTimeUtc(path) >=
-                entry.RegisteredAt.UtcDateTime - ArrivalCreationTolerance;
+            if (File.GetCreationTimeUtc(path) >=
+                entry.RegisteredAt.UtcDateTime - ArrivalCreationTolerance)
+            {
+                return true;
+            }
+
+            // NTFS file-system tunneling (<15s after delete/move) can preserve an
+            // older CreationTimeUtc on a freshly copied arrival. Explorer's copy
+            // still preserves the source's exact (Length, LastWriteTimeUtc), so
+            // matching the source fingerprint proves this file is our arrival
+            // without false-matching an unrelated pre-existing occupant.
+            if (entry.SourcePath is { Length: > 0 } sourcePath &&
+                TryCaptureFingerprint(path, out FileFingerprint destFingerprint) &&
+                TryCaptureFingerprint(sourcePath, out FileFingerprint sourceFingerprint) &&
+                destFingerprint.MatchesCopiedContent(sourceFingerprint))
+            {
+                return true;
+            }
+
+            return false;
         }
         catch
         {
@@ -563,7 +585,12 @@ internal sealed class DesktopAutoOrganizationSuppressionRegistry
     private readonly record struct FileFingerprint(
         long Length,
         DateTime LastWriteTimeUtc,
-        DateTime CreationTimeUtc);
+        DateTime CreationTimeUtc)
+    {
+        public bool MatchesCopiedContent(FileFingerprint source) =>
+            Length == source.Length &&
+            Math.Abs((LastWriteTimeUtc - source.LastWriteTimeUtc).Ticks) <= TimeSpan.TicksPerSecond * 2;
+    }
 }
 
 internal sealed class DesktopSuppressionLedger

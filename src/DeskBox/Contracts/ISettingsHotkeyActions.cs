@@ -36,6 +36,12 @@ public interface ISettingsHotkeyActions
 
     bool TryApplyActivation(GlobalHotkeyActivation activation, out string? applyError);
 
+    Task<(bool Applied, string? Error)> TryApplyActivationAsync(GlobalHotkeyActivation activation)
+    {
+        bool applied = TryApplyActivation(activation, out string? applyError);
+        return Task.FromResult((applied, applyError));
+    }
+
     bool ResetToDefault(out string? error);
 
     /// <summary>Re-runs registration against the persisted settings.</summary>
@@ -71,8 +77,32 @@ public interface ISettingsHotkeyActions
     /// <summary>Applies a captured gesture through the live service.</summary>
     bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error);
 
+    /// <summary>Applies a captured activation (chord, double-tap, or reserved key) through the live search hotkey service.</summary>
+    bool TryApplySearchHotkeyActivation(GlobalHotkeyActivation activation, out string? error) =>
+        TryApplySearchHotkeyGesture(activation.Gesture, out error);
+
     /// <summary>Re-runs the search hotkey registration against persisted settings.</summary>
     void RefreshSearchHotkeyRegistration();
+
+    // ── Clipboard quick-paste hotkey ────────────────────────────────
+
+    Task<bool> IsClipboardHotkeyRegisteredAsync() => Task.FromResult(false);
+
+    void SetClipboardHotkeyEnabled(bool enabled) { }
+
+    bool TryApplyClipboardHotkeyActivation(GlobalHotkeyActivation activation, out string? error)
+    {
+        error = null;
+        return false;
+    }
+
+    Task<(bool Applied, string? Error)> TryApplyClipboardHotkeyActivationAsync(GlobalHotkeyActivation activation)
+    {
+        bool applied = TryApplyClipboardHotkeyActivation(activation, out string? error);
+        return Task.FromResult((applied, error));
+    }
+
+    void RefreshClipboardHotkeyRegistration() { }
 
     /// <summary>
     /// Applies the desktop double-click toggle through the live service,

@@ -16,8 +16,15 @@ namespace DeskBox.Platform;
 /// IUnknown (slots 0-2) and must be verified against the Windows SDK header
 /// at every call site.
 /// </summary>
-internal static class ComVtable
+internal static partial class ComVtable
 {
+    /// <summary>
+    /// Resolves the raw function pointer for one vtable slot without allocating
+    /// a managed delegate wrapper. Callers invoke it via <c>delegate* unmanaged[Stdcall]</c>.
+    /// </summary>
+    internal static unsafe IntPtr SlotPointer(IntPtr comObject, int slot) =>
+        (*(IntPtr**)comObject)[slot];
+
     /// <summary>
     /// Resolves the delegate for one vtable slot. The returned delegate
     /// carries the interface pointer as its first argument.
@@ -29,24 +36,25 @@ internal static class ComVtable
         return Marshal.GetDelegateForFunctionPointer<T>(proc);
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int QueryInterfaceInvoker(
-        IntPtr self, ref Guid iid, out IntPtr ppv);
-
     /// <summary>
-    /// IUnknown::QueryInterface (slot 0) through a raw pointer — the
-    /// interface-hop counterpart of <see cref="Slot{T}"/> for callers that
+    /// IUnknown::QueryInterface (slot 0) through a raw function pointer — the
+    /// zero-allocation counterpart of <see cref="SlotPointer"/> for callers that
     /// hold a bare COM pointer without any ComImport declaration.
     /// Release the returned pointer with <see cref="Marshal.Release"/>.
     /// </summary>
-    internal static int QueryInterface(
+    internal static unsafe int QueryInterface(
         IntPtr comObject, ref Guid iid, out IntPtr ppv)
     {
-        return Slot<QueryInterfaceInvoker>(comObject, 0)(comObject, ref iid, out ppv);
+        var queryInterface = (delegate* unmanaged[Stdcall]<IntPtr, Guid*, IntPtr*, int>)SlotPointer(comObject, 0);
+        fixed (Guid* iidPtr = &iid)
+        fixed (IntPtr* ppvPtr = &ppv)
+        {
+            return queryInterface(comObject, iidPtr, ppvPtr);
+        }
     }
 
-    [DllImport("ole32.dll")]
-    private static extern int CoCreateInstance(
+    [LibraryImport("ole32.dll", EntryPoint = "CoCreateInstance")]
+    private static partial int CoCreateInstance(
         ref Guid clsid,
         IntPtr punkOuter,
         uint dwClsContext,

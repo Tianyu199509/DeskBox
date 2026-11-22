@@ -24,20 +24,25 @@ public sealed class SettingsAccordionEmptyStateContractTests
         "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml";
     private const string SearchSectionCode =
         "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs";
-    private const string SettingsWindowXaml = "src/DeskBox/Views/SettingsWindow.xaml";
+    private const string FileWidgetSectionXaml = "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml";
 
     [Fact]
-    public void CapsuleMode_HoverAndAnimationSubCards_UseIsEnabledNotVisibility()
+    public void CapsuleMode_HoverAndAnimationSubCards_HideCleanlyOutsideCustomPreset()
     {
         string xaml = ReadRepositoryFile(CapsuleSectionXaml);
 
-        Assert.Contains("IsEnabled=\"{Binding ShowHoverResponseCustom}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding ShowAnimationCustom}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Visibility=\"{Binding ShowHoverResponseCustom", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Visibility=\"{Binding ShowAnimationCustom", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding ShowAnimationCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("IsEnabled=\"{Binding ShowHoverResponseCustom}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsEnabled=\"{Binding ShowAnimationCustom}\"", xaml, StringComparison.Ordinal);
 
-        // The expander-level preset semantics survive: the hover expander
-        // itself still hides when its preset entry is unavailable.
+        // The hover block itself still hides when its preset entry is unavailable.
         Assert.Contains(
             "Visibility=\"{Binding ShowHoverResponseEntry", xaml, StringComparison.Ordinal);
     }
@@ -47,18 +52,26 @@ public sealed class SettingsAccordionEmptyStateContractTests
     {
         string xaml = ReadRepositoryFile(CapsuleSectionXaml);
 
-        // Expand/collapse delay sub-cards in the hover expander and the
-        // duration sub-card in the animation expander.
-        Assert.Equal(2, CountOccurrences(xaml, "IsEnabled=\"{Binding ShowHoverResponseCustom}\""));
-        Assert.Equal(1, CountOccurrences(xaml, "IsEnabled=\"{Binding ShowAnimationCustom}\""));
+        // Expand/collapse delay sub-cards under hover response and the
+        // duration sub-card under animation.
+        Assert.Equal(
+            2,
+            CountOccurrences(
+                xaml,
+                "Visibility=\"{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\""));
+        Assert.Equal(
+            1,
+            CountOccurrences(
+                xaml,
+                "Visibility=\"{Binding ShowAnimationCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\""));
     }
 
     [Fact]
-    public void SearchHotkey_ExpanderIsNeverGatedAsAWhole()
+    public void SearchHotkey_CardIsNeverGatedAsAWhole()
     {
         string code = ReadRepositoryFile(SearchSectionCode);
 
-        Assert.DoesNotContain("SearchHotkeyExpander.IsEnabled", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("SearchHotkeyCard.IsEnabled", code, StringComparison.Ordinal);
 
         // Content-level gating instead: toggle, capture and reset controls
         // gray out when the hotkey is unavailable. The preset picker moved
@@ -66,24 +79,24 @@ public sealed class SettingsAccordionEmptyStateContractTests
         // gating.
         Assert.Contains("SearchHotkeyToggle.IsEnabled", code, StringComparison.Ordinal);
         Assert.Contains("SearchHotkeyCaptureButton.IsEnabled", code, StringComparison.Ordinal);
-        Assert.Contains("ResetSearchHotkeyButton.IsEnabled", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResetSearchHotkeyButton", code, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SearchHotkey_ExpanderStaysPlainInXaml()
+    public void SearchHotkey_CardStaysPlainInXaml()
     {
         string xaml = ReadRepositoryFile(SearchSectionXaml);
 
-        Match? expander = FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Search.Hotkey.Title\"");
-        Assert.NotNull(expander);
-        Assert.DoesNotContain("IsEnabled", expander.Value, StringComparison.Ordinal);
+        Match? card = FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.Search.Hotkey.Title\"");
+        Assert.NotNull(card);
+        Assert.DoesNotContain("IsEnabled", card.Value, StringComparison.Ordinal);
     }
 
     [Fact]
     public void DragBehavior_ExpanderHeaderCarriesADescription()
     {
-        string xaml = ReadRepositoryFile(SettingsWindowXaml);
+        string xaml = ReadRepositoryFile(FileWidgetSectionXaml);
 
         // The merged drag-and-drop group (拖放行为) folds the old 拖放提示
         // expander in; its header must keep carrying a description.

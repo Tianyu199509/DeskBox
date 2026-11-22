@@ -207,7 +207,7 @@ internal static class EverythingInstallationDetector
 
         string trimmed = value.Trim();
         int comma = trimmed.LastIndexOf(',');
-        if (comma > 0 && int.TryParse(trimmed[(comma + 1)..], out _))
+        if (comma > 0 && int.TryParse(trimmed[(comma + 1)..], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _))
         {
             trimmed = trimmed[..comma];
         }

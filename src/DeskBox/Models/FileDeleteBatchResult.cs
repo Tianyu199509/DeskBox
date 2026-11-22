@@ -7,7 +7,8 @@ public sealed record FileDeleteFailure(
 
 public sealed record FileDeleteBatchResult(
     int DeletedCount,
-    IReadOnlyList<FileDeleteFailure> Failures)
+    IReadOnlyList<FileDeleteFailure> Failures,
+    int PermanentlyDeletedCount = 0)
 {
     public bool IsComplete => Failures.Count == 0;
 }

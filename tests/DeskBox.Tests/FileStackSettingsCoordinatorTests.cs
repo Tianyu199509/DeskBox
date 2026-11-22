@@ -30,7 +30,7 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         coordinator.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
         coordinator.SetFileStackThreshold(5);
         coordinator.SetFileStackOrderBy(SettingsService.FileStackOrderByDateModified);
-        coordinator.SetFileStackOpenMode(SettingsService.FileStackOpenModePopover);
+        coordinator.SetFileStackOpenMode(SettingsService.FileStackOpenModeInline);
         coordinator.SetFileStackPopoverLayout(SettingsService.FileStackPopoverLayoutAdaptive);
         coordinator.SetFileStackPopoverStyle(SettingsService.FileStackPopoverStyleFollowMaterial);
         coordinator.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
@@ -45,7 +45,7 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         Assert.Equal(SettingsService.FileStackGroupByCustom, slice.FileStackGroupBy);
         Assert.Equal(5, slice.FileStackThreshold);
         Assert.Equal(SettingsService.FileStackOrderByDateModified, slice.FileStackOrderBy);
-        Assert.Equal(SettingsService.FileStackOpenModePopover, slice.FileStackOpenMode);
+        Assert.Equal(SettingsService.FileStackOpenModeInline, slice.FileStackOpenMode);
         Assert.Equal(SettingsService.FileStackPopoverLayoutAdaptive, slice.FileStackPopoverLayout);
         Assert.Equal(SettingsService.FileStackPopoverStyleFollowMaterial, slice.FileStackPopoverStyle);
         Assert.Equal(SettingsService.FileStackUnmatchedOther, slice.FileStackUnmatchedBehavior);
@@ -121,7 +121,7 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         coordinator.SetFileStackGroupBy(SettingsService.FileStackGroupByCustom);
         coordinator.SetFileStackThreshold(2);
         coordinator.SetFileStackOrderBy(SettingsService.FileStackOrderByName);
-        coordinator.SetFileStackOpenMode(SettingsService.FileStackOpenModePopover);
+        coordinator.SetFileStackOpenMode(SettingsService.FileStackOpenModeInline);
         coordinator.SetFileStackPopoverLayout(SettingsService.FileStackPopoverLayoutGrid5);
         coordinator.SetFileStackPopoverStyle(SettingsService.FileStackPopoverStyleFollowMaterial);
         coordinator.SetFileStackUnmatchedBehavior(SettingsService.FileStackUnmatchedOther);
@@ -140,7 +140,7 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         Assert.Equal(SettingsService.FileStackGroupByCustom, snapshot.FileStackGroupBy);
         Assert.Equal(2, snapshot.FileStackThreshold);
         Assert.Equal(SettingsService.FileStackOrderByName, snapshot.FileStackOrderBy);
-        Assert.Equal(SettingsService.FileStackOpenModePopover, snapshot.FileStackOpenMode);
+        Assert.Equal(SettingsService.FileStackOpenModeInline, snapshot.FileStackOpenMode);
         Assert.Equal(SettingsService.FileStackPopoverLayoutGrid5, snapshot.FileStackPopoverLayout);
         Assert.Equal(SettingsService.FileStackPopoverStyleFollowMaterial, snapshot.FileStackPopoverStyle);
         Assert.Equal(SettingsService.FileStackUnmatchedOther, snapshot.FileStackUnmatchedBehavior);
@@ -169,7 +169,7 @@ public sealed class FileStackSettingsCoordinatorTests : IDisposable
         Assert.Equal(SettingsService.FileStackOrderByWidget,
             settings.Settings.FileWidget.FileStackOrderBy);
         coordinator.SetFileStackOpenMode("Sidecar");
-        Assert.Equal(SettingsService.FileStackOpenModeInline,
+        Assert.Equal(SettingsService.FileStackOpenModePopover,
             settings.Settings.FileWidget.FileStackOpenMode);
         coordinator.SetFileStackPopoverLayout("Grid4");
         Assert.Equal(SettingsService.FileStackPopoverLayoutAdaptive,

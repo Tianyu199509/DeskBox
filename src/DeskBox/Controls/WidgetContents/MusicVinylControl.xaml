@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.MusicVinylControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    UseLayoutRounding="False">
+
+    <Viewbox Stretch="Uniform">
+        <Grid Width="160" Height="160">
+            <!-- Soft contact shadow under the platter -->
+            <Ellipse Margin="-3,1,-3,-5" IsHitTestVisible="False">
+                <Ellipse.Fill>
+                    <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                        <GradientStop Offset="0.80" Color="#3A000000" />
+                        <GradientStop Offset="0.92" Color="#14000000" />
+                        <GradientStop Offset="1" Color="#00000000" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+
+            <!-- Vinyl body: near-black with a faint depth gradient -->
+            <Ellipse>
+                <Ellipse.Fill>
+                    <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                        <GradientStop Offset="0" Color="#FF17171B" />
+                        <GradientStop Offset="0.62" Color="#FF0F0F12" />
+                        <GradientStop Offset="0.97" Color="#FF0A0A0C" />
+                        <GradientStop Offset="1" Color="#FF050506" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+
+            <Grid IsHitTestVisible="False">
+                <!-- Bevelled outer edge (lit from the upper left) -->
+                <Ellipse StrokeThickness="0.9">
+                    <Ellipse.Stroke>
+                        <LinearGradientBrush StartPoint="0.15,0.1" EndPoint="0.85,0.9">
+                            <GradientStop Offset="0" Color="#4CFFFFFF" />
+                            <GradientStop Offset="0.45" Color="#10FFFFFF" />
+                            <GradientStop Offset="1" Color="#26FFFFFF" />
+                        </LinearGradientBrush>
+                    </Ellipse.Stroke>
+                </Ellipse>
+                <!-- Smooth lead-in band, then the first groove edge -->
+                <Ellipse Width="153" Height="153" Stroke="#D0000000" StrokeThickness="0.9" />
+                <Ellipse Width="155" Height="155" Stroke="#0CFFFFFF" StrokeThickness="0.4" />
+
+                <!-- Micro grooves (irregular contrast reads as pressed vinyl rather than a target) -->
+                <Ellipse Width="102" Height="102" Stroke="#0BFFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="104.5" Height="104.5" Stroke="#09FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="107" Height="107" Stroke="#0DFFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="109.5" Height="109.5" Stroke="#12FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="112" Height="112" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="114.5" Height="114.5" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="117" Height="117" Stroke="#10FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="124.5" Height="124.5" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="127" Height="127" Stroke="#0BFFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="129.5" Height="129.5" Stroke="#10FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="132" Height="132" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="134.5" Height="134.5" Stroke="#10FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="139.5" Height="139.5" Stroke="#09FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="142" Height="142" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="144.5" Height="144.5" Stroke="#07FFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="147" Height="147" Stroke="#0DFFFFFF" StrokeThickness="0.45" />
+                <Ellipse Width="149.5" Height="149.5" Stroke="#0DFFFFFF" StrokeThickness="0.45" />
+
+                <!-- Track gaps: darker smooth bands with a lit trailing edge -->
+                <Ellipse Width="120.8" Height="120.8" Stroke="#C0000000" StrokeThickness="1.3" />
+                <Ellipse Width="122.7" Height="122.7" Stroke="#1AFFFFFF" StrokeThickness="0.4" />
+                <Ellipse Width="136.4" Height="136.4" Stroke="#C0000000" StrokeThickness="1.3" />
+                <Ellipse Width="138.3" Height="138.3" Stroke="#1AFFFFFF" StrokeThickness="0.4" />
+
+                <!-- Stationary anisotropic sheen: two opposing feathered light wedges, like a real record under a lamp -->
+                <Path Fill="#0BFFFFFF" Data="M 23.15,28.81 A 76.5,76.5 0 0 1 28.81,23.15 L 46.21,42.47 A 50.5,50.5 0 0 0 42.47,46.21 Z" />
+                <Path Fill="#0BFFFFFF" Data="M 18.9,33.96 A 76.5,76.5 0 0 1 33.96,18.9 L 49.61,39.67 A 50.5,50.5 0 0 0 39.67,49.61 Z" />
+                <Path Fill="#0BFFFFFF" Data="M 14.43,40.6 A 76.5,76.5 0 0 1 40.6,14.43 L 53.99,36.71 A 50.5,50.5 0 0 0 36.71,53.99 Z" />
+                <Path Fill="#0BFFFFFF" Data="M 9.58,50.11 A 76.5,76.5 0 0 1 50.11,9.58 L 60.27,33.51 A 50.5,50.5 0 0 0 33.51,60.27 Z" />
+                <Path Fill="#07FFFFFF" Data="M 136.85,131.19 A 76.5,76.5 0 0 1 131.19,136.85 L 113.79,117.53 A 50.5,50.5 0 0 0 117.53,113.79 Z" />
+                <Path Fill="#07FFFFFF" Data="M 141.1,126.04 A 76.5,76.5 0 0 1 126.04,141.1 L 110.39,120.33 A 50.5,50.5 0 0 0 120.33,110.39 Z" />
+                <Path Fill="#07FFFFFF" Data="M 145.57,119.4 A 76.5,76.5 0 0 1 119.4,145.57 L 106.01,123.29 A 50.5,50.5 0 0 0 123.29,106.01 Z" />
+                <Path Fill="#07FFFFFF" Data="M 150.42,109.89 A 76.5,76.5 0 0 1 109.89,150.42 L 99.73,126.49 A 50.5,50.5 0 0 0 126.49,99.73 Z" />
+
+                <!-- Broad soft gloss from the key light -->
+                <Ellipse>
+                    <Ellipse.Fill>
+                        <RadialGradientBrush GradientOrigin="0.28,0.22" Center="0.5,0.5" RadiusX="0.56" RadiusY="0.56">
+                            <GradientStop Offset="0" Color="#1EFFFFFF" />
+                            <GradientStop Offset="0.42" Color="#06FFFFFF" />
+                            <GradientStop Offset="1" Color="#00FFFFFF" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+
+                <!-- Label recess: dark seat with a hairline lip -->
+                <Ellipse Width="101" Height="101" Fill="#FF08080A" />
+                <Ellipse Width="101.6" Height="101.6" StrokeThickness="0.5">
+                    <Ellipse.Stroke>
+                        <LinearGradientBrush StartPoint="0.2,0.1" EndPoint="0.8,0.9">
+                            <GradientStop Offset="0" Color="#08FFFFFF" />
+                            <GradientStop Offset="1" Color="#22FFFFFF" />
+                        </LinearGradientBrush>
+                    </Ellipse.Stroke>
+                </Ellipse>
+            </Grid>
+
+            <!-- Rotating center label (96x96 inside 160x160) -->
+            <Grid
+                x:Name="RotatingLabelHost"
+                Width="96"
+                Height="96"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+                <!-- Blank pressed label shown when artwork is unavailable (empty state) -->
+                <Grid x:Name="PlaceholderLabel">
+                    <Ellipse>
+                        <Ellipse.Fill>
+                            <LinearGradientBrush StartPoint="0.2,0.05" EndPoint="0.8,0.95">
+                                <GradientStop Offset="0" Color="#FF3A3B43" />
+                                <GradientStop Offset="0.55" Color="#FF292A31" />
+                                <GradientStop Offset="1" Color="#FF1D1E23" />
+                            </LinearGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <!-- Matte paper falloff toward the rim -->
+                    <Ellipse>
+                        <Ellipse.Fill>
+                            <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Offset="0.78" Color="#00000000" />
+                                <GradientStop Offset="1" Color="#30000000" />
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Width="86" Height="86" Stroke="#12FFFFFF" StrokeThickness="0.5" />
+                    <Ellipse Width="83" Height="83" Stroke="#0AFFFFFF" StrokeThickness="0.4" />
+                    <!-- Printed divider rule; also makes rotation legible on a blank label -->
+                    <Rectangle Width="18" Height="0.6" Margin="-50,0,0,0" Fill="#16FFFFFF" RadiusX="0.3" RadiusY="0.3" />
+                    <Rectangle Width="18" Height="0.6" Margin="50,0,0,0" Fill="#16FFFFFF" RadiusX="0.3" RadiusY="0.3" />
+                    <Rectangle Width="10" Height="1.4" Margin="0,-56,0,0" Fill="#14FFFFFF" RadiusX="0.7" RadiusY="0.7" />
+                    <Rectangle Width="16" Height="0.6" Margin="0,-50,0,0" Fill="#0CFFFFFF" RadiusX="0.3" RadiusY="0.3" />
+                    <!-- Debossed hub around the spindle -->
+                    <Ellipse Width="26" Height="26" StrokeThickness="0.5">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Offset="0" Color="#14000000" />
+                                <GradientStop Offset="1" Color="#00000000" />
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                        <Ellipse.Stroke>
+                            <LinearGradientBrush StartPoint="0.2,0.1" EndPoint="0.8,0.9">
+                                <GradientStop Offset="0" Color="#26000000" />
+                                <GradientStop Offset="1" Color="#14FFFFFF" />
+                            </LinearGradientBrush>
+                        </Ellipse.Stroke>
+                    </Ellipse>
+                </Grid>
+
+                <!-- Album artwork center label -->
+                <Ellipse x:Name="CoverEllipse" Visibility="Collapsed">
+                    <Ellipse.Fill>
+                        <ImageBrush x:Name="CoverBrush" Stretch="UniformToFill" />
+                    </Ellipse.Fill>
+                </Ellipse>
+                <!-- Printed-on-paper shading so artwork sits in the record instead of floating on it -->
+                <Ellipse x:Name="CoverShade" IsHitTestVisible="False" Visibility="Collapsed">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                            <GradientStop Offset="0" Color="#22000000" />
+                            <GradientStop Offset="0.16" Color="#00000000" />
+                            <GradientStop Offset="0.80" Color="#00000000" />
+                            <GradientStop Offset="1" Color="#3C000000" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <Ellipse
+                    x:Name="CoverRim"
+                    Stroke="#1EFFFFFF"
+                    StrokeThickness="0.6"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed" />
+            </Grid>
+
+            <!-- Stationary spindle: contact shadow, chrome pin, specular point -->
+            <Ellipse
+                Width="10"
+                Height="10"
+                Margin="0.6,1.2,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsHitTestVisible="False"
+                Fill="#55000000" />
+            <Ellipse
+                Width="7"
+                Height="7"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsHitTestVisible="False"
+                Stroke="#66000000"
+                StrokeThickness="0.5">
+                <Ellipse.Fill>
+                    <RadialGradientBrush GradientOrigin="0.34,0.30" Center="0.5,0.5" RadiusX="0.6" RadiusY="0.6">
+                        <GradientStop Offset="0" Color="#FFFAFAFC" />
+                        <GradientStop Offset="0.45" Color="#FFC9CAD0" />
+                        <GradientStop Offset="1" Color="#FF6C6D74" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+        </Grid>
+    </Viewbox>
+</UserControl>

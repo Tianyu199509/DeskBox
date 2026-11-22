@@ -2,11 +2,10 @@ using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using System.Runtime.InteropServices;
 using Windows.Graphics;
 using Windows.System;
@@ -16,10 +15,10 @@ namespace DeskBox.Views;
 
 public sealed partial class DesktopOrganizationWindow : Window
 {
-    private const int DesiredWidth = 900;
+    private const int DesiredWidth = 960;
     private const int DesiredHeight = 680;
-    private const int MinimumWidth = 600;
-    private const int MinimumHeight = 500;
+    private const int MinimumWidth = 720;
+    private const int MinimumHeight = 520;
     private const int WorkAreaMargin = 64;
     private const uint WmGetMinMaxInfo = 0x0024;
     private const uint WmNcDestroy = 0x0082;
@@ -30,6 +29,7 @@ public sealed partial class DesktopOrganizationWindow : Window
     private readonly Win32Helper.SubclassProc _windowSubclassProc;
     private bool _hasStarted;
     private bool _allowClose;
+    private bool _isConfirmingEscapeDiscard;
     private IntPtr _ownerHwnd;
     private bool _isSubclassInstalled;
 
@@ -178,23 +178,65 @@ public sealed partial class DesktopOrganizationWindow : Window
     private void TaskView_OrganizationUndone(object? sender, EventArgs e) =>
         OrganizationUndone?.Invoke(this, EventArgs.Empty);
 
-    private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != VirtualKey.Escape)
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
+        if (e.Key != VirtualKey.Escape || _isConfirmingEscapeDiscard)
         {
             return;
         }
 
         e.Handled = true;
+        if (TaskView.TryCancelActiveInteraction())
+        {
+            return;
+        }
+
         if (TaskView.IsExecutionRunning)
         {
             TaskView.CancelExecutionAndCloseWhenSafe();
+            return;
         }
-        else
+
+        if (TaskView.HasActiveUserCustomizations && RootGrid.XamlRoot is not null)
         {
-            _allowClose = true;
-            Close();
+            _isConfirmingEscapeDiscard = true;
+            try
+            {
+                LocalizationService loc = App.Current.LocalizationService;
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = RootGrid.XamlRoot,
+                    RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(RootGrid),
+                    Title = loc.T("DesktopOrganization.Layout.DiscardChangesTitle"),
+                    Content = loc.T("DesktopOrganization.Layout.DiscardChangesBody"),
+                    PrimaryButtonText = loc.T("DesktopOrganization.Layout.DiscardAndClose"),
+                    CloseButtonText = loc.T("DesktopOrganization.Layout.KeepEditing"),
+                    DefaultButton = ContentDialogButton.Close
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Another ContentDialog is already open (e.g. abandon dialog);
+                // let that dialog handle Escape instead of closing the window.
+                return;
+            }
+            finally
+            {
+                _isConfirmingEscapeDiscard = false;
+            }
         }
+
+        _allowClose = true;
+        Close();
     }
 
     private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args) =>
@@ -202,19 +244,9 @@ public sealed partial class DesktopOrganizationWindow : Window
 
     private void ApplyTitleBarColors()
     {
-        bool isDark = RootGrid.ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-        AppWindowTitleBar titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private void InstallMinimumSizeHook()
@@ -248,18 +280,16 @@ public sealed partial class DesktopOrganizationWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
-            minMaxInfo.MinTrackSize.X = Math.Max(
-                minMaxInfo.MinTrackSize.X,
-                ToPhysicalPixels(MinimumWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(
-                minMaxInfo.MinTrackSize.Y,
-                ToPhysicalPixels(MinimumHeight, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                MinimumWidth,
+                MinimumHeight);
         }
 
         if (message == WmNcDestroy)
@@ -298,18 +328,22 @@ public sealed partial class DesktopOrganizationWindow : Window
     private void DesktopOrganizationWindow_Closed(object sender, WindowEventArgs args)
     {
         RemoveMinimumSizeHook();
-        TaskView.CancelPendingWork();
+        TaskView.CleanupForWindowClosed();
         TaskView.CloseRequested -= TaskView_CloseRequested;
         TaskView.OrganizationCompleted -= TaskView_OrganizationCompleted;
         TaskView.OrganizationUndone -= TaskView_OrganizationUndone;
         _appWindow.Closing -= AppWindow_Closing;
         AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= DesktopOrganizationWindow_Closed;
+        ContentLayer.Child = null;
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     private void DesktopOrganizationWindow_ClosedInternal(object sender, WindowEventArgs args)
     {
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
 
         // This window closes for real (no hide-and-reuse), so leaving the
         // quick-reveal raised band happens on teardown; the manager skips

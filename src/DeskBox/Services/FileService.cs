@@ -72,7 +72,7 @@ public sealed partial class FileService
         new(StringComparer.OrdinalIgnoreCase);
     private static readonly Queue<string> s_shellKindCacheOrder = new();
     private static readonly object s_shellKindCacheGate = new();
-    private sealed record TransferOperation(
+    internal sealed record TransferOperation(
         string SourcePath,
         string DestinationPath,
         bool SourceIsDirectory = false);
@@ -99,7 +99,8 @@ public sealed partial class FileService
         string SourceFilePath,
         long Length,
         DateTime LastWriteTimeUtc,
-        FileTransferSourceIdentity? Identity);
+        FileTransferSourceIdentity? Identity,
+        string DestinationFilePath = "");
 
     /// <summary>
     /// A destination file this operation created, with the object identity
@@ -114,7 +115,28 @@ public sealed partial class FileService
 
     public sealed record FileTransferPlan(string SourcePath, string DestinationPath);
 
-    public sealed record FileTransferResult(string SourcePath, string DestinationPath);
+    public enum FileTransferConflictPolicy
+    {
+        KeepBoth,
+        AskUser
+    }
+
+    internal sealed class FileTransferBatchResult(
+        IReadOnlyList<FileTransferResult> completed,
+        IReadOnlySet<string> skippedSourcePaths) : IReadOnlyList<FileTransferResult>
+    {
+        internal IReadOnlySet<string> SkippedSourcePaths { get; } = skippedSourcePaths;
+        public int Count => completed.Count;
+        public FileTransferResult this[int index] => completed[index];
+        public IEnumerator<FileTransferResult> GetEnumerator() => completed.GetEnumerator();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    public sealed record FileTransferResult(string SourcePath, string DestinationPath)
+    {
+        internal IReadOnlyList<FileTransferResult>? MergedLeafResults { get; init; }
+        internal bool HadOverwrite { get; init; }
+    }
 
     public interface IFileTransferWithCompletedResults
     {
@@ -321,11 +343,12 @@ public sealed partial class FileService
         public IReadOnlyList<FileTransferResult> CompletedResults { get; }
     }
 
-    private const uint FoDelete = 0x0003;
-    private const ushort FofAllowUndo = 0x0040;
-    private const ushort FofNoConfirmation = 0x0010;
-    private const ushort FofNoErrorUi = 0x0400;
-    private const ushort FofSilent = 0x0004;
+    private const uint ShellDeleteRecycleOnDelete = 0x00080000;
+    private const uint ShellDeleteWantNukeWarning = 0x4000;
+    private const uint ShellDeleteShowElevationPrompt = 0x00040000;
+    private const uint ShellDeleteNoConfirmation = 0x0010;
+    private const uint ShellDeleteNoErrorUi = 0x0400;
+    private const uint ShellDeleteSilent = 0x0004;
 
     public FileService(LocalizationService? localizationService = null)
     {
@@ -1308,21 +1331,32 @@ public sealed partial class FileService
     /// permanently dropping the file's Hidden/System attributes.
     /// </summary>
     private static readonly object s_attributeStripGate = new();
+    private static readonly Dictionary<string, (System.IO.FileAttributes Original, int RefCount)> s_activeStrippedAttributes =
+        new(StringComparer.OrdinalIgnoreCase);
 
     internal static System.IO.FileAttributes? StripBlockingAttributes(string path)
     {
         try
         {
+            string normalized = Path.GetFullPath(path);
             lock (s_attributeStripGate)
             {
-                var attrs = File.GetAttributes(path);
+                if (s_activeStrippedAttributes.TryGetValue(normalized, out var existing))
+                {
+                    s_activeStrippedAttributes[normalized] = (existing.Original, existing.RefCount + 1);
+                    return existing.Original;
+                }
+
+                string extended = StorageMigrationNativeMethods.Extended(normalized);
+                var attrs = File.GetAttributes(extended);
                 var blocking = attrs & (System.IO.FileAttributes.Hidden | System.IO.FileAttributes.System);
                 if (blocking == 0)
                 {
                     return null;
                 }
 
-                File.SetAttributes(path, attrs & ~blocking);
+                File.SetAttributes(extended, attrs & ~blocking);
+                s_activeStrippedAttributes[normalized] = (attrs, 1);
                 App.Log($"[StorageItems] Temporarily stripped {blocking} attributes from '{path}'");
                 return attrs; // return original so caller can restore
             }
@@ -1342,9 +1376,23 @@ public sealed partial class FileService
 
         try
         {
+            string normalized = Path.GetFullPath(path);
             lock (s_attributeStripGate)
             {
-                File.SetAttributes(path, original.Value);
+                System.IO.FileAttributes toRestore = original.Value;
+                if (s_activeStrippedAttributes.TryGetValue(normalized, out var existing))
+                {
+                    if (existing.RefCount > 1)
+                    {
+                        s_activeStrippedAttributes[normalized] = (existing.Original, existing.RefCount - 1);
+                        return;
+                    }
+
+                    toRestore = existing.Original;
+                    s_activeStrippedAttributes.Remove(normalized);
+                }
+
+                File.SetAttributes(StorageMigrationNativeMethods.Extended(normalized), toRestore);
             }
         }
         catch (Exception ex)
@@ -1401,46 +1449,25 @@ public sealed partial class FileService
         }
     }
 
+    private const int StorageBrokerSyncTimeoutMs = 800;
+
     private static StorageFile? TryGetStorageFile(string path)
     {
-        var originalAttrs = StripBlockingAttributes(path);
-
         try
         {
-            return StorageFile.GetFileFromPathAsync(path).AsTask().GetAwaiter().GetResult();
-        }
-        catch (Exception directEx)
-        {
-            try
+            Task<StorageFile?> lookupTask = Task.Run(() => TryGetStorageFileAsync(path));
+            if (lookupTask.Wait(StorageBrokerSyncTimeoutMs))
             {
-                string? parentPath = Path.GetDirectoryName(path);
-                string fileName = Path.GetFileName(path);
-                if (string.IsNullOrWhiteSpace(parentPath) || string.IsNullOrWhiteSpace(fileName))
-                {
-                    App.Log($"[StorageItems] Failed to access '{path}': {directEx.Message}");
-                    return null;
-                }
+                return lookupTask.GetAwaiter().GetResult();
+            }
 
-                var parentAttrs = StripBlockingAttributes(parentPath);
-                try
-                {
-                    var parent = StorageFolder.GetFolderFromPathAsync(parentPath).AsTask().GetAwaiter().GetResult();
-                    return parent.GetFileAsync(fileName).AsTask().GetAwaiter().GetResult();
-                }
-                finally
-                {
-                    RestoreAttributes(parentPath, parentAttrs);
-                }
-            }
-            catch (Exception parentEx)
-            {
-                App.Log($"[StorageItems] Failed to access '{path}': {directEx.Message}; parent lookup: {parentEx.Message}");
-                return null;
-            }
+            App.Log($"[StorageItems] Timed out ({StorageBrokerSyncTimeoutMs} ms) resolving file '{path}'");
+            return null;
         }
-        finally
+        catch (Exception ex)
         {
-            RestoreAttributes(path, originalAttrs);
+            App.Log($"[StorageItems] Failed to resolve file '{path}': {ex.Message}");
+            return null;
         }
     }
 
@@ -1464,19 +1491,21 @@ public sealed partial class FileService
 
     private static StorageFolder? TryGetStorageFolder(string path)
     {
-        var originalAttrs = StripBlockingAttributes(path);
         try
         {
-            return StorageFolder.GetFolderFromPathAsync(path).AsTask().GetAwaiter().GetResult();
+            Task<StorageFolder?> lookupTask = Task.Run(() => TryGetStorageFolderAsync(path));
+            if (lookupTask.Wait(StorageBrokerSyncTimeoutMs))
+            {
+                return lookupTask.GetAwaiter().GetResult();
+            }
+
+            App.Log($"[StorageItems] Timed out ({StorageBrokerSyncTimeoutMs} ms) resolving folder '{path}'");
+            return null;
         }
         catch (Exception ex)
         {
             App.Log($"[StorageItems] Failed to access folder '{path}': {ex.Message}");
             return null;
-        }
-        finally
-        {
-            RestoreAttributes(path, originalAttrs);
         }
     }
 
@@ -1500,6 +1529,7 @@ public sealed partial class FileService
         {
             cancellationToken.ThrowIfCancellationRequested();
             string normalizedDestinationFolder = Path.GetFullPath(destinationFolder);
+            DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(normalizedDestinationFolder);
             var normalizedSourcePaths = sourcePaths
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(Path.GetFullPath)
@@ -1514,8 +1544,11 @@ public sealed partial class FileService
                         normalizedDestinationFolder))
                 .ToList();
 
-            EnsureSafeDirectoryTransfers(transferableSourcePaths.Select(path =>
-                new TransferOperation(path, normalizedDestinationFolder)));
+            bool allowShellLinkDelegation = useShellProgress && onItemError is null;
+            EnsureSafeDirectoryTransfers(
+                transferableSourcePaths.Select(path =>
+                    new TransferOperation(path, normalizedDestinationFolder)),
+                allowShellLinkDelegation);
 
             if (!Directory.Exists(normalizedDestinationFolder))
             {
@@ -1523,10 +1556,18 @@ public sealed partial class FileService
             }
 
             var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var reservedFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             return transferableSourcePaths
                 .Select(path => new FileTransferPlan(
                     path,
-                    GetAvailablePath(Path.Combine(normalizedDestinationFolder, Path.GetFileName(path)), reservedPaths)))
+                    ResolveTransferDestinationPath(
+                        path,
+                        normalizedDestinationFolder,
+                        reservedPaths,
+                        reservedFilePaths,
+                        useShellProgress && onItemError is null
+                            ? FileTransferConflictPolicy.AskUser
+                            : FileTransferConflictPolicy.KeepBoth)))
                 .ToList();
         }, cancellationToken);
 
@@ -1574,144 +1615,176 @@ public sealed partial class FileService
                     !string.Equals(operation.SourcePath, operation.DestinationPath, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            EnsureSafeDirectoryTransfers(plannedOperations);
+            foreach (TransferOperation operation in plannedOperations)
+            {
+                DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(
+                    Path.GetDirectoryName(operation.DestinationPath));
+            }
+
+            bool allowShellLinkDelegation = allowShellElevation ||
+                (useShellProgress && onItemError is null);
+            EnsureSafeDirectoryTransfers(plannedOperations, allowShellLinkDelegation);
             return plannedOperations;
         }, cancellationToken);
 
-        using FileTransferSessionLease transferSession =
+        FileTransferSessionLease transferSession =
             TransferSessions.Begin(
                 operations.Select(operation => new FileTransferRegistration(
                     operation.SourcePath,
                     operation.DestinationPath,
                     operation.SourceIsDirectory)),
                 move);
-
-        if (allowShellElevation)
-        {
-            if (ownerWindowHandle == IntPtr.Zero)
-                throw new InvalidOperationException("Interactive desktop transfers require an owner window.");
-            return await ExecuteModernShellTransferPlanAsync(
-                operations, move, ownerWindowHandle, progress, cancellationToken,
-                keepBoth: true, itemCompleted: itemCompleted);
-        }
-
-        if (useShellProgress && onItemError is null)
-        {
-            // Interactive imports use the modern Windows Shell operation on a
-            // dedicated STA thread with the 45 s inactivity watchdog. It owns
-            // enumeration, conflicts, errors, cancellation and the native
-            // progress window for both copy and move operations, on every
-            // build channel and volume relationship. The legacy
-            // SHFileOperation bridge for AOT same-volume moves was retired
-            // (2026-10-13): it ran on an unpumped MTA thread-pool thread with
-            // no watchdog, which could hang a same-volume paste forever.
-            // User-cancelled shell transfers surface as
-            // FileTransferCanceledException carrying the completed set —
-            // callers turn that into the same partial-count feedback the
-            // legacy silent return used to produce. A caller that asked for
-            // per-item error decisions must stay on the managed engine —
-            // Shell transfers cannot surface them.
-            return await ExecuteModernShellTransferPlanAsync(
-                operations,
-                move,
-                ownerWindowHandle,
-                progress,
-                cancellationToken);
-        }
-
-        if (progress is not null || cancellationToken.CanBeCanceled ||
-            onItemError is not null)
-        {
-            // Keep synchronous filesystem probes, partial-file cleanup and
-            // rollback off the caller's synchronization context. In the UI the
-            // progress callback marshals updates back through DispatcherQueue.
-            // Item-level retry/skip decisions only exist on the managed engine:
-            // the Shell operations own their own error dialogs instead.
-            return await Task.Run(
-                () => ExecuteManagedTransferPlanWithProgressAsync(
-                    operations,
-                    move,
-                    progress,
-                    cancellationToken,
-                    onItemError,
-                    skippedItems),
-                CancellationToken.None);
-        }
-
-        if (move && operations.Any(operation => !CanUseAtomicMove(
-                operation.SourcePath,
-                operation.DestinationPath)))
-        {
-            // Headless callers such as desktop organization and storage
-            // migration still need to avoid File.Move's opaque cross-volume
-            // copy. They may not display byte progress, but the transfer stays
-            // on DeskBox's chunked, logged and rollback-safe implementation.
-            return await Task.Run(
-                () => ExecuteManagedTransferPlanWithProgressAsync(
-                    operations,
-                    move: true,
-                    progress: null,
-                    CancellationToken.None),
-                CancellationToken.None);
-        }
-
-        var completedOperations = new List<TransferOperation>(operations.Count);
+        bool leaseOwnedByShellWorker = false;
         try
         {
-            foreach (var operation in operations)
+            if (allowShellElevation)
             {
-                // Re-resolve both paths immediately before the filesystem
-                // operation. This closes the common check-then-replace window
-                // where a junction or SUBST alias is swapped during a drag.
-                await Task.Run(() => EnsureSafeDirectoryTransfers([operation]));
-                if (move)
-                {
-                    await Task.Run(() => MoveEntryAsync(
-                        operation.SourcePath,
-                        operation.DestinationPath));
-                    completedOperations.Add(operation);
-                }
-                else
-                {
-                    await Task.Run(() => CopyEntryAsync(
-                        operation.SourcePath,
-                        operation.DestinationPath));
-                    completedOperations.Add(operation);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Partial completion (Explorer semantics): completed items stay;
-            // the completed results ride the exception for callers.
-            throw new FileTransferCanceledException(
-                completedOperations
-                    .Select(operation => new FileTransferResult(operation.SourcePath, operation.DestinationPath))
-                    .ToList(),
-                CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            // Partial completion: completed items stay; the failure
-            // propagates with the completed results attached (including any
-            // item-level receipts the inner exception already carries).
-            App.Log(
-                $"[FileTransfer] Managed transfer failed after " +
-                $"{completedOperations.Count} of {operations.Count} item(s): {exception}");
-            var completedSnapshot = completedOperations
-                .Select(operation => new FileTransferResult(operation.SourcePath, operation.DestinationPath))
-                .ToList();
-            if (exception is IFileTransferWithCompletedResults itemLevelResults)
-            {
-                completedSnapshot.AddRange(itemLevelResults.CompletedResults);
+                if (ownerWindowHandle == IntPtr.Zero)
+                    throw new InvalidOperationException("Interactive desktop transfers require an owner window.");
+                leaseOwnedByShellWorker = true;
+                return await ExecuteModernShellTransferPlanAsync(
+                    operations, move, ownerWindowHandle, progress, cancellationToken,
+                    keepBoth: true, itemCompleted: itemCompleted, showElevationPrompt: true,
+                    activeSessionLease: transferSession);
             }
 
-            throw new FileTransferPartialFailureException(completedSnapshot, exception);
-        }
+            if (useShellProgress && onItemError is null)
+            {
+                // Interactive imports use the modern Windows Shell operation on a
+                // dedicated STA thread with the 45 s inactivity watchdog. It owns
+                // enumeration, conflicts, errors, cancellation and the native
+                // progress window for both copy and move operations, on every
+                // build channel and volume relationship. The legacy
+                // SHFileOperation bridge for AOT same-volume moves was retired
+                // (2026-10-13): it ran on an unpumped MTA thread-pool thread with
+                // no watchdog, which could hang a same-volume paste forever.
+                // User-cancelled shell transfers surface as
+                // FileTransferCanceledException carrying the completed set —
+                // callers turn that into the same partial-count feedback the
+                // legacy silent return used to produce. A caller that asked for
+                // per-item error decisions must stay on the managed engine —
+                // Shell transfers cannot surface them.
+                leaseOwnedByShellWorker = true;
+                return await ExecuteModernShellTransferPlanAsync(
+                    operations,
+                    move,
+                    ownerWindowHandle,
+                    progress,
+                    cancellationToken,
+                    showElevationPrompt: ownerWindowHandle != IntPtr.Zero,
+                    activeSessionLease: transferSession);
+            }
 
-        return completedOperations
-            .Select(operation => new FileTransferResult(operation.SourcePath, operation.DestinationPath))
-            .ToList();
+            if (progress is not null || cancellationToken.CanBeCanceled ||
+                onItemError is not null)
+            {
+                // Keep synchronous filesystem probes, partial-file cleanup and
+                // rollback off the caller's synchronization context. In the UI the
+                // progress callback marshals updates back through DispatcherQueue.
+                // Item-level retry/skip decisions only exist on the managed engine:
+                // the Shell operations own their own error dialogs instead.
+                return await Task.Run(
+                    () => ExecuteManagedTransferPlanWithProgressAsync(
+                        operations,
+                        move,
+                        progress,
+                        cancellationToken,
+                        onItemError,
+                        skippedItems,
+                        itemCompleted,
+                        ownerWindowHandle),
+                    CancellationToken.None);
+            }
+
+            if (move && operations.Any(operation => !CanUseAtomicMove(
+                    operation.SourcePath,
+                    operation.DestinationPath)))
+            {
+                // Headless callers such as desktop organization and storage
+                // migration still need to avoid File.Move's opaque cross-volume
+                // copy. They may not display byte progress, but the transfer stays
+                // on DeskBox's chunked, logged and rollback-safe implementation.
+                return await Task.Run(
+                    () => ExecuteManagedTransferPlanWithProgressAsync(
+                        operations,
+                        move: true,
+                        progress: null,
+                        CancellationToken.None,
+                        ownerWindowHandle: ownerWindowHandle),
+                    CancellationToken.None);
+            }
+
+            var completedOperations = new List<TransferOperation>(operations.Count);
+            var completedResults = new List<FileTransferResult>(operations.Count);
+            try
+            {
+                foreach (var operation in operations)
+                {
+                    // Re-resolve both paths immediately before the filesystem
+                    // operation. This closes the common check-then-replace window
+                    // where a junction or SUBST alias is swapped during a drag.
+                    await Task.Run(() => EnsureSafeDirectoryTransfers([operation]));
+                    if (move)
+                    {
+                        IReadOnlyList<FileTransferResult>? mergedLeafResults = null;
+                        await Task.Run(() => MoveEntryAsync(
+                            operation.SourcePath,
+                            operation.DestinationPath,
+                            leaves => mergedLeafResults = leaves));
+                        completedOperations.Add(operation);
+                        completedResults.Add(new FileTransferResult(
+                            operation.SourcePath,
+                            operation.DestinationPath)
+                        {
+                            MergedLeafResults = mergedLeafResults
+                        });
+                    }
+                    else
+                    {
+                        await Task.Run(() => CopyEntryAsync(
+                            operation.SourcePath,
+                            operation.DestinationPath));
+                        completedOperations.Add(operation);
+                        completedResults.Add(new FileTransferResult(
+                            operation.SourcePath,
+                            operation.DestinationPath));
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Partial completion (Explorer semantics): completed items stay;
+                // the completed results ride the exception for callers.
+                throw new FileTransferCanceledException(
+                    completedResults.ToList(),
+                    CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                // Partial completion: completed items stay; the failure
+                // propagates with the completed results attached (including any
+                // item-level receipts the inner exception already carries).
+                App.Log(
+                    $"[FileTransfer] Managed transfer failed after " +
+                    $"{completedOperations.Count} of {operations.Count} item(s): {exception}");
+                var completedSnapshot = completedResults.ToList();
+                if (exception is IFileTransferWithCompletedResults itemLevelResults)
+                {
+                    completedSnapshot.AddRange(itemLevelResults.CompletedResults);
+                }
+
+                throw new FileTransferPartialFailureException(completedSnapshot, exception);
+            }
+
+            return completedResults;
+        }
+        finally
+        {
+            if (!leaseOwnedByShellWorker)
+            {
+                transferSession.Dispose();
+            }
+        }
     }
 
     internal static bool IsCompletedShellMove(string sourcePath, string destinationPath)
@@ -1730,6 +1803,8 @@ public sealed partial class FileService
     {
         string normalizedSource = Path.GetFullPath(sourcePath);
         string normalizedDestination = Path.GetFullPath(destinationPath);
+        DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(normalizedSource);
+        DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(normalizedDestination);
         if (string.Equals(normalizedSource, normalizedDestination, StringComparison.Ordinal))
         {
             return;
@@ -1759,6 +1834,7 @@ public sealed partial class FileService
         IntPtr ownerHandle = default)
     {
         string normalizedPath = Path.GetFullPath(path);
+        DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(normalizedPath);
         if (!File.Exists(normalizedPath) && !Directory.Exists(normalizedPath))
         {
             return true;
@@ -1780,15 +1856,16 @@ public sealed partial class FileService
 
         return await Task.Run(() =>
         {
-            if (ownerHandle == IntPtr.Zero && IsNetworkVolumePath(normalizedPath))
+            if (ownerHandle == IntPtr.Zero &&
+                (IsNetworkVolumePath(normalizedPath) ||
+                 !FileOperationNativeMethods.CanHeadlessRecyclePath(normalizedPath)))
             {
-                // FOF_ALLOWUNDO degrades to a silent permanent delete on
-                // volumes without a client-side Recycle Bin. A headless
-                // caller cannot consent to that, so refuse instead: callers
-                // treat false as "not deleted" and may retry with an owner
-                // window for the interactive Shell confirmation.
+                // Headless callers cannot consent to a permanent delete on
+                // volumes without an active Recycle Bin (network shares,
+                // removable USB/SD media, RAM disks, SUBST drives, or
+                // NukeOnDelete=1). Refuse so callers may retry interactively.
                 App.Log(
-                    $"[FileService] Refused headless recycle on a network volume: '{normalizedPath}'");
+                    $"[FileService] Refused headless recycle on an unrecyclable volume: '{normalizedPath}'");
                 return false;
             }
 
@@ -1803,7 +1880,9 @@ public sealed partial class FileService
     /// Detection failures deliberately report false: the caller falls back
     /// to the pre-existing behavior rather than blocking routine deletes.
     /// </summary>
-    internal static bool IsNetworkVolumePath(string path)
+    internal static bool IsNetworkVolumePath(
+        string path,
+        Func<string, DriveType>? driveTypeResolver = null)
     {
         try
         {
@@ -1821,7 +1900,10 @@ public sealed partial class FileService
                 return false;
             }
 
-            return new DriveInfo(root).DriveType == DriveType.Network;
+            DriveType driveType = driveTypeResolver is not null
+                ? driveTypeResolver(root)
+                : new DriveInfo(root).DriveType;
+            return driveType == DriveType.Network;
         }
         catch
         {
@@ -1842,6 +1924,41 @@ public sealed partial class FileService
         bool recycle,
         IntPtr ownerHandle)
     {
+        string[] pathList = paths as string[] ?? paths.ToArray();
+        foreach (string p in pathList)
+        {
+            if (!string.IsNullOrWhiteSpace(p))
+            {
+                DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(Path.GetFullPath(p));
+            }
+        }
+
+        return await DeleteEntriesWithShellCoreAsync(
+            pathList,
+            recycle,
+            ownerHandle,
+            onOutcome: null);
+    }
+
+    internal async Task<IReadOnlySet<string>> DeleteEntriesWithShellAsync(
+        IEnumerable<string> paths,
+        bool recycle,
+        IntPtr ownerHandle,
+        Action<ShellDeleteOutcome>? onOutcome)
+    {
+        return await DeleteEntriesWithShellCoreAsync(
+            paths,
+            recycle,
+            ownerHandle,
+            onOutcome);
+    }
+
+    private async Task<IReadOnlySet<string>> DeleteEntriesWithShellCoreAsync(
+        IEnumerable<string> paths,
+        bool recycle,
+        IntPtr ownerHandle,
+        Action<ShellDeleteOutcome>? onOutcome)
+    {
         ArgumentNullException.ThrowIfNull(paths);
         if (ownerHandle == IntPtr.Zero)
         {
@@ -1861,7 +1978,11 @@ public sealed partial class FileService
         }
 
         return await Task.Run(() =>
-            DeleteEntriesWithShell(normalizedPaths, ownerHandle, allowUndo: recycle));
+            DeleteEntriesWithShell(
+                normalizedPaths,
+                ownerHandle,
+                allowUndo: recycle,
+                onOutcome));
     }
 
     private static bool DeleteEntryWithShell(
@@ -1879,7 +2000,8 @@ public sealed partial class FileService
     private static IReadOnlySet<string> DeleteEntriesWithShell(
         IReadOnlyList<string> paths,
         IntPtr ownerHandle,
-        bool allowUndo)
+        bool allowUndo,
+        Action<ShellDeleteOutcome>? onOutcome = null)
     {
         var completedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string[] existingPaths = paths
@@ -1897,63 +2019,61 @@ public sealed partial class FileService
 
         if (existingPaths.Length == 0)
         {
+            onOutcome?.Invoke(new ShellDeleteOutcome(
+                completedPaths,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                [],
+                Canceled: false,
+                PerformHResult: 0));
             return completedPaths;
         }
 
-        // The confirmation dialog is a Shell feature governed by
-        // FofNoConfirmation: interactive callers omit that flag so the native
-        // dialog (recycle or permanent, per the user's Explorer settings)
-        // appears; headless callers keep it suppressed.
+        // Interactive callers omit confirmation/error suppression so Explorer's
+        // native Recycle Bin, permanent-delete, nuke-warning, UAC, and
+        // File-In-Use dialogs own user consent; headless callers suppress UI
+        // while PreDeleteItem blocks any silent permanent-delete fallback.
         bool interactive = ownerHandle != IntPtr.Zero;
-        ushort flags = FofNoErrorUi | FofSilent;
-        if (allowUndo)
+        uint flags = allowUndo
+            ? ShellDeleteRecycleOnDelete | ShellDeleteWantNukeWarning
+            : 0u;
+        if (interactive)
         {
-            flags |= FofAllowUndo;
+            flags |= ShellDeleteShowElevationPrompt;
+        }
+        else
+        {
+            flags |= ShellDeleteNoConfirmation | ShellDeleteNoErrorUi | ShellDeleteSilent;
         }
 
-        if (!interactive)
+        ShellDeleteOutcome outcome = ExecuteShellDeleteOnStaThread(
+            existingPaths,
+            ownerHandle,
+            flags,
+            allowUndo);
+        foreach (string deleted in outcome.DeletedPaths)
         {
-            flags |= FofNoConfirmation;
+            completedPaths.Add(deleted);
         }
 
-        string from = string.Join('\0', existingPaths) + "\0\0";
-        unsafe
+        onOutcome?.Invoke(outcome);
+
+        if (outcome.Failures.Count > 0 && onOutcome is null)
         {
-            fixed (char* fromPointer = from)
-            {
-                var operation = new FileTransferNativeMethods.ShFileOperation
-                {
-                    WindowHandle = ownerHandle,
-                    Function = FoDelete,
-                    From = fromPointer,
-                    To = null,
-                    Flags = flags
-                };
-
-                int result = FileTransferNativeMethods.SHFileOperation(ref operation);
-                foreach (string existingPath in existingPaths)
-                {
-                    if (!File.Exists(existingPath) &&
-                        !Directory.Exists(existingPath))
-                    {
-                        completedPaths.Add(existingPath);
-                    }
-                }
-
-                if (result == 1223 || operation.AnyOperationsAborted != 0)
-                {
-                    // The user answered "No" (or cancelled) the confirmation.
-                    return completedPaths;
-                }
-
-                if (result != 0 && result is not 2 and not 3)
-                {
-                    throw new Win32Exception(result);
-                }
-
-                return completedPaths;
-            }
+            Exception? error = Marshal.GetExceptionForHR(outcome.Failures[0].HResult);
+            throw error ?? new IOException(
+                $"Shell delete failed (hr=0x{outcome.Failures[0].HResult:X8}).");
         }
+
+        if (outcome.PerformHResult < 0 &&
+            !outcome.Canceled &&
+            outcome.DeletedPaths.Count == 0 &&
+            onOutcome is null)
+        {
+            Marshal.ThrowExceptionForHR(outcome.PerformHResult);
+        }
+
+        return completedPaths;
     }
 
     /// <summary>
@@ -1995,6 +2115,7 @@ public sealed partial class FileService
             return new DirectoryMoveReport(0, []);
         }
 
+        DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(normalizedDestination);
         EnsureSafeDirectoryTransfers([new TransferOperation(normalizedSource, normalizedDestination)]);
 
         if (!Directory.Exists(normalizedSource))
@@ -2019,8 +2140,14 @@ public sealed partial class FileService
                 return new DirectoryMoveReport(Math.Max(entryCount, 1), []);
             }
         }
-        catch
+        catch (Exception ex) when (
+            onItemError is not null ||
+            IsCrossVolumeMoveError(ex) ||
+            Directory.Exists(normalizedDestination))
         {
+            // Cross-volume relocation, pre-existing destination merge, or an
+            // interactive caller with per-item Retry/Skip/Cancel handling.
+            // Headless same-volume locks rethrow instead of splitting the tree.
         }
 
         // Creation ownership must come from the atomic call itself: an
@@ -2174,6 +2301,75 @@ public sealed partial class FileService
             : name + extension;
     }
 
+    /// <summary>
+    /// Resolves the destination path for a file or folder transfer into
+    /// <paramref name="destinationDirectory"/>. Matches Windows Explorer:
+    /// real folders merge into an existing non-link folder of the same name
+    /// rather than renaming to <c>Folder (2)</c>, whereas file collisions and
+    /// folder-vs-file collisions allocate the next available name.
+    /// </summary>
+    public static string ResolveTransferDestinationPath(
+        string sourcePath,
+        string destinationDirectory,
+        ISet<string>? reservedPaths = null,
+        ISet<string>? reservedFilePaths = null,
+        FileTransferConflictPolicy conflictPolicy = FileTransferConflictPolicy.KeepBoth)
+    {
+        string normalizedSource = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourcePath));
+        string normalizedDestinationDir = Path.GetFullPath(destinationDirectory);
+        string entryName = Path.GetFileName(normalizedSource);
+        string desiredPath = Path.Combine(normalizedDestinationDir, entryName);
+
+        // Interactive operations preserve collisions, including two sources
+        // with the same name in one batch, for the Windows conflict dialog.
+        if (conflictPolicy == FileTransferConflictPolicy.AskUser)
+        {
+            return desiredPath;
+        }
+
+        bool sourceIsMergableDirectory =
+            Directory.Exists(normalizedSource) &&
+            !IsFileSystemLink(normalizedSource);
+        if (sourceIsMergableDirectory)
+        {
+            string candidate = Path.GetFullPath(desiredPath);
+            bool blockedByFile =
+                File.Exists(candidate) ||
+                (reservedFilePaths?.Contains(candidate) == true);
+            bool blockedByLinkDirectory =
+                Directory.Exists(candidate) &&
+                IsFileSystemLink(candidate);
+            if (!blockedByFile && !blockedByLinkDirectory)
+            {
+                reservedPaths?.Add(candidate);
+                return candidate;
+            }
+        }
+
+        string available = GetAvailablePath(desiredPath, reservedPaths);
+        if (!sourceIsMergableDirectory)
+        {
+            reservedFilePaths?.Add(available);
+        }
+
+        return available;
+    }
+
+    internal static string ResolveNestedDirectoryDestinationPath(
+        string parentDestinationDirectory,
+        string subDirectoryName)
+    {
+        string candidate = Path.GetFullPath(
+            Path.Combine(parentDestinationDirectory, subDirectoryName));
+        bool blockedByFile = File.Exists(candidate);
+        bool blockedByLinkDirectory =
+            Directory.Exists(candidate) &&
+            IsFileSystemLink(candidate);
+        return !blockedByFile && !blockedByLinkDirectory
+            ? candidate
+            : GetAvailableDestinationPath(parentDestinationDirectory, subDirectoryName);
+    }
+
     public static string GetAvailablePath(string desiredPath, ISet<string>? reservedPaths = null)
     {
         string normalizedPath = Path.GetFullPath(desiredPath);
@@ -2182,9 +2378,15 @@ public sealed partial class FileService
             return normalizedPath;
         }
 
-        string? directoryPath = Path.GetDirectoryName(normalizedPath);
-        string name = Path.GetFileName(normalizedPath);
-        string extension = Path.GetExtension(name);
+        string trimmedDesired = Path.TrimEndingDirectorySeparator(normalizedPath);
+        string? directoryPath = Path.GetDirectoryName(trimmedDesired);
+        string name = Path.GetFileName(trimmedDesired);
+        bool treatAsWholeName =
+            normalizedPath.EndsWith(Path.DirectorySeparatorChar) ||
+            normalizedPath.EndsWith(Path.AltDirectorySeparatorChar) ||
+            Directory.Exists(trimmedDesired) ||
+            (name.StartsWith('.') && name.IndexOf('.', 1) < 0);
+        string extension = treatAsWholeName ? string.Empty : Path.GetExtension(name);
         string baseName = string.IsNullOrEmpty(extension)
             ? name
             : Path.GetFileNameWithoutExtension(name);
@@ -2342,6 +2544,57 @@ public sealed partial class FileService
         return false;
     }
 
+    /// <summary>
+    /// Pure lexical overlap guard for UI-thread drag-hover paths where touching
+    /// disk or SMB shares (<c>Directory.Exists</c> / symlink handle resolution)
+    /// would stall pointer input. Full junction-aware <see cref="IsUnsafeDirectoryTransfer"/>
+    /// still runs off-UI-thread before any drop transfer commits.
+    /// </summary>
+    internal static bool IsLexicallyUnsafeDirectoryTransfer(
+        IEnumerable<string> sourcePaths,
+        string? destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return false;
+        }
+
+        string normalizedDestination;
+        try
+        {
+            normalizedDestination = Path.GetFullPath(destinationPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (string sourcePath in sourcePaths)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                continue;
+            }
+
+            string normalizedSource;
+            try
+            {
+                normalizedSource = Path.GetFullPath(sourcePath);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (IsPathUnderDirectory(normalizedDestination, normalizedSource))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool IsPathUnderDirectoryResolved(string candidatePath, string directoryPath)
     {
         if (!TryResolvePathIdentity(candidatePath, out string candidate) ||
@@ -2379,7 +2632,7 @@ public sealed partial class FileService
     /// overlap checks. The final destination may not exist yet, so only the
     /// existing prefix is resolved and the missing suffix is preserved.
     /// </summary>
-    private static bool TryResolvePathIdentity(string path, out string resolvedPath)
+    internal static bool TryResolvePathIdentity(string path, out string resolvedPath)
     {
         if (!TryResolvePathWithMissingSuffix(path, out resolvedPath))
         {
@@ -2391,15 +2644,55 @@ public sealed partial class FileService
         {
             resolvedPath = Path.TrimEndingDirectorySeparator(
                 Path.GetFullPath(finalPath));
+            return true;
+        }
+
+        // When the leaf destination does not exist yet (e.g. copying C:\Real\Box
+        // into Z:\Box\Backup where Z: is a subst drive mapped to C:\Real), walk
+        // up to the deepest existing ancestor so GetFinalPathNameByHandle resolves
+        // DOS device / subst aliases on the existing prefix.
+        string? currentAncestor = Path.GetDirectoryName(resolvedPath);
+        while (!string.IsNullOrWhiteSpace(currentAncestor))
+        {
+            if (Directory.Exists(currentAncestor))
+            {
+                if (Win32Helper.TryGetFinalPath(currentAncestor, out string finalAncestor))
+                {
+                    string normalizedFinalAncestor = Path.TrimEndingDirectorySeparator(
+                        Path.GetFullPath(finalAncestor));
+                    string relativeSuffix = Path.GetRelativePath(currentAncestor, resolvedPath);
+                    resolvedPath = Path.TrimEndingDirectorySeparator(
+                        Path.GetFullPath(Path.Combine(normalizedFinalAncestor, relativeSuffix)));
+                }
+
+                break;
+            }
+
+            string? nextAncestor = Path.GetDirectoryName(currentAncestor);
+            if (string.Equals(nextAncestor, currentAncestor, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            currentAncestor = nextAncestor;
         }
 
         return true;
     }
 
-    private void EnsureSafeDirectoryTransfers(IEnumerable<TransferOperation> operations)
+    private void EnsureSafeDirectoryTransfers(
+        IEnumerable<TransferOperation> operations,
+        bool allowShellLinkDelegation = false)
     {
         foreach (var operation in operations)
         {
+            if (!allowShellLinkDelegation && IsFileSystemLink(operation.SourcePath))
+            {
+                throw new InvalidOperationException(
+                    _localizationService?.T("Widget.Error.UnsafeFolderTransfer") ??
+                    UnsafeFolderTransferFallbackMessage);
+            }
+
             if (!Directory.Exists(operation.SourcePath))
             {
                 continue;
@@ -2408,8 +2701,7 @@ public sealed partial class FileService
             // IsPathUnderDirectoryResolved deliberately returns true when an
             // identity cannot be verified, so a directory transfer never
             // falls back to a lexical-only safety decision.
-            if (IsFileSystemLink(operation.SourcePath) ||
-                IsPathUnderDirectoryResolved(operation.DestinationPath, operation.SourcePath))
+            if (IsPathUnderDirectoryResolved(operation.DestinationPath, operation.SourcePath))
             {
                 throw new InvalidOperationException(
                     _localizationService?.T("Widget.Error.UnsafeFolderTransfer") ??
@@ -2462,7 +2754,10 @@ public sealed partial class FileService
         }
     }
 
-    private static async Task MoveEntryAsync(string sourcePath, string destinationPath)
+    private static async Task MoveEntryAsync(
+        string sourcePath,
+        string destinationPath,
+        Action<IReadOnlyList<FileTransferResult>>? onMergedLeaves = null)
     {
         if (File.Exists(sourcePath))
         {
@@ -2472,7 +2767,7 @@ public sealed partial class FileService
 
         if (Directory.Exists(sourcePath))
         {
-            await MoveDirectoryAsync(sourcePath, destinationPath);
+            await MoveDirectoryAsync(sourcePath, destinationPath, onMergedLeaves);
         }
     }
 
@@ -2488,55 +2783,50 @@ public sealed partial class FileService
             CancellationToken.None);
     }
 
-    private static async Task MoveDirectoryAsync(string sourceDirectory, string destinationDirectory)
+    private static async Task MoveDirectoryAsync(
+        string sourceDirectory,
+        string destinationDirectory,
+        Action<IReadOnlyList<FileTransferResult>>? onMergedLeaves = null)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationDirectory)!);
-
-        try
-        {
-            if (!Directory.Exists(destinationDirectory))
-            {
-                await Task.Run(() => Directory.Move(sourceDirectory, destinationDirectory));
-                return;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-
-        // Keep the source tree intact until a complete destination tree exists.
-        // A recursive child-by-child move can leave an untracked split tree if
-        // deleting a source directory fails after its children were moved.
-        var copiedSourceFiles = new List<CopiedSourceFileRecord>();
-        await CopyDirectoryAsync(
+        IReadOnlyList<FileTransferResult>? mergedLeaves = await MoveDirectoryWithProgressAsync(
             sourceDirectory,
             destinationDirectory,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            copiedSourceFiles);
-        try
+            estimate: null,
+            new TransferProgressReporter(progress: null, totalItems: 1),
+            CancellationToken.None);
+        if (mergedLeaves is not null && onMergedLeaves is not null)
         {
-            await Task.Run(
-                () => DeleteSourceTreeByManifest(
-                    sourceDirectory,
-                    destinationDirectory,
-                    copiedSourceFiles));
+            onMergedLeaves(mergedLeaves);
         }
-        catch (Exception ex) when (
-            ex is UnauthorizedAccessException or
-                (IOException and not FileTransferSourceChangedException))
+    }
+
+    internal static IReadOnlyList<FileTransferResult> BuildManagedMergedLeafResults(
+        IReadOnlyList<FileTransferResult> copiedSubDirectories,
+        IReadOnlyList<CopiedSourceFileRecord> copiedSourceFiles)
+    {
+        var merged = new List<FileTransferResult>(
+            copiedSubDirectories.Count + copiedSourceFiles.Count);
+        foreach (FileTransferResult dir in copiedSubDirectories)
         {
-            App.Log(
-                $"[FileTransfer] Directory copy completed but source cleanup " +
-                $"failed source='{sourceDirectory}' " +
-                $"destination='{destinationDirectory}': {ex}");
-            throw new FileTransferSourceCleanupException(
-                sourceDirectory,
-                destinationDirectory,
-                ex);
+            if (!string.IsNullOrWhiteSpace(dir.SourcePath) &&
+                !string.IsNullOrWhiteSpace(dir.DestinationPath))
+            {
+                merged.Add(dir);
+            }
         }
+
+        foreach (CopiedSourceFileRecord file in copiedSourceFiles)
+        {
+            if (!string.IsNullOrWhiteSpace(file.SourceFilePath) &&
+                !string.IsNullOrWhiteSpace(file.DestinationFilePath))
+            {
+                merged.Add(new FileTransferResult(
+                    file.SourceFilePath,
+                    file.DestinationFilePath));
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>
@@ -2554,21 +2844,45 @@ public sealed partial class FileService
         string destinationDirectory,
         IReadOnlyList<CopiedSourceFileRecord> copiedFiles)
     {
-        var manifest = new Dictionary<string, CopiedSourceFileRecord>(
+        var exactManifest = new Dictionary<string, CopiedSourceFileRecord>(
+            StringComparer.Ordinal);
+        var caseInsensitiveManifest = new Dictionary<string, CopiedSourceFileRecord>(
+            StringComparer.OrdinalIgnoreCase);
+        var ambiguousCaseInsensitiveKeys = new HashSet<string>(
             StringComparer.OrdinalIgnoreCase);
         foreach (CopiedSourceFileRecord record in copiedFiles)
         {
-            manifest[record.SourceFilePath] = record;
+            if (!exactManifest.TryAdd(record.SourceFilePath, record))
+            {
+                throw new FileTransferSourceChangedException(
+                    sourceDirectory,
+                    destinationDirectory);
+            }
+
+            if (!caseInsensitiveManifest.TryAdd(record.SourceFilePath, record))
+            {
+                ambiguousCaseInsensitiveKeys.Add(record.SourceFilePath);
+            }
         }
 
         int currentFileCount = 0;
+        var matchedManifestKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (string filePath in Directory.EnumerateFiles(
                      sourceDirectory,
                      "*",
                      SearchOption.AllDirectories))
         {
             currentFileCount++;
-            if (!manifest.TryGetValue(filePath, out CopiedSourceFileRecord record))
+            if (!exactManifest.TryGetValue(filePath, out CopiedSourceFileRecord record) &&
+                (ambiguousCaseInsensitiveKeys.Contains(filePath) ||
+                 !caseInsensitiveManifest.TryGetValue(filePath, out record)))
+            {
+                throw new FileTransferSourceChangedException(
+                    sourceDirectory,
+                    destinationDirectory);
+            }
+
+            if (!matchedManifestKeys.Add(record.SourceFilePath))
             {
                 throw new FileTransferSourceChangedException(
                     sourceDirectory,
@@ -2586,7 +2900,8 @@ public sealed partial class FileService
             }
         }
 
-        if (currentFileCount != manifest.Count)
+        if (currentFileCount != exactManifest.Count ||
+            matchedManifestKeys.Count != exactManifest.Count)
         {
             // Every remaining file matched, so a manifest entry is gone: the
             // source was manipulated during the copy. Fail closed.
@@ -2823,18 +3138,9 @@ public sealed partial class FileService
             return;
         }
 
-        if (ShortcutHelper.IsShortcutPath(path))
-        {
-            string? target = ShortcutHelper.Resolve(path)?.TargetPath;
-            if (!string.IsNullOrEmpty(target) &&
-                (File.Exists(target) || Directory.Exists(target)))
-            {
-                Win32Helper.ShowInExplorer(target);
-                return;
-            }
-        }
-
-        Win32Helper.ShowInExplorer(path);
+        ShellLaunchService.FireAndForgetRevealInExplorer(
+            path,
+            resolveShortcutTarget: true);
     }
 
     public enum OpenItemResult
@@ -2892,7 +3198,8 @@ public sealed partial class FileService
         string sourceDirectory,
         string destinationDirectory,
         ISet<string> visitedSourceDirectories,
-        List<CopiedSourceFileRecord> copiedSourceFiles)
+        List<CopiedSourceFileRecord> copiedSourceFiles,
+        List<FileTransferResult>? copiedSubDirectories = null)
     {
         EnsureSafeRecursiveDirectoryCopy(
             sourceDirectory,
@@ -2902,6 +3209,12 @@ public sealed partial class FileService
 
         foreach (string filePath in Directory.EnumerateFiles(sourceDirectory))
         {
+            if (IsFileSystemLink(filePath))
+            {
+                throw new InvalidOperationException(
+                    UnsafeFolderTransferFallbackMessage);
+            }
+
             string destinationFilePath = GetAvailableDestinationPath(destinationDirectory, Path.GetFileName(filePath));
             // Capture the pre-copy state: a mismatch during cleanup means
             // the file changed while it was being copied. FileInfo stats
@@ -2922,18 +3235,25 @@ public sealed partial class FileService
                 filePath,
                 sourceLength,
                 sourceLastWriteUtc,
-                sourceIdentity));
+                sourceIdentity,
+                destinationFilePath));
         }
 
         foreach (string subDirectory in Directory.EnumerateDirectories(sourceDirectory))
         {
             string folderName = Path.GetFileName(subDirectory);
-            string destinationSubDirectory = GetAvailableDestinationPath(destinationDirectory, folderName);
+            string destinationSubDirectory = ResolveNestedDirectoryDestinationPath(
+                destinationDirectory,
+                folderName);
+            copiedSubDirectories?.Add(new FileTransferResult(
+                subDirectory,
+                destinationSubDirectory));
             await CopyDirectoryAsync(
                 subDirectory,
                 destinationSubDirectory,
                 visitedSourceDirectories,
-                copiedSourceFiles);
+                copiedSourceFiles,
+                copiedSubDirectories);
         }
     }
 
@@ -2980,7 +3300,17 @@ public sealed partial class FileService
         long Length,
         DateTime LastWriteTimeUtc,
         ulong VolumeSerialNumber,
-        FileId128? FileId);
+        FileId128? FileId,
+        DateTime? CreationTimeUtc = null);
+
+    internal static bool DirectoryFileIdMatches(
+        FileTransferSourceIdentity current,
+        FileTransferSourceIdentity expected) =>
+        current.VolumeSerialNumber != 0 &&
+        current.VolumeSerialNumber == expected.VolumeSerialNumber &&
+        current.FileId is { } currentId &&
+        expected.FileId is { } expectedId &&
+        currentId == expectedId;
 
     // The BY_HANDLE view and the kernel32 handle-identity entry points live
     // in DeskBox.Platform.FileTransferNativeMethods.
@@ -2992,13 +3322,14 @@ public sealed partial class FileService
             // Native open (not FileStream): FILE_FLAG_BACKUP_SEMANTICS makes
             // this work for DIRECTORIES as well as files, so recovery
             // receipts can identify folder items too.
+            string extendedPath = StorageMigrationNativeMethods.Extended(Path.GetFullPath(path));
             using SafeFileHandle handle = FileTransferNativeMethods.CreateFileW(
-                path,
-                GenericReadAccess,
-                ShareRead | ShareWrite,
+                extendedPath,
+                0,
+                ShareRead | ShareWrite | ShareDelete,
                 IntPtr.Zero,
                 OpenExisting,
-                FileFlagBackupSemantics,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
                 IntPtr.Zero);
             if (handle.IsInvalid)
             {
@@ -3126,10 +3457,156 @@ public sealed partial class FileService
     // DeskBox.Platform.FileTransferNativeMethods.
 
     private const int FileBasicInfoClass = 0;
+    private const int FileAttributeTagInfoClass = 9;
     private const int FileIdInfoClass = 18; // FILE_INFO_BY_HANDLE_CLASS.FileTransferNativeMethods.FileIdInfo
     private const uint ReadOnlyAttribute = 0x00000001;
     private const uint FileAttributeNormal = 0x00000080;
+    private const uint ReparsePointAttribute = 0x00000400;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
     private const uint FileFlagBackupSemantics = 0x02000000;
+    private const uint FileFlagSequentialScan = 0x08000000;
+
+    /// <summary>
+    /// Opens <paramref name="path"/> while atomically rejecting filesystem
+    /// links and mount points so cross-volume copy/move and source-cleanup
+    /// passes can never follow a symbolic link to read or delete an external
+    /// target. Uses a zero-access metadata probe handle first so online-only
+    /// (dehydrated) OneDrive/cloud placeholders are never opened with
+    /// <c>FILE_OPEN_REPARSE_POINT | FILE_READ_DATA</c> (which <c>cldflt.sys</c>
+    /// rejects with <c>ERROR_CLOUD_FILE_INVALID_REQUEST</c>), while verifying
+    /// 128-bit object identity across the normal filter-attached reopen.
+    /// </summary>
+    internal static SafeFileHandle OpenSourceHandleRejectingLinks(
+        string path,
+        uint desiredAccess,
+        uint shareMode,
+        uint flagsAndAttributes,
+        out bool rejectedAsLink,
+        out int lastWin32Error,
+        bool includeWriteAttributesWhenReadOnly = false)
+    {
+        rejectedAsLink = false;
+        lastWin32Error = 0;
+        string extendedPath = StorageMigrationNativeMethods.Extended(Path.GetFullPath(path));
+
+        SafeFileHandle probeHandle = FileTransferNativeMethods.CreateFileW(
+            extendedPath,
+            0,
+            ShareRead | ShareWrite | ShareDelete,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (probeHandle.IsInvalid)
+        {
+            lastWin32Error = Marshal.GetLastWin32Error();
+            return probeHandle;
+        }
+
+        if (!FileTransferNativeMethods.GetFileInformationByHandle(
+                probeHandle,
+                out FileTransferNativeMethods.ByHandleFileInformation probeInfo))
+        {
+            lastWin32Error = Marshal.GetLastWin32Error();
+            probeHandle.Dispose();
+            return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+        }
+
+        uint effectiveAccess = desiredAccess |
+            (includeWriteAttributesWhenReadOnly && (probeInfo.FileAttributes & ReadOnlyAttribute) != 0
+                ? FileWriteAttributesAccess
+                : 0u);
+
+        if ((probeInfo.FileAttributes & ReparsePointAttribute) == 0)
+        {
+            probeHandle.Dispose();
+
+            SafeFileHandle directHandle = FileTransferNativeMethods.CreateFileW(
+                extendedPath,
+                effectiveAccess,
+                shareMode,
+                IntPtr.Zero,
+                OpenExisting,
+                flagsAndAttributes | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (directHandle.IsInvalid)
+            {
+                lastWin32Error = Marshal.GetLastWin32Error();
+                return directHandle;
+            }
+
+            if (!FileTransferNativeMethods.GetFileInformationByHandle(
+                    directHandle,
+                    out FileTransferNativeMethods.ByHandleFileInformation verifyInfo))
+            {
+                lastWin32Error = Marshal.GetLastWin32Error();
+                directHandle.Dispose();
+                return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+            }
+
+            if ((verifyInfo.FileAttributes & ReparsePointAttribute) != 0)
+            {
+                rejectedAsLink = true;
+                lastWin32Error = ErrorAccessDenied;
+                directHandle.Dispose();
+                return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+            }
+
+            return directHandle;
+        }
+
+        int tagSize = Marshal.SizeOf<FileTransferNativeMethods.FileAttributeTagInfo>();
+        if (!FileTransferNativeMethods.GetFileAttributeTagByHandle(
+                probeHandle,
+                FileAttributeTagInfoClass,
+                out FileTransferNativeMethods.FileAttributeTagInfo tagInfo,
+                tagSize) ||
+            StorageMigrationNativeMethods.IsDisallowedLinkReparseTag(
+                tagInfo.FileAttributes,
+                tagInfo.ReparseTag))
+        {
+            rejectedAsLink = true;
+            lastWin32Error = ErrorAccessDenied;
+            probeHandle.Dispose();
+            return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+        }
+
+        if (IdentityFromHandle(probeHandle) is not { } reparseIdentity)
+        {
+            probeHandle.Dispose();
+            rejectedAsLink = true;
+            lastWin32Error = ErrorAccessDenied;
+            return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+        }
+
+        probeHandle.Dispose();
+
+        SafeFileHandle normalHandle = FileTransferNativeMethods.CreateFileW(
+            extendedPath,
+            effectiveAccess,
+            shareMode,
+            IntPtr.Zero,
+            OpenExisting,
+            flagsAndAttributes,
+            IntPtr.Zero);
+        if (normalHandle.IsInvalid)
+        {
+            lastWin32Error = Marshal.GetLastWin32Error();
+            return normalHandle;
+        }
+
+        if (IdentityFromHandle(normalHandle) is not { } normalIdentity ||
+            normalIdentity.VolumeSerialNumber != reparseIdentity.VolumeSerialNumber ||
+            normalIdentity.FileId != reparseIdentity.FileId)
+        {
+            rejectedAsLink = true;
+            lastWin32Error = ErrorAccessDenied;
+            normalHandle.Dispose();
+            return new SafeFileHandle(IntPtr.Zero, ownsHandle: true);
+        }
+
+        return normalHandle;
+    }
 
     /// <summary>
     /// Reads the object identity from an already-open handle. The identity
@@ -3152,6 +3629,9 @@ public sealed partial class FileService
         long length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
         long lastWrite =
             ((long)information.LastWriteTimeHigh << 32) | information.LastWriteTimeLow;
+        long creation =
+            ((long)information.CreationTimeHigh << 32) | information.CreationTimeLow;
+        DateTime? creationUtc = creation > 0 ? DateTime.FromFileTimeUtc(creation) : null;
         unsafe
         {
             FileTransferNativeMethods.FileIdInfo idInfo = default;
@@ -3161,7 +3641,13 @@ public sealed partial class FileService
                     out idInfo,
                     sizeof(FileTransferNativeMethods.FileIdInfo)))
             {
-                return null;
+                int error = Marshal.GetLastWin32Error();
+                return TryFallbackIdentityFromLegacyHandleInfo(
+                    in information,
+                    error,
+                    length,
+                    lastWrite,
+                    creationUtc);
             }
 
             ulong low = *(ulong*)idInfo.FileId;
@@ -3170,8 +3656,44 @@ public sealed partial class FileService
                 length,
                 DateTime.FromFileTimeUtc(lastWrite),
                 idInfo.VolumeSerialNumber,
-                new FileId128(high, low));
+                new FileId128(high, low),
+                creationUtc);
         }
+    }
+
+    internal static FileTransferSourceIdentity? TryFallbackIdentityFromLegacyHandleInfo(
+        in FileTransferNativeMethods.ByHandleFileInformation information,
+        int fileIdInfoWin32Error,
+        long length,
+        long lastWrite,
+        DateTime? creationUtc = null)
+    {
+        // FAT32, exFAT, and legacy SMB dialects reject FileIdInfo (128-bit) with
+        // ERROR_INVALID_FUNCTION (1), ERROR_NOT_SUPPORTED (50), or
+        // ERROR_INVALID_PARAMETER (87), while populating a unique 64-bit file
+        // index in BY_HANDLE_FILE_INFORMATION (ReFS is the only Windows FS with
+        // >64-bit FileIds and always supports FileIdInfo). Fail closed if either
+        // the volume serial or the 64-bit index is zero.
+        const int ErrorInvalidFunction = 1;
+        const int ErrorNotSupported = 50;
+        const int ErrorInvalidParameter = 87;
+        if (fileIdInfoWin32Error is not (ErrorInvalidFunction or ErrorNotSupported or ErrorInvalidParameter))
+        {
+            return null;
+        }
+
+        ulong legacyIndex = ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow;
+        if (information.VolumeSerialNumber == 0 || legacyIndex == 0)
+        {
+            return null;
+        }
+
+        return new FileTransferSourceIdentity(
+            length,
+            DateTime.FromFileTimeUtc(lastWrite),
+            information.VolumeSerialNumber,
+            new FileId128(0, legacyIndex),
+            creationUtc);
     }
 
     /// <summary>
@@ -3281,21 +3803,23 @@ public sealed partial class FileService
     {
         try
         {
-            using SafeFileHandle handle = FileTransferNativeMethods.CreateFileW(
+            using SafeFileHandle handle = OpenSourceHandleRejectingLinks(
                 path,
-                GenericReadAccess | DeleteAccess | FileWriteAttributesAccess,
-                ShareRead,
-                IntPtr.Zero,
-                OpenExisting,
+                GenericReadAccess | DeleteAccess,
+                ShareRead | ShareDelete,
                 0,
-                IntPtr.Zero);
+                out bool rejectedAsLink,
+                out int openError,
+                includeWriteAttributesWhenReadOnly: true);
             if (handle.IsInvalid)
             {
                 // A writer holding the file refuses us (or an unrelated
-                // sharing conflict): no deletion without exclusivity.
+                // sharing conflict or a filesystem link swap): no deletion
+                // without verified non-link exclusivity.
                 App.Log(
-                    $"[FileTransfer] Kept '{path}': it could not be opened " +
-                    $"for deletion (win32={Marshal.GetLastWin32Error()}).");
+                    rejectedAsLink
+                        ? $"[FileTransfer] Kept '{path}': refused deletion because the path is a filesystem link."
+                        : $"[FileTransfer] Kept '{path}': it could not be opened for deletion (win32={openError}).");
                 return false;
             }
 

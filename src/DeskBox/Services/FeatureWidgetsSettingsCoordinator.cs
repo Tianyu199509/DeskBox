@@ -39,7 +39,11 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
             music.MusicUseArtworkBackdrop,
             music.MusicEnableCoverHoverMotion,
             SettingsService.NormalizeMusicDisplayMode(music.MusicDisplayMode),
-            music.MusicHideTimelineWhenUnavailable);
+            music.MusicHideTimelineWhenUnavailable,
+            music.MusicShowLyrics,
+            music.MusicShowCapsuleLyrics,
+            music.MusicLocalLyricsFolder ?? string.Empty,
+            SettingsService.NormalizeMusicSpectrumStyle(music.MusicSpectrumStyle));
     }
 
     public WeatherPresentationSettings ReadWeatherPresentation()
@@ -129,6 +133,66 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         return true;
     }
 
+    public bool SetMusicShowLyrics(bool value)
+    {
+        ThrowIfStopped();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (music.MusicShowLyrics == value)
+        {
+            return false;
+        }
+
+        music.MusicShowLyrics = value;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetMusicShowCapsuleLyrics(bool value)
+    {
+        ThrowIfStopped();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (music.MusicShowCapsuleLyrics == value)
+        {
+            return false;
+        }
+
+        music.MusicShowCapsuleLyrics = value;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetMusicLocalLyricsFolder(string? folderPath)
+    {
+        ThrowIfStopped();
+        string normalized = string.IsNullOrWhiteSpace(folderPath)
+            ? string.Empty
+            : folderPath.Trim();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (string.Equals(music.MusicLocalLyricsFolder ?? string.Empty, normalized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        music.MusicLocalLyricsFolder = normalized;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetMusicSpectrumStyle(string? style)
+    {
+        ThrowIfStopped();
+        string normalized = SettingsService.NormalizeMusicSpectrumStyle(style);
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (string.Equals(music.MusicSpectrumStyle, normalized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        music.MusicSpectrumStyle = normalized;
+        _settings.SaveDebounced();
+        return true;
+    }
+
     public void ResetMusicPresentationPreferences(bool scheduleSave = true)
     {
         ThrowIfStopped();
@@ -137,6 +201,13 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
             music.MusicUseArtworkBackdrop != true ||
             music.MusicEnableCoverHoverMotion != true ||
             music.MusicHideTimelineWhenUnavailable != true ||
+            music.MusicShowLyrics != true ||
+            music.MusicShowCapsuleLyrics != true ||
+            !string.IsNullOrEmpty(music.MusicLocalLyricsFolder) ||
+            !string.Equals(
+                music.MusicSpectrumStyle,
+                SettingsService.MusicSpectrumStyleAuto,
+                StringComparison.Ordinal) ||
             !string.Equals(
                 music.MusicDisplayMode,
                 SettingsService.MusicDisplayModeAuto,
@@ -144,6 +215,10 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         music.MusicUseArtworkBackdrop = true;
         music.MusicEnableCoverHoverMotion = true;
         music.MusicHideTimelineWhenUnavailable = true;
+        music.MusicShowLyrics = true;
+        music.MusicShowCapsuleLyrics = true;
+        music.MusicLocalLyricsFolder = string.Empty;
+        music.MusicSpectrumStyle = SettingsService.MusicSpectrumStyleAuto;
         music.MusicDisplayMode = SettingsService.MusicDisplayModeAuto;
         if (scheduleSave && changed)
         {
@@ -365,27 +440,40 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
     public bool SetManagedDropAction(string? action)
     {
         ThrowIfStopped();
-        string normalized = action switch
-        {
-            SettingsService.ManagedDropActionCopy =>
-                SettingsService.ManagedDropActionCopy,
-            SettingsService.ManagedDropActionFollowWindows =>
-                SettingsService.ManagedDropActionFollowWindows,
-            _ => SettingsService.ManagedDropActionMove
-        };
+        string normalized = NormalizeManagedAction(action);
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
-        if (string.Equals(
-                fileWidget.ManagedDropAction,
-                normalized,
-                StringComparison.Ordinal))
+        string currentDrop = NormalizeManagedAction(fileWidget.ManagedDropAction);
+        string currentDragOut = NormalizeManagedAction(fileWidget.ManagedDragOutAction);
+        bool keepLinked = string.Equals(currentDrop, currentDragOut, StringComparison.Ordinal);
+        bool dropSame = string.Equals(
+            fileWidget.ManagedDropAction,
+            normalized,
+            StringComparison.Ordinal);
+        bool dragOutSame = !keepLinked || string.Equals(
+            fileWidget.ManagedDragOutAction,
+            normalized,
+            StringComparison.Ordinal);
+        if (dropSame && dragOutSame)
         {
             return false;
         }
 
         fileWidget.ManagedDropAction = normalized;
+        if (keepLinked)
+        {
+            fileWidget.ManagedDragOutAction = normalized;
+        }
+
         _settings.SaveDebounced();
         return true;
     }
+
+    private static string NormalizeManagedAction(string? action) => action switch
+    {
+        SettingsService.ManagedDropActionCopy => SettingsService.ManagedDropActionCopy,
+        SettingsService.ManagedDropActionFollowWindows => SettingsService.ManagedDropActionFollowWindows,
+        _ => SettingsService.ManagedDropActionMove
+    };
 
     public string ReadFileWidgetFolderOpenBehavior() =>
         FileWidgetFolderOpenBehaviorNames.NormalizeGlobal(

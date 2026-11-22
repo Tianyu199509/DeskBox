@@ -1,39 +1,15 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
 
 internal enum QuickAccessBackendMode
 {
-    CSharp,
     Rust
 }
 
 internal static class QuickAccessBackendPolicy
 {
-    internal const string EnvironmentVariable = "DESKBOX_QUICK_ACCESS_BACKEND";
-
-#if DESKBOX_NATIVE_AOT
-    internal static QuickAccessBackendMode Current { get; } = QuickAccessBackendMode.Rust;
-#else
-    internal static QuickAccessBackendMode Current { get; } = Resolve(
-        Environment.GetEnvironmentVariable(EnvironmentVariable),
-        RuntimeFeature.IsDynamicCodeSupported);
-
-    internal static QuickAccessBackendMode Resolve(
-        string? configuredValue,
-        bool isDynamicCodeSupported)
-    {
-        if (!isDynamicCodeSupported)
-        {
-            return QuickAccessBackendMode.Rust;
-        }
-
-        return string.Equals(configuredValue?.Trim(), "rust", StringComparison.OrdinalIgnoreCase)
-            ? QuickAccessBackendMode.Rust
-            : QuickAccessBackendMode.CSharp;
-    }
-#endif
+    internal static QuickAccessBackendMode Current => QuickAccessBackendMode.Rust;
 }
 
 internal enum QuickAccessNativeOperation : uint

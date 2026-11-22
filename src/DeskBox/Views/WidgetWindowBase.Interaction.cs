@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -206,6 +206,10 @@ public abstract partial class WidgetWindowBase
         PerformanceLogger.RecordTransientUiTimerReleased();
     }
 
+    protected virtual bool OwnsTransientForegroundWindow(IntPtr foregroundWindow) =>
+        HWnd != IntPtr.Zero &&
+        WidgetEditorPopoverWindow.IsPopoverOwnedBy(foregroundWindow, HWnd);
+
     protected bool ShouldDeferDesktopLayerRestore()
     {
         if (IsDragging ||
@@ -222,8 +226,8 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        return foregroundWindow == HWnd ||
-               Win32Helper.GetAncestor(foregroundWindow, Win32Helper.GA_ROOTOWNER) == HWnd;
+        return WidgetLayerService.IsWindowOrOwnedByWidget(foregroundWindow, HWnd) ||
+               OwnsTransientForegroundWindow(foregroundWindow);
     }
 
     protected void RestoreDesktopLayer(bool force = false)
@@ -278,16 +282,24 @@ public abstract partial class WidgetWindowBase
         {
             IsAtDesktopLayer = true;
         }
+        else
+        {
+            App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
+                $"{LogPrefix}-desktop-layer-restored");
+        }
 
         App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
-        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
-            $"{LogPrefix}-desktop-layer-restored");
     }
 
     // ── Drag logic ─────────────────────────────────────────────
 
+    protected virtual void OnWidgetBoundsInteractionStarting()
+    {
+    }
+
     protected void BeginWindowDragCore(PointerRoutedEventArgs e, FrameworkElement captureElement)
     {
+        OnWidgetBoundsInteractionStarting();
         CancelPendingTitleBarDragFrame();
         _titleBarDragFrameMetrics = new BoundsInteractionFrameMetrics();
         BeginWidgetBoundsInteraction();
@@ -303,9 +315,14 @@ public abstract partial class WidgetWindowBase
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
+        double initScale = Win32Helper.GetDpiScaleForPoint(InitialPointerPt.X, InitialPointerPt.Y);
+        _initialDragDpiScale = double.IsFinite(initScale) && initScale > 0 ? initScale : 1.0;
+        WidgetShellControl.SetDragHandleToolTipSuppressed(true);
+        App? app = App.Current;
+        WidgetManager? manager = app?.WidgetManager;
         _isCoordinatedMoveDrag =
             Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
-            App.Current?.WidgetManager?.TryBeginCoordinatedMove(HWnd) == true;
+            manager?.TryBeginCoordinatedMove(HWnd) == true;
         if (!_isCoordinatedMoveDrag)
         {
             ElevateForInteraction();
@@ -318,7 +335,17 @@ public abstract partial class WidgetWindowBase
 
         if (!movesCapsuleBar && !_isCoordinatedMoveDrag)
         {
-            App.Current?.ResizeGuideOverlay.BeginDrag(HWnd, RootElement);
+            app?.ResizeGuideOverlay.BeginDrag(HWnd, RootElement);
+            if (!IsCompactBoundsStateActive)
+            {
+                double anchorNormX = initialBounds.Width > 0
+                    ? (double)(InitialPointerPt.X - initialBounds.X) / initialBounds.Width
+                    : 0.5;
+                double anchorNormY = initialBounds.Height > 0
+                    ? (double)(InitialPointerPt.Y - initialBounds.Y) / initialBounds.Height
+                    : 0.06;
+                manager?.BeginWidgetGroupDragSession(Config.Id, anchorNormX, anchorNormY);
+            }
         }
     }
 
@@ -326,6 +353,13 @@ public abstract partial class WidgetWindowBase
     {
         if (!IsDragging)
         {
+            return;
+        }
+
+        if (!e.GetCurrentPoint(RootElement).Properties.IsLeftButtonPressed &&
+            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.LeftButton))
+        {
+            EndWindowDragCore(e);
             return;
         }
 
@@ -411,10 +445,28 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        int currentPointerX = InitialPointerPt.X + frame.DeltaX;
+        int currentPointerY = InitialPointerPt.Y + frame.DeltaY;
+        double targetScale = Win32Helper.GetDpiScaleForPoint(currentPointerX, currentPointerY);
+        RectInt32 crossDpiBounds = WidgetPositioningService.CalculateCrossDpiDragBounds(
+            InitialWindowPos,
+            InitialWindowSize,
+            new PointInt32(InitialPointerPt.X, InitialPointerPt.Y),
+            _initialDragDpiScale,
+            new PointInt32(currentPointerX, currentPointerY),
+            targetScale);
+
+        // Resolve the merge candidate first: while the pointer rests on a
+        // joinable target, edge snapping is suspended so the two intents
+        // (align beside / stack onto) never fight over the window position.
+        bool groupTargetEngaged =
+            !IsCompactBoundsStateActive &&
+            App.Current?.WidgetManager?.UpdateWidgetGroupDragPreview(Config.Id) == true;
         RectInt32 snappedBounds =
             App.Current?.ResizeGuideOverlay.UpdateGuidesAndSnapForDrag(
-                frame.ProposedBounds)
-            ?? frame.ProposedBounds;
+                crossDpiBounds,
+                suspendSnap: groupTargetEngaged)
+            ?? crossDpiBounds;
         ApplyWindowBounds(
             snappedBounds.X,
             snappedBounds.Y,
@@ -422,10 +474,6 @@ public abstract partial class WidgetWindowBase
             snappedBounds.Height,
             persist: false,
             updateConfig: false);
-        if (!IsCompactBoundsStateActive)
-        {
-            App.Current?.WidgetManager?.UpdateWidgetGroupDragPreview(Config.Id);
-        }
     }
 
     private void FlushPendingTitleBarDragFrame()
@@ -434,6 +482,17 @@ public abstract partial class WidgetWindowBase
         CancelPendingTitleBarDragFrame();
         CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag");
     }
+
+    /// <summary>
+    /// Physical bounds the window had when the current title drag began;
+    /// a drag-merge undo returns the widget here.
+    /// </summary>
+    private RectInt32 GetTitleBarDragOriginBounds() =>
+        new(
+            InitialWindowPos.X,
+            InitialWindowPos.Y,
+            InitialWindowSize.Width,
+            InitialWindowSize.Height);
 
     private void CancelPendingTitleBarDragFrame()
     {
@@ -456,22 +515,73 @@ public abstract partial class WidgetWindowBase
         DragCaptureElement?.ReleasePointerCapture(e.Pointer);
         DragCaptureElement = null;
 
-        App.Current?.ResizeGuideOverlay.EndDrag();
+        FinishTitleBarDragCore(
+            hasMoved,
+            "coordinated-drag-ended",
+            "drag-ended");
+        e.Handled = true;
+    }
+
+    private void FinishTitleBarDragCore(
+        bool hasMoved,
+        string coordinatedRestoreReason,
+        string normalRestoreReason)
+    {
+        WidgetShellControl.SetDragHandleToolTipSuppressed(false);
+        App? app = App.Current;
+        app?.ResizeGuideOverlay.EndDrag();
+        WidgetManager? manager = app?.WidgetManager;
 
         if (_isCoordinatedMoveDrag &&
-            App.Current?.WidgetManager?.CompleteCoordinatedMove(HWnd, hasMoved) == true)
+            manager?.CompleteCoordinatedMove(HWnd, hasMoved) == true)
         {
             _isCoordinatedMoveDrag = false;
-            App.Current.WidgetManager.CancelWidgetGroupDrag(Config.Id);
+            manager.CancelWidgetGroupDrag(Config.Id);
             HasMovedTitleBarDrag = false;
-            App.Current.WidgetManager.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
-                "coordinated-drag-ended");
-            e.Handled = true;
+            manager.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
+                coordinatedRestoreReason);
             return;
         }
 
         _isCoordinatedMoveDrag = false;
 
+        // If the release lands on an armed merge target, cloak the dragged
+        // source immediately and skip the redundant drag placement commit and
+        // 8-window Z-order bounce; fallback runs only if the merge is rejected.
+        if (hasMoved &&
+            !IsCompactBoundsStateActive &&
+            manager?.IsWidgetGroupDragMergeReady(Config.Id) == true)
+        {
+            RectInt32 originBounds = GetTitleBarDragOriginBounds();
+            EndWidgetBoundsInteraction();
+            DisplayChangeWatcher?.ResumeRestore();
+            HasMovedTitleBarDrag = false;
+            _ = manager.CompleteWidgetGroupDragAsync(
+                Config.Id,
+                originBounds,
+                onNotMergedFallback: () =>
+                {
+                    if (!IsClosing)
+                    {
+                        CompleteNonMergedDragPlacementAndRestore(
+                            hasMoved: true,
+                            normalRestoreReason);
+                    }
+                });
+            return;
+        }
+
+        manager?.CancelWidgetGroupDrag(Config.Id);
+        EndWidgetBoundsInteraction();
+        DisplayChangeWatcher?.ResumeRestore();
+        HasMovedTitleBarDrag = false;
+        CompleteNonMergedDragPlacementAndRestore(hasMoved, normalRestoreReason);
+    }
+
+    private void CompleteNonMergedDragPlacementAndRestore(
+        bool hasMoved,
+        string layerRestoreReason)
+    {
         if (hasMoved)
         {
             CompleteCompactArrangementDrag();
@@ -486,24 +596,12 @@ public abstract partial class WidgetWindowBase
                 _suppressHoverExpansionAfterDragUntilPointerExit = true;
             }
         }
-        EndWidgetBoundsInteraction();
-        OnDragEnd(hasMoved);
-        if (hasMoved && !IsCompactBoundsStateActive)
-        {
-            _ = App.Current?.WidgetManager?.CompleteWidgetGroupDragAsync(Config.Id);
-        }
-        else
-        {
-            App.Current?.WidgetManager?.CancelWidgetGroupDrag(Config.Id);
-        }
 
-        DisplayChangeWatcher?.ResumeRestore();
-        HasMovedTitleBarDrag = false;
+        OnDragEnd(hasMoved);
         RestoreBackdropAfterInteraction();
         QueueBackdropRefresh();
         App.Current?.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
-            "drag-ended");
-        e.Handled = true;
+            layerRestoreReason);
     }
 
     // ── Resize logic ───────────────────────────────────────────
@@ -529,6 +627,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        OnWidgetBoundsInteractionStarting();
         BeginWidgetBoundsInteraction();
         IsResizing = true;
         // Per-commit config sync from AppWindow.Changed would fight the
@@ -545,6 +644,8 @@ public abstract partial class WidgetWindowBase
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
+        double initScale = Win32Helper.GetDpiScaleForPoint(InitialPointerPt.X, InitialPointerPt.Y);
+        _initialDragDpiScale = double.IsFinite(initScale) && initScale > 0 ? initScale : 1.0;
         _interactiveResizeMinimumSize = GetPhysicalMinimumWindowSize(
             initialBounds.X,
             initialBounds.Y,
@@ -741,47 +842,10 @@ public abstract partial class WidgetWindowBase
         IsDragging = false;
         bool hasMoved = HasMovedTitleBarDrag;
         DragCaptureElement = null;
-        App.Current?.ResizeGuideOverlay.EndDrag();
 
-        if (_isCoordinatedMoveDrag &&
-            App.Current?.WidgetManager?.CompleteCoordinatedMove(HWnd, hasMoved) == true)
-        {
-            _isCoordinatedMoveDrag = false;
-            App.Current.WidgetManager.CancelWidgetGroupDrag(Config.Id);
-            HasMovedTitleBarDrag = false;
-            App.Current.WidgetManager.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
-                "coordinated-drag-capture-lost");
-            e.Handled = true;
-            return;
-        }
-
-        _isCoordinatedMoveDrag = false;
-        if (hasMoved)
-        {
-            CompleteCompactArrangementDrag();
-            RectInt32 finalBounds = GetActualWindowBounds();
-            finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
-            if (_targetCollapsed)
-            {
-                _suppressHoverExpansionAfterDragUntilPointerExit = true;
-            }
-        }
-        EndWidgetBoundsInteraction();
-        OnDragEnd(hasMoved);
-        if (hasMoved && !IsCompactBoundsStateActive)
-        {
-            _ = App.Current?.WidgetManager?.CompleteWidgetGroupDragAsync(Config.Id);
-        }
-        else
-        {
-            App.Current?.WidgetManager?.CancelWidgetGroupDrag(Config.Id);
-        }
-        DisplayChangeWatcher?.ResumeRestore();
-        HasMovedTitleBarDrag = false;
-        RestoreBackdropAfterInteraction();
-        QueueBackdropRefresh();
-        App.Current?.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
+        FinishTitleBarDragCore(
+            hasMoved,
+            "coordinated-drag-capture-lost",
             "drag-capture-lost");
         e.Handled = true;
     }
@@ -893,9 +957,30 @@ public abstract partial class WidgetWindowBase
 
     // ── Tray animation helpers ─────────────────────────────────
 
-    protected WidgetTrayAnimationProfile GetTrayAnimationProfile()
+    private WidgetAnimationOptions? _trayAnimationOptionsOverride;
+
+    protected WidgetAnimationOptions GetEffectiveTrayAnimationOptions() =>
+        _trayAnimationOptionsOverride ?? WidgetAnimationSettings.From(SettingsService.Settings);
+
+    protected void SetTrayAnimationOptionsOverrideCore(WidgetAnimationOptions? optionsOverride)
     {
-        return TrayAnimation.CreateProfile(WidgetAnimationSettings.From(SettingsService.Settings));
+        _trayAnimationOptionsOverride = optionsOverride;
+    }
+
+    protected WidgetTrayAnimationProfile GetTrayAnimationProfile(bool isShowing = true)
+    {
+        return TrayAnimation.CreateProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
+    }
+
+    protected WidgetTrayAnimationProfile GetSingleWidgetAnimationProfile(bool isShowing)
+    {
+        return TrayAnimation.CreateSingleWidgetLifecycleProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
     }
 
     protected void LogTrayWindow(string message)

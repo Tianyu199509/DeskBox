@@ -1,151 +1,193 @@
 namespace DeskBox.Services;
 
+/// <summary>
+/// Process-wide short-lived writeback guard so clipboard writes initiated by
+/// DeskBox itself (Clipboard widget copy/paste, QuickCapture copy, File widget
+/// Ctrl+C, Todo copy, Custom widget copy) do not re-trigger history ingestion.
+/// </summary>
 public static class DeskBoxClipboardWriteScope
 {
-    private static readonly TimeSpan s_ignoreWindow = TimeSpan.FromSeconds(2);
-    private static readonly object s_gate = new();
+    private static readonly TimeSpan SuppressionWindow = TimeSpan.FromMilliseconds(2500);
+    private static readonly Lock Gate = new();
 
-    private static DateTimeOffset s_lastWriteUtc;
     private static string? s_lastText;
-    private static bool s_lastWriteHasImage;
-    private static string[] s_lastPaths = [];
+    private static long s_lastTextTick;
+    private static long s_lastImageTick;
+    private static string? s_lastPathsKey;
+    private static long s_lastPathsTick;
+    private static readonly Dictionary<string, long> s_suppressedHashes = new(StringComparer.Ordinal);
 
     public static void MarkWrite(
         string? text = null,
         bool hasImage = false,
         IEnumerable<string>? paths = null)
     {
-        string? normalizedText = NormalizeText(text);
-        string[] normalizedPaths = paths?
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(NormalizePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray() ?? [];
-
-        lock (s_gate)
+        long now = Environment.TickCount64;
+        lock (Gate)
         {
-            s_lastWriteUtc = DateTimeOffset.UtcNow;
-            s_lastText = normalizedText;
-            s_lastPaths = normalizedPaths;
-            s_lastWriteHasImage = hasImage || normalizedPaths.Any(IsImageFile);
+            PruneLocked(now);
+            if (!string.IsNullOrEmpty(text))
+            {
+                s_lastText = NormalizeText(text);
+                s_lastTextTick = now;
+            }
+
+            if (hasImage)
+            {
+                s_lastImageTick = now;
+            }
+
+            if (paths is not null)
+            {
+                string key = NormalizePathsKey(paths);
+                if (key.Length > 0)
+                {
+                    s_lastPathsKey = key;
+                    s_lastPathsTick = now;
+                }
+            }
         }
     }
 
     public static void MarkText(string? text)
     {
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
         MarkWrite(text: text);
     }
 
-    public static bool ShouldIgnore(QuickCaptureClipboardContent content)
+    public static void MarkContentHash(string? contentHash)
     {
-        if (content.HasImage && ShouldIgnoreImage())
+        if (string.IsNullOrWhiteSpace(contentHash))
         {
-            return true;
+            return;
         }
 
-        return ShouldIgnoreText(content.Text);
+        long now = Environment.TickCount64;
+        lock (Gate)
+        {
+            PruneLocked(now);
+            s_suppressedHashes[contentHash] = now;
+        }
+    }
+
+    public static bool ShouldIgnoreImage()
+    {
+        long now = Environment.TickCount64;
+        lock (Gate)
+        {
+            return s_lastImageTick != 0 &&
+                   now - s_lastImageTick <= (long)SuppressionWindow.TotalMilliseconds;
+        }
     }
 
     public static bool ShouldIgnoreText(string? text)
     {
-        string? normalizedText = NormalizeText(text);
-        if (string.IsNullOrWhiteSpace(normalizedText))
+        if (string.IsNullOrEmpty(text))
         {
             return false;
         }
 
-        ClipboardWriteSnapshot snapshot = GetFreshSnapshot();
-        if (!snapshot.IsFresh)
+        string normalized = NormalizeText(text);
+        long now = Environment.TickCount64;
+        lock (Gate)
+        {
+            return s_lastText is not null &&
+                   now - s_lastTextTick <= (long)SuppressionWindow.TotalMilliseconds &&
+                   string.Equals(s_lastText, normalized, StringComparison.Ordinal);
+        }
+    }
+
+    public static bool ShouldIgnorePaths(IEnumerable<string>? paths)
+    {
+        if (paths is null)
         {
             return false;
         }
 
-        if (string.Equals(snapshot.Text, normalizedText, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        if (snapshot.Paths.Length == 0)
+        string key = NormalizePathsKey(paths);
+        if (key.Length == 0)
         {
             return false;
         }
 
-        string[] textPaths = normalizedText
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(NormalizePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .ToArray();
+        long now = Environment.TickCount64;
+        lock (Gate)
+        {
+            return s_lastPathsKey is not null &&
+                   now - s_lastPathsTick <= (long)SuppressionWindow.TotalMilliseconds &&
+                   string.Equals(s_lastPathsKey, key, StringComparison.Ordinal);
+        }
+    }
 
-        return textPaths.Length > 0 &&
-               textPaths.Length == snapshot.Paths.Length &&
-               textPaths.All(path => snapshot.Paths.Contains(path, StringComparer.OrdinalIgnoreCase));
+    public static bool ShouldIgnoreContentHash(string? contentHash)
+    {
+        if (string.IsNullOrWhiteSpace(contentHash))
+        {
+            return false;
+        }
+
+        long now = Environment.TickCount64;
+        lock (Gate)
+        {
+            PruneLocked(now);
+            return s_suppressedHashes.ContainsKey(contentHash);
+        }
     }
 
     internal static void ClearForTesting()
     {
-        lock (s_gate)
+        lock (Gate)
         {
-            s_lastWriteUtc = default;
             s_lastText = null;
-            s_lastWriteHasImage = false;
-            s_lastPaths = [];
+            s_lastTextTick = 0;
+            s_lastImageTick = 0;
+            s_lastPathsKey = null;
+            s_lastPathsTick = 0;
+            s_suppressedHashes.Clear();
         }
     }
 
-    private static bool ShouldIgnoreImage()
+    private static void PruneLocked(long now)
     {
-        ClipboardWriteSnapshot snapshot = GetFreshSnapshot();
-        return snapshot.IsFresh && snapshot.HasImage;
-    }
-
-    private static ClipboardWriteSnapshot GetFreshSnapshot()
-    {
-        lock (s_gate)
+        long windowMs = (long)SuppressionWindow.TotalMilliseconds;
+        if (s_suppressedHashes.Count == 0)
         {
-            bool isFresh = DateTimeOffset.UtcNow - s_lastWriteUtc <= s_ignoreWindow;
-            return new ClipboardWriteSnapshot(isFresh, s_lastText, s_lastWriteHasImage, s_lastPaths);
+            return;
         }
-    }
 
-    private static string? NormalizeText(string? text)
-    {
-        return string.IsNullOrWhiteSpace(text)
-            ? null
-            : text.Trim();
-    }
-
-    private static string NormalizePath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
+        List<string>? expired = null;
+        foreach (var (hash, tick) in s_suppressedHashes)
         {
-            return string.Empty;
+            if (now - tick > windowMs)
+            {
+                expired ??= [];
+                expired.Add(hash);
+            }
         }
 
-        try
+        if (expired is not null)
         {
-            return Path.GetFullPath(path.Trim());
-        }
-        catch
-        {
-            return path.Trim();
+            foreach (string hash in expired)
+            {
+                s_suppressedHashes.Remove(hash);
+            }
         }
     }
 
-    private static bool IsImageFile(string path)
+    private static string NormalizeText(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+
+    private static string NormalizePathsKey(IEnumerable<string> paths)
     {
-        string extension = Path.GetExtension(path);
-        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".gif", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+        string[] normalized = paths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim().TrimEnd('\\', '/').ToUpperInvariant())
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToArray();
+        return string.Join('|', normalized);
     }
-
-    private readonly record struct ClipboardWriteSnapshot(
-        bool IsFresh,
-        string? Text,
-        bool HasImage,
-        string[] Paths);
 }

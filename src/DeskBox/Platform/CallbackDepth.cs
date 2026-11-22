@@ -98,6 +98,11 @@ internal static class CallbackDepth
             {
                 return proc(hWnd, message, wParam, lParam, subclassId, referenceData);
             }
+            catch (Exception ex)
+            {
+                global::DeskBox.App.Log($"[CallbackDepth] Unhandled exception in subclass proc msg=0x{message:X4}: {ex}");
+                return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            }
             finally
             {
                 Exit();

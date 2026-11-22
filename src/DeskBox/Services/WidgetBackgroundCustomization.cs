@@ -120,12 +120,16 @@ public static class WidgetBackgroundCustomization
             config.Metadata.TryGetValue(DimMetadataKey, out string? value))
         {
             string normalized = Math.Clamp(
-                double.TryParse(value, out double parsed) && double.IsFinite(parsed)
+                TryParseDimValue(value, out double parsed)
                     ? parsed
                     : DefaultDimPercent,
                 MinDimPercent,
-                MaxDimPercent).ToString("0.#");
-            if (double.TryParse(normalized, out double result))
+                MaxDimPercent).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            if (double.TryParse(
+                    normalized,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out double result))
             {
                 return result;
             }
@@ -252,7 +256,7 @@ public static class WidgetBackgroundCustomization
 
         double dim = Math.Clamp(dimPercent, MinDimPercent, MaxDimPercent);
         config.Metadata ??= [];
-        config.Metadata[DimMetadataKey] = dim.ToString("0.#");
+        config.Metadata[DimMetadataKey] = dim.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public static void Clear(WidgetConfig config)
@@ -299,9 +303,10 @@ public static class WidgetBackgroundCustomization
         {
             if (TryNormalizeDim(dim, out double normalized))
             {
-                if (!string.Equals(dim, normalized.ToString("0.#"), StringComparison.Ordinal))
+                string formatted = normalized.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+                if (!string.Equals(dim, formatted, StringComparison.Ordinal))
                 {
-                    config.Metadata[DimMetadataKey] = normalized.ToString("0.#");
+                    config.Metadata[DimMetadataKey] = formatted;
                     changed = true;
                 }
             }
@@ -357,13 +362,47 @@ public static class WidgetBackgroundCustomization
     private static bool TryNormalizeDim(string? value, out double dimPercent)
     {
         dimPercent = DefaultDimPercent;
-        if (!double.TryParse(value, out double parsed) || !double.IsFinite(parsed))
+        if (!TryParseDimValue(value, out double parsed))
         {
             return false;
         }
 
         dimPercent = Math.Clamp(parsed, MinDimPercent, MaxDimPercent);
         return true;
+    }
+
+    private static bool TryParseDimValue(string? value, out double parsed)
+    {
+        parsed = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string trimmed = value.Trim();
+        if (double.TryParse(
+                trimmed,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out parsed) &&
+            double.IsFinite(parsed))
+        {
+            return true;
+        }
+
+        if (trimmed.Contains(',') &&
+            !trimmed.Contains('.') &&
+            double.TryParse(
+                trimmed.Replace(',', '.'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out parsed) &&
+            double.IsFinite(parsed))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     internal static bool IsValidImageFileName(string? fileName)

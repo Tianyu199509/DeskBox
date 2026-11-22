@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Services;
+namespace DeskBox.Services;
 
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -22,12 +22,22 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
     // ones with zero user-visible signal. Optional failure reporter wired
     // by the settings host to its save-failed banner.
     private readonly Action? _onWriteFailure;
+    private readonly uint _mainProcessId;
 
-    public RemoteSettingsWidgetActions(SettingsIpcClient client, SettingsService settingsService, Action? onWriteFailure = null)
+    private void GrantMainProcessForegroundRight()
+    {
+        if (_mainProcessId != 0)
+        {
+            try { Platform.Win32Helper.AllowSetForegroundWindow(_mainProcessId); } catch { }
+        }
+    }
+
+    public RemoteSettingsWidgetActions(SettingsIpcClient client, SettingsService settingsService, Action? onWriteFailure = null, uint mainProcessId = 0)
     {
         _client = client;
         _settingsService = settingsService;
         _onWriteFailure = onWriteFailure;
+        _mainProcessId = mainProcessId;
     }
 
     public Task ApplyGroupPresentation(DeskBox.Contracts.GroupPresentationChange change) =>
@@ -174,6 +184,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             payload: null,
             nameof(NotifyWidgetGroupPresentationSettingsChanged));
 
+
     private Task NotifyWithoutBlockingAsync(string method, string? payload, string caller) =>
         SettingsIpcShell.NotifyWithoutBlockingAsync(_client, method, payload, caller);
 
@@ -205,8 +216,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public IReadOnlyList<ManagedStorageFolderCleanupCandidate>? GetOrphanManagedStorageFolders()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetGetOrphans)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.WidgetGetOrphans);
         return ok
             ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ListManagedStorageFolderCleanupCandidate)
             : null;
@@ -232,8 +242,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public int GetDefaultManagedStorageWidgetCount()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetManagedCount)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.WidgetManagedCount);
         return ok && int.TryParse(payload, out int count) ? count : 0;
     }
 
@@ -241,14 +250,56 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
         string newRootPath,
         CancellationToken token)
     {
-        (bool ok, string? payload, _) = await _client.RequestAsync(
+        token.ThrowIfCancellationRequested();
+        string operationId = Guid.NewGuid().ToString("N");
+        await using CancellationTokenRegistration cancelReg = token.CanBeCanceled
+            ? token.Register(() =>
+                _ = NotifyWithoutBlockingAsync(
+                    SettingsIpcMethods.WidgetMigrateCancel,
+                    payload: operationId,
+                    nameof(PreviewManagedStorageMigrationAsync)))
+            : default;
+
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetMigratePreview,
-            newRootPath,
-            token);
-        return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ManagedStorageMigrationPreview)
-            is { } preview
-                ? preview
-                : new ManagedStorageMigrationPreview(0, 0, 0, false, null);
+            SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationPreviewRequest(newRootPath, operationId),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest),
+            CancellationToken.None);
+        if (!ok)
+        {
+            throw new IOException(error ?? "storage migration preview failed");
+        }
+
+        SettingsIpcMigrationOutcome? outcome = SettingsIpcPayload.Decode(
+            payload,
+            SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome);
+        if (outcome is { Ok: true, Preview: { } preview })
+        {
+            return preview;
+        }
+
+        if (outcome is { Stopped: true })
+        {
+            throw new OperationCanceledException(outcome.ErrorMessage ?? "Storage migration preview stopped.", token);
+        }
+
+        if (outcome is not null)
+        {
+            StorageMigrationProblem problem = outcome.ProblemKind is { } kind &&
+                                              Enum.IsDefined(typeof(StorageMigrationProblem), kind)
+                ? (StorageMigrationProblem)kind
+                : StorageMigrationProblem.Unknown;
+            throw new StorageMigrationException(
+                problem,
+                outcome.ErrorMessage ?? "storage migration preview failed",
+                blockingPath: outcome.BlockingPath)
+            {
+                TemporaryBytes = outcome.TemporaryBytes,
+            };
+        }
+
+        throw new IOException(error ?? "storage migration preview failed");
     }
 
     public Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(
@@ -258,10 +309,118 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
         return UpdateDefaultManagedStorageRootCoreAsync(newRootPath, options);
     }
 
+    public async Task<ManagedStorageMigrationResult?> TrySwitchEmptyManagedStorageRootAsync(
+        string newRootPath,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetMigrateTryEmptySwitch,
+            newRootPath,
+            token);
+        if (!ok)
+        {
+            throw new IOException(error ?? "empty storage root switch failed");
+        }
+
+        SettingsIpcMigrationOutcome? outcome = SettingsIpcPayload.Decode(
+            payload,
+            SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome);
+        if (outcome is { Ok: true })
+        {
+            return outcome.Result;
+        }
+
+        if (outcome is { Stopped: true })
+        {
+            throw new OperationCanceledException(outcome.ErrorMessage ?? "Storage switch canceled.", token);
+        }
+
+        if (outcome is not null)
+        {
+            StorageMigrationProblem problem = outcome.ProblemKind is { } kind &&
+                                              Enum.IsDefined(typeof(StorageMigrationProblem), kind)
+                ? (StorageMigrationProblem)kind
+                : StorageMigrationProblem.Unknown;
+            throw new StorageMigrationException(
+                problem,
+                outcome.ErrorMessage ?? "empty storage root switch failed",
+                blockingPath: outcome.BlockingPath)
+            {
+                TemporaryBytes = outcome.TemporaryBytes,
+            };
+        }
+
+        throw new IOException(error ?? "empty storage root switch failed");
+    }
+
+    public Task<ManagedStorageMigrationCleanupResult> RetryManagedStorageSourceCleanupAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        SendMigrationCleanupAsync(SettingsIpcMethods.WidgetMigrateRetrySourceCleanup, newRootPath, token);
+
+    public Task<ManagedStorageMigrationCleanupResult> CleanupInterruptedMigrationCopiesAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        SendMigrationCleanupAsync(SettingsIpcMethods.WidgetMigrateCleanupCopies, newRootPath, token);
+
+    private async Task<ManagedStorageMigrationCleanupResult> SendMigrationCleanupAsync(
+        string method,
+        string newRootPath,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(method, newRootPath, token);
+        if (!ok)
+        {
+            throw new IOException(error ?? "storage migration cleanup failed");
+        }
+
+        SettingsIpcMigrationOutcome? outcome = SettingsIpcPayload.Decode(
+            payload,
+            SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome);
+        if (outcome is { Ok: true, CleanupResult: { } cleanup })
+        {
+            return cleanup;
+        }
+
+        if (outcome is { Stopped: true })
+        {
+            throw new OperationCanceledException(outcome.ErrorMessage ?? "Cleanup canceled.", token);
+        }
+
+        if (outcome is not null)
+        {
+            StorageMigrationProblem problem = outcome.ProblemKind is { } kind &&
+                                              Enum.IsDefined(typeof(StorageMigrationProblem), kind)
+                ? (StorageMigrationProblem)kind
+                : StorageMigrationProblem.Unknown;
+            throw new StorageMigrationException(
+                problem,
+                outcome.ErrorMessage ?? "storage migration cleanup failed",
+                blockingPath: outcome.BlockingPath)
+            {
+                TemporaryBytes = outcome.TemporaryBytes,
+            };
+        }
+
+        throw new IOException(error ?? "storage migration cleanup failed");
+    }
+
     private async Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootCoreAsync(
         string newRootPath,
         ManagedStorageMigrationOptions? options)
     {
+        CancellationToken callerToken = options?.CancellationToken ?? default;
+        if (callerToken.IsCancellationRequested)
+        {
+            throw new StorageMigrationStoppedException(
+                new OperationCanceledException(callerToken),
+                temporaryBytes: null);
+        }
+
+        string operationId = Guid.NewGuid().ToString("N");
+
         // The dialog's IProgress cannot ride the request; main-side progress
         // arrives as pushed events and is re-reported into the caller's
         // progress until the request completes.
@@ -276,6 +435,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
             int separator = eventPayload.IndexOf('\n');
             if (separator > 0 &&
+                eventPayload.AsSpan(0, separator).SequenceEqual(operationId.AsSpan()) &&
                 SettingsIpcPayload.Decode(
                     eventPayload[(separator + 1)..],
                     SettingsIpcJsonContext.Default.ManagedStorageMigrationProgress) is { } progress)
@@ -283,6 +443,18 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 callerProgress?.Report(progress);
             }
         }
+
+        // Forward Stop clicks to the main process over WidgetMigrateCancel and
+        // wait for the server's structured Stopped response (which carries
+        // TemporaryBytes after journal flush and gate release) instead of
+        // abandoning the in-flight pipe request mid-copy.
+        await using CancellationTokenRegistration cancelReg = callerToken.CanBeCanceled
+            ? callerToken.Register(() =>
+                _ = NotifyWithoutBlockingAsync(
+                    SettingsIpcMethods.WidgetMigrateCancel,
+                    payload: operationId,
+                    nameof(UpdateDefaultManagedStorageRootCoreAsync)))
+            : default;
 
         _client.EventReceived += OnMigrationEvent;
         try
@@ -292,16 +464,48 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 SettingsIpcPayload.Encode(
                     new SettingsIpcMigrationRequest(
                         newRootPath,
-                        options?.RestartIfCopiesRemoved ?? false),
+                        options?.RestartIfCopiesRemoved ?? false,
+                        operationId,
+                        options?.RetainOriginals ?? false,
+                        options?.IncludeOrphanFolders ?? false),
                     SettingsIpcJsonContext.Default.SettingsIpcMigrationRequest));
-            if (!ok ||
-                SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ManagedStorageMigrationResult)
-                    is not { } result)
+            if (!ok)
             {
-                throw new InvalidOperationException(error ?? "storage migration failed");
+                throw new IOException(error ?? "storage migration failed");
             }
 
-            return result;
+            SettingsIpcMigrationOutcome? outcome = SettingsIpcPayload.Decode(
+                payload,
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome);
+            if (outcome is { Ok: true, Result: { } result })
+            {
+                return result;
+            }
+
+            if (outcome is { Stopped: true })
+            {
+                throw new StorageMigrationStoppedException(
+                    new OperationCanceledException(outcome.ErrorMessage ?? "Storage migration stopped; originals retained."),
+                    outcome.TemporaryBytes,
+                    outcome.HasPartialCopies);
+            }
+
+            if (outcome is not null)
+            {
+                StorageMigrationProblem problem = outcome.ProblemKind is { } kind &&
+                                                  Enum.IsDefined(typeof(StorageMigrationProblem), kind)
+                    ? (StorageMigrationProblem)kind
+                    : StorageMigrationProblem.Unknown;
+                throw new StorageMigrationException(
+                    problem,
+                    outcome.ErrorMessage ?? "storage migration failed",
+                    blockingPath: outcome.BlockingPath)
+                {
+                    TemporaryBytes = outcome.TemporaryBytes,
+                };
+            }
+
+            throw new InvalidOperationException(error ?? "storage migration failed");
         }
         finally
         {
@@ -311,8 +515,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetGlanceList)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.WidgetGlanceList);
         return ok
             ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ListGlanceWidgetInstanceInfo) ?? []
             : [];
@@ -322,8 +525,14 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
     {
         get
         {
-            (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetGlanceFeatureEnabled)
-                .GetAwaiter().GetResult();
+            if (_settingsService.Settings.WidgetLayout.FeatureWidgetEnabledStates.TryGetValue(
+                    nameof(WidgetKind.Glance),
+                    out bool mirrored))
+            {
+                return mirrored;
+            }
+
+            (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.WidgetGlanceFeatureEnabled);
             return ok && SettingsIpcPayload.DecodeBoolean(payload);
         }
     }
@@ -356,6 +565,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public async Task<bool> LocateGlanceWidgetAsync(string widgetId)
     {
+        GrantMainProcessForegroundRight();
         (bool ok, _, _) = await _client.RequestAsync(SettingsIpcMethods.WidgetGlanceLocate, widgetId);
         return ok;
     }
@@ -370,6 +580,101 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 new SettingsIpcGlanceRename(widgetId, newName),
                 SettingsIpcJsonContext.Default.SettingsIpcGlanceRename));
 
+    public async Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync()
+    {
+        (bool ok, string? payload, _) = await _client.RequestAsync(SettingsIpcMethods.WidgetCustomList);
+        return ok
+            ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ListGlanceWidgetInstanceInfo) ?? []
+            : [];
+    }
+
+    public async Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetCustomCreate,
+            templateOrPackageSpec);
+        if (!ok ||
+            SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo)
+                is not { } created)
+        {
+            throw new InvalidOperationException(error ?? "custom widget create failed");
+        }
+
+        return created;
+    }
+
+    public async Task<GlanceWidgetInstanceInfo> CreateCustomWidgetWithSetupAsync(Contracts.CustomWidgetCreateOptions options)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetCustomCreateWithSetup,
+            SettingsIpcPayload.Encode(
+                options,
+                SettingsIpcJsonContext.Default.CustomWidgetCreateOptions));
+        if (!ok ||
+            SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo)
+                is not { } created)
+        {
+            throw new InvalidOperationException(error ?? "custom widget create failed");
+        }
+
+        return created;
+    }
+
+    public async Task ApplyCustomWidgetMutationAsync(Contracts.CustomWidgetSettingsMutation mutation)
+    {
+        (bool ok, _, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetCustomApplyMutation,
+            SettingsIpcPayload.Encode(
+                mutation,
+                SettingsIpcJsonContext.Default.CustomWidgetSettingsMutation));
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "custom widget mutation failed");
+        }
+    }
+
+    public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) =>
+        RequestVoidAsync(
+            SettingsIpcMethods.WidgetCustomSetEnabled,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcGlanceSetEnabled(widgetId, enabled),
+                SettingsIpcJsonContext.Default.SettingsIpcGlanceSetEnabled));
+
+    public async Task<bool> LocateCustomWidgetAsync(string widgetId)
+    {
+        GrantMainProcessForegroundRight();
+        (bool ok, _, _) = await _client.RequestAsync(SettingsIpcMethods.WidgetCustomLocate, widgetId);
+        return ok;
+    }
+
+    public Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea)
+    {
+        GrantMainProcessForegroundRight();
+        return RequestVoidAsync(SettingsIpcMethods.WidgetCustomOpenStudio, EncodeStudioRequest(widgetId, initialIdea));
+    }
+
+    /// <summary>"widgetId\nidea" — either part may be empty.</summary>
+    internal static string EncodeStudioRequest(string? widgetId, string? initialIdea) =>
+        (widgetId?.Trim() ?? string.Empty) + "\n" + (initialIdea ?? string.Empty);
+
+    internal static (string? WidgetId, string? InitialIdea) DecodeStudioRequest(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return (null, null);
+        }
+
+        int separator = payload.IndexOf('\n');
+        string id = separator < 0 ? payload : payload[..separator];
+        string idea = separator < 0 ? string.Empty : payload[(separator + 1)..];
+        return (
+            string.IsNullOrWhiteSpace(id) ? null : id.Trim(),
+            string.IsNullOrWhiteSpace(idea) ? null : idea);
+    }
+
+    public Task RemoveCustomWidgetAsync(string widgetId) =>
+        RequestVoidAsync(SettingsIpcMethods.WidgetCustomRemove, widgetId);
+
     public async Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
         string displayStableId)
     {
@@ -383,7 +688,18 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             throw new InvalidOperationException(error ?? "move-all failed");
         }
 
-        return (moveAll.MovedCount, new WidgetMoveAllUndoToken { IpcHandleId = moveAll.Handle });
+        if (!string.IsNullOrEmpty(moveAll.LayoutSliceJson))
+        {
+            _ = _settingsService.ApplyExternalLayout(moveAll.LayoutSliceJson);
+        }
+
+        return (
+            moveAll.MovedCount,
+            new WidgetMoveAllUndoToken
+            {
+                IpcHandleId = moveAll.Handle,
+                Persisted = moveAll.Persisted
+            });
     }
 
     public async Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token)
@@ -393,27 +709,73 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             return false;
         }
 
-        (bool ok, _, _) = await _client.RequestAsync(
+        (bool ok, string? payload, _) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetMoveAllUndo,
             handle.ToString());
+        if (ok && !string.IsNullOrEmpty(payload))
+        {
+            _ = _settingsService.ApplyExternalLayout(payload);
+        }
+
         return ok;
     }
 
-    public Task ApplyScreenBindingAsync(
+    public async Task<int> RecalibrateDisplayLayoutAsync()
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetRecalibrateDisplayLayout);
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "recalibrate display layout failed");
+        }
+
+        if (string.IsNullOrEmpty(payload))
+        {
+            return 0;
+        }
+
+        int separator = payload.IndexOf('\n');
+        string countPart = separator < 0 ? payload : payload[..separator];
+        string? sliceJson = separator < 0 ? null : payload[(separator + 1)..];
+        if (!string.IsNullOrEmpty(sliceJson))
+        {
+            _ = _settingsService.ApplyExternalLayout(sliceJson);
+        }
+
+        return int.TryParse(
+            countPart,
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out int count)
+            ? count
+            : 0;
+    }
+
+    public async Task ApplyScreenBindingAsync(
         string widgetId,
         WidgetScreenBindingMode mode,
         string? boundScreenId,
-        bool persistImmediately = true) =>
-        RequestVoidAsync(
+        bool persistImmediately = true)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetApplyScreenBinding,
             SettingsIpcPayload.Encode(
                 new SettingsIpcScreenBinding(widgetId, (int)mode, boundScreenId, persistImmediately),
                 SettingsIpcJsonContext.Default.SettingsIpcScreenBinding));
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "apply screen binding failed");
+        }
+
+        if (!string.IsNullOrEmpty(payload))
+        {
+            _ = _settingsService.ApplyExternalLayout(payload);
+        }
+    }
 
     public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetLatestUndoableOrgEntry)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.WidgetLatestUndoableOrgEntry);
         return ok
             ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.OrganizationHistoryEntry)
             : null;
@@ -421,10 +783,10 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId)
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.WidgetOrgHistoryEntry,
-                historyId)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.WidgetOrgHistoryEntry,
+            historyId);
         return ok
             ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.OrganizationHistoryEntry)
             : null;

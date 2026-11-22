@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using DeskBox.Helpers;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
 
@@ -28,8 +30,12 @@ public static class WindowsCompatibilityService
     {
         try
         {
+            window.SetTitleBar(null);
             window.ExtendsContentIntoTitleBar = false;
-            appWindow?.TitleBar.ResetToDefault();
+            if (appWindow is not null && AppWindowTitleBar.IsCustomizationSupported())
+            {
+                appWindow.TitleBar.ResetToDefault();
+            }
         }
         catch (Exception ex)
         {
@@ -76,6 +82,8 @@ public static class WindowsCompatibilityService
 
     public static bool SupportsNativeWindowCorners => IsWindows11OrLater;
 
+    public static bool SupportsWidgetCorners => true;
+
     public static bool SupportsMica => IsWindows11OrLater && IsSupported(() => MicaController.IsSupported());
 
     public static bool SupportsDesktopAcrylic =>
@@ -89,10 +97,8 @@ public static class WindowsCompatibilityService
     }
 
     /// <summary>
-    /// Resolves the corner preference that can actually be rendered on the
-    /// current platform. The persisted setting remains the user's requested
-    /// value so a Win10 profile can regain its preference after moving to
-    /// Windows 11.
+    /// Resolves the corner preference rendered by widget and popup XAML/backdrop
+    /// surfaces on the current platform (supported on Windows 10 19041+ and Windows 11).
     /// </summary>
     public static string ResolveEffectiveWidgetCornerPreference(string? requestedPreference)
     {
@@ -103,22 +109,19 @@ public static class WindowsCompatibilityService
         string? requestedPreference,
         int osBuild)
     {
-        string normalized = requestedPreference is
+        _ = osBuild;
+        return requestedPreference is
             SettingsService.WidgetCornerPreferenceSquare or
             SettingsService.WidgetCornerPreferenceSmall or
-            SettingsService.WidgetCornerPreferenceRound
+            SettingsService.WidgetCornerPreferenceRound or
+            SettingsService.WidgetCornerPreferenceLarge
                 ? requestedPreference
                 : SettingsService.WidgetCornerPreferenceRound;
-
-        return osBuild < Windows11Build
-            ? SettingsService.WidgetCornerPreferenceSquare
-            : normalized;
     }
 
     /// <summary>
-    /// Resolves the compact media corner mode that can actually be rendered
-    /// on the current platform. Win10 keeps all capsule media surfaces square,
-    /// while Win11 continues to honor the explicit media preference.
+    /// Resolves the compact media corner mode rendered on the current platform
+    /// (supported on Windows 10 19041+ and Windows 11).
     /// </summary>
     public static string ResolveEffectiveWidgetCompactMediaCornerMode(string? requestedMode)
     {
@@ -129,10 +132,8 @@ public static class WindowsCompatibilityService
         string? requestedMode,
         int osBuild)
     {
-        string normalized = SettingsService.NormalizeWidgetCompactMediaCornerMode(requestedMode);
-        return osBuild < Windows11Build
-            ? SettingsService.WidgetCompactMediaCornerSquare
-            : normalized;
+        _ = osBuild;
+        return SettingsService.NormalizeWidgetCompactMediaCornerMode(requestedMode);
     }
 
     internal static string ResolveWidgetMaterialTypeForBuild(
@@ -187,7 +188,71 @@ public static class WindowsCompatibilityService
         }
 
         window.SystemBackdrop = null;
+        ApplySolidRootSurfaceFallback(window);
         return "Solid";
+    }
+
+    private static void ApplySolidRootSurfaceFallback(Window window)
+    {
+        try
+        {
+            if (window.Content is not Panel rootPanel)
+            {
+                return;
+            }
+
+            bool needsFallback = rootPanel.Background is null ||
+                (rootPanel.Background is SolidColorBrush solid && solid.Color.A == 0);
+            if (!needsFallback)
+            {
+                return;
+            }
+
+            ApplySolidThemeBackground(rootPanel);
+            Windows.Foundation.TypedEventHandler<FrameworkElement, object> themeChangedHandler = static (sender, _) =>
+            {
+                if (sender is Panel panel)
+                {
+                    ApplySolidThemeBackground(panel);
+                }
+            };
+            rootPanel.ActualThemeChanged += themeChangedHandler;
+
+            Windows.Foundation.TypedEventHandler<object, WindowEventArgs>? closedHandler = null;
+            closedHandler = (sender, _) =>
+            {
+                rootPanel.ActualThemeChanged -= themeChangedHandler;
+                if (sender is Window closingWindow && closedHandler is not null)
+                {
+                    closingWindow.Closed -= closedHandler;
+                }
+            };
+            window.Closed += closedHandler;
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Backdrop] Solid fallback brush apply skipped: {ex.Message}");
+        }
+    }
+
+    private static void ApplySolidThemeBackground(Panel rootPanel)
+    {
+        if (IsHighContrast)
+        {
+            rootPanel.Background =
+                NeutralInteractionBrush.ResolveThemedResource("SolidBackgroundFillColorBaseBrush", rootPanel) ??
+                new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(
+                    Windows.UI.ViewManagement.UIColorType.Background));
+            return;
+        }
+
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(rootPanel);
+        Windows.UI.Color fallbackColor = IsHighContrast
+            ? ResolveHighContrastBackgroundColor(isDark)
+            : isDark
+                ? Windows.UI.Color.FromArgb(255, 32, 32, 32)
+                : Windows.UI.Color.FromArgb(255, 243, 243, 243);
+        rootPanel.Background = new SolidColorBrush(fallbackColor);
     }
 
     /// <summary>
@@ -282,6 +347,18 @@ public static class WindowsCompatibilityService
         }
     }
 
+    public static Windows.UI.Color ResolveHighContrastBackgroundColor(bool isDark) =>
+        TryGetUiColor(Windows.UI.ViewManagement.UIColorType.Background)
+        ?? (isDark
+            ? Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20)
+            : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3));
+
+    public static Windows.UI.Color ResolveHighContrastForegroundColor(bool isDark) =>
+        TryGetUiColor(Windows.UI.ViewManagement.UIColorType.Foreground)
+        ?? (isDark
+            ? Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
+            : Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
+
     public static bool ShouldAnimate
     {
         get
@@ -327,6 +404,16 @@ public static class WindowsCompatibilityService
         bool highContrast)
     {
         return animationsEnabled && advancedEffectsEnabled && !highContrast;
+    }
+
+    public static bool ShouldAnimateContinuousMedia =>
+        ResolveShouldAnimateContinuousMedia(AreAnimationsEnabled, IsHighContrast);
+
+    internal static bool ResolveShouldAnimateContinuousMedia(
+        bool animationsEnabled,
+        bool highContrast)
+    {
+        return animationsEnabled && !highContrast;
     }
 
     private static int GetOsBuild()

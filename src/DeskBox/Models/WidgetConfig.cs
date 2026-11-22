@@ -6,7 +6,7 @@ namespace DeskBox.Models;
 /// <summary>
 /// Represents the persisted configuration for a single desktop widget.
 /// </summary>
-public class WidgetConfig
+public sealed class WidgetConfig
 {
     public const int CurrentBoundsCoordinateVersion = 1;
 
@@ -55,6 +55,14 @@ public class WidgetConfig
     /// Null on legacy data: the profile entry then wins as before.
     /// </summary>
     public DateTimeOffset? LastUserPlacementUtc { get; set; }
+
+    /// <summary>
+    /// Active topology key when <see cref="LastUserPlacementUtc"/> was stamped.
+    /// Prevents a temporary room-making adjustment on a subset/fallback topology
+    /// from overwriting an already-authoritative placement in a fuller display set.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastUserPlacementTopologyKey { get; set; }
 
     /// <summary>Work area signature of the monitor where the widget was last positioned.</summary>
     public string? PositionMonitorKey { get; set; }
@@ -112,8 +120,27 @@ public class WidgetConfig
     public double Height { get; set; } = 400;
 
     /// <summary>Widget content type.</summary>
-    [JsonConverter(typeof(WidgetKindJsonConverter))]
+    [JsonIgnore]
     public WidgetKind WidgetKind { get; set; } = WidgetKind.File;
+
+    /// <summary>Preserves unrecognized future widgetKind strings verbatim across load/save without global state.</summary>
+    [JsonIgnore]
+    public string? UnknownWidgetKindRawValue { get; set; }
+
+    /// <summary>True when loaded from a newer DeskBox version with an unrecognized widgetKind.</summary>
+    [JsonIgnore]
+    public bool IsUnknownFutureKind => WidgetKindJsonConverter.IsUnknownFutureKind(WidgetKind);
+
+    [JsonPropertyName("widgetKind")]
+    public PersistedWidgetKind SerializedWidgetKind
+    {
+        get => new(WidgetKind, UnknownWidgetKindRawValue);
+        set
+        {
+            WidgetKind = value.Kind;
+            UnknownWidgetKindRawValue = value.RawUnknown;
+        }
+    }
 
     /// <summary>Current view layout mode (Icon grid or List).</summary>
     public ViewMode ViewMode { get; set; } = ViewMode.Icon;
@@ -212,7 +239,7 @@ public sealed class WidgetCompactPlacement
 /// <summary>
 /// Persisted reference to a single item (file or shortcut) inside a widget.
 /// </summary>
-public class WidgetItemConfig
+public sealed class WidgetItemConfig
 {
     /// <summary>Absolute path to the file, folder, or shortcut.</summary>
     public string Path { get; set; } = string.Empty;
@@ -281,14 +308,20 @@ public enum WidgetKind
     /// <summary>Reserved for a future system monitor widget.</summary>
     SystemMonitor,
 
-    /// <summary>Global search widget that provides unified file and content search.</summary>
+    /// <summary>Legacy value kept only for migrating old settings files (Search is now standalone).</summary>
     Search,
 
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity,
 
     /// <summary>At-a-glance background, time and date widget.</summary>
-    Glance
+    Glance,
+
+    /// <summary>Declarative native WinUI 3 custom widget.</summary>
+    Custom,
+
+    /// <summary>First-party clipboard history and snippet shelf widget.</summary>
+    Clipboard
 }
 
 /// <summary>
@@ -342,23 +375,76 @@ public sealed class WidgetScreenBindingModeJsonConverter : JsonConverter<WidgetS
     }
 }
 
-public sealed class WidgetKindJsonConverter : JsonConverter<WidgetKind>
+[JsonConverter(typeof(PersistedWidgetKindJsonConverter))]
+public readonly record struct PersistedWidgetKind(WidgetKind Kind, string? RawUnknown);
+
+public sealed class PersistedWidgetKindJsonConverter : JsonConverter<PersistedWidgetKind>
 {
-    public override WidgetKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override PersistedWidgetKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.String)
         {
             string? value = reader.GetString();
-            return Enum.TryParse(value, ignoreCase: true, out WidgetKind parsed) &&
-                   Enum.IsDefined(parsed)
-                ? parsed
-                : WidgetKind.File;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return new PersistedWidgetKind(WidgetKind.File, null);
+            }
+
+            return Enum.TryParse(value, ignoreCase: true, out WidgetKind parsed) && Enum.IsDefined(parsed)
+                ? new PersistedWidgetKind(parsed, null)
+                : new PersistedWidgetKind(WidgetKindJsonConverter.UnknownFutureKind, value.Trim());
         }
 
         if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int numericValue))
         {
             var parsed = (WidgetKind)numericValue;
-            return Enum.IsDefined(parsed) ? parsed : WidgetKind.File;
+            return Enum.IsDefined(parsed)
+                ? new PersistedWidgetKind(parsed, null)
+                : new PersistedWidgetKind(
+                    WidgetKindJsonConverter.UnknownFutureKind,
+                    numericValue.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return new PersistedWidgetKind(WidgetKind.File, null);
+    }
+
+    public override void Write(Utf8JsonWriter writer, PersistedWidgetKind value, JsonSerializerOptions options)
+    {
+        if (Enum.IsDefined(value.Kind))
+        {
+            writer.WriteStringValue(value.Kind.ToString());
+            return;
+        }
+
+        writer.WriteStringValue(!string.IsNullOrWhiteSpace(value.RawUnknown) ? value.RawUnknown : "Unknown");
+    }
+}
+
+public sealed class WidgetKindJsonConverter : JsonConverter<WidgetKind>
+{
+    public const WidgetKind UnknownFutureKind = (WidgetKind)(-1);
+
+    public static bool IsUnknownFutureKind(WidgetKind kind) => (int)kind < 0 || !Enum.IsDefined(kind);
+
+    public override WidgetKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            string? value = reader.GetString();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return WidgetKind.File;
+            }
+
+            return Enum.TryParse(value, ignoreCase: true, out WidgetKind parsed) && Enum.IsDefined(parsed)
+                ? parsed
+                : UnknownFutureKind;
+        }
+
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int numericValue))
+        {
+            var parsed = (WidgetKind)numericValue;
+            return Enum.IsDefined(parsed) ? parsed : UnknownFutureKind;
         }
 
         return WidgetKind.File;
@@ -366,6 +452,6 @@ public sealed class WidgetKindJsonConverter : JsonConverter<WidgetKind>
 
     public override void Write(Utf8JsonWriter writer, WidgetKind value, JsonSerializerOptions options)
     {
-        writer.WriteStringValue(Enum.IsDefined(value) ? value.ToString() : WidgetKind.File.ToString());
+        writer.WriteStringValue(Enum.IsDefined(value) ? value.ToString() : "Unknown");
     }
 }

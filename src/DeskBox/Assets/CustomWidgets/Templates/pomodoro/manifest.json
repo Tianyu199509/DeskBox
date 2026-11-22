@@ -1,0 +1,1268 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.pomodoro",
+  "name": "${$i18n.widgetName}",
+  "version": "8.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🍅",
+  "minSize": {
+    "width": 296,
+    "height": 320
+  },
+  "defaultSize": {
+    "width": 332,
+    "height": 360
+  },
+  "script": {
+    "entry": "logic.js"
+  },
+  "settings": [
+    {
+      "key": "rhythmMode",
+      "type": "choice",
+      "label": "${$i18n.setRhythmMode}",
+      "default": "pomodoro",
+      "options": [
+        {
+          "value": "pomodoro",
+          "label": "${$i18n.optRhythmPomodoro}"
+        },
+        {
+          "value": "sedentary",
+          "label": "${$i18n.optRhythmSedentary}"
+        }
+      ]
+    },
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "timer:1,task:1,goal:1,history:0,health:0",
+      "options": [
+        {
+          "value": "timer",
+          "label": "${$i18n.modTimer}"
+        },
+        {
+          "value": "task",
+          "label": "${$i18n.modTask}"
+        },
+        {
+          "value": "goal",
+          "label": "${$i18n.modGoal}"
+        },
+        {
+          "value": "history",
+          "label": "${$i18n.modHistory}"
+        },
+        {
+          "value": "health",
+          "label": "${$i18n.modHealth}"
+        }
+      ]
+    },
+    {
+      "key": "focusMinutes",
+      "type": "choice",
+      "label": "${$i18n.setFocusMin}",
+      "default": "25",
+      "options": [
+        {
+          "value": "15",
+          "label": "${$i18n.optFocus15}"
+        },
+        {
+          "value": "25",
+          "label": "${$i18n.optFocus25}"
+        },
+        {
+          "value": "35",
+          "label": "${$i18n.optFocus35}"
+        },
+        {
+          "value": "45",
+          "label": "${$i18n.optFocus45}"
+        },
+        {
+          "value": "60",
+          "label": "${$i18n.optFocus60}"
+        }
+      ]
+    },
+    {
+      "key": "breakPreset",
+      "type": "choice",
+      "label": "${$i18n.setBreakPreset}",
+      "default": "5,15",
+      "options": [
+        {
+          "value": "3,10",
+          "label": "${$i18n.optBreak3_10}"
+        },
+        {
+          "value": "5,15",
+          "label": "${$i18n.optBreak5_15}"
+        },
+        {
+          "value": "5,20",
+          "label": "${$i18n.optBreak5_20}"
+        },
+        {
+          "value": "10,25",
+          "label": "${$i18n.optBreak10_25}"
+        }
+      ]
+    },
+    {
+      "key": "dailyGoal",
+      "type": "choice",
+      "label": "${$i18n.setDailyGoal}",
+      "default": "6",
+      "options": [
+        {
+          "value": "4",
+          "label": "${$i18n.optGoal4}"
+        },
+        {
+          "value": "6",
+          "label": "${$i18n.optGoal6}"
+        },
+        {
+          "value": "8",
+          "label": "${$i18n.optGoal8}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optGoal10}"
+        },
+        {
+          "value": "12",
+          "label": "${$i18n.optGoal12}"
+        }
+      ]
+    },
+    {
+      "key": "flowMode",
+      "type": "choice",
+      "label": "${$i18n.setFlowMode}",
+      "default": "semi",
+      "options": [
+        {
+          "value": "semi",
+          "label": "${$i18n.optFlowSemi}"
+        },
+        {
+          "value": "manual",
+          "label": "${$i18n.optFlowManual}"
+        },
+        {
+          "value": "auto",
+          "label": "${$i18n.optFlowAuto}"
+        }
+      ]
+    },
+    {
+      "key": "notifyMode",
+      "type": "choice",
+      "label": "${$i18n.setNotifyMode}",
+      "default": "toast_sound",
+      "options": [
+        {
+          "value": "toast_sound",
+          "label": "${$i18n.optNotifySound}"
+        },
+        {
+          "value": "toast_silent",
+          "label": "${$i18n.optNotifySilent}"
+        },
+        {
+          "value": "none",
+          "label": "${$i18n.optNotifyNone}"
+        }
+      ]
+    },
+    {
+      "key": "sedentaryIntervalMin",
+      "type": "choice",
+      "label": "${$i18n.setSedentaryInterval}",
+      "default": "50",
+      "options": [
+        {
+          "value": "40",
+          "label": "${$i18n.optSed40}"
+        },
+        {
+          "value": "50",
+          "label": "${$i18n.optSed50}"
+        },
+        {
+          "value": "60",
+          "label": "${$i18n.optSed60}"
+        },
+        {
+          "value": "90",
+          "label": "${$i18n.optSed90}"
+        }
+      ]
+    },
+    {
+      "key": "idleAutoResetMin",
+      "type": "choice",
+      "label": "${$i18n.setIdleReset}",
+      "default": "5",
+      "options": [
+        {
+          "value": "0",
+          "label": "${$i18n.optIdleOff}"
+        },
+        {
+          "value": "5",
+          "label": "${$i18n.optIdle5}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optIdle10}"
+        }
+      ]
+    },
+    {
+      "key": "backgroundSedentary",
+      "type": "toggle",
+      "label": "${$i18n.setBgSedentary}",
+      "default": true
+    },
+    {
+      "key": "focusSoundscape",
+      "type": "select",
+      "label": "${$i18n.setFocusSoundscape}",
+      "default": "off",
+      "options": [
+        {
+          "value": "off",
+          "label": "${$i18n.optSoundOff}"
+        },
+        {
+          "value": "rain",
+          "label": "${$i18n.optSoundRain}"
+        },
+        {
+          "value": "pink",
+          "label": "${$i18n.optSoundPink}"
+        },
+        {
+          "value": "brown",
+          "label": "${$i18n.optSoundBrown}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "currentTask": "",
+    "linkedTodoId": "",
+    "soundVolume": 35,
+    "seeded": false
+  },
+  "collections": {
+    "sessions": {
+      "maxItems": 100,
+      "sort": "newestFirst"
+    },
+    "todos": {
+      "maxItems": 60,
+      "fields": [
+        "id",
+        "title",
+        "done",
+        "completed",
+        "dueDate",
+        "dueIso",
+        "dueText",
+        "priority",
+        "important",
+        "widgetId"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "type": "pomodoro",
+      "intervalMs": 1000
+    },
+    {
+      "type": "todo",
+      "targetCollection": "todos",
+      "maxItems": 60,
+      "intervalMs": 30000
+    }
+  ],
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "🍅",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${$pomodoro.isDue || $pomodoro.sedentaryIsDue == 'true'}",
+    "progress": "${$pomodoro.progressPercent}",
+    "enableBounceOnUpdate": false,
+    "primaryAction": {
+      "icon": "${$pomodoro.isRunning ? 'pause' : 'play'}",
+      "tooltip": "${$pomodoro.primaryActionText}",
+      "onClick": [
+        {
+          "type": "pomodoro.toggle"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "soundPop": {
+      "title": "${$i18n.soundPopoverTitle}",
+      "width": 268,
+      "root": "pop_soundscape_body"
+    },
+    "taskPop": {
+      "title": "${$i18n.taskPopoverTitle}",
+      "width": 284,
+      "root": "pop_task_picker_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "ModuleStack",
+      "bind": "settings.modules",
+      "spacing": 8,
+      "padding": "12",
+      "children": [
+        "timer",
+        "task",
+        "goal",
+        "history",
+        "health"
+      ]
+    },
+    "timer": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "12,10",
+      "spacing": 10,
+      "children": [
+        "timer_mode_bar_grid",
+        "sedentary_alert_banner_card",
+        "timer_mode_switcher_stack"
+      ]
+    },
+    "timer_mode_bar_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "rhythm_mode_tabs_row",
+        "btn_soundscape_popover"
+      ]
+    },
+    "rhythm_mode_tabs_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 4,
+      "children": [
+        "btn_mode_pomodoro",
+        "btn_mode_sedentary"
+      ]
+    },
+    "btn_mode_pomodoro": {
+      "type": "Button",
+      "text": "${$i18n.modeTabPomo}",
+      "variant": "${$settings.rhythmMode != 'sedentary' ? 'standard' : 'subtle'}",
+      "fontWeight": "${$settings.rhythmMode != 'sedentary' ? 'semiBold' : 'normal'}",
+      "padding": "10,3",
+      "onClick": [
+        {
+          "type": "settings.set",
+          "key": "rhythmMode",
+          "value": "pomodoro"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_mode_sedentary": {
+      "type": "Button",
+      "text": "${$i18n.modeTabSed}",
+      "variant": "${$settings.rhythmMode == 'sedentary' ? 'standard' : 'subtle'}",
+      "fontWeight": "${$settings.rhythmMode == 'sedentary' ? 'semiBold' : 'normal'}",
+      "padding": "10,3",
+      "onClick": [
+        {
+          "type": "settings.set",
+          "key": "rhythmMode",
+          "value": "sedentary"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_soundscape_popover": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "${$settings.focusSoundscape == 'off' ? 'mute' : 'soundscape'}",
+      "size": 26,
+      "variant": "subtle",
+      "popover": "soundPop",
+      "tooltip": "${$computed.soundChipLabel}"
+    },
+    "sedentary_alert_banner_card": {
+      "type": "Card",
+      "when": "${$pomodoro.mode == 'pomodoro' && $pomodoro.sedentaryIsDue == 'true'}",
+      "tone": "warning",
+      "padding": "8,6",
+      "children": [
+        "sedentary_alert_banner_grid"
+      ]
+    },
+    "sedentary_alert_banner_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_sedentary_alert_message",
+        "btn_sedentary_banner_confirm",
+        "btn_sedentary_banner_snooze"
+      ]
+    },
+    "txt_sedentary_alert_message": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.bgSedDueBanner}",
+      "style": "caption",
+      "color": "warning",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "btn_sedentary_banner_confirm": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$pomodoro.confirmActionText}",
+      "variant": "standard",
+      "padding": "8,3",
+      "onClick": [
+        {
+          "type": "pomodoro.sedentaryConfirm"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_sedentary_banner_snooze": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$pomodoro.snoozeActionText}",
+      "variant": "subtle",
+      "padding": "6,3",
+      "onClick": [
+        {
+          "type": "pomodoro.sedentarySnooze",
+          "value": "900"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "timer_mode_switcher_stack": {
+      "type": "ZStack",
+      "children": [
+        "pomodoro_timer_panel",
+        "sedentary_timer_panel"
+      ]
+    },
+    "pomodoro_timer_panel": {
+      "type": "Stack",
+      "when": "${$pomodoro.mode == 'pomodoro'}",
+      "spacing": 8,
+      "children": [
+        "pomodoro_phase_header_grid",
+        "pomodoro_controls_grid"
+      ]
+    },
+    "pomodoro_phase_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "pomodoro_phase_status_row",
+        "focus_duration_stepper_row"
+      ]
+    },
+    "pomodoro_phase_status_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "badge_pomodoro_phase",
+        "txt_pomodoro_round_hint"
+      ]
+    },
+    "badge_pomodoro_phase": {
+      "type": "Badge",
+      "text": "${$computed.phaseTagText}",
+      "tone": "${$computed.phaseTone}"
+    },
+    "txt_pomodoro_round_hint": {
+      "type": "Text",
+      "text": "${$computed.roundHintText}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "focus_duration_stepper_row": {
+      "type": "Stack",
+      "column": 1,
+      "when": "${!$pomodoro.isRunning && !$pomodoro.isPaused}",
+      "orientation": "horizontal",
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_decrease_focus_minutes",
+        "txt_focus_duration_value",
+        "btn_increase_focus_minutes"
+      ]
+    },
+    "btn_decrease_focus_minutes": {
+      "type": "IconButton",
+      "icon": "minus",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipMinusFocus}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "stepFocusDuration",
+          "args": {
+            "dir": "-1",
+            "cur": "${$settings.focusMinutes}",
+            "brk": "${$settings.breakPreset}",
+            "goal": "${$settings.dailyGoal}",
+            "flow": "${$settings.flowMode}",
+            "notify": "${$settings.notifyMode}"
+          }
+        }
+      ]
+    },
+    "txt_focus_duration_value": {
+      "type": "Text",
+      "text": "${$settings.focusMinutes}${$i18n.minShortUnit}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "btn_increase_focus_minutes": {
+      "type": "IconButton",
+      "icon": "add",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipPlusFocus}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "stepFocusDuration",
+          "args": {
+            "dir": "1",
+            "cur": "${$settings.focusMinutes}"
+          }
+        }
+      ]
+    },
+    "pomodoro_controls_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 10,
+      "verticalAlignment": "center",
+      "children": [
+        "pomodoro_clock_stack",
+        "pomodoro_action_buttons_row"
+      ]
+    },
+    "pomodoro_clock_stack": {
+      "type": "Stack",
+      "column": 0,
+      "spacing": 2,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_pomodoro_countdown",
+        "txt_pomodoro_subtitle"
+      ]
+    },
+    "txt_pomodoro_countdown": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "${$pomodoro.timeText}",
+      "fontFamily": "mono",
+      "fontSize": 34,
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "txt_pomodoro_subtitle": {
+      "type": "Text",
+      "text": "${$computed.timerSubtitle}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "pomodoro_action_buttons_row": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_reset_pomodoro",
+        "btn_toggle_pomodoro",
+        "btn_skip_pomodoro"
+      ]
+    },
+    "btn_reset_pomodoro": {
+      "type": "IconButton",
+      "when": "${$pomodoro.isRunning || $pomodoro.isPaused}",
+      "icon": "refresh",
+      "size": 30,
+      "variant": "subtle",
+      "tooltip": "${$i18n.resetTooltip}",
+      "onClick": [
+        {
+          "type": "pomodoro.reset"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_toggle_pomodoro": {
+      "type": "Button",
+      "icon": "${$pomodoro.isRunning ? 'pause' : 'play'}",
+      "text": "${$pomodoro.primaryActionText}",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "padding": "12,6",
+      "onClick": [
+        {
+          "type": "pomodoro.toggle"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_skip_pomodoro": {
+      "type": "IconButton",
+      "icon": "next",
+      "size": 30,
+      "variant": "subtle",
+      "tooltip": "${$i18n.skipTooltip}",
+      "onClick": [
+        {
+          "type": "pomodoro.skip"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "sedentary_timer_panel": {
+      "type": "Stack",
+      "when": "${$pomodoro.mode == 'sedentary'}",
+      "spacing": 8,
+      "children": [
+        "sedentary_state_switcher_stack",
+        "txt_sedentary_rule_summary"
+      ]
+    },
+    "sedentary_state_switcher_stack": {
+      "type": "ZStack",
+      "children": [
+        "sedentary_countdown_grid",
+        "sedentary_due_prompt_stack"
+      ]
+    },
+    "sedentary_countdown_grid": {
+      "type": "Grid",
+      "when": "${!$pomodoro.isDue}",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "sedentary_clock_stack",
+        "btn_toggle_sedentary"
+      ]
+    },
+    "sedentary_clock_stack": {
+      "type": "Stack",
+      "column": 0,
+      "spacing": 2,
+      "children": [
+        "txt_sedentary_title",
+        "txt_sedentary_countdown"
+      ]
+    },
+    "txt_sedentary_title": {
+      "type": "Text",
+      "text": "${$i18n.sedCardTitle}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "txt_sedentary_countdown": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "${$pomodoro.timeText}",
+      "fontFamily": "mono",
+      "fontSize": 32,
+      "fontWeight": "semiBold",
+      "maxLines": 1
+    },
+    "btn_toggle_sedentary": {
+      "type": "Button",
+      "column": 1,
+      "icon": "${$pomodoro.isRunning ? 'pause' : 'play'}",
+      "text": "${$pomodoro.primaryActionText}",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "padding": "12,6",
+      "onClick": [
+        {
+          "type": "pomodoro.toggle"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView",
+          "args": {
+            "sed": "${$settings.sedentaryIntervalMin}",
+            "idle": "${$settings.idleAutoResetMin}"
+          }
+        }
+      ]
+    },
+    "sedentary_due_prompt_stack": {
+      "type": "Stack",
+      "when": "${$pomodoro.isDue}",
+      "spacing": 8,
+      "children": [
+        "txt_sedentary_micro_action",
+        "sedentary_due_actions_grid"
+      ]
+    },
+    "txt_sedentary_micro_action": {
+      "type": "Text",
+      "text": "${$pomodoro.microAction}",
+      "style": "caption",
+      "color": "warning",
+      "maxLines": 2
+    },
+    "sedentary_due_actions_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "btn_confirm_sedentary_break",
+        "btn_snooze_sedentary_break"
+      ]
+    },
+    "btn_confirm_sedentary_break": {
+      "type": "Button",
+      "column": 0,
+      "icon": "check",
+      "text": "${$pomodoro.confirmActionText}",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "pomodoro.sedentaryConfirm"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "btn_snooze_sedentary_break": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$pomodoro.snoozeActionText}",
+      "variant": "subtle",
+      "onClick": [
+        {
+          "type": "pomodoro.sedentarySnooze",
+          "value": "900"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "txt_sedentary_rule_summary": {
+      "type": "Text",
+      "text": "${$computed.sedRuleText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "task": {
+      "type": "Card",
+      "tone": "default",
+      "padding": "12,8",
+      "when": "${$pomodoro.mode == 'pomodoro'}",
+      "children": [
+        "active_task_grid"
+      ]
+    },
+    "active_task_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "chk_complete_active_task",
+        "active_task_info_stack",
+        "btn_open_task_picker"
+      ]
+    },
+    "chk_complete_active_task": {
+      "type": "CheckBox",
+      "column": 0,
+      "value": "false",
+      "tooltip": "${$i18n.completeTodoTooltip}",
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "completeActiveTask"
+        }
+      ]
+    },
+    "active_task_info_stack": {
+      "type": "Stack",
+      "column": 1,
+      "spacing": 1,
+      "popover": "taskPop",
+      "children": [
+        "txt_active_task_heading",
+        "txt_active_task_title"
+      ]
+    },
+    "txt_active_task_heading": {
+      "type": "Text",
+      "text": "${$i18n.modTask}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "txt_active_task_title": {
+      "type": "Text",
+      "text": "${$computed.activeTaskLabel}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "btn_open_task_picker": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$i18n.btnSwitchTask}",
+      "variant": "subtle",
+      "padding": "6,3",
+      "popover": "taskPop"
+    },
+    "goal": {
+      "type": "Card",
+      "tone": "subtle",
+      "when": "${$pomodoro.mode == 'pomodoro'}",
+      "padding": "12,8",
+      "spacing": 5,
+      "children": [
+        "daily_goal_header_grid",
+        "prog_daily_goal"
+      ]
+    },
+    "daily_goal_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_daily_goal_summary",
+        "txt_eye_care_hint"
+      ]
+    },
+    "txt_daily_goal_summary": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.dailyGoalSummary}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "txt_eye_care_hint": {
+      "type": "Text",
+      "column": 1,
+      "when": "${$settings.backgroundSedentary == 'true'}",
+      "text": "${$computed.eyeCareHint}",
+      "style": "caption",
+      "color": "emerald",
+      "maxLines": 1
+    },
+    "prog_daily_goal": {
+      "type": "ProgressBar",
+      "value": "${$computed.dailyGoalPct}",
+      "max": 100,
+      "color": "emerald"
+    },
+    "history": {
+      "type": "Card",
+      "tone": "subtle",
+      "when": "${$pomodoro.mode == 'pomodoro'}",
+      "padding": "12,10",
+      "spacing": 6,
+      "children": [
+        "session_history_header_grid",
+        "list_focus_sessions"
+      ]
+    },
+    "session_history_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "children": [
+        "txt_session_history_title",
+        "btn_export_session_review"
+      ]
+    },
+    "txt_session_history_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$i18n.todayLogTitle}",
+      "style": "bodyStrong",
+      "verticalAlignment": "center"
+    },
+    "btn_export_session_review": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "copy",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$i18n.copyReviewTooltip}",
+      "onClick": [
+        {
+          "type": "collection.exportMarkdown",
+          "collection": "sessions"
+        }
+      ]
+    },
+    "list_focus_sessions": {
+      "type": "List",
+      "items": "sessions",
+      "maxLines": 5,
+      "variant": "divided",
+      "filter": "${$item.date == $pomodoro.todayDate}",
+      "emptyState": {
+        "icon": "clock",
+        "title": "${$i18n.emptySessionsTitle}",
+        "subtitle": "${$i18n.emptySessionsSub}"
+      },
+      "hoverActions": [
+        "btn_delete_session_item"
+      ],
+      "itemTemplate": "row_focus_session_item"
+    },
+    "btn_delete_session_item": {
+      "type": "IconButton",
+      "icon": "delete",
+      "size": 20,
+      "tooltip": "${$i18n.deleteSessionTooltip}",
+      "onClick": [
+        {
+          "type": "collection.remove",
+          "collection": "sessions",
+          "targetId": "${$item.id}"
+        }
+      ]
+    },
+    "row_focus_session_item": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 8,
+      "children": [
+        "txt_session_item_time",
+        "txt_session_item_task",
+        "badge_session_item_duration"
+      ]
+    },
+    "txt_session_item_time": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.timeText}",
+      "style": "mono",
+      "color": "muted",
+      "verticalAlignment": "center"
+    },
+    "txt_session_item_task": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.task}",
+      "style": "body",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "badge_session_item_duration": {
+      "type": "Badge",
+      "column": 2,
+      "text": "${$item.duration}",
+      "tone": "subtle"
+    },
+    "health": {
+      "type": "Card",
+      "tone": "subtle",
+      "when": "${$pomodoro.mode == 'sedentary'}",
+      "padding": "12,10",
+      "spacing": 8,
+      "children": [
+        "health_metrics_grid",
+        "txt_next_micro_action"
+      ]
+    },
+    "health_metrics_grid": {
+      "type": "Grid",
+      "columns": "*,*",
+      "columnSpacing": 8,
+      "children": [
+        "stood_count_metric_card",
+        "longest_sit_metric_card"
+      ]
+    },
+    "stood_count_metric_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "default",
+      "padding": "10,8",
+      "spacing": 2,
+      "children": [
+        "txt_stood_count_label",
+        "txt_stood_count_value"
+      ]
+    },
+    "txt_stood_count_label": {
+      "type": "Text",
+      "text": "${$i18n.stoodCountLabel}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "txt_stood_count_value": {
+      "type": "Text",
+      "text": "${$pomodoro.stoodCount}${$i18n.timesUnit}",
+      "style": "subtitle",
+      "color": "cyan"
+    },
+    "longest_sit_metric_card": {
+      "type": "Card",
+      "column": 1,
+      "tone": "default",
+      "padding": "10,8",
+      "spacing": 2,
+      "children": [
+        "txt_longest_sit_label",
+        "txt_longest_sit_value"
+      ]
+    },
+    "txt_longest_sit_label": {
+      "type": "Text",
+      "text": "${$i18n.longestSitLabel}",
+      "style": "caption",
+      "color": "secondary"
+    },
+    "txt_longest_sit_value": {
+      "type": "Text",
+      "text": "${t('minutesShortFmt', $pomodoro.longestSitMin)}",
+      "style": "subtitle"
+    },
+    "txt_next_micro_action": {
+      "type": "Text",
+      "text": "${$i18n.nextMicroPrefix}${$pomodoro.microAction}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 2
+    },
+    "pop_soundscape_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 10,
+      "children": [
+        "select_focus_soundscape",
+        "slider_soundscape_volume"
+      ]
+    },
+    "select_focus_soundscape": {
+      "type": "Select",
+      "bind": "settings.focusSoundscape",
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ],
+      "options": [
+        {
+          "value": "off",
+          "label": "${$i18n.soundShortOff}"
+        },
+        {
+          "value": "rain",
+          "label": "${$i18n.soundShortRain}"
+        },
+        {
+          "value": "pink",
+          "label": "${$i18n.soundShortPink}"
+        },
+        {
+          "value": "brown",
+          "label": "${$i18n.soundShortBrown}"
+        }
+      ]
+    },
+    "slider_soundscape_volume": {
+      "type": "Slider",
+      "title": "${$i18n.soundVolumeLabel}",
+      "bind": "state.soundVolume",
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "unit": "%"
+    },
+    "pop_task_picker_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "custom_task_input_grid",
+        "txt_todo_picker_header",
+        "list_pickable_todos"
+      ]
+    },
+    "custom_task_input_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "inp_current_task",
+        "btn_clear_custom_task"
+      ]
+    },
+    "inp_current_task": {
+      "type": "Input",
+      "column": 0,
+      "placeholder": "${$i18n.taskPlaceholder}",
+      "bind": "state.currentTask",
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "commitTask"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "taskPop"
+        }
+      ]
+    },
+    "btn_clear_custom_task": {
+      "type": "IconButton",
+      "column": 1,
+      "when": "${$computed.hasCustomTask == 'true'}",
+      "icon": "close",
+      "size": 28,
+      "variant": "subtle",
+      "tooltip": "${$i18n.clearTaskTooltip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearCustomTask"
+        }
+      ]
+    },
+    "txt_todo_picker_header": {
+      "type": "Text",
+      "text": "${$i18n.todoListHeader}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1
+    },
+    "list_pickable_todos": {
+      "type": "List",
+      "items": "${$computed.pickableTodos}",
+      "maxHeight": 132,
+      "variant": "divided",
+      "emptyState": {
+        "icon": "check",
+        "title": "${$i18n.emptyTodosTitle}",
+        "subtitle": "${$i18n.emptyTodosSub}"
+      },
+      "itemTemplate": "row_pickable_todo_item"
+    },
+    "row_pickable_todo_item": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "pickTodoTask",
+          "args": {
+            "id": "${$item.id}",
+            "title": "${$item.title}"
+          }
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "taskPop"
+        }
+      ],
+      "children": [
+        "txt_pickable_todo_title",
+        "txt_pickable_todo_select"
+      ]
+    },
+    "txt_pickable_todo_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.title}",
+      "style": "body",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "txt_pickable_todo_select": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$i18n.btnSelectTask}",
+      "style": "caption",
+      "color": "emerald",
+      "verticalAlignment": "center"
+    }
+  }
+}

@@ -3,25 +3,61 @@ namespace DeskBox.Tests;
 public sealed class PerformanceSettingsContractTests
 {
     [Fact]
-    public void GeneralPage_PlacesPerformanceAfterStartupAndBeforeAttachmentStorage()
+    public void GeneralPage_PlacesPerformanceAfterStartupAndMovesAttachmentStorageToMaintenance()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsWindow.xaml");
 
-        int attachment = xaml.IndexOf(
-            "Settings.AttachmentStorageMode.Title",
+        int quickCapture = xaml.IndexOf(
+            "x:Key=\"QuickCaptureSettingsSectionTemplate\"",
             StringComparison.Ordinal);
-        int performance = xaml.IndexOf(
-            "Tag=\"PerformanceSettings\"",
+        int quickCaptureAttachment = xaml.IndexOf(
+            "x:Name=\"QuickCaptureAttachmentStorageModeComboBox\"",
+            quickCapture,
+            StringComparison.Ordinal);
+        int todo = xaml.IndexOf(
+            "x:Key=\"TodoSettingsSectionTemplate\"",
+            StringComparison.Ordinal);
+        int todoAttachment = xaml.IndexOf(
+            "x:Name=\"TodoAttachmentStorageModeComboBox\"",
+            todo,
+            StringComparison.Ordinal);
+        int maintenance = xaml.IndexOf(
+            "x:Key=\"MaintenanceSectionTemplate\"",
+            StringComparison.Ordinal);
+        int maintenanceEnd = xaml.IndexOf(
+            "x:Key=\"AboutSectionTemplate\"",
+            maintenance,
+            StringComparison.Ordinal);
+        string maintenanceSlice = xaml[maintenance..maintenanceEnd];
+
+        int general = xaml.IndexOf(
+            "x:Name=\"GeneralSection\"",
             StringComparison.Ordinal);
         int autoStart = xaml.IndexOf(
             "Settings.AutoStart.Title",
+            general,
+            StringComparison.Ordinal);
+        int silentStartup = xaml.IndexOf(
+            "Settings.SilentStartup.Title",
+            general,
+            StringComparison.Ordinal);
+        int performance = xaml.IndexOf(
+            "x:Name=\"PerformanceInlineCard\"",
+            general,
+            StringComparison.Ordinal);
+        int aiEntry = xaml.IndexOf(
+            "x:Name=\"AiSettingsEntryCard\"",
+            general,
             StringComparison.Ordinal);
 
-        Assert.True(attachment >= 0);
-        Assert.True(performance > autoStart);
-        Assert.True(attachment > performance);
-        Assert.True(autoStart >= 0);
+        Assert.True(quickCapture >= 0 && quickCaptureAttachment > quickCapture);
+        Assert.True(todo >= 0 && todoAttachment > todo);
+        Assert.DoesNotContain("Settings.AttachmentStorageMode.Title", maintenanceSlice, StringComparison.Ordinal);
+        Assert.True(general >= 0 && autoStart > general);
+        Assert.True(silentStartup > autoStart);
+        Assert.True(performance > silentStartup);
+        Assert.True(aiEntry > performance);
         Assert.Contains(
             "ItemsSource=\"{Binding AvailablePerformanceModeOptions}\"",
             xaml,
@@ -42,48 +78,35 @@ public sealed class PerformanceSettingsContractTests
         string navigation = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsWindow.Navigation.cs");
 
-        Assert.Contains(
-            "x:Name=\"PerformanceSettingsSection\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SelectedHiddenCacheCleanupDelaySeconds",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SelectedHiddenCacheCleanupScope",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "AvailableHiddenCacheCleanupScopeOptions",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SelectedVisibleIdleCacheCleanupDelaySeconds",
+        Assert.DoesNotContain(
+            "x:Key=\"PerformanceSettingsSectionTemplate\"",
             xaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            "SelectedTransientWindowReleaseDelaySeconds",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "SelectedPerformanceCacheBudget",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContinuousDecorativeAnimationsSummaryText",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContinuousDecorativeAnimationsDropDown_Click",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "[\"PerformanceSettings\"] = new(\"PerformanceSettings\", \"Settings.Performance.Title\", \"General\", \"General\")",
+            "[\"PerformanceSettings\"]",
             window,
             StringComparison.Ordinal);
         Assert.Contains(
-            "x:Key=\"PerformanceSettingsSectionTemplate\"",
+            "\"PerformanceSettings\" => \"General\"",
+            navigation,
+            StringComparison.Ordinal);
+
+        int perfExpanderStart = xaml.IndexOf("x:Name=\"PerformanceInlineCard\"", StringComparison.Ordinal);
+        int perfExpanderEnd = xaml.IndexOf("</toolkit:SettingsExpander>", perfExpanderStart, StringComparison.Ordinal);
+        Assert.True(perfExpanderStart >= 0 && perfExpanderEnd > perfExpanderStart);
+        string perfExpanderSlice = xaml[perfExpanderStart..perfExpanderEnd];
+
+        Assert.Contains("SelectedPerformanceMode", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("KeepWarmCacheWhenHidden", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("SelectedPerformanceCacheBudget", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("SelectedVisibleIdleCacheCleanupDelaySeconds", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("IdleWorkingSetTrimEnabled", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("AllowTextMarquee", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("AllowVinylRotation", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("AllowGlanceRotation", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.Contains("AllowCompactAmbient", perfExpanderSlice, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "SelectedTransientWindowReleaseDelaySeconds",
             xaml,
             StringComparison.Ordinal);
         Assert.Contains(

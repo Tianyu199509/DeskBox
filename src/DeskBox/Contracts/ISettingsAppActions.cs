@@ -20,6 +20,9 @@ public interface ISettingsAppActions
 
     /// <summary>Forwarded from the host: the home screen changed.</summary>
     event Action? ScreenHomeChanged;
+
+    /// <summary>Forwarded from the host: auto-start registration or status changed.</summary>
+    event Action? AutoStartStateChanged;
     // ── Lifecycle ───────────────────────────────────────────────────
 
     Task ShutdownForRestartAsync();
@@ -86,6 +89,12 @@ public interface ISettingsAppActions
     AppRuntimeHealthSnapshot? GetRuntimeHealthSnapshot();
 
     Task ForceExternalStateRecoveryAsync();
+
+    // ── Auto-start ──────────────────────────────────────────────────
+
+    Task<StartupOperationResult> GetAutoStartStatusAsync();
+
+    Task<StartupOperationResult> SetAutoStartEnabledAsync(bool enabled);
 
     // ── Drag-drop permissions ───────────────────────────────────────
 

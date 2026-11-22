@@ -1,16 +1,17 @@
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Platform;
+using DeskBox.Services.DragDrop;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls;
 
 /// <summary>
-/// Wraps the Shell's native file data object in a WinRT DataPackage. This is
-/// used for existing .lnk files because the StorageItem broker does not expose
-/// a reliable, non-blocking preflight for shortcut paths. Explorer then
-/// receives a real CF_HDROP in the original drag transaction and remains
-/// responsible for the drop position.
+/// Wraps the Shell's native file data object in a WinRT DataPackage for both
+/// single-folder and multi-folder selections. Using the Shell data object avoids
+/// synchronous WinRT StorageFile broker stalls on the UI STA (including .lnk
+/// files whose target is offline or permission-sensitive) and hands Explorer a
+/// genuine CF_HDROP payload in the original drag transaction.
 /// </summary>
 internal static partial class NativeShellFileDragProvider
 {
@@ -28,8 +29,16 @@ internal static partial class NativeShellFileDragProvider
 
     internal static bool TryAttach(
         DataPackage dataPackage,
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths) =>
+        TryAttach(dataPackage, sourcePaths, out _);
+
+    internal static bool TryAttach(
+        DataPackage dataPackage,
+        IReadOnlyList<string> sourcePaths,
+        out string[] attachedPhysicalPaths,
+        bool networkReachabilityVerified = false)
     {
+        attachedPhysicalPaths = [];
         ArgumentNullException.ThrowIfNull(dataPackage);
         if (!CanAttachPaths(sourcePaths))
         {
@@ -38,9 +47,14 @@ internal static partial class NativeShellFileDragProvider
 
         nint shellDataObject = 0;
         nint filterDataObject = 0;
+        bool attachedToDataPackage = false;
         try
         {
-            shellDataObject = CreateShellDataObject(sourcePaths);
+            shellDataObject = DesktopOutboundDropCoordinator.TryCreateShellDataObjectWithTimeout(
+                sourcePaths,
+                timeoutMs: 650,
+                out string[] resolvedPhysicalPaths,
+                networkReachabilityVerified);
             if (shellDataObject == 0 ||
                 !HasFileDropFormat(shellDataObject))
             {
@@ -49,7 +63,7 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
-            filterDataObject = FileDragSourceGuardDataObject.CreateInterfacePointer(
+            filterDataObject = FileDragSourceGuardDataObject.CreateTargetAwareInterfacePointer(
                 shellDataObject);
             // End-to-end self-check: the guard wrapper must still answer
             // CF_HDROP. If the IDataObject ABI assumptions break under a new
@@ -73,6 +87,8 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
+            attachedToDataPackage = true;
+            attachedPhysicalPaths = resolvedPhysicalPaths;
             App.LogVerbose(
                 $"[DragStart] Attached native Shell file data object " +
                 $"paths={sourcePaths.Count} sourceGuard=True");
@@ -88,7 +104,8 @@ internal static partial class NativeShellFileDragProvider
         finally
         {
             FileDragSourceGuardDataObject.ReleaseInterfacePointer(
-                filterDataObject);
+                filterDataObject,
+                keepManagedRootForActiveDrag: attachedToDataPackage);
             ReleaseInterface(shellDataObject);
         }
     }
@@ -97,13 +114,15 @@ internal static partial class NativeShellFileDragProvider
         IReadOnlyList<string> sourcePaths,
         Func<string, bool>? pathExists = null)
     {
-        pathExists ??= path => File.Exists(path) || Directory.Exists(path);
+        pathExists ??= static path =>
+            DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(path) ||
+            File.Exists(path) ||
+            Directory.Exists(path);
         if (sourcePaths.Count == 0)
         {
             return false;
         }
 
-        string? parentPath = null;
         foreach (string path in sourcePaths)
         {
             if (string.IsNullOrWhiteSpace(path) || !pathExists(path))
@@ -111,24 +130,37 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
-            string? currentParent = Path.GetDirectoryName(
-                Path.GetFullPath(path));
-            if (string.IsNullOrWhiteSpace(currentParent))
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch
             {
                 return false;
             }
 
-            parentPath ??= currentParent;
-            if (!string.Equals(
-                    parentPath,
-                    currentParent,
-                    StringComparison.OrdinalIgnoreCase))
+            string? currentParent = Path.GetDirectoryName(fullPath);
+            if (string.IsNullOrWhiteSpace(currentParent) &&
+                !IsNetworkShareRoot(fullPath))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static bool IsNetworkShareRoot(string fullPath)
+    {
+        if (fullPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return fullPath.StartsWith(@"\\", StringComparison.Ordinal) &&
+               !fullPath.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+               !fullPath.StartsWith(@"\\.\", StringComparison.Ordinal);
     }
 
     internal static bool AreExistingShortcuts(
@@ -153,55 +185,125 @@ internal static partial class NativeShellFileDragProvider
         // Attribute checks are not a safe preflight here. A normal-looking
         // .lnk can still be rejected by the WinRT StorageFile broker (for
         // example when its target is unavailable or permission-sensitive),
-        // and TryPrepare runs on the UI STA. Route every existing shell link
-        // through the native Shell data object so the drag never has to wait
-        // synchronously for that broker.
-        return AreExistingShortcuts(sourcePaths, fileExists);
+        // and TryPrepare runs on the UI STA. Route any selection containing at
+        // least one existing shell link through the native Shell data object
+        // so mixed (.lnk + file) drags never stall or fail on that broker.
+        fileExists ??= File.Exists;
+        return sourcePaths.Count > 0 &&
+               sourcePaths.Any(path =>
+                   !string.IsNullOrWhiteSpace(path) &&
+                   string.Equals(
+                       Path.GetExtension(path),
+                       ".lnk",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   fileExists(path));
     }
 
     internal static unsafe nint CreateShellDataObject(
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths) =>
+        CreateShellDataObject(sourcePaths, out _);
+
+    internal static unsafe nint CreateShellDataObject(
+        IReadOnlyList<string> sourcePaths,
+        out string[] resolvedPhysicalPaths)
     {
         string[] normalizedPaths = sourcePaths
-            .Select(Path.GetFullPath)
+            .Select(path => StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(path))
             .ToArray();
-        string parentPath = Path.GetDirectoryName(normalizedPaths[0])!;
+        resolvedPhysicalPaths = normalizedPaths;
+        string firstParent = Path.GetDirectoryName(normalizedPaths[0]) ?? string.Empty;
+        bool singleParent = !string.IsNullOrWhiteSpace(firstParent);
+        if (singleParent)
+        {
+            for (int i = 1; i < normalizedPaths.Length; i++)
+            {
+                if (!string.Equals(
+                        Path.GetDirectoryName(normalizedPaths[i]),
+                        firstParent,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    singleParent = false;
+                    break;
+                }
+            }
+        }
+
         nint parentItemIdList = 0;
         var absoluteItemIdLists = new nint[normalizedPaths.Length];
-        var childItemIdLists = new nint[normalizedPaths.Length];
+        var childItemIdLists = singleParent ? new nint[normalizedPaths.Length] : [];
         nint dataObject = 0;
 
         try
         {
-            Marshal.ThrowExceptionForHR(ParseItemIdList(
-                parentPath,
-                out parentItemIdList));
+            if (singleParent)
+            {
+                Marshal.ThrowExceptionForHR(ParseItemIdList(
+                    firstParent,
+                    out parentItemIdList));
+            }
+
             for (int index = 0; index < normalizedPaths.Length; index++)
             {
                 Marshal.ThrowExceptionForHR(ParseItemIdList(
                     normalizedPaths[index],
                     out absoluteItemIdLists[index]));
-                childItemIdLists[index] = ShellItemDragNativeMethods.ILFindLastID(
-                    absoluteItemIdLists[index]);
-                if (childItemIdLists[index] == 0)
+                if (singleParent)
                 {
-                    throw new InvalidOperationException(
-                        $"The Shell did not return a child PIDL for " +
-                        $"'{normalizedPaths[index]}'.");
+                    childItemIdLists[index] = ShellItemDragNativeMethods.ILFindLastID(
+                        absoluteItemIdLists[index]);
+                    if (childItemIdLists[index] == 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"The Shell did not return a child PIDL for " +
+                            $"'{normalizedPaths[index]}'.");
+                    }
                 }
             }
 
             Guid interfaceId = s_dataObjectInterfaceId;
-            fixed (nint* children = childItemIdLists)
+            if (singleParent)
             {
-                int result = ShellItemDragNativeMethods.SHCreateDataObject(
-                    parentItemIdList,
-                    (uint)childItemIdLists.Length,
-                    children,
-                    0,
-                    &interfaceId,
-                    out dataObject);
-                Marshal.ThrowExceptionForHR(result);
+                fixed (nint* children = childItemIdLists)
+                {
+                    int result = ShellItemDragNativeMethods.SHCreateDataObject(
+                        parentItemIdList,
+                        (uint)childItemIdLists.Length,
+                        children,
+                        0,
+                        &interfaceId,
+                        out dataObject);
+                    Marshal.ThrowExceptionForHR(result);
+                }
+            }
+            else
+            {
+                // Multi-folder selections bind against the Desktop root namespace
+                // (an empty 2-byte terminator PIDL) using full desktop-relative
+                // PIDLs returned by SHParseDisplayName.
+                ushort desktopTerminator = 0;
+                nint desktopRootPidl = (nint)(&desktopTerminator);
+                fixed (nint* relativeToDesktop = absoluteItemIdLists)
+                {
+                    int result = ShellItemDragNativeMethods.SHCreateDataObject(
+                        desktopRootPidl,
+                        (uint)absoluteItemIdLists.Length,
+                        relativeToDesktop,
+                        0,
+                        &interfaceId,
+                        out dataObject);
+                    if (result < 0)
+                    {
+                        result = ShellItemDragNativeMethods.SHCreateDataObject(
+                            0,
+                            (uint)absoluteItemIdLists.Length,
+                            relativeToDesktop,
+                            0,
+                            &interfaceId,
+                            out dataObject);
+                    }
+
+                    Marshal.ThrowExceptionForHR(result);
+                }
             }
 
             return dataObject;
@@ -222,25 +324,7 @@ internal static partial class NativeShellFileDragProvider
         }
     }
 
-    private static int ParseItemIdList(
-        string path,
-        out nint itemIdList)
-    {
-        int result = ShellItemDragNativeMethods.SHParseDisplayName(
-            path,
-            0,
-            out itemIdList,
-            0,
-            out _);
-        if (result >= 0 && itemIdList == 0)
-        {
-            return unchecked((int)0x80004005);
-        }
-
-        return result;
-    }
-
-    private static bool HasFileDropFormat(nint dataObject)
+    internal static bool HasFileDropFormat(nint dataObject)
     {
         var format = new NativeFormatEtc
         {
@@ -252,6 +336,42 @@ internal static partial class NativeShellFileDragProvider
         };
         return new NativeOleDataObject(dataObject).QueryGetData(ref format) ==
                S_OK;
+    }
+
+    private static int ParseItemIdList(
+        string path,
+        out nint itemIdList)
+    {
+        int result = ShellItemDragNativeMethods.SHParseDisplayName(
+            path,
+            0,
+            out itemIdList,
+            0,
+            out _);
+        if (result < 0 &&
+            path.Length >= 248 &&
+            !path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            string extended = StorageMigrationNativeMethods.Extended(path);
+            int extendedResult = ShellItemDragNativeMethods.SHParseDisplayName(
+                extended,
+                0,
+                out nint extendedPidl,
+                0,
+                out _);
+            if (extendedResult >= 0 && extendedPidl != 0)
+            {
+                itemIdList = extendedPidl;
+                return extendedResult;
+            }
+        }
+
+        if (result >= 0 && itemIdList == 0)
+        {
+            return unchecked((int)0x80004005);
+        }
+
+        return result;
     }
 
     private static unsafe int SetDataObject(

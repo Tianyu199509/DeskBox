@@ -13,12 +13,6 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
     private const uint WmQueryEndSession = 0x0011;
     private const uint WmEndSession = 0x0016;
     private const uint WmNcDestroy = 0x0082;
-    private const uint WtsSessionLock = 0x0007;
-    private const uint WtsSessionUnlock = 0x0008;
-    private const uint WtsSessionLogon = 0x0005;
-    private const uint WtsSessionLogoff = 0x0006;
-    private const uint WtsSessionRemoteConnect = 0x0009;
-    private const uint WtsSessionRemoteDisconnect = 0x000A;
     private const uint NotifyForThisSession = 0;
     private static readonly uint s_taskbarCreatedMessage = Win32Helper.RegisterWindowMessage("TaskbarCreated");
     private static readonly UIntPtr SubclassId = new(0xDBA7);
@@ -117,21 +111,33 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
         UIntPtr subclassId,
         UIntPtr refData)
     {
+        string? gateEvent =
+            AppLifecycleRecoverySignalClassifier.ResolveGateEvent(
+                message,
+                wParam,
+                lParam);
         string? recoveryReason =
             AppLifecycleRecoverySignalClassifier.ResolveRecoveryReason(
                 message,
                 wParam,
                 lParam,
                 s_taskbarCreatedMessage);
+        if (gateEvent is not null)
+        {
+            RaiseGateEvent(gateEvent);
+            if (gateEvent == "session-locked")
+            {
+                App.Log("[Lifecycle] Session ended or locked; deferring external-state recovery.");
+            }
+        }
+
         if (recoveryReason == "display-power-off")
         {
             // Screen-off is a gate signal only: topology churn while the
             // display is off must not schedule a restore (spec 5.6).
-            RaiseGateEvent(recoveryReason);
         }
         else if (recoveryReason is not null)
         {
-            RaiseGateEvent(recoveryReason == "display-power-on" ? recoveryReason : null);
             QueueRecovery(recoveryReason);
         }
         else if (message == WmQueryEndSession)
@@ -144,26 +150,6 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
             if (wParam != UIntPtr.Zero)
             {
                 InvokeEndSessionAction("end-session");
-            }
-        }
-        else if (message == AppLifecycleRecoverySignalClassifier.WmWtsSessionChange)
-        {
-            uint sessionEvent = unchecked((uint)wParam.ToUInt64());
-            if (sessionEvent == WtsSessionUnlock ||
-                sessionEvent == WtsSessionLogon ||
-                sessionEvent == WtsSessionRemoteConnect)
-            {
-                RaiseGateEvent("session-unlocked");
-                QueueRecovery(sessionEvent == WtsSessionUnlock
-                    ? "session-unlock"
-                    : "session-reconnect");
-            }
-            else if (sessionEvent == WtsSessionLock ||
-                     sessionEvent == WtsSessionLogoff ||
-                     sessionEvent == WtsSessionRemoteDisconnect)
-            {
-                RaiseGateEvent("session-locked");
-                App.Log("[Lifecycle] Session ended or locked; deferring external-state recovery.");
             }
         }
         else if (message == WmNcDestroy)

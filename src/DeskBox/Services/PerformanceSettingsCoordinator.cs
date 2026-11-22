@@ -43,7 +43,8 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
             effective.AllowCompactAmbientAnimations,
             performance.IdleWorkingSetTrimEnabled,
             performance.ImmediateHiddenWorkingSetTrimEnabled,
-            performance.QuiescenceWorkingSetTrimEnabled);
+            performance.QuiescenceWorkingSetTrimEnabled,
+            effective.KeepCapsuleContentWarm);
     }
 
     public void SetPerformanceMode(string? mode)
@@ -73,14 +74,17 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         int normalized =
             PerformanceSettingsPolicy.NormalizeHiddenCacheCleanupDelaySeconds(
                 delaySeconds);
+        EffectivePerformanceSettings effective =
+            PerformanceSettingsPolicy.Resolve(_settings.Settings);
         PerformanceSettingsSlice performance = _settings.Settings.Performance;
-        if (performance.HiddenCacheCleanupDelaySeconds == normalized)
+        if (effective.HiddenCacheCleanupDelaySeconds == normalized &&
+            performance.HiddenCacheCleanupDelaySeconds == normalized)
         {
             return;
         }
 
+        SwitchPerformanceModeToCustom(performance, effective);
         performance.HiddenCacheCleanupDelaySeconds = normalized;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -89,14 +93,17 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         ThrowIfStopped();
         int normalized = PerformanceSettingsPolicy
             .NormalizeVisibleIdleCacheCleanupDelaySeconds(delaySeconds);
+        EffectivePerformanceSettings effective =
+            PerformanceSettingsPolicy.Resolve(_settings.Settings);
         PerformanceSettingsSlice performance = _settings.Settings.Performance;
-        if (performance.VisibleIdleCacheCleanupDelaySeconds == normalized)
+        if (effective.VisibleIdleCacheCleanupDelaySeconds == normalized &&
+            performance.VisibleIdleCacheCleanupDelaySeconds == normalized)
         {
             return;
         }
 
+        SwitchPerformanceModeToCustom(performance, effective);
         performance.VisibleIdleCacheCleanupDelaySeconds = normalized;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -105,17 +112,17 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         ThrowIfStopped();
         string normalized =
             PerformanceSettingsPolicy.NormalizeCacheBudget(cacheBudget);
+        EffectivePerformanceSettings effective =
+            PerformanceSettingsPolicy.Resolve(_settings.Settings);
         PerformanceSettingsSlice performance = _settings.Settings.Performance;
-        if (string.Equals(
-                performance.PerformanceCacheBudget,
-                normalized,
-                StringComparison.Ordinal))
+        if (string.Equals(effective.CacheBudget, normalized, StringComparison.Ordinal) &&
+            string.Equals(performance.PerformanceCacheBudget, normalized, StringComparison.Ordinal))
         {
             return;
         }
 
+        SwitchPerformanceModeToCustom(performance, effective);
         performance.PerformanceCacheBudget = normalized;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -124,17 +131,17 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         ThrowIfStopped();
         string normalized =
             PerformanceSettingsPolicy.NormalizeHiddenCacheCleanupScope(scope);
+        EffectivePerformanceSettings effective =
+            PerformanceSettingsPolicy.Resolve(_settings.Settings);
         PerformanceSettingsSlice performance = _settings.Settings.Performance;
-        if (string.Equals(
-                performance.HiddenCacheCleanupScope,
-                normalized,
-                StringComparison.Ordinal))
+        if (string.Equals(effective.HiddenCacheCleanupScope, normalized, StringComparison.Ordinal) &&
+            string.Equals(performance.HiddenCacheCleanupScope, normalized, StringComparison.Ordinal))
         {
             return;
         }
 
+        SwitchPerformanceModeToCustom(performance, effective);
         performance.HiddenCacheCleanupScope = normalized;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -189,7 +196,6 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
             performance.EnableVinylRotationAnimations &&
             performance.EnableGlanceImageAutoRotation &&
             performance.EnableCompactAmbientAnimations;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -206,7 +212,26 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         _settings.SaveDebounced();
     }
 
-    private void SwitchPerformanceModeToCustom(PerformanceSettingsSlice performance)
+    public void SetKeepCapsuleContentWarm(bool enabled)
+    {
+        ThrowIfStopped();
+        EffectivePerformanceSettings effective =
+            PerformanceSettingsPolicy.Resolve(_settings.Settings);
+        PerformanceSettingsSlice performance = _settings.Settings.Performance;
+        if (effective.KeepCapsuleContentWarm == enabled &&
+            performance.KeepCapsuleContentWarm == enabled)
+        {
+            return;
+        }
+
+        SwitchPerformanceModeToCustom(performance, effective);
+        performance.KeepCapsuleContentWarm = enabled;
+        _settings.SaveDebounced();
+    }
+
+    private static void SwitchPerformanceModeToCustom(
+        PerformanceSettingsSlice performance,
+        EffectivePerformanceSettings currentEffective)
     {
         if (string.Equals(
                 performance.PerformanceMode,
@@ -216,6 +241,17 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
             return;
         }
 
+        performance.HiddenCacheCleanupDelaySeconds =
+            currentEffective.HiddenCacheCleanupDelaySeconds;
+        performance.VisibleIdleCacheCleanupDelaySeconds =
+            currentEffective.VisibleIdleCacheCleanupDelaySeconds;
+        performance.TransientWindowReleaseDelaySeconds =
+            currentEffective.TransientWindowReleaseDelaySeconds;
+        performance.PerformanceCacheBudget = currentEffective.CacheBudget;
+        performance.HiddenCacheCleanupScope =
+            currentEffective.HiddenCacheCleanupScope;
+        performance.KeepCapsuleContentWarm =
+            currentEffective.KeepCapsuleContentWarm;
         performance.PerformanceMode = PerformanceOptionKinds.ModeCustom;
     }
 

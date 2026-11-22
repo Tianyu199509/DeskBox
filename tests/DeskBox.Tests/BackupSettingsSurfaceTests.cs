@@ -41,7 +41,7 @@ public sealed class BackupSettingsSurfaceTests
             CloudTodoEnabled: true, CloudQuickCaptureEnabled: false, CloudWidgetStyleEnabled: true,
             CloudIntervalMinutes: 360, CloudRetentionCount: 10,
             CloudLastSuccessUtcTicks: 0, CloudLastFailureUtcTicks: 0, CloudLastUnverifiedUtcTicks: 0,
-            Endpoint: DavA, HasEndpoint: true));
+            Endpoint: DavA, HasEndpoint: true, CloudCustomWidgetsEnabled: true));
         using var editor = Create(fake);
 
         Assert.False(editor.LocalBackupEnabled);
@@ -58,6 +58,7 @@ public sealed class BackupSettingsSurfaceTests
         Assert.True(editor.IncludeTodoData);
         Assert.False(editor.IncludeQuickCaptureData);
         Assert.True(editor.IncludeWidgetStyle);
+        Assert.True(editor.IncludeCustomWidgets);
         Assert.Equal(360, editor.SelectedIntervalMinutes);
         Assert.Equal(10, editor.SelectedRetentionCount);
         Assert.True(editor.ActionsEnabled);
@@ -98,6 +99,7 @@ public sealed class BackupSettingsSurfaceTests
         editor.IncludeTodoData = true;
         editor.IncludeQuickCaptureData = true;
         editor.IncludeWidgetStyle = false;
+        editor.IncludeCustomWidgets = true;
         editor.SelectedIntervalMinutes = 360; // valid preset, differs from default
         editor.SelectedIntervalMinutes = 61; // unknown preset normalizes back
         editor.SelectedRetentionCount = 10; // valid preset, differs from default
@@ -118,6 +120,7 @@ public sealed class BackupSettingsSurfaceTests
         Assert.Contains(fake.Changes, c => c.CloudTodoEnabled == true);
         Assert.Contains(fake.Changes, c => c.CloudQuickCaptureEnabled == true);
         Assert.Contains(fake.Changes, c => c.CloudWidgetStyleEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudCustomWidgetsEnabled == true);
         Assert.Contains(fake.Changes, c => c.CloudIntervalMinutes == 360);
         Assert.Contains(fake.Changes, c => c.CloudIntervalMinutes == 1440);
         Assert.Contains(fake.Changes, c => c.CloudRetentionCount == 10);
@@ -133,7 +136,7 @@ public sealed class BackupSettingsSurfaceTests
         Assert.Equal(5, editor.SelectedRetentionCount);
         // Each accepted control edit produced exactly one change record
         // (normalized-back no-ops are skipped, like the legacy shell).
-        Assert.Equal(16, fake.Changes.Count);
+        Assert.Equal(17, fake.Changes.Count);
     }
 
     [Fact]
@@ -149,6 +152,7 @@ public sealed class BackupSettingsSurfaceTests
             CloudTodoEnabled = true,
             CloudQuickCaptureEnabled = true,
             CloudWidgetStyleEnabled = true,
+            CloudCustomWidgetsEnabled = true,
         });
         using var editor = Create(fake);
 
@@ -164,6 +168,8 @@ public sealed class BackupSettingsSurfaceTests
         Assert.Contains(fake.Changes, c => c.CloudTodoEnabled == false);
         Assert.Contains(fake.Changes, c => c.CloudQuickCaptureEnabled == false);
         Assert.Contains(fake.Changes, c => c.CloudWidgetStyleEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudCustomWidgetsEnabled == false);
+        Assert.False(editor.IncludeCustomWidgets);
     }
 
     [Fact]

@@ -12,6 +12,35 @@ namespace DeskBox.ViewModels;
 
 public partial class WidgetViewModel
 {
+    public OrganizationHistoryEntry? GetLatestUndoableHistory() =>
+        _organizerService.GetLatestUndoableEntry();
+
+    public Task<OrganizationHistoryEntry?> RecordSubfolderMoveUndoAsync(
+        IReadOnlyList<FileService.FileTransferResult> results,
+        IReadOnlyDictionary<string, HashSet<string>?> preExistingMergeSnapshots,
+        string? sourceWidgetId = null) =>
+        _organizerService.RecordCompletedMoveHistoryAsync(
+            Config,
+            Name,
+            results,
+            preExistingMergeSnapshots,
+            sourceWidgetId);
+
+    public async Task<int> UndoHistoryEntryAsync(string historyId)
+    {
+        OrganizationHistoryEntry? entry = _settingsService.OrganizationHistory.Entries
+            .FirstOrDefault(h => string.Equals(h.Id, historyId, StringComparison.Ordinal));
+        if (entry is null || !entry.CanUndo || entry.IsUndone)
+        {
+            return 0;
+        }
+
+        int previouslyRestored = entry.Items.Count(static item => item.IsRestored);
+        await _organizerService.UndoAsync(entry.Id);
+        int nowRestored = entry.Items.Count(static item => item.IsRestored);
+        return Math.Max(0, nowRestored - previouslyRestored);
+    }
+
     public Task InitializeAsync()
     {
         return InitializeAsync(CancellationToken.None);
@@ -32,6 +61,18 @@ public partial class WidgetViewModel
             cancellationToken.ThrowIfCancellationRequested();
             MappedFolderPath = Config.MappedFolderPath;
             _mappedFolderTraversalPath = ResolveMappedFolderTraversalPath();
+            if (!string.IsNullOrWhiteSpace(MappedFolderPath) &&
+                !string.IsNullOrWhiteSpace(_mappedFolderTraversalPath) &&
+                !PathsEqual(MappedFolderPath, _mappedFolderTraversalPath) &&
+                WidgetPathRebaseHelper.RebaseFolderTree(
+                    Config,
+                    MappedFolderPath,
+                    _mappedFolderTraversalPath,
+                    rebaseMappedFolderPath: false))
+            {
+                ApplyStackSettings();
+                _settingsService.UpdateWidget(Config, notifySubscribers: false);
+            }
             SetCurrentFolderPath(_mappedFolderTraversalPath);
             await ConfigureFolderWatchersAsync(CurrentFolderPath, cancellationToken);
             await ReloadFolderContentsAsync(
@@ -60,6 +101,9 @@ public partial class WidgetViewModel
         bool activateManualSortOnSuccess = false,
         WidgetVisibleInsertionAnchor? preferredStackAnchor = null)
     {
+        LastImportSkippedConflictCount = 0;
+        LastImportUndoHistoryId = null;
+        LastImportDestinationPaths = [];
         var normalizedPaths = paths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -124,6 +168,10 @@ public partial class WidgetViewModel
         catch (Exception ex) when (
             ex is FileService.IFileTransferWithCompletedResults partial)
         {
+            LastImportDestinationPaths = partial.CompletedResults
+                .Select(static item => Path.GetFullPath(item.DestinationPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             await ApplyImportedTransferResultsAsync(
                 partial.CompletedResults,
                 shouldMove,
@@ -131,9 +179,23 @@ public partial class WidgetViewModel
                 preferredManualIndex,
                 activateManualSortOnSuccess,
                 preferredStackAnchor);
+            if (ex.Data[OrganizerService.PartialHistoryEntryIdDataKey] is string partialHistoryId)
+            {
+                LastImportUndoHistoryId = partialHistoryId;
+            }
+
             throw;
         }
 
+        LastImportSkippedConflictCount = operation.SkippedItemCount;
+        LastImportUndoHistoryId =
+            operation.History is { CanUndo: true, IsUndone: false } undoableHistory
+                ? undoableHistory.Id
+                : null;
+        LastImportDestinationPaths = operation.CompletedItems
+            .Select(static item => Path.GetFullPath(item.DestinationPath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         // CompletedItems (not the persisted History entry) carries this
         // run's receipts: oversized batches are compacted to a summary
         // before the entry is returned.
@@ -160,6 +222,23 @@ public partial class WidgetViewModel
     /// success for files that were never transferred.
     /// </summary>
     internal int LastImportSkippedUndisplayableCount { get; private set; }
+    internal int LastImportSkippedConflictCount { get; private set; }
+
+    /// <summary>
+    /// The exact undoable history-entry id produced by the most recent
+    /// <see cref="ImportPathsAsync"/> run (null for copies, unsafe merges, and
+    /// failed imports). HUD undo receipts bind THIS id — the global
+    /// "latest undoable entry" can belong to another widget or batch.
+    /// </summary>
+    internal string? LastImportUndoHistoryId { get; private set; }
+
+    /// <summary>
+    /// Normalized destination paths written, created, or overwritten during the
+    /// most recent <see cref="ImportPathsAsync"/> run so stack-drop commit paths
+    /// can include overwritten same-name files instead of relying solely on set
+    /// difference against pre-drop items.
+    /// </summary>
+    internal IReadOnlyList<string> LastImportDestinationPaths { get; private set; } = [];
 
     private static (List<string> DisplayablePaths, int SkippedUndisplayableCount)
         PartitionDisplayableImportPaths(IReadOnlyList<string> paths)
@@ -199,8 +278,7 @@ public partial class WidgetViewModel
             .Select(group => group.Last())
             .ToArray();
 
-        WidgetSortMode? originalSortMode = null;
-        bool originalSortDescending = Config.SortDescending;
+        FolderSortStateSnapshot? originalSortState = null;
         bool insertedAny = false;
         var importedDestinationPaths = new List<string>();
         int nextManualIndex = preferredManualIndex ?? -1;
@@ -232,18 +310,24 @@ public partial class WidgetViewModel
             if (activateManualSortOnSuccess &&
                 (preferredManualIndex.HasValue ||
                  preferredStackAnchor.HasValue) &&
-                Config.SortMode != WidgetSortMode.Manual)
+                EffectiveSortMode != WidgetSortMode.Manual)
             {
-                originalSortMode = Config.SortMode;
-                Config.SortMode = WidgetSortMode.Manual;
-                Config.SortDescending = false;
-                NormalizeSortOrder();
-                OnPropertyChanged(nameof(SortModeLabel));
+                originalSortState = CaptureCurrentFolderSortStateAndActivateManual();
             }
 
-            foreach (string destinationPath in materialized.Select(
+            var seenTopLevelDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string rawDestinationPath in materialized.Select(
                          result => result.DestinationPath))
             {
+                string? destinationPath = ResolveDirectChildDestinationPath(
+                    rawDestinationPath,
+                    destinationFolderPath);
+                if (string.IsNullOrWhiteSpace(destinationPath) ||
+                    !seenTopLevelDestinations.Add(destinationPath))
+                {
+                    continue;
+                }
+
                 if (!File.Exists(destinationPath) &&
                     !Directory.Exists(destinationPath))
                 {
@@ -293,7 +377,7 @@ public partial class WidgetViewModel
                 stackAnchor);
         }
 
-        if (originalSortMode.HasValue)
+        if (originalSortState is { } capturedSortState)
         {
             if (insertedAny)
             {
@@ -305,11 +389,50 @@ public partial class WidgetViewModel
             }
             else
             {
-                Config.SortMode = originalSortMode.Value;
-                Config.SortDescending = originalSortDescending;
-                SortItems();
-                OnPropertyChanged(nameof(SortModeLabel));
+                RestoreCurrentFolderSortState(capturedSortState);
             }
+        }
+    }
+
+    /// <summary>
+    /// Returns the normalized destination path only when it is a direct child
+    /// of <paramref name="destinationFolderPath"/>. Nested leaf paths returned
+    /// by partial directory merges (e.g. <c>Box\Sub\file.txt</c>) must never be
+    /// upserted as phantom top-level tiles in <c>Box</c> (FL-12).
+    /// </summary>
+    internal static string? ResolveDirectChildDestinationPath(
+        string? destinationPath,
+        string? destinationFolderPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath) ||
+            string.IsNullOrWhiteSpace(destinationFolderPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            string normalizedDestination = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(destinationPath));
+            string normalizedFolder = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(destinationFolderPath));
+            string? parent = Path.GetDirectoryName(normalizedDestination);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return null;
+            }
+
+            string normalizedParent = Path.TrimEndingDirectorySeparator(parent);
+            return string.Equals(
+                normalizedParent,
+                normalizedFolder,
+                StringComparison.OrdinalIgnoreCase)
+                ? normalizedDestination
+                : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -335,16 +458,11 @@ public partial class WidgetViewModel
             return 0;
         }
 
-        WidgetSortMode? originalSortMode = null;
-        bool originalSortDescending = Config.SortDescending;
+        FolderSortStateSnapshot? originalSortState = null;
         if (activateManualSortOnSuccess &&
-            Config.SortMode != WidgetSortMode.Manual)
+            EffectiveSortMode != WidgetSortMode.Manual)
         {
-            originalSortMode = Config.SortMode;
-            Config.SortMode = WidgetSortMode.Manual;
-            Config.SortDescending = false;
-            NormalizeSortOrder();
-            OnPropertyChanged(nameof(SortModeLabel));
+            originalSortState = CaptureCurrentFolderSortStateAndActivateManual();
         }
 
         int insertedCount = 0;
@@ -377,7 +495,7 @@ public partial class WidgetViewModel
                 stackAnchor);
         }
 
-        if (originalSortMode.HasValue)
+        if (originalSortState is { } capturedSortState)
         {
             if (insertedCount > 0)
             {
@@ -385,10 +503,7 @@ public partial class WidgetViewModel
             }
             else
             {
-                Config.SortMode = originalSortMode.Value;
-                Config.SortDescending = originalSortDescending;
-                SortItems();
-                OnPropertyChanged(nameof(SortModeLabel));
+                RestoreCurrentFolderSortState(capturedSortState);
             }
         }
 
@@ -768,8 +883,8 @@ public partial class WidgetViewModel
             {
                 await _folderRefreshGate.WaitAsync();
                 refreshGateHeld = true;
-                _folderWatcher.Stop();
-                _publicFolderWatcher.Stop();
+                _folderWatcher?.Stop();
+                _publicFolderWatcher?.Stop();
                 restartWatchers = true;
             }
 
@@ -793,7 +908,7 @@ public partial class WidgetViewModel
             int originalIndex = Items.IndexOf(item);
             if (originalIndex >= 0)
             {
-                if (Config.SortMode != WidgetSortMode.Manual)
+                if (EffectiveSortMode != WidgetSortMode.Manual)
                 {
                     Items.RemoveAt(originalIndex);
                     Items.Insert(GetSortedInsertIndex(item), item);
@@ -845,26 +960,46 @@ public partial class WidgetViewModel
 
         if (ownerHandle != IntPtr.Zero)
         {
+            int permanentlyDeletedCount = 0;
             try
             {
+                FileService.ShellDeleteOutcome? shellOutcome = null;
                 IReadOnlySet<string> deletedPaths =
                     await _fileService.DeleteEntriesWithShellAsync(
                         targets.Select(item => item.Path),
                         recycle,
-                        ownerHandle);
+                        ownerHandle,
+                        outcome => shellOutcome = outcome);
 
+                var failedByPath = shellOutcome?.Failures
+                    .ToDictionary(f => f.Path, f => f.HResult, StringComparer.OrdinalIgnoreCase);
                 foreach (WidgetItem item in targets)
                 {
                     string normalizedPath = Path.GetFullPath(item.Path);
-                    if (!deletedPaths.Contains(normalizedPath))
+                    if (deletedPaths.Contains(normalizedPath))
                     {
+                        Items.Remove(item);
+                        RemoveFileAddedAt(item.Path);
+                        successfulPaths.Add(normalizedPath);
+                        deletedCount++;
+                        if (shellOutcome?.PermanentlyDeletedPaths.Contains(normalizedPath) == true)
+                        {
+                            permanentlyDeletedCount++;
+                        }
+
                         continue;
                     }
 
-                    Items.Remove(item);
-                    RemoveFileAddedAt(item.Path);
-                    successfulPaths.Add(normalizedPath);
-                    deletedCount++;
+                    if (failedByPath is not null &&
+                        failedByPath.TryGetValue(normalizedPath, out int hr))
+                    {
+                        string errorMessage = System.Runtime.InteropServices.Marshal.GetExceptionForHR(hr)?.Message
+                            ?? $"0x{hr:X8}";
+                        failures.Add(new FileDeleteFailure(
+                            item.Path,
+                            item.Name,
+                            errorMessage));
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -897,7 +1032,7 @@ public partial class WidgetViewModel
                 targets
                     .Where(item => successfulPaths.Contains(Path.GetFullPath(item.Path)))
                     .Select(item => item.Path));
-            return new FileDeleteBatchResult(deletedCount, failures);
+            return new FileDeleteBatchResult(deletedCount, failures, permanentlyDeletedCount);
         }
 
         foreach (var item in targets)
@@ -987,14 +1122,30 @@ public partial class WidgetViewModel
             return new FileDeleteBatchResult(0, failures);
         }
 
+        int permanentlyDeletedCount = 0;
         try
         {
+            FileService.ShellDeleteOutcome? shellOutcome = null;
             IReadOnlySet<string> deletedPaths =
                 await _fileService.DeleteEntriesWithShellAsync(
                     targets,
                     recycle: true,
-                    ownerHandle);
+                    ownerHandle,
+                    outcome => shellOutcome = outcome);
             deletedCount = deletedPaths.Count;
+            permanentlyDeletedCount = shellOutcome?.PermanentlyDeletedPaths.Count ?? 0;
+            if (shellOutcome is { Failures.Count: > 0 })
+            {
+                foreach (FileService.ShellDeleteItemFailure failure in shellOutcome.Failures)
+                {
+                    string message = System.Runtime.InteropServices.Marshal.GetExceptionForHR(failure.HResult)?.Message
+                        ?? $"0x{failure.HResult:X8}";
+                    failures.Add(new FileDeleteFailure(
+                        failure.Path,
+                        Path.GetFileName(failure.Path),
+                        message));
+                }
+            }
 
             // Keep the model in sync: same-widget drops arrive as paths, and
             // the watcher refresh alone would leave a stale tile visible
@@ -1020,7 +1171,7 @@ public partial class WidgetViewModel
                 ex.Message));
         }
 
-        return new FileDeleteBatchResult(deletedCount, failures);
+        return new FileDeleteBatchResult(deletedCount, failures, permanentlyDeletedCount);
     }
 
     public void UpdateBounds(double x, double y, double width, double height, bool persist)

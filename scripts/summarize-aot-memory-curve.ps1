@@ -5,7 +5,7 @@
     可选对照实验根 DeskBox.log 的 [Memory] 托管堆数字。
 #>
 param(
-    [string]$CsvPath = "D:\project\wingezi\deskbox-aot-curve-samples.csv",
+    [string]$CsvPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.artifacts\aot-curve-samples.csv")),
     [string]$DataRoot = "$env:LOCALAPPDATA\DeskBox-AotCurve",
     # plateau 判别：最后一批的峰值相对第一批峰值允许的涨幅
     [double]$PlateauTolerancePercent = 15,

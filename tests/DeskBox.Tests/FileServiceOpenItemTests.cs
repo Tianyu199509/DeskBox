@@ -100,13 +100,58 @@ public sealed class FileServiceOpenItemTests
             FileService.SelectOpenDispatchMode(
                 isShellLinkShortcut: false,
                 targetKind: ShortcutTargetKind.LocalFileSystem,
-                pathToOpen: @"C:\Users\simon\Documents"));
+                pathToOpen: @"C:\Users\alice\Documents"));
         Assert.Equal(
             OpenItemDispatchMode.ShellDispatch,
             FileService.SelectOpenDispatchMode(
                 isShellLinkShortcut: false,
                 targetKind: ShortcutTargetKind.LocalFileSystem,
-                pathToOpen: @"C:\Users\simon\Documents\Report.docx"));
+                pathToOpen: @"C:\Users\alice\Documents\Report.docx"));
+    }
+
+    [Fact]
+    public void SelectOpenDispatchMode_DirectLocalExecutablesUseLocalDefaultVerbWhenUnelevated()
+    {
+        foreach (string path in new[]
+                 {
+                     @"D:\DeskBox\其他\DeskBox_Setup_1.4.9_x64.exe",
+                     @"C:\Installers\Package.MSI",
+                     @"C:\Scripts\build.bat",
+                     @"C:\Scripts\run.cmd",
+                     @"C:\Tools\legacy.com"
+                 })
+        {
+            Assert.Equal(
+                OpenItemDispatchMode.LocalDefaultVerb,
+                FileService.SelectOpenDispatchMode(
+                    isShellLinkShortcut: false,
+                    targetKind: ShortcutTargetKind.LocalFileSystem,
+                    pathToOpen: path,
+                    isProcessElevated: false));
+        }
+    }
+
+    [Fact]
+    public void SelectOpenDispatchMode_DirectExecutablesKeepExplorerWhenElevatedOrOnNetwork()
+    {
+        // When DeskBox runs elevated, delegating to Explorer avoids unintentionally
+        // elevating normal user executables.
+        Assert.Equal(
+            OpenItemDispatchMode.ShellDispatch,
+            FileService.SelectOpenDispatchMode(
+                isShellLinkShortcut: false,
+                targetKind: ShortcutTargetKind.LocalFileSystem,
+                pathToOpen: @"D:\DeskBox\app.exe",
+                isProcessElevated: true));
+
+        // Network/UNC executables stay on Explorer so Explorer owns network credentials.
+        Assert.Equal(
+            OpenItemDispatchMode.ShellDispatch,
+            FileService.SelectOpenDispatchMode(
+                isShellLinkShortcut: false,
+                targetKind: ShortcutTargetKind.Unc,
+                pathToOpen: @"\\fileserver\share\setup.exe",
+                isProcessElevated: false));
     }
 
     [Fact]
@@ -234,18 +279,26 @@ public sealed class FileServiceOpenItemTests
     }
 
     /// <summary>
-    /// Pins the #339 boundary: the search popup's hard-coded explorer.exe
-    /// dispatch for folders is a separate issue and must not move in #459's
-    /// wake.
+    /// Search folder results now share the unified ShellLaunchService /
+    /// Win32Helper.OpenFile pipeline rather than spawning raw explorer.exe,
+    /// preserving custom folder handlers and contamination-free STA dispatch.
     /// </summary>
     [Fact]
-    public void SearchPopupFolderOpen_StillUsesExplorerForNow()
+    public void SearchPopupFolderOpen_RoutesThroughUnifiedShellLaunchPipeline()
     {
         string search = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/ViewModels/SearchPopupViewModel.cs"));
 
+        Assert.DoesNotContain(
+            "Process.Start(\"explorer.exe\"",
+            search,
+            StringComparison.Ordinal);
         Assert.Contains(
-            """System.Diagnostics.Process.Start("explorer.exe", $"\"{path}\"");""",
+            "OpenSearchFileItemAsync(folderPath)",
+            search,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShellLaunchService.OpenPathAsync(",
             search,
             StringComparison.Ordinal);
     }

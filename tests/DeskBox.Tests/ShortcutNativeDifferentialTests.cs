@@ -35,20 +35,12 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     private ShortcutNativeModule Native => s_nativeModule.Value;
 
     [Fact]
-    public void BackendPolicy_DefaultsToCSharpButForcesRustForNativeAot()
+    public void BackendPolicy_UnconditionallySelectsRust()
     {
+        Assert.Equal(ShortcutBackendMode.Rust, ShortcutBackendPolicy.Current);
         Assert.Equal(
-            ShortcutBackendMode.CSharp,
-            ShortcutBackendPolicy.Resolve(configuredValue: null, isDynamicCodeSupported: true));
-        Assert.Equal(
-            ShortcutBackendMode.CSharp,
-            ShortcutBackendPolicy.Resolve("invalid", isDynamicCodeSupported: true));
-        Assert.Equal(
-            ShortcutBackendMode.Rust,
-            ShortcutBackendPolicy.Resolve(" RuSt ", isDynamicCodeSupported: true));
-        Assert.Equal(
-            ShortcutBackendMode.Rust,
-            ShortcutBackendPolicy.Resolve(configuredValue: null, isDynamicCodeSupported: false));
+            [ShortcutBackendMode.Rust],
+            Enum.GetValues<ShortcutBackendMode>());
     }
 
     [Fact]
@@ -133,7 +125,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             icon,
             -7);
 
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
 
         Assert.True(rust.Success, rust.Detail);
@@ -152,7 +144,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             target,
             arguments: "\u2003  --diagnostic=\"值\"  \u3000");
 
-        bool csharpSuccess = DragDropPermissionService.TryReadShortcutWithCSharp(
+        bool csharpSuccess = Helpers.WindowsShellLinkTestOracle.TryReadShortcut(
             link,
             out string csharpTarget,
             out string csharpArguments);
@@ -175,13 +167,13 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             CreateTarget("long-unicode.exe"),
             arguments: $"\u3000{unicodeValue}\u2003");
 
-        ShortcutInfo csharpStored = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharpStored = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rustStored = Native.ReadStoredRaw(link);
         Assert.True(rustStored.Success, rustStored.Detail);
         AssertShortcutEqual(csharpStored, rustStored.Metadata!);
-        Assert.Equal(1u << 2, rustStored.SourceTruncatedFields);
+        Assert.Equal(0u, rustStored.SourceTruncatedFields);
 
-        bool csharpDiagnosticSuccess = DragDropPermissionService.TryReadShortcutWithCSharp(
+        bool csharpDiagnosticSuccess = Helpers.WindowsShellLinkTestOracle.TryReadShortcut(
             link,
             out string csharpTarget,
             out string csharpArguments);
@@ -195,9 +187,9 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     }
 
     [Theory]
-    [InlineData(259)]
-    [InlineData(260)]
-    [InlineData(261)]
+    [InlineData(4095)]
+    [InlineData(4096)]
+    [InlineData(4097)]
     public void StoredRaw_ArgumentBoundariesMatchCSharpOracle(int length)
     {
         string link = CreatePathShortcut(
@@ -205,7 +197,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             CreateTarget($"stored-{length}.exe"),
             arguments: new string('x', length));
 
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
 
         Assert.True(rust.Success, rust.Detail);
@@ -214,9 +206,9 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     }
 
     [Theory]
-    [InlineData(511)]
-    [InlineData(512)]
-    [InlineData(513)]
+    [InlineData(4095)]
+    [InlineData(4096)]
+    [InlineData(4097)]
     public void EffectiveDiagnostic_ArgumentBoundariesMatchCSharpOracle(int length)
     {
         string link = CreatePathShortcut(
@@ -224,7 +216,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             CreateTarget($"diagnostic-{length}.exe"),
             arguments: new string('y', length));
 
-        bool csharpSuccess = DragDropPermissionService.TryReadShortcutWithCSharp(
+        bool csharpSuccess = Helpers.WindowsShellLinkTestOracle.TryReadShortcut(
             link,
             out string csharpTarget,
             out string csharpArguments);
@@ -243,7 +235,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         string target = Path.Combine(_tempRoot, "missing", "application.exe");
         string link = CreatePathShortcut("missing-target.lnk", target);
 
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
 
         Assert.True(rust.Success, rust.Detail);
@@ -261,7 +253,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             target,
             arguments: "--special");
 
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
 
         Assert.True(rust.Success, rust.Detail);
@@ -279,7 +271,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             fullTarget,
             relativeTarget);
 
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
 
         Assert.True(rust.Success, rust.Detail);
@@ -294,12 +286,20 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         (bool csharpStoredSuccess, ShortcutInfo? csharpStored) = TryReadStoredCSharp(link);
         ShortcutNativeCallResult rustStored = Native.ReadStoredRaw(link);
         Assert.Equal(csharpStoredSuccess, rustStored.Success);
+        if (!rustStored.Success)
+        {
+            Assert.True(rustStored.IsExpectedPidlOnlyOutcome, rustStored.Detail);
+        }
+
+        ShortcutNativeCallResult missingStored = Native.ReadStoredRaw(
+            Path.Combine(_tempRoot, "missing-nonexistent.lnk"));
+        Assert.False(missingStored.IsExpectedPidlOnlyOutcome);
         if (csharpStoredSuccess)
         {
             AssertShortcutEqual(csharpStored!, rustStored.Metadata!);
         }
 
-        bool csharpDiagnosticSuccess = DragDropPermissionService.TryReadShortcutWithCSharp(
+        bool csharpDiagnosticSuccess = Helpers.WindowsShellLinkTestOracle.TryReadShortcut(
             link,
             out string csharpTarget,
             out string csharpArguments);
@@ -447,7 +447,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             Path.Combine(_tempRoot, "folder target")).FullName;
         string csharpFolderLink = Path.Combine(_tempRoot, "folder-csharp.lnk");
         string rustFolderLink = Path.Combine(_tempRoot, "folder-rust.lnk");
-        ShortcutHelper.CreateOrUpdateFolderShortcutWithCSharp(
+        Helpers.WindowsShellLinkTestOracle.CreateOrUpdateFolderShortcut(
             csharpFolderLink,
             folderTarget,
             "folder description");
@@ -469,7 +469,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         File.WriteAllBytes(appIcon, [0]);
         string csharpAppLink = Path.Combine(_tempRoot, "application-csharp.lnk");
         string rustAppLink = Path.Combine(_tempRoot, "application-rust.lnk");
-        DragDropPermissionService.CreateOrUpdateShortcutWithCSharp(
+        Helpers.WindowsShellLinkTestOracle.CreateOrUpdateShortcut(
             csharpAppLink,
             appTarget,
             "--application",
@@ -495,7 +495,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         string rustLink = Path.Combine(_tempRoot, "shell-namespace-rust.lnk");
         const string parsingName = "shell:RecycleBinFolder";
         const string description = "Shell namespace shortcut";
-        ShortcutHelper.CreateShellNamespaceShortcutWithCSharp(
+        Helpers.WindowsShellLinkTestOracle.CreateShellNamespaceShortcut(
             csharpLink,
             parsingName,
             description);
@@ -514,7 +514,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         Assert.Equal(0, write.DescriptionHResult);
         AssertStoredLinksEqual(csharpLink, rustLink);
         Assert.Empty(
-            ShortcutHelper.ReadStoredMetadataWithCSharpUncached(rustLink).TargetPath);
+            Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(rustLink).TargetPath);
     }
 
     [Fact]
@@ -542,7 +542,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         string folderTarget = Directory.CreateDirectory(
             Path.Combine(_tempRoot, "overwrite folder")).FullName;
 
-        ShortcutHelper.CreateOrUpdateFolderShortcutWithCSharp(
+        Helpers.WindowsShellLinkTestOracle.CreateOrUpdateFolderShortcut(
             csharpLink,
             folderTarget,
             "new description");
@@ -558,7 +558,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
         Assert.True(write.Success, write.Detail);
         AssertStoredLinksEqual(csharpLink, rustLink);
-        ShortcutInfo actual = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(rustLink);
+        ShortcutInfo actual = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(rustLink);
         Assert.Equal(string.Empty, actual.Arguments);
         Assert.Equal(string.Empty, actual.IconLocation);
         Assert.Equal(0, actual.IconIndex);
@@ -649,7 +649,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
                     iconPath,
                     index));
             Assert.True(write.Success, write.Detail);
-            ShortcutInfo stored = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+            ShortcutInfo stored = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
             Assert.Equal(arguments, stored.Arguments);
             Assert.Equal(index, stored.IconIndex);
         })).ToArray();
@@ -670,7 +670,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
             link,
             new ShortcutInfo(target, string.Empty, string.Empty, _tempRoot, string.Empty, 0));
         Assert.True(write.Success, write.Detail);
-        ShortcutInfo stored = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo stored = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         Assert.Equal(string.Empty, stored.IconLocation);
         Assert.Equal(0, stored.IconIndex);
     }
@@ -740,7 +740,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
         Task[] reads = Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
         {
-            ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+            ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
             ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
             Assert.True(rust.Success, rust.Detail);
             AssertShortcutEqual(csharp, rust.Metadata!);
@@ -751,7 +751,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
     private ShortcutNativeCallResult AssertResolveEqual(string link, ushort timeoutMs)
     {
-        ShortcutInfo? csharp = ShortcutHelper.ResolveWithCSharp(link, timeoutMs);
+        ShortcutInfo? csharp = Helpers.WindowsShellLinkTestOracle.Resolve(link, timeoutMs);
         ShortcutNativeCallResult rust = Native.ResolveNoUi(link, timeoutMs);
 
         Assert.NotNull(csharp);
@@ -763,7 +763,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
     private void AssertStoredEqual(string link)
     {
-        ShortcutInfo csharp = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link);
+        ShortcutInfo csharp = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link);
         ShortcutNativeCallResult rust = Native.ReadStoredRaw(link);
         Assert.True(rust.Success, rust.Detail);
         AssertShortcutEqual(csharp, rust.Metadata!);
@@ -771,8 +771,8 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
     private static void AssertStoredLinksEqual(string expectedLink, string actualLink)
     {
-        ShortcutInfo expected = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(expectedLink);
-        ShortcutInfo actual = ShortcutHelper.ReadStoredMetadataWithCSharpUncached(actualLink);
+        ShortcutInfo expected = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(expectedLink);
+        ShortcutInfo actual = Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(actualLink);
         AssertShortcutEqual(expected, actual);
     }
 
@@ -861,7 +861,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     {
         try
         {
-            return (true, ShortcutHelper.ReadStoredMetadataWithCSharpUncached(link));
+            return (true, Helpers.WindowsShellLinkTestOracle.ReadStoredMetadataUncached(link));
         }
         catch
         {
@@ -900,6 +900,77 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         {
             throw new Xunit.Sdk.XunitException($"{apartment} test thread failed: {failure}");
         }
+    }
+
+    [Fact]
+    public void LongPathShortcut_CreateAndResolveRoundTripsAcrossManagedAndRustNative()
+    {
+        string segment = new('p', 90);
+        string longFolder = Path.Combine(_tempRoot, segment, segment, segment + "_folder");
+        string longTargetFile = Path.Combine(longFolder, "deep-target-application.exe");
+        Assert.True(longFolder.Length > 265);
+        Assert.True(longTargetFile.Length > 280);
+
+        Directory.CreateDirectory(StorageMigrationNativeMethods.Extended(longFolder));
+        File.WriteAllBytes(StorageMigrationNativeMethods.Extended(longTargetFile), "MZ"u8.ToArray());
+
+        string expectedFolderTarget = Path.GetFullPath(longFolder);
+        string expectedFileTarget = Path.GetFullPath(longTargetFile);
+
+        string managedFolderShortcut = Path.Combine(_tempRoot, "long-managed-folder.lnk");
+        ShortcutHelper.CreateOrUpdateFolderShortcut(
+            managedFolderShortcut,
+            longFolder,
+            "Long folder shortcut");
+        ShortcutHelper.InvalidateStoredMetadataCache(managedFolderShortcut);
+
+        ShortcutInfo? managedStored = ShortcutHelper.ReadStoredMetadata(managedFolderShortcut);
+        ShortcutInfo? managedResolved = ShortcutHelper.Resolve(managedFolderShortcut);
+        Assert.NotNull(managedStored);
+        Assert.NotNull(managedResolved);
+        Assert.Equal(expectedFolderTarget, managedStored!.TargetPath, ignoreCase: true);
+        Assert.Equal(expectedFolderTarget, managedResolved!.TargetPath, ignoreCase: true);
+
+        string rustFileShortcut = Path.Combine(_tempRoot, "long-rust-file.lnk");
+        ShortcutNativeWriteCallResult writeResult = Native.WriteShortcut(
+            rustFileShortcut,
+            new ShortcutInfo(
+                longTargetFile,
+                "Long file shortcut",
+                "--mode long-path",
+                longFolder,
+                string.Empty,
+                0));
+        Assert.True(writeResult.Success, writeResult.Detail);
+
+        ShortcutNativeCallResult rustStored = Native.ReadStoredRaw(rustFileShortcut);
+        ShortcutNativeCallResult rustDiagnostic = Native.ReadEffectiveDiagnostic(rustFileShortcut);
+        ShortcutNativeCallResult rustResolved = Native.ResolveNoUi(rustFileShortcut);
+        ShortcutHelper.InvalidateStoredMetadataCache(rustFileShortcut);
+        ShortcutInfo? unifiedStored = ShortcutHelper.ReadStoredMetadata(rustFileShortcut);
+        string? unifiedEffective = ShortcutHelper.TryReadEffectiveTargetPath(rustFileShortcut);
+        ShortcutInfo? unifiedResolved = ShortcutHelper.Resolve(rustFileShortcut);
+
+        Assert.True(rustStored.Success, rustStored.Detail);
+        Assert.True(rustDiagnostic.Success, rustDiagnostic.Detail);
+        Assert.True(rustResolved.Success, rustResolved.Detail);
+        Assert.NotNull(rustStored.Metadata);
+        Assert.NotNull(rustDiagnostic.Metadata);
+        Assert.NotNull(rustResolved.Metadata);
+        Assert.Equal(expectedFileTarget, ExpandShortTargetIfCompressed(rustStored.Metadata!.TargetPath), ignoreCase: true);
+        Assert.Equal(expectedFileTarget, ExpandShortTargetIfCompressed(rustDiagnostic.Metadata!.TargetPath), ignoreCase: true);
+        Assert.Equal(expectedFileTarget, ExpandShortTargetIfCompressed(rustResolved.Metadata!.TargetPath), ignoreCase: true);
+        Assert.NotNull(unifiedStored);
+        Assert.Equal(expectedFileTarget, unifiedStored!.TargetPath, ignoreCase: true);
+        Assert.Equal(expectedFileTarget, unifiedEffective, ignoreCase: true);
+        Assert.NotNull(unifiedResolved);
+        Assert.Equal(expectedFileTarget, unifiedResolved!.TargetPath, ignoreCase: true);
+        Assert.Equal("--mode long-path", unifiedResolved.Arguments);
+
+        static string ExpandShortTargetIfCompressed(string path) =>
+            StorageMigrationNativeMethods.TryExpandShortPathExceedingMaxPath(path, out string expanded)
+                ? expanded
+                : path;
     }
 
     public void Dispose()

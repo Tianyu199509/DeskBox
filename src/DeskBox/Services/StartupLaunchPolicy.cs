@@ -3,6 +3,8 @@ namespace DeskBox.Services;
 internal static class StartupLaunchPolicy
 {
     private const string StartupArgument = "--startup";
+    private const string StartupProtocolUri = "deskbox://startup";
+    private const string WakeupProtocolUri = "deskbox://wakeup";
 
     public static bool IsStartupLaunch(
         IEnumerable<string> processArguments,
@@ -23,9 +25,19 @@ internal static class StartupLaunchPolicy
 
     private static bool IsStartupArgument(string argument)
     {
-        return string.Equals(
-            argument.Trim().Trim('"'),
-            StartupArgument,
-            StringComparison.OrdinalIgnoreCase);
+        string normalized = argument.Trim().Trim('"').TrimEnd('/');
+        if (string.Equals(normalized, StartupArgument, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out Uri? uri) &&
+            string.Equals(uri.Scheme, "deskbox", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Equals(uri.Host, "startup", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(uri.Host, "wakeup", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 }

@@ -16,6 +16,8 @@ public sealed record WidgetFeedbackRequest(
     Func<Task>? Action = null,
     Func<Task>? DismissAction = null)
 {
+    public bool HasAction => !string.IsNullOrWhiteSpace(ActionText) && Action is not null;
+
     public TimeSpan DisplayDuration => WidgetFeedbackPolicy.GetDisplayDuration(this);
 }
 
@@ -24,8 +26,7 @@ public static class WidgetFeedbackPolicy
     public static TimeSpan GetDisplayDuration(WidgetFeedbackRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if ((!string.IsNullOrWhiteSpace(request.ActionText) && request.Action is not null) ||
-            request.DismissAction is not null)
+        if (request.HasAction || request.DismissAction is not null)
         {
             return TimeSpan.FromMilliseconds(5000);
         }
@@ -38,6 +39,27 @@ public static class WidgetFeedbackPolicy
             WidgetFeedbackSeverity.Error => 4500,
             _ => 1800
         });
+    }
+
+    public static bool ShouldPreserveActiveAction(
+        WidgetFeedbackRequest? current,
+        WidgetFeedbackRequest incoming)
+    {
+        ArgumentNullException.ThrowIfNull(incoming);
+        if (current is null || !current.HasAction || incoming.HasAction)
+        {
+            return false;
+        }
+
+        if (incoming.Severity is WidgetFeedbackSeverity.Warning or WidgetFeedbackSeverity.Error)
+        {
+            return false;
+        }
+
+        return !string.Equals(
+            current.DeduplicationKey,
+            incoming.DeduplicationKey,
+            StringComparison.Ordinal);
     }
 
     public static bool Replaces(

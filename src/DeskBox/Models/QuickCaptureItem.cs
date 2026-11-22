@@ -52,6 +52,14 @@ public sealed class QuickCaptureItem
     /// Backfilled by the store's Normalize; used by the future sync projection.
     /// </summary>
     public string? DeviceId { get; set; }
+
+    public double? PopoutX { get; set; }
+
+    public double? PopoutY { get; set; }
+
+    public double? PopoutWidth { get; set; }
+
+    public double? PopoutHeight { get; set; }
 }
 
 public enum QuickCaptureItemType

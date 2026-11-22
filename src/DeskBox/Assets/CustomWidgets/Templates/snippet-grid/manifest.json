@@ -1,0 +1,529 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.snippet-grid",
+  "name": "${$i18n.widgetName}",
+  "version": "3.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "⚡",
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "minSize": {
+    "width": 304,
+    "height": 296
+  },
+  "defaultSize": {
+    "width": 352,
+    "height": 378
+  },
+  "state": {
+    "group": "daily",
+    "lastFeedback": "",
+    "lastActionTag": "",
+    "editingId": "",
+    "draftGroup": "daily",
+    "draftKind": "copy",
+    "draftTitle": "",
+    "draftSubtitle": "",
+    "draftBody": "",
+    "seeded": false
+  },
+  "collections": {
+    "snippets": {
+      "maxItems": 100,
+      "fields": [
+        "group",
+        "kind",
+        "icon",
+        "title",
+        "subtitle",
+        "tag",
+        "tone",
+        "body"
+      ]
+    }
+  },
+  "settings": [
+    {
+      "key": "showHint",
+      "type": "toggle",
+      "label": "${$i18n.setShowHint}",
+      "default": true
+    }
+  ],
+  "capsule": {
+    "title": "${$i18n.widgetName}",
+    "summary": "${state.lastFeedback != '' ? state.lastFeedback : $i18n.capsuleIdleSummary}",
+    "glyph": "⚡",
+    "badge": "${$computed.capsuleBadge}",
+    "primaryAction": {
+      "icon": "expand",
+      "tooltip": "${$i18n.capsuleActionTip}",
+      "onClick": [
+        {
+          "type": "launcher.open",
+          "targetId": "ms-screenclip:"
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "addSnippetPop": {
+      "title": "${state.editingId != '' ? $i18n.editPopTitle : $i18n.popTitle}",
+      "width": 316,
+      "placement": "bottom",
+      "root": "pop_snippet_editor_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "spacing": 7,
+      "padding": "11,11,11,8",
+      "children": [
+        "header_toolbar_grid",
+        "grid_snippet_tiles",
+        "feedback_footer_card"
+      ]
+    },
+    "header_toolbar_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "group_tabs_card",
+        "btn_add_snippet"
+      ]
+    },
+    "group_tabs_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "subtle",
+      "padding": "3",
+      "children": [
+        "group_tabs_grid"
+      ]
+    },
+    "group_tabs_grid": {
+      "type": "Grid",
+      "columns": "*,*,*",
+      "columnSpacing": 3,
+      "children": [
+        "btn_group_daily",
+        "btn_group_phrases",
+        "btn_group_dev"
+      ]
+    },
+    "btn_group_daily": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$i18n.tabDaily}",
+      "variant": "${state.group == 'daily' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "6,3,6,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setGroup",
+          "args": {
+            "group": "daily"
+          }
+        }
+      ]
+    },
+    "btn_group_phrases": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$i18n.tabPhrases}",
+      "variant": "${state.group == 'phrases' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "6,3,6,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setGroup",
+          "args": {
+            "group": "phrases"
+          }
+        }
+      ]
+    },
+    "btn_group_dev": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$i18n.tabDev}",
+      "variant": "${state.group == 'dev' ? 'standard' : 'subtle'}",
+      "horizontalAlignment": "stretch",
+      "padding": "6,3,6,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setGroup",
+          "args": {
+            "group": "dev"
+          }
+        }
+      ]
+    },
+    "btn_add_snippet": {
+      "type": "IconButton",
+      "column": 1,
+      "icon": "add",
+      "size": 28,
+      "variant": "subtle",
+      "verticalAlignment": "center",
+      "tooltip": "${$i18n.addBtnTooltip}",
+      "onClick": [
+        {
+          "type": "state.set",
+          "key": "editingId",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftGroup",
+          "value": "${state.group}"
+        },
+        {
+          "type": "state.set",
+          "key": "draftKind",
+          "value": "copy"
+        },
+        {
+          "type": "state.set",
+          "key": "draftTitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftSubtitle",
+          "value": ""
+        },
+        {
+          "type": "state.set",
+          "key": "draftBody",
+          "value": ""
+        }
+      ],
+      "popover": "addSnippetPop"
+    },
+    "grid_snippet_tiles": {
+      "type": "ItemsGrid",
+      "collection": "snippets",
+      "filter": "${$item.group == state.group}",
+      "columns": "2",
+      "minItemWidth": 132,
+      "spacing": 7,
+      "emptyState": {
+        "icon": "⚡",
+        "title": "${$i18n.emptySnippets}"
+      },
+      "itemTemplate": "card_snippet_tile"
+    },
+    "card_snippet_tile": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,7,10,7",
+      "spacing": 4,
+      "onClick": [
+        {
+          "type": "launcher.open",
+          "guard": "${$item.kind == 'open'}",
+          "targetId": "${$item.body}"
+        },
+        {
+          "type": "clipboard.copy",
+          "guard": "${$item.kind != 'open'}",
+          "text": "${$item.body}"
+        },
+        {
+          "type": "state.set",
+          "key": "lastActionTag",
+          "value": "${$item.kind == 'open' ? $i18n.doneOpenedPrefix : $i18n.doneCopiedPrefix}"
+        },
+        {
+          "type": "state.set",
+          "key": "lastFeedback",
+          "value": "${$item.title}"
+        }
+      ],
+      "contextMenu": [
+        {
+          "label": "${$item.kind == 'open' ? $i18n.ctxRunOpen : $i18n.ctxRunCopy}",
+          "onClick": [
+            {
+              "type": "launcher.open",
+              "guard": "${$item.kind == 'open'}",
+              "targetId": "${$item.body}"
+            },
+            {
+              "type": "clipboard.copy",
+              "guard": "${$item.kind != 'open'}",
+              "text": "${$item.body}"
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.ctxEdit}",
+          "onClick": [
+            {
+              "type": "state.set",
+              "key": "editingId",
+              "value": "${$item.id != '' ? $item.id : $item.body}"
+            },
+            {
+              "type": "state.set",
+              "key": "draftGroup",
+              "value": "${$item.group}"
+            },
+            {
+              "type": "state.set",
+              "key": "draftKind",
+              "value": "${$item.kind}"
+            },
+            {
+              "type": "state.set",
+              "key": "draftTitle",
+              "value": "${$item.title}"
+            },
+            {
+              "type": "state.set",
+              "key": "draftSubtitle",
+              "value": "${$item.subtitle}"
+            },
+            {
+              "type": "state.set",
+              "key": "draftBody",
+              "value": "${$item.body}"
+            },
+            {
+              "type": "popover.open",
+              "popoverId": "addSnippetPop"
+            }
+          ]
+        },
+        {
+          "label": "${$i18n.ctxDelete}",
+          "onClick": {
+            "type": "script.run",
+            "fn": "removeSnippet",
+            "args": {
+              "id": "${$item.id != '' ? $item.id : $item.body}"
+            }
+          }
+        }
+      ],
+      "children": [
+        "snippet_tile_header_grid",
+        "snippet_tile_text_stack"
+      ]
+    },
+    "snippet_tile_header_grid": {
+      "type": "Grid",
+      "columns": "Auto,*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "txt_snippet_icon",
+        "snippet_header_spacer",
+        "badge_snippet_tag"
+      ]
+    },
+    "txt_snippet_icon": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$item.icon}",
+      "fontSize": 16,
+      "verticalAlignment": "center"
+    },
+    "snippet_header_spacer": {
+      "type": "Spacer",
+      "column": 1
+    },
+    "badge_snippet_tag": {
+      "type": "Badge",
+      "column": 2,
+      "text": "${$item.tag}",
+      "tone": "${$item.tone}",
+      "verticalAlignment": "center"
+    },
+    "snippet_tile_text_stack": {
+      "type": "Stack",
+      "spacing": 1,
+      "children": [
+        "txt_snippet_title",
+        "txt_snippet_subtitle"
+      ]
+    },
+    "txt_snippet_title": {
+      "type": "Text",
+      "text": "${$item.title}",
+      "style": "bodyStrong",
+      "maxLines": 1
+    },
+    "txt_snippet_subtitle": {
+      "type": "Text",
+      "text": "${$item.subtitle}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "feedback_footer_card": {
+      "type": "Card",
+      "when": "${$settings.showHint == 'true'}",
+      "tone": "subtle",
+      "padding": "10,6,10,6",
+      "children": [
+        "feedback_status_grid",
+        "txt_grid_hint"
+      ]
+    },
+    "feedback_status_grid": {
+      "type": "Grid",
+      "when": "${state.lastFeedback != ''}",
+      "columns": "Auto,*",
+      "columnSpacing": 6,
+      "children": [
+        "badge_last_action",
+        "txt_last_feedback"
+      ]
+    },
+    "badge_last_action": {
+      "type": "Badge",
+      "column": 0,
+      "tone": "emerald",
+      "text": "${state.lastActionTag}"
+    },
+    "txt_last_feedback": {
+      "type": "Text",
+      "column": 1,
+      "text": "${state.lastFeedback}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "txt_grid_hint": {
+      "type": "Text",
+      "when": "${state.lastFeedback == ''}",
+      "text": "${$i18n.gridHint}",
+      "style": "caption",
+      "color": "muted",
+      "maxLines": 1
+    },
+    "pop_snippet_editor_body": {
+      "type": "Stack",
+      "spacing": 8,
+      "padding": "12",
+      "children": [
+        "seg_draft_group",
+        "seg_draft_kind",
+        "inp_draft_title",
+        "inp_draft_subtitle",
+        "inp_draft_body",
+        "btn_save_snippet",
+        "btn_reset_snippets"
+      ]
+    },
+    "seg_draft_group": {
+      "type": "Segmented",
+      "horizontalAlignment": "stretch",
+      "bind": "state.draftGroup",
+      "options": [
+        {
+          "value": "daily",
+          "label": "${$i18n.tabDaily}"
+        },
+        {
+          "value": "phrases",
+          "label": "${$i18n.tabPhrases}"
+        },
+        {
+          "value": "dev",
+          "label": "${$i18n.tabDev}"
+        }
+      ]
+    },
+    "seg_draft_kind": {
+      "type": "Segmented",
+      "horizontalAlignment": "stretch",
+      "bind": "state.draftKind",
+      "options": [
+        {
+          "value": "copy",
+          "label": "${$i18n.kindCopy}"
+        },
+        {
+          "value": "open",
+          "label": "${$i18n.kindOpen}"
+        }
+      ]
+    },
+    "inp_draft_title": {
+      "type": "Input",
+      "bind": "state.draftTitle",
+      "placeholder": "${$i18n.titlePlaceholder}"
+    },
+    "inp_draft_subtitle": {
+      "type": "Input",
+      "bind": "state.draftSubtitle",
+      "placeholder": "${$i18n.subPlaceholder}"
+    },
+    "inp_draft_body": {
+      "type": "Input",
+      "bind": "state.draftBody",
+      "placeholder": "${state.draftKind == 'open' ? $i18n.bodyOpenPlaceholder : $i18n.bodyPhrasePlaceholder}",
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "guard": "${state.draftBody != ''}",
+          "fn": "addSnippet"
+        },
+        {
+          "type": "popover.close",
+          "guard": "${state.draftBody != ''}",
+          "popoverId": "addSnippetPop"
+        }
+      ]
+    },
+    "btn_save_snippet": {
+      "type": "Button",
+      "icon": "check",
+      "text": "${$i18n.saveBtn}",
+      "variant": "standard",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "script.run",
+          "guard": "${state.draftBody != ''}",
+          "fn": "addSnippet"
+        },
+        {
+          "type": "popover.close",
+          "guard": "${state.draftBody != ''}",
+          "popoverId": "addSnippetPop"
+        }
+      ]
+    },
+    "btn_reset_snippets": {
+      "type": "Button",
+      "icon": "refresh",
+      "text": "${$i18n.resetBtn}",
+      "variant": "subtle",
+      "horizontalAlignment": "stretch",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "resetSnippets"
+        },
+        {
+          "type": "popover.close",
+          "popoverId": "addSnippetPop"
+        }
+      ]
+    }
+  }
+}

@@ -154,7 +154,8 @@ function Get-DeskBoxMsvcEnvironment {
                     $sdkHostArchitecture = $hostArchitectures[$toolPriority]
                     $sdkBinDirectory =
                         Join-Path $windowsKitsRoot "bin\$($sdkDirectory.Name)\$sdkHostArchitecture"
-                    if (Test-Path -LiteralPath (Join-Path $sdkBinDirectory "rc.exe") -PathType Leaf) {
+                    if ((Test-Path -LiteralPath (Join-Path $sdkBinDirectory "rc.exe") -PathType Leaf) -and
+                        (Test-Path -LiteralPath (Join-Path $sdkBinDirectory "mt.exe") -PathType Leaf)) {
                         [pscustomobject]@{
                             Version = [version]$sdkDirectory.Name.TrimEnd('.')
                             VersionText = $sdkDirectory.Name

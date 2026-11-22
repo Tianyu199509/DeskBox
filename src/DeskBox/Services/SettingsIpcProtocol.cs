@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -76,7 +76,14 @@ public static class SettingsIpcMethods
     public const string SearchHotkeyState = "search-hotkey.state";
     public const string SearchHotkeySetEnabled = "search-hotkey.set-enabled";
     public const string SearchHotkeyApplyGesture = "search-hotkey.apply-gesture";
+    public const string SearchHotkeyApplyActivation = "search-hotkey.apply-activation";
     public const string SearchHotkeyRefreshRegistration = "search-hotkey.refresh-registration";
+
+    // ── Clipboard hotkey facade ─────────────────────────────────────
+    public const string ClipboardHotkeyState = "clipboard-hotkey.state";
+    public const string ClipboardHotkeySetEnabled = "clipboard-hotkey.set-enabled";
+    public const string ClipboardHotkeyApplyActivation = "clipboard-hotkey.apply-activation";
+    public const string ClipboardHotkeyRefreshRegistration = "clipboard-hotkey.refresh-registration";
 
     // ── Data facade (batch 3c-1) ─────────────────────────────────────
     public const string DataQuickCaptureCounts = "data.qc-counts";
@@ -84,6 +91,11 @@ public static class SettingsIpcMethods
     public const string DataQuickCaptureClearRecent = "data.qc-clear-recent";
     public const string DataQuickCaptureCacheCleanup = "data.qc-cache-cleanup";
     public const string DataQuickCaptureCacheInfo = "data.qc-cache-info";
+    public const string DataQuickCaptureMirrorFolderGet = "data.qc-mirror-get";
+    public const string DataQuickCaptureMirrorFolderSet = "data.qc-mirror-set";
+    public const string DataClipboardStats = "data.clipboard-stats";
+    public const string DataClipboardClearUnpinned = "data.clipboard-clear-unpinned";
+    public const string DataClipboardObservedApps = "data.clipboard-observed-apps";
 
     // ── Restore facade (batch 3c-2) ─────────────────────────────────
     public const string RestorePrepare = "restore.prepare";
@@ -111,6 +123,10 @@ public static class SettingsIpcMethods
     public const string WidgetManagedCount = "widget.managed-count";
     public const string WidgetMigratePreview = "widget.migrate-preview";
     public const string WidgetMigrateRoot = "widget.migrate-root";
+    public const string WidgetMigrateCancel = "widget.migrate-cancel";
+    public const string WidgetMigrateTryEmptySwitch = "widget.migrate-try-empty-switch";
+    public const string WidgetMigrateRetrySourceCleanup = "widget.migrate-retry-source-cleanup";
+    public const string WidgetMigrateCleanupCopies = "widget.migrate-cleanup-copies";
     public const string WidgetMigrationProgress = "widget.migration-progress";
     public const string WidgetGlanceList = "widget.glance-list";
     public const string WidgetGlanceFeatureEnabled = "widget.glance-feature-enabled";
@@ -127,9 +143,19 @@ public static class SettingsIpcMethods
     /// it directly.
     /// </summary>
     public const string WidgetGlanceApplyData = "widget.glance-apply-data";
+    public const string WidgetCustomList = "widget.custom-list";
+    public const string WidgetCustomCreate = "widget.custom-create";
+    public const string WidgetCustomCreateWithSetup = "widget.custom-create-with-setup";
+    public const string WidgetCustomApplyMutation = "widget.custom-apply-mutation";
+    public const string WidgetCustomApplyStoreData = "widget.custom-apply-store-data";
+    public const string WidgetCustomSetEnabled = "widget.custom-set-enabled";
+    public const string WidgetCustomLocate = "widget.custom-locate";
+    public const string WidgetCustomOpenStudio = "widget.custom-open-studio";
+    public const string WidgetCustomRemove = "widget.custom-remove";
     public const string WidgetMoveAll = "widget.move-all";
     public const string WidgetMoveAllUndo = "widget.move-all-undo";
     public const string WidgetApplyScreenBinding = "widget.apply-screen-binding";
+    public const string WidgetRecalibrateDisplayLayout = "widget.recalibrate-display-layout";
     // (widget.folder-watcher-health removed in deep review R18, A-#27: the
     // host never sent it — runtime-health diagnostics ride the app facade,
     // which reads watcher snapshots directly on the main process.)
@@ -165,6 +191,9 @@ public static class SettingsIpcMethods
     public const string AppForceExternalRecovery = "app.force-external-recovery";
     public const string AppDiagnoseDragDrop = "app.diagnose-drag-drop";
     public const string AppRepairDragDrop = "app.repair-drag-drop";
+    public const string AppGetAutoStartStatus = "app.get-autostart-status";
+    public const string AppSetAutoStartEnabled = "app.set-autostart-enabled";
+    public const string AppAutoStartStateChanged = "app.autostart-state-changed";
     public const string AppDisplayTopologyChanged = "app.display-topology-changed";
     public const string AppScreenHomeChanged = "app.screen-home-changed";
 
@@ -330,9 +359,34 @@ public sealed record SettingsIpcGlanceRename(string WidgetId, string NewName);
 
 public sealed record SettingsIpcGlanceCreate(string? SourceWidgetId);
 
-public sealed record SettingsIpcMoveAllResult(int MovedCount, long Handle);
+public sealed record SettingsIpcMoveAllResult(
+    int MovedCount,
+    long Handle,
+    bool Persisted = true,
+    string? LayoutSliceJson = null);
 
-public sealed record SettingsIpcMigrationRequest(string NewRootPath, bool RestartIfCopiesRemoved);
+public sealed record SettingsIpcMigrationRequest(
+    string NewRootPath,
+    bool RestartIfCopiesRemoved,
+    string? OperationId = null,
+    bool RetainOriginals = false,
+    bool IncludeOrphanFolders = false);
+
+public sealed record SettingsIpcMigrationPreviewRequest(
+    string Path,
+    string? OperationId = null);
+
+public sealed record SettingsIpcMigrationOutcome(
+    bool Ok,
+    ManagedStorageMigrationPreview? Preview = null,
+    ManagedStorageMigrationResult? Result = null,
+    bool Stopped = false,
+    int? ProblemKind = null,
+    string? ErrorMessage = null,
+    long? TemporaryBytes = null,
+    ManagedStorageMigrationCleanupResult? CleanupResult = null,
+    string? BlockingPath = null,
+    bool HasPartialCopies = false);
 
 public sealed record SettingsIpcReleaseNotes(
     string? ManifestJson,
@@ -407,6 +461,8 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(SettingsIpcGlanceCreate))]
 [JsonSerializable(typeof(SettingsIpcMoveAllResult))]
 [JsonSerializable(typeof(SettingsIpcMigrationRequest))]
+[JsonSerializable(typeof(SettingsIpcMigrationPreviewRequest))]
+[JsonSerializable(typeof(SettingsIpcMigrationOutcome))]
 [JsonSerializable(typeof(SettingsIpcReleaseNotes))]
 [JsonSerializable(typeof(DeskBoxRestorePreparation))]
 [JsonSerializable(typeof(DeskBoxBackupSnapshotInfo))]
@@ -417,6 +473,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(ManagedStorageMigrationPreview))]
 [JsonSerializable(typeof(ManagedStorageMigrationResult))]
 [JsonSerializable(typeof(ManagedStorageMigrationProgress))]
+[JsonSerializable(typeof(ManagedStorageMigrationCleanupResult))]
 [JsonSerializable(typeof(GlanceWidgetInstanceInfo))]
 [JsonSerializable(typeof(List<GlanceWidgetInstanceInfo>))]
 [JsonSerializable(typeof(FolderWatcherHealthSnapshot))]
@@ -429,6 +486,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(AppUpdateManifest))]
 [JsonSerializable(typeof(DragDropPermissionDiagnostic))]
 [JsonSerializable(typeof(DragDropPermissionRepairResult))]
+[JsonSerializable(typeof(StartupOperationResult))]
 [JsonSerializable(typeof(BackupEndpoint))]
 [JsonSerializable(typeof(LocalBackupResult))]
 [JsonSerializable(typeof(CloudBackupRunResult))]
@@ -448,6 +506,10 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(DeskBox.Contracts.GroupNavigationDefaultsChange))]
 [JsonSerializable(typeof(DeskBox.Contracts.LayoutPreferencesChange))]
 [JsonSerializable(typeof(DeskBox.Contracts.CapsuleOverrideReset))]
+[JsonSerializable(typeof(DeskBox.Contracts.CustomWidgetSettingsMutation))]
+[JsonSerializable(typeof(DeskBox.Contracts.CustomWidgetCreateOptions))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(Dictionary<string, bool>))]
 [JsonSerializable(typeof(AppUpdateCheckResult))]
 [JsonSerializable(typeof(AppUpdateDownloadProgress))]
 [JsonSerializable(typeof(AppUpdateDownloadResult))]
@@ -455,4 +517,23 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(DeskBox.Contracts.EverythingConnectionSnapshot))]
 [JsonSerializable(typeof(SettingsIpcEverythingRefresh))]
 [JsonSerializable(typeof(SettingsIpcEverythingPath))]
+[JsonSerializable(typeof(ClipboardStorageStats))]
+[JsonSerializable(typeof(ClipboardObservedApp))]
+[JsonSerializable(typeof(List<ClipboardObservedApp>))]
+[JsonSerializable(typeof(ConnectedMcpClientInfo))]
+[JsonSerializable(typeof(Studio.StudioShowIntentPayload))]
+[JsonSerializable(typeof(Studio.StudioShowPreviewIntentPayload))]
+[JsonSerializable(typeof(Studio.StudioBootstrapResponse))]
+[JsonSerializable(typeof(Studio.StudioWindowStatePayload))]
+[JsonSerializable(typeof(Studio.StudioWindowBandPayload))]
+[JsonSerializable(typeof(Studio.StudioCreateWidgetRequest))]
+[JsonSerializable(typeof(Studio.StudioUpdateManifestRequest))]
+[JsonSerializable(typeof(Studio.StudioSetWidgetEnabledRequest))]
+[JsonSerializable(typeof(Studio.StudioNotificationPayload))]
+[JsonSerializable(typeof(Studio.StudioWidgetMutationResponse))]
+[JsonSerializable(typeof(Studio.StudioStageCommitResponse))]
+[JsonSerializable(typeof(Studio.StudioAgentUpsertEventPayload))]
+[JsonSerializable(typeof(Studio.StudioMcpActivityPayload))]
+[JsonSerializable(typeof(Studio.StudioContextRequestPayload))]
+[JsonSerializable(typeof(Studio.StudioContextReportPayload))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

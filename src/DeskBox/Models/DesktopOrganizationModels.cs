@@ -6,6 +6,7 @@ public static class DesktopOrganizationCategoryIds
 {
     public const string Shortcuts = "Shortcuts";
     public const string Documents = "Documents";
+    public const string Design = "Design";
     public const string Images = "Images";
     public const string Media = "Media";
     public const string Packages = "Packages";
@@ -15,6 +16,7 @@ public static class DesktopOrganizationCategoryIds
     [
         Shortcuts,
         Documents,
+        Design,
         Images,
         Media,
         Packages,
@@ -137,6 +139,8 @@ public sealed class DesktopOrganizationTargetPlan
 
     public bool CreatesWidget { get; init; }
 
+    public bool AutoBindCategoryRule { get; init; } = true;
+
     public List<DesktopOrganizationFileSnapshot> Items { get; init; } = [];
 
     public DesktopOrganizationRect? PlannedBounds { get; set; }
@@ -146,7 +150,8 @@ public sealed class DesktopOrganizationTargetPlan
         string displayName,
         string targetDirectoryPath,
         bool createsWidget,
-        IEnumerable<DesktopOrganizationFileSnapshot> items) => new()
+        IEnumerable<DesktopOrganizationFileSnapshot> items,
+        bool? autoBindCategoryRule = null) => new()
         {
             SourceBucketId = SourceBucketId,
             CategoryId = CategoryId,
@@ -154,6 +159,7 @@ public sealed class DesktopOrganizationTargetPlan
             SuggestedDisplayName = displayName,
             TargetDirectoryPath = targetDirectoryPath,
             CreatesWidget = createsWidget,
+            AutoBindCategoryRule = autoBindCategoryRule ?? AutoBindCategoryRule,
             Items = items.ToList(),
             PlannedBounds = PlannedBounds
         };
@@ -281,6 +287,9 @@ public sealed class DesktopOrganizationRecoveryItem
     public string TargetWidgetId { get; set; } = string.Empty;
 
     public bool Completed { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ShortcutRebaseInProgress { get; set; }
 
     public DesktopOrganizationDestinationIdentity? DestinationIdentity { get; set; }
 }

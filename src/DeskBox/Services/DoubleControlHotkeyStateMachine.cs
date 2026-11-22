@@ -1,5 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using DeskBox.Models;
+
 namespace DeskBox.Services;
 
 /// <summary>
@@ -9,108 +11,21 @@ namespace DeskBox.Services;
 /// </summary>
 internal sealed class DoubleControlHotkeyStateMachine
 {
-    internal const uint DefaultMaximumIntervalMilliseconds = 320;
+    internal const uint DefaultMaximumIntervalMilliseconds =
+        DoubleModifierHotkeyStateMachine.DefaultMaximumIntervalMilliseconds;
 
-    private const uint Control = 0x11;
-    private const uint LeftControl = 0xA2;
-    private const uint RightControl = 0xA3;
-
-    private readonly uint _maximumIntervalMilliseconds;
-    private ControlKeys _pressedControls;
-    private bool _currentPressUsedAsChord;
-    private uint _lastStandaloneReleaseTime;
-    private bool _hasPendingTap;
-
-    [Flags]
-    private enum ControlKeys
-    {
-        None = 0,
-        Generic = 1,
-        Left = 2,
-        Right = 4
-    }
+    private readonly DoubleModifierHotkeyStateMachine _inner;
 
     public DoubleControlHotkeyStateMachine(
         uint maximumIntervalMilliseconds = DefaultMaximumIntervalMilliseconds)
     {
-        _maximumIntervalMilliseconds = maximumIntervalMilliseconds;
+        _inner = new DoubleModifierHotkeyStateMachine(
+            HotkeyModifierKeys.Control,
+            maximumIntervalMilliseconds);
     }
 
-    public ReservedHotkeyEventDisposition Process(uint virtualKey, bool isKeyDown, uint eventTime)
-    {
-        if (!TryGetControlKey(virtualKey, out ControlKeys controlKey))
-        {
-            if (isKeyDown)
-            {
-                if (_pressedControls != ControlKeys.None)
-                {
-                    _currentPressUsedAsChord = true;
-                }
+    public ReservedHotkeyEventDisposition Process(uint virtualKey, bool isKeyDown, uint eventTime) =>
+        _inner.Process(virtualKey, isKeyDown, eventTime);
 
-                _hasPendingTap = false;
-            }
-
-            return ReservedHotkeyEventDisposition.PassThrough;
-        }
-
-        if (isKeyDown)
-        {
-            if ((_pressedControls & controlKey) == 0 && _pressedControls != ControlKeys.None)
-            {
-                _currentPressUsedAsChord = true;
-            }
-
-            _pressedControls |= controlKey;
-            return ReservedHotkeyEventDisposition.PassThrough;
-        }
-
-        if ((_pressedControls & controlKey) == 0)
-        {
-            return ReservedHotkeyEventDisposition.PassThrough;
-        }
-
-        _pressedControls &= ~controlKey;
-        if (_pressedControls != ControlKeys.None)
-        {
-            return ReservedHotkeyEventDisposition.PassThrough;
-        }
-
-        if (_currentPressUsedAsChord)
-        {
-            _currentPressUsedAsChord = false;
-            _hasPendingTap = false;
-            return ReservedHotkeyEventDisposition.PassThrough;
-        }
-
-        if (_hasPendingTap &&
-            unchecked(eventTime - _lastStandaloneReleaseTime) <= _maximumIntervalMilliseconds)
-        {
-            _hasPendingTap = false;
-            return ReservedHotkeyEventDisposition.TriggerAndPassThrough;
-        }
-
-        _lastStandaloneReleaseTime = eventTime;
-        _hasPendingTap = true;
-        return ReservedHotkeyEventDisposition.PassThrough;
-    }
-
-    public void Reset()
-    {
-        _pressedControls = ControlKeys.None;
-        _currentPressUsedAsChord = false;
-        _lastStandaloneReleaseTime = 0;
-        _hasPendingTap = false;
-    }
-
-    private static bool TryGetControlKey(uint virtualKey, out ControlKeys controlKey)
-    {
-        controlKey = virtualKey switch
-        {
-            Control => ControlKeys.Generic,
-            LeftControl => ControlKeys.Left,
-            RightControl => ControlKeys.Right,
-            _ => ControlKeys.None
-        };
-        return controlKey != ControlKeys.None;
-    }
+    public void Reset() => _inner.Reset();
 }

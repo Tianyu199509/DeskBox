@@ -13,14 +13,28 @@ public sealed class RenderWindowContractTests
     {
         string xaml = File.ReadAllText(GetRepoFile(
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml"));
+        string codeBehind = File.ReadAllText(GetRepoFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
 
         Assert.DoesNotContain(
             "ItemsSource=\"{Binding VisibleItems}\"",
             xaml,
             StringComparison.Ordinal);
         Assert.Equal(
-            2,
+            0,
             CountOccurrences(xaml, "ItemsSource=\"{Binding RenderedItems}\""));
+        Assert.Contains(
+            "SyncActiveItemsViewSource()",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ViewModel.RenderedItems",
+            codeBehind,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "inactiveView.ItemsSource = null;",
+            codeBehind,
+            StringComparison.Ordinal);
     }
 
     [Fact]

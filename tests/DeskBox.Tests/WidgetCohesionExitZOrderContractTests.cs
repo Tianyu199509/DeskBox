@@ -19,7 +19,7 @@ public sealed class WidgetCohesionExitZOrderContractTests
     }
 
     [Fact]
-    public void CohesionExitNormalization_BypassesTheDropShadowPolicy()
+    public void CohesionExitNormalization_RunsEvenInDesktopPinnedModeWhileIdlePassesDoNot()
     {
         string manager = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetManager.ZOrder.cs"));
@@ -27,43 +27,37 @@ public sealed class WidgetCohesionExitZOrderContractTests
         string queue = SliceMethod(
             manager,
             "internal void QueueIdleWidgetZOrderNormalization",
-            "private long TrackTemporarilyRaisedWidgets");
-        Assert.Contains("!cohesionExit", queue, StringComparison.Ordinal);
+            "// ── Interaction-leak watchdog");
+        Assert.Contains(
+            "if (!cohesionExit && WidgetLayerService.UsesDesktopPinnedMode())",
+            queue,
+            StringComparison.Ordinal);
 
         string normalize = SliceMethod(
             manager,
             "private bool NormalizeIdleWidgetZOrder",
             "private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder");
-        // The shadow gate stays conditional so an idle request is still
-        // dropped when the system disables window drop shadows.
-        Assert.Contains(
-            "(!cohesionExit &&\r\n                !IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(dropShadowEnabled))",
-            normalize.ReplaceLineEndings("\r\n"),
-            StringComparison.Ordinal);
+        int nonCohesionBail = normalize.IndexOf("if (!cohesionExit)", StringComparison.Ordinal);
+        int peerApply = normalize.IndexOf("ApplyPeerOrderHighestToLowest", StringComparison.Ordinal);
+        Assert.True(nonCohesionBail >= 0 && peerApply > nonCohesionBail,
+            "only cohesion-exit passes may reorder resting peers");
+        Assert.DoesNotContain("ShouldNormalizeIdlePeerOrder", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("HasAnyShadowOverlapRisk", manager, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CohesionExitNormalization_NeverAbandonsOnAnimationDefers()
+    public void CohesionExitNormalization_AppliesWithoutAnimationDeferLadder()
     {
         string manager = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetManager.ZOrder.cs"));
         string normalize = SliceMethod(
             manager,
             "private bool NormalizeIdleWidgetZOrder",
-            "private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder")
-            .ReplaceLineEndings("\r\n");
+            "private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder");
 
-        // The defer/abandon ladder only applies to idle requests.
-        Assert.Contains(
-            "if (!cohesionExit &&\r\n            candidates.Any(window => window.IsBoundsTransitionActive))",
-            normalize,
-            StringComparison.Ordinal);
-        // A cohesion exit that meets an in-flight animation still applies the
-        // order (sorted on resting/target bounds) instead of being dropped.
-        Assert.Contains(
-            "cohesionExit && candidates.Any(window => window.IsBoundsTransitionActive)",
-            normalize,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("_idleNormalizeAnimationDefers", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaxIdleNormalizeAnimationDefers", manager, StringComparison.Ordinal);
+        Assert.Contains("GetWindowsInIdleHighestFirstOrder(candidates)", normalize, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -14,11 +14,20 @@ public sealed class OnboardingExperienceTests
         "Onboarding.Step1.Hint",
         "Onboarding.Step2.Title",
         "Onboarding.Step2.Body",
-        "Onboarding.Step2.PathLabel",
-        "Onboarding.Step2.PathSub",
         "Onboarding.Step2.ChangeInSettings",
-        "Onboarding.Step2.Hint1",
-        "Onboarding.Step2.Hint2",
+        "Onboarding.Step2.ChooseFolder",
+        "Onboarding.Step2.MoveExplain",
+        "Onboarding.Step2.CopyExplain",
+        "Onboarding.Step2.WarningTitle",
+        "Onboarding.Step2.WarningBody",
+        "Onboarding.Kind.Managed.Title",
+        "Onboarding.Kind.Managed.Body",
+        "Onboarding.Kind.Mapped.Title",
+        "Onboarding.Kind.Mapped.Body",
+        "Onboarding.Step3.ChangeHotkey",
+        "Onboarding.Step4.QuickSettings",
+        "Onboarding.Skip",
+        "Onboarding.Scene.DesktopLabel",
         "Onboarding.Scene.FileName1",
         "Onboarding.Scene.FileName2",
         "Onboarding.Scene.FileName3",
@@ -43,7 +52,8 @@ public sealed class OnboardingExperienceTests
         "Onboarding.Feature.Weather",
         "Onboarding.Feature.Music",
         "Onboarding.Scene.MoveBadge",
-        "Widget.Empty.ActionsHint"
+        "Widget.Empty.FolderEmpty",
+        "Widget.Empty.ElevatedWarning"
     ];
 
     [Fact]
@@ -77,7 +87,9 @@ public sealed class OnboardingExperienceTests
 
         Assert.Contains("Click=\"Step3Try_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"Step4OpenMenu_Click\"", xaml, StringComparison.Ordinal);
-        foreach (string kind in new[] { "Todo", "QuickCapture", "Search", "Weather", "Music", "Glance" })
+        Assert.Contains("x:Name=\"Step4OrganizeRow\" Style=\"{StaticResource QuickSettingRowButton}\" Click=\"Step4Organize_Click\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Tag=\"DesktopOrganizationSettings\"", xaml, StringComparison.Ordinal);
+        foreach (string kind in new[] { "Todo", "QuickCapture", "Clipboard", "Weather", "Music", "Glance" })
         {
             Assert.Contains(
                 $"Tag=\"{kind}\" Toggled=\"Step5FeatureToggle_Toggled\"",
@@ -129,6 +141,7 @@ public sealed class OnboardingExperienceTests
 
         Assert.Contains("ToggleWidgetsForOnboardingAsync", steps, StringComparison.Ordinal);
         Assert.Contains("ShowTrayContextMenuForOnboarding", steps, StringComparison.Ordinal);
+        Assert.Contains("_showDesktopOrganization?.Invoke()", steps, StringComparison.Ordinal);
         Assert.Contains("OnOnboardingWidgetsVisibilityChanged", steps, StringComparison.Ordinal);
         Assert.Contains(
             "OnboardingWidgetsVisibilityChanged += OnOnboardingWidgetsVisibilityChanged",
@@ -243,21 +256,21 @@ public sealed class OnboardingExperienceTests
     }
 
     [Fact]
-    public void EmptyFileWidget_KeepsOneConciseActionHint()
+    public void EmptyFileWidget_UsesMinimalExplorerTextWithoutButtonsOrHelpIcon()
     {
         string root = FindRepositoryRoot();
         string xaml = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml"));
 
-        Assert.Contains(
-            "svc:Localized.Key=\"Widget.Empty.ActionsHint\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Text=\"{Binding EmptyStateText}\"",
-            xaml,
-            StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"EmptyState\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding EmptyStateTitle}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsHitTestVisible=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyAddButton", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyStateHelpButton", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("EmptyStateElevatedBar", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Widget.Empty.ActionsHint", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding EmptyStateText}\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -369,6 +382,96 @@ public sealed class OnboardingExperienceTests
         Assert.DoesNotContain("IntroMarkHost", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("PlayIntroSequence", code, StringComparison.Ordinal);
         Assert.Contains("PlaySceneEntrance", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MoveStep_MakesThePathConsequenceExplicitAndEditableInPlace()
+    {
+        string root = FindRepositoryRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml"));
+        string steps = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string scene = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Scene.cs"));
+        string code = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
+        using JsonDocument strings = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Strings/zh-CN.json")));
+
+        // The move consequence is the headline, and the warning names the
+        // safe alternatives (folder mapping, Alt-drop shortcut).
+        Assert.Contains("移动", strings.RootElement.GetProperty("Onboarding.Step2.Title").GetString(), StringComparison.Ordinal);
+        string warning = strings.RootElement.GetProperty("Onboarding.Step2.WarningBody").GetString()!;
+        Assert.Contains("映射", warning, StringComparison.Ordinal);
+        Assert.Contains("Alt", warning, StringComparison.Ordinal);
+
+        // Step 2 stays focused on path safety and storage location without
+        // forcing a drag-mode decision during onboarding; external Settings
+        // changes still update the stage animation live.
+        Assert.DoesNotContain("Step2DropMode_Checked", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Step2MoveRadio", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Step2CopyRadio", xaml, StringComparison.Ordinal);
+        Assert.Contains("Severity=\"Warning\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileWidget", steps, StringComparison.Ordinal);
+        Assert.Contains("SetDropSceneMode(copy, replay: true)", steps, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ScenePathStrike\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SceneFileGhost1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("\"Scale.X\"", scene, StringComparison.Ordinal);
+
+        // Skipping is only offered after the move/path safety step.
+        Assert.Contains("FirstSkippableStep = 2", code, StringComparison.Ordinal);
+        // Skipping is only offered after the move/path safety step.
+        Assert.Contains("FirstSkippableStep = 2", code, StringComparison.Ordinal);
+        Assert.Contains("Click=\"SkipButton_Click\"", xaml, StringComparison.Ordinal);
+
+        // Storage drive quick-switch and folder picker operate directly in Step 2.
+        Assert.Contains("x:Name=\"Step2DriveButtonsHost\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.Key=\"Onboarding.Step2.ChooseFolder\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TrySwitchEmptyManagedStorageRootAsync", steps, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Stage_AnswersRealInputAndHonorsReducedMotionWithStaticFrames()
+    {
+        string root = FindRepositoryRoot();
+        string steps = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string scene = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Scene.cs"));
+        string code = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
+
+        // Real F7/tray toggles take over the summon scene.
+        Assert.Contains("MirrorSummonScene(hasVisibleWidgets)", steps, StringComparison.Ordinal);
+        // Feature switches pop their stage tiles.
+        Assert.Contains("ApplyFeatureTileState(kind, toggle.IsOn, animate: true)", steps, StringComparison.Ordinal);
+        // Direction-aware hand-off and staggered copy reveal.
+        Assert.Contains("ApplySceneState(newStep, animate: true, direction)", code, StringComparison.Ordinal);
+        Assert.Contains("PlayTextReveal", code, StringComparison.Ordinal);
+        // Reduced motion lands on a meaningful end frame, not a blank stage.
+        Assert.Contains("PrepareStepPose(step, finalFrame: !MotionEnabled)", scene, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Onboarding_NeverReferencesSettingsKeysTheResidentHostFiltersOut()
+    {
+        // The main process drops pure settings-UI strings to save memory; the
+        // guide runs there, so a filtered key would render as its raw name.
+        string root = FindRepositoryRoot();
+        string viewsDirectory = Path.Combine(root, "src/DeskBox/Views");
+        IEnumerable<string> sources =
+        [
+            Path.Combine(viewsDirectory, "OnboardingWindow.xaml"),
+            .. Directory.GetFiles(viewsDirectory, "OnboardingWindow*.cs")
+        ];
+        foreach (string source in sources)
+        {
+            foreach (System.Text.RegularExpressions.Match match in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         File.ReadAllText(source),
+                         "\"(Settings\\.[A-Za-z0-9.]+)\""))
+            {
+                string key = match.Groups[1].Value;
+                Assert.False(
+                    DeskBox.Services.LocalizationService.IsPureSettingsUiKey(key),
+                    $"{Path.GetFileName(source)} references filtered key {key}.");
+            }
+        }
     }
 
     private static string FindRepositoryRoot()

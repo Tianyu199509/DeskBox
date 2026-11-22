@@ -14,7 +14,8 @@ public readonly record struct EffectivePerformanceSettings(
     int VisibleIdleCacheCleanupDelaySeconds,
     int TransientWindowReleaseDelaySeconds,
     string CacheBudget,
-    string HiddenCacheCleanupScope)
+    string HiddenCacheCleanupScope,
+    bool KeepCapsuleContentWarm = false)
 {
     public bool AllowContinuousDecorativeAnimations =>
         AllowTextMarqueeAnimations ||
@@ -30,9 +31,6 @@ public readonly record struct EffectivePerformanceSettings(
 /// </summary>
 public static class PerformanceSettingsPolicy
 {
-    // Canonical option values live in Contracts (batch 50) so the
-    // performance editor can build its binding surface without referencing
-    // this adapter-side policy; these historical constants stay as aliases.
     public const string ModeBestVisual = "BestVisual";
     public const string ModeBalanced = PerformanceOptionKinds.ModeBalanced;
     public const string ModeResourceSaver = PerformanceOptionKinds.ModeResourceSaver;
@@ -82,12 +80,36 @@ public static class PerformanceSettingsPolicy
     public const bool DefaultVinylRotationAnimationsEnabled = true;
     public const bool DefaultGlanceImageAutoRotationEnabled = true;
     public const bool DefaultCompactAmbientAnimationsEnabled = true;
+    public const bool DefaultKeepCapsuleContentWarm = false;
 
-    // The string option normalizers live in Contracts (single source) so the
-    // performance editor compares canonical values exactly like the legacy
-    // shell setters did; the numeric delay normalizers stay here because
-    // they encode the hidden CleanupNever sentinel and the settings-load
-    // migration path.
+    private static readonly EffectivePerformanceSettings s_resourceSaverPreset = new(
+        ModeResourceSaver,
+        CleanupAfter30Seconds,
+        CleanupAfter1Minute,
+        DefaultTextMarqueeAnimationsEnabled,
+        DefaultVinylRotationAnimationsEnabled,
+        DefaultGlanceImageAutoRotationEnabled,
+        DefaultCompactAmbientAnimationsEnabled,
+        CleanupAfter5Minutes,
+        CleanupAfter2Minutes,
+        CacheBudgetSmall,
+        HiddenCacheCleanupScopeAllRecreatable,
+        KeepCapsuleContentWarm: false);
+
+    private static readonly EffectivePerformanceSettings s_balancedPreset = new(
+        ModeBalanced,
+        CleanupAfter30Seconds,
+        CleanupAfter5Minutes,
+        DefaultTextMarqueeAnimationsEnabled,
+        DefaultVinylRotationAnimationsEnabled,
+        DefaultGlanceImageAutoRotationEnabled,
+        DefaultCompactAmbientAnimationsEnabled,
+        CleanupAfter10Minutes,
+        CleanupAfter10Minutes,
+        CacheBudgetBalanced,
+        HiddenCacheCleanupScopeWarm,
+        KeepCapsuleContentWarm: true);
+
     public static string NormalizeMode(string? mode) =>
         PerformanceOptionKinds.NormalizeMode(mode);
 
@@ -143,6 +165,17 @@ public static class PerformanceSettingsPolicy
                 ? delaySeconds
                 : DefaultTransientWindowReleaseDelaySeconds;
 
+    public static bool ResolveEffectiveKeepCapsuleContentWarm(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return NormalizeMode(settings.Performance.PerformanceMode) switch
+        {
+            ModeResourceSaver => false,
+            ModeCustom => settings.Performance.KeepCapsuleContentWarm,
+            _ => true
+        };
+    }
+
     public static EffectivePerformanceSettings Resolve(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -150,31 +183,21 @@ public static class PerformanceSettingsPolicy
         string mode = NormalizeMode(settings.PerformanceMode);
         return mode switch
         {
-            ModeResourceSaver => new(
-                mode,
-                CleanupAfter30Seconds,
-                CleanupAfter1Minute,
-                settings.EnableTextMarqueeAnimations,
-                settings.EnableVinylRotationAnimations,
-                settings.EnableGlanceImageAutoRotation,
-                settings.EnableCompactAmbientAnimations,
-                CleanupAfter5Minutes,
-                CleanupAfter2Minutes,
-                CacheBudgetSmall,
-                HiddenCacheCleanupScopeAllRecreatable),
+            ModeResourceSaver => s_resourceSaverPreset with
+            {
+                AllowTextMarqueeAnimations = settings.EnableTextMarqueeAnimations,
+                AllowVinylRotationAnimations = settings.EnableVinylRotationAnimations,
+                AllowGlanceImageAutoRotation = settings.EnableGlanceImageAutoRotation,
+                AllowCompactAmbientAnimations = settings.EnableCompactAmbientAnimations
+            },
             ModeCustom => ResolveCustom(settings),
-            _ => new(
-                ModeBalanced,
-                CleanupAfter30Seconds,
-                CleanupAfter5Minutes,
-                settings.EnableTextMarqueeAnimations,
-                settings.EnableVinylRotationAnimations,
-                settings.EnableGlanceImageAutoRotation,
-                settings.EnableCompactAmbientAnimations,
-                CleanupAfter10Minutes,
-                CleanupAfter10Minutes,
-                CacheBudgetBalanced,
-                HiddenCacheCleanupScopeAllRecreatable)
+            _ => s_balancedPreset with
+            {
+                AllowTextMarqueeAnimations = settings.EnableTextMarqueeAnimations,
+                AllowVinylRotationAnimations = settings.EnableVinylRotationAnimations,
+                AllowGlanceImageAutoRotation = settings.EnableGlanceImageAutoRotation,
+                AllowCompactAmbientAnimations = settings.EnableCompactAmbientAnimations
+            }
         };
     }
 
@@ -200,6 +223,7 @@ public static class PerformanceSettingsPolicy
             settings.EnableGlanceImageAutoRotation;
         bool allowCompactAmbientAnimations =
             settings.EnableCompactAmbientAnimations;
+        bool keepCapsuleWarm = settings.Performance.KeepCapsuleContentWarm;
 
         if (!string.Equals(mode, ModeCustom, StringComparison.Ordinal))
         {
@@ -209,6 +233,7 @@ public static class PerformanceSettingsPolicy
             transientWindowDelay = preset.TransientWindowReleaseDelaySeconds;
             cacheBudget = preset.CacheBudget;
             hiddenCleanupScope = preset.HiddenCacheCleanupScope;
+            keepCapsuleWarm = preset.KeepCapsuleContentWarm;
         }
 
         bool changed = false;
@@ -234,6 +259,10 @@ public static class PerformanceSettingsPolicy
             settings.HiddenCacheCleanupScope,
             hiddenCleanupScope,
             value => settings.HiddenCacheCleanupScope = value);
+        changed |= SetIfChanged(
+            settings.Performance.KeepCapsuleContentWarm,
+            keepCapsuleWarm,
+            value => settings.Performance.KeepCapsuleContentWarm = value);
         changed |= SetIfChanged(
             settings.EnableTextMarqueeAnimations,
             allowTextMarqueeAnimations,
@@ -304,6 +333,7 @@ public static class PerformanceSettingsPolicy
             preset.TransientWindowReleaseDelaySeconds;
         settings.PerformanceCacheBudget = preset.CacheBudget;
         settings.HiddenCacheCleanupScope = preset.HiddenCacheCleanupScope;
+        settings.Performance.KeepCapsuleContentWarm = preset.KeepCapsuleContentWarm;
         settings.EnableContinuousDecorativeAnimations =
             settings.EnableTextMarqueeAnimations &&
             settings.EnableVinylRotationAnimations &&
@@ -311,14 +341,10 @@ public static class PerformanceSettingsPolicy
             settings.EnableCompactAmbientAnimations;
     }
 
-    private static EffectivePerformanceSettings ResolvePreset(string mode)
-    {
-        var settings = new AppSettings
-        {
-            PerformanceMode = mode
-        };
-        return Resolve(settings);
-    }
+    private static EffectivePerformanceSettings ResolvePreset(string mode) =>
+        string.Equals(NormalizeMode(mode), ModeResourceSaver, StringComparison.Ordinal)
+            ? s_resourceSaverPreset
+            : s_balancedPreset;
 
     private static EffectivePerformanceSettings ResolveCustom(
         AppSettings settings)
@@ -346,7 +372,8 @@ public static class PerformanceSettingsPolicy
                 settings.TransientWindowReleaseDelaySeconds),
             cacheBudget,
             NormalizeHiddenCacheCleanupScope(
-                settings.HiddenCacheCleanupScope));
+                settings.HiddenCacheCleanupScope),
+            settings.Performance.KeepCapsuleContentWarm);
     }
 
     private static bool SetIfChanged<T>(

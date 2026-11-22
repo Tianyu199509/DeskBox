@@ -1,5 +1,5 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
 
 namespace DeskBox.Platform;
 
@@ -12,56 +12,65 @@ public static partial class Win32Helper
 {
     // ── wtsapi32: session change notifications ──────────────────────
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [LibraryImport("wtsapi32.dll", EntryPoint = "WTSRegisterSessionNotification", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool WTSRegisterSessionNotification(IntPtr hWnd, uint flags);
+    internal static partial bool WTSRegisterSessionNotification(IntPtr hWnd, uint flags);
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [LibraryImport("wtsapi32.dll", EntryPoint = "WTSUnRegisterSessionNotification", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
+    internal static partial bool WTSUnRegisterSessionNotification(IntPtr hWnd);
 
     // ── user32: display device identity ─────────────────────────────
 
-    [DllImport("user32.dll", EntryPoint = "EnumDisplayDevicesW", CharSet = CharSet.Unicode)]
+    [LibraryImport("user32.dll", EntryPoint = "EnumDisplayDevicesW", StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool EnumDisplayDevices(
+    internal static partial bool EnumDisplayDevices(
         string device,
         uint deviceIndex,
         ref DisplayDevice displayDevice,
         uint flags);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    internal struct DisplayDevice
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct DisplayDevice
     {
+        internal static int SizeInBytes => sizeof(DisplayDevice);
+
         public int Size;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string DeviceName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceString;
-
+        private fixed ushort _deviceName[32];
+        private fixed ushort _deviceString[128];
         public uint StateFlags;
+        private fixed ushort _deviceId[128];
+        private fixed ushort _deviceKey[128];
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceId;
+        public readonly string GetDeviceId()
+        {
+            fixed (ushort* ptr = _deviceId)
+            {
+                return ReadNullTerminatedUtf16(ptr, 128);
+            }
+        }
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceKey;
+        public readonly string GetDeviceKey()
+        {
+            fixed (ushort* ptr = _deviceKey)
+            {
+                return ReadNullTerminatedUtf16(ptr, 128);
+            }
+        }
     }
 
     // ── user32: work area and system DPI ────────────────────────────
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool SystemParametersInfo(
+    internal static partial bool SystemParametersInfo(
         uint action,
         uint parameter,
         ref NativeRect value,
         uint update);
 
-    [DllImport("user32.dll")]
-    internal static extern uint GetDpiForSystem();
+    [LibraryImport("user32.dll", EntryPoint = "GetDpiForSystem")]
+    internal static partial uint GetDpiForSystem();
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativeRect
@@ -74,30 +83,23 @@ public static partial class Win32Helper
 
     // ── gdi32: installed font family enumeration ────────────────────
 
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    internal static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
+    [LibraryImport("gdi32.dll", EntryPoint = "CreateCompatibleDC")]
+    internal static partial IntPtr CreateCompatibleDC(IntPtr deviceContext);
 
-    [DllImport("gdi32.dll", ExactSpelling = true)]
+    [LibraryImport("gdi32.dll", EntryPoint = "DeleteDC")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool DeleteDC(IntPtr deviceContext);
+    internal static partial bool DeleteDC(IntPtr deviceContext);
 
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    internal static extern int EnumFontFamiliesExW(
+    [LibraryImport("gdi32.dll", EntryPoint = "EnumFontFamiliesExW")]
+    internal static unsafe partial int EnumFontFamiliesExW(
         IntPtr deviceContext,
         ref LogFont logFont,
-        EnumFontFamilyDelegate callback,
+        delegate* unmanaged[Stdcall]<LogFont*, IntPtr, uint, IntPtr, int> callback,
         IntPtr parameter,
         uint flags);
 
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    internal delegate int EnumFontFamilyDelegate(
-        IntPtr fontInfo,
-        IntPtr textMetrics,
-        uint fontType,
-        IntPtr parameter);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    internal struct LogFont
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct LogFont
     {
         public int Height;
         public int Width;
@@ -112,8 +114,22 @@ public static partial class Win32Helper
         public byte ClipPrecision;
         public byte Quality;
         public byte PitchAndFamily;
+        private fixed ushort _faceName[32];
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string FaceName;
+        public readonly string GetFaceName()
+        {
+            fixed (ushort* ptr = _faceName)
+            {
+                return ReadNullTerminatedUtf16(ptr, 32);
+            }
+        }
+    }
+
+    internal static unsafe string ReadNullTerminatedUtf16(ushort* ptr, int maxChars)
+    {
+        ReadOnlySpan<char> chars = new(ptr, maxChars);
+        int nullIndex = chars.IndexOf('\0');
+        ReadOnlySpan<char> slice = nullIndex >= 0 ? chars[..nullIndex] : chars;
+        return slice.IsEmpty ? string.Empty : new string(slice);
     }
 }

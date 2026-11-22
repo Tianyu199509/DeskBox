@@ -1,3 +1,5 @@
+using System.Xml.Linq;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -14,13 +16,16 @@ public sealed class ToggleSwitchAccessibleNameContractTests
 {
     public static TheoryData<string, int> ToggleSwitchHostFiles => new()
     {
-        { "src/DeskBox/Views/SettingsWindow.xaml", 51 },
-        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 4 },
-        { "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml", 4 },
-        { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 1 },
+        { "src/DeskBox/Views/SettingsWindow.xaml", 35 },
+        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 12 },
+        { "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml", 7 },
+        { "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 2 },
+        { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 11 },
         { "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", 2 },
-        { "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 1 },
-        { "src/DeskBox/Views/OnboardingWindow.xaml", 6 },
+        { "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 2 },
+        { "src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml", 6 },
+        { "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml", 1 },
+        { "src/DeskBox/Views/OnboardingWindow.xaml", 7 },
     };
 
     [Theory]
@@ -28,9 +33,17 @@ public sealed class ToggleSwitchAccessibleNameContractTests
     public void EveryToggleSwitch_HasAccessibleNameKey(string path, int expectedCount)
     {
         string xaml = ReadRepositoryFile(path);
+        XDocument document = XDocument.Parse(xaml);
+        XElement[] switches = document
+            .Descendants()
+            .Where(static element => string.Equals(element.Name.LocalName, "ToggleSwitch", StringComparison.Ordinal))
+            .ToArray();
 
-        int total = CountOccurrences(xaml, "<ToggleSwitch");
-        int named = CountOccurrences(xaml, "<ToggleSwitch svc:Localized.AutomationNameKey=\"");
+        int total = switches.Length;
+        int named = switches.Count(static element =>
+            element.Attributes().Any(static attr =>
+                string.Equals(attr.Name.LocalName, "Localized.AutomationNameKey", StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(attr.Value)));
 
         Assert.Equal(expectedCount, total);
         Assert.Equal(total, named);
@@ -64,18 +77,6 @@ public sealed class ToggleSwitchAccessibleNameContractTests
         Assert.True(offenders.Count == 0,
             "New ToggleSwitch host files must be added to ToggleSwitchHostFiles with naming: " +
             string.Join(", ", offenders));
-    }
-
-    private static int CountOccurrences(string content, string needle)
-    {
-        int count = 0;
-        int index = 0;
-        while ((index = content.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += needle.Length;
-        }
-        return count;
     }
 
     private static string ReadRepositoryFile(string relativePath)

@@ -7,34 +7,51 @@ namespace DeskBox.Services;
 public sealed partial class DirectStartupService : IStartupService
 {
     private const string AppName = "DeskBox";
+    private const string LegacyShortcutFileName = AppName + ".lnk";
+    private static readonly TimeSpan CrossProcessLockTimeout = TimeSpan.FromSeconds(15);
+
     private readonly object _registrationLock = new();
+    private readonly string? _crossProcessMutexName;
     private readonly IDirectStartupTaskBackend _taskBackend;
     private readonly IDirectStartupRunEntryStore _runEntryStore;
     private readonly Func<string?> _executablePathProvider;
     private readonly string? _legacyShortcutPath;
+    private readonly string? _legacyCommonShortcutPath;
     private readonly Func<string, string?> _shortcutTargetReader;
     private readonly Action<string> _shortcutDelete;
     private readonly Action<string> _log;
     private readonly Func<bool> _runEntryApprovedProvider;
+    private readonly Func<bool> _shortcutApprovedProvider;
 
     public DirectStartupService(SettingsService? settingsService = null)
         : this(
             new DirectStartupTaskBackend(),
             new RegistryStartupRunEntryStore(),
-            () => Environment.ProcessPath,
+            () => AppExecutablePath.ResolveMainExecutablePath(),
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.Startup),
-                AppName + ".lnk"),
+                LegacyShortcutFileName),
             path => ShortcutHelper.ReadStoredMetadata(path)?.TargetPath,
             File.Delete,
             null,
             null,
-            settingsService is null ? null : () => settingsService.Settings.AutoStartMode,
+            settingsService is null ? null : () => settingsService.Settings.Core.AutoStartMode,
             settingsService is null ? null : mode =>
             {
-                settingsService.Settings.AutoStartMode = mode;
-                settingsService.SaveDebounced();
-            })
+                DeskBox.Platform.UiDispatch.RunOrDefer(() =>
+                {
+                    if (settingsService.Settings.Core.AutoStartMode == mode)
+                    {
+                        return;
+                    }
+
+                    settingsService.Settings.Core.AutoStartMode = mode;
+                    settingsService.SaveDebounced();
+                });
+            },
+            ResolveDistinctCommonStartupShortcutPath(),
+            IsStartupFolderShortcutApproved,
+            $"DeskBox_StartupReg_Mutex_{DeskBoxDataPathService.Current.InstanceScope}")
     {
     }
 
@@ -48,28 +65,102 @@ public sealed partial class DirectStartupService : IStartupService
         Action<string>? logger = null,
         Func<bool>? runEntryApprovedProvider = null,
         Func<StartupMode?>? modeProvider = null,
-        Action<StartupMode>? modeWriter = null)
+        Action<StartupMode>? modeWriter = null,
+        string? legacyCommonShortcutPath = null,
+        Func<bool>? shortcutApprovedProvider = null,
+        string? crossProcessMutexName = null)
     {
         _taskBackend = taskBackend;
         _runEntryStore = runEntryStore;
         _executablePathProvider = executablePathProvider;
         _legacyShortcutPath = legacyShortcutPath;
+        _legacyCommonShortcutPath =
+            !string.IsNullOrWhiteSpace(legacyCommonShortcutPath) &&
+            !DirectStartupTaskBackend.PathsEqual(legacyCommonShortcutPath, legacyShortcutPath)
+                ? legacyCommonShortcutPath
+                : null;
         _shortcutTargetReader = shortcutTargetReader ?? (_ => null);
         _shortcutDelete = shortcutDelete ?? (_ => { });
         _log = logger ?? (message =>
             global::DeskBox.App.Log($"[DirectStartupService] {message}"));
         _runEntryApprovedProvider = runEntryApprovedProvider ?? IsRunEntryApproved;
+        _shortcutApprovedProvider = shortcutApprovedProvider ?? (() => true);
         _modeProvider = modeProvider;
         _modeWriter = modeWriter;
+        _crossProcessMutexName = crossProcessMutexName;
     }
 
-
-    public StartupRegistrationState GetState()
+    private T ExecuteSerialized<T>(Func<T> action)
     {
         lock (_registrationLock)
         {
-            return GetStateCore();
+            if (string.IsNullOrWhiteSpace(_crossProcessMutexName))
+            {
+                return action();
+            }
+
+            Mutex? mutex = null;
+            bool acquired = false;
+            try
+            {
+                mutex = new Mutex(initiallyOwned: false, _crossProcessMutexName);
+                try
+                {
+                    acquired = mutex.WaitOne(CrossProcessLockTimeout);
+                }
+                catch (AbandonedMutexException)
+                {
+                    acquired = true;
+                }
+
+                if (!acquired)
+                {
+                    Log("Timed out waiting for cross-process startup registration mutex; continuing serialized locally.");
+                }
+
+                return action();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                Log($"Cross-process startup mutex unavailable ({ex.Message}); continuing serialized locally.");
+                return action();
+            }
+            finally
+            {
+                if (mutex is not null)
+                {
+                    if (acquired)
+                    {
+                        try { mutex.ReleaseMutex(); }
+                        catch (ApplicationException) { }
+                    }
+
+                    mutex.Dispose();
+                }
+            }
         }
+    }
+
+    public StartupRegistrationState GetState() =>
+        ExecuteSerialized(GetStateCore);
+
+    public StartupOperationResult GetStatus() =>
+        ExecuteSerialized(GetStatusCore);
+
+    private StartupOperationResult GetStatusCore()
+    {
+        StartupRegistrationState state = GetStateCore();
+        if (state != StartupRegistrationState.Enabled)
+        {
+            return new StartupOperationResult(state);
+        }
+
+        string? executablePath = GetExecutablePath();
+        StartupMode? activeMode = GetActiveMode(executablePath);
+        return new StartupOperationResult(
+            state,
+            EffectiveMode: activeMode,
+            UsedFallback: activeMode == StartupMode.Standard);
     }
 
     private StartupRegistrationState GetStateCore()
@@ -82,24 +173,34 @@ public sealed partial class DirectStartupService : IStartupService
 
             string? runValue = _runEntryStore.Read();
             bool ownsRun = IsCommandOwnedBy(runValue, executablePath);
-            // An old Windows Startup apps opt-out must survive migration.
-            if (ownsRun && !_runEntryApprovedProvider())
+            bool ownsUserShortcut = IsLegacyShortcutOwnedBy(_legacyShortcutPath, executablePath);
+            bool ownsCommonShortcut = IsLegacyShortcutOwnedBy(_legacyCommonShortcutPath, executablePath);
+
+            // An existing Windows Startup apps opt-out (Run or Startup folder)
+            // must survive migration and never be bypassed.
+            if ((ownsRun && !_runEntryApprovedProvider()) ||
+                (ownsUserShortcut && !_shortcutApprovedProvider()))
+            {
                 return StartupRegistrationState.DisabledByUser;
+            }
 
             DirectStartupTaskRegistration? task = _taskBackend.Read();
             if (task?.IsOwnedBy(executablePath) == true)
+            {
                 return task.Enabled
                     ? StartupRegistrationState.Enabled
                     : StartupRegistrationState.DisabledByTaskScheduler;
+            }
 
-            // A failed migration leaves the existing Run registration usable.
-            if (ownsRun || IsLegacyShortcutOwnedBy(executablePath))
+            // A fallback or pre-migration standard registration remains usable.
+            if (ownsRun || ownsUserShortcut || ownsCommonShortcut)
                 return StartupRegistrationState.Enabled;
 
             if (_taskBackend.ReadFailed)
                 return StartupRegistrationState.BlockedOrFailed;
 
-            return !string.IsNullOrWhiteSpace(runValue) || task is not null
+            return (!string.IsNullOrWhiteSpace(runValue) && !IsSameInstallCompanionCommand(runValue, executablePath)) ||
+                   (task is not null && !IsSameInstallCompanionTask(task, executablePath))
                 ? StartupRegistrationState.PathMismatch
                 : StartupRegistrationState.NotRegistered;
         }
@@ -111,14 +212,8 @@ public sealed partial class DirectStartupService : IStartupService
 
     public bool IsEnabled() => GetState() == StartupRegistrationState.Enabled;
 
-
-    public string? GetRunValue()
-    {
-        lock (_registrationLock)
-        {
-            return GetRunValueCore();
-        }
-    }
+    public string? GetRunValue() =>
+        ExecuteSerialized(GetRunValueCore);
 
     private string? GetRunValueCore()
     {
@@ -136,17 +231,27 @@ public sealed partial class DirectStartupService : IStartupService
         }
     }
 
-
     public StartupOperationResult Enable()
     {
-        lock (_registrationLock)
+        (StartupOperationResult result, StartupMode? modeToPersist) =
+            ExecuteSerialized(EnableCoreWithDeferredMode);
+        if (modeToPersist is { } mode)
         {
-            return EnableCore();
+            PersistModeOutsideLock(mode);
         }
+
+        return result;
     }
 
-    private StartupOperationResult EnableCore()
+    private (StartupOperationResult Result, StartupMode? ModeToPersist) EnableCoreWithDeferredMode()
     {
+        StartupOperationResult result = EnableCore(out StartupMode? modeToPersist);
+        return (result, modeToPersist);
+    }
+
+    private StartupOperationResult EnableCore(out StartupMode? modeToPersist)
+    {
+        modeToPersist = null;
         try
         {
             string? executablePath = GetExecutablePath();
@@ -154,19 +259,31 @@ public sealed partial class DirectStartupService : IStartupService
                 return new(StartupRegistrationState.BlockedOrFailed,
                     "Cannot enable startup: the executable path is unavailable.");
 
-            if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath) &&
-                !_runEntryApprovedProvider())
+            string? currentRun = _runEntryStore.Read();
+            bool ownsRun = IsCommandOwnedBy(currentRun, executablePath) ||
+                IsSameInstallCompanionCommand(currentRun, executablePath);
+            bool ownsUserShortcut = IsLegacyShortcutOwnedBy(_legacyShortcutPath, executablePath);
+            if ((ownsRun && !_runEntryApprovedProvider()) ||
+                (ownsUserShortcut && !_shortcutApprovedProvider()))
             {
-                string cleanupError = RemoveOwnedAlternativeRegistrations(executablePath);
+                string cleanupError = RemoveOwnedAlternativeRegistrations(
+                    executablePath,
+                    preserveRun: ownsRun,
+                    preserveUserShortcut: ownsUserShortcut);
                 return new(StartupRegistrationState.DisabledByUser, cleanupError);
             }
 
-            StartupMode mode = GetActiveMode(executablePath) ?? ResolveMode(executablePath);
-            StartupOperationResult result = mode == StartupMode.ScheduledTask
-                ? EnableTaskAndRemoveLegacyEntries(executablePath)
-                : EnableStandardAndRemoveAlternatives(executablePath);
+            // Unified Scheme A policy: always prefer the fast least-privilege
+            // logon task via direct COM, and transparently fall back to the
+            // verified standard Run entry if Task Scheduler is blocked or denied.
+            StartupOperationResult result = EnableTaskAndRemoveLegacyEntries(executablePath);
             if (result.IsEnabled)
-                SaveMode(result.EffectiveMode ?? mode);
+            {
+                StartupMode effectiveMode = result.EffectiveMode ?? StartupMode.ScheduledTask;
+                _selectedMode = effectiveMode;
+                modeToPersist = effectiveMode;
+            }
+
             return result;
         }
         catch (Exception ex)
@@ -181,12 +298,14 @@ public sealed partial class DirectStartupService : IStartupService
         string? existingRun = _runEntryStore.Read();
         if (!string.IsNullOrWhiteSpace(existingRun) &&
             !IsCommandOwnedBy(existingRun, executablePath) &&
+            !IsSameInstallCompanionCommand(existingRun, executablePath) &&
             CommandTargetExists(existingRun))
             return new(StartupRegistrationState.PathMismatch,
                 "The Run entry belongs to another DeskBox installation.");
 
         DirectStartupTaskRegistration? existingTask = _taskBackend.Read();
         if (existingTask is not null && !existingTask.IsOwnedBy(executablePath) &&
+            !IsSameInstallCompanionTask(existingTask, executablePath) &&
             File.Exists(existingTask.ExecutablePath))
             return new(StartupRegistrationState.PathMismatch,
                 "The startup task belongs to another DeskBox installation.");
@@ -204,12 +323,14 @@ public sealed partial class DirectStartupService : IStartupService
 
         try
         {
-            // Remove the shortcut before Run, so a failed shortcut cleanup
-            // leaves the previous standard registration available for rollback.
-            if (!DeleteLegacyStartupShortcutIfOwnedBy(executablePath, out string shortcutError))
+            // Remove shortcuts before Run, so a failed shortcut cleanup leaves
+            // the previous standard registration available for rollback.
+            if (!DeleteAllLegacyStartupShortcutsIfOwnedBy(executablePath, out string shortcutError))
                 throw new IOException(shortcutError);
+
             if (!string.IsNullOrWhiteSpace(existingRun) &&
                 !IsCommandOwnedBy(existingRun, executablePath) &&
+                !IsSameInstallCompanionCommand(existingRun, executablePath) &&
                 !CommandTargetExists(existingRun) &&
                 string.Equals(_runEntryStore.Read(), existingRun, StringComparison.Ordinal))
             {
@@ -227,7 +348,7 @@ public sealed partial class DirectStartupService : IStartupService
             // If an old launch path cannot be removed, roll back the new task
             // instead of deliberately leaving two active registrations.
             string rollbackError = (existingTask is null
-                ? _taskBackend.TryDelete()
+                ? _taskBackend.TryDelete(executablePath)
                 : _taskBackend.TryRestore(existingTask))
                 ? string.Empty : _taskBackend.LastError;
             rollbackError = CombineErrors(rollbackError, RestoreRunValue(existingRun));
@@ -239,13 +360,8 @@ public sealed partial class DirectStartupService : IStartupService
         return new(StartupRegistrationState.Enabled, EffectiveMode: StartupMode.ScheduledTask);
     }
 
-    public StartupOperationResult Disable()
-    {
-        lock (_registrationLock)
-        {
-            return DisableCore();
-        }
-    }
+    public StartupOperationResult Disable() =>
+        ExecuteSerialized(DisableCore);
 
     private StartupOperationResult DisableCore()
     {
@@ -264,7 +380,10 @@ public sealed partial class DirectStartupService : IStartupService
 
             List<string> failures = [];
             DirectStartupTaskRegistration? task = _taskBackend.Read();
-            if (task is not null && task.IsOwnedBy(executablePath) && !_taskBackend.TryDelete())
+            bool hasOwnedOrCompanionTask =
+                (task is not null && (task.IsOwnedBy(executablePath) || IsSameInstallCompanionTask(task, executablePath))) ||
+                _taskBackend.HasCurrentUserLegacyTask(executablePath);
+            if (hasOwnedOrCompanionTask && !_taskBackend.TryDelete(executablePath))
             {
                 string failure =
                     $"Failed to delete the owned startup task: {_taskBackend.LastError}";
@@ -281,13 +400,13 @@ public sealed partial class DirectStartupService : IStartupService
                 failures.Add($"Failed to delete the owned Run entry: {ex.Message}");
             }
 
-            if (!DeleteLegacyStartupShortcutIfOwnedBy(executablePath, out string shortcutError))
+            if (!DeleteAllLegacyStartupShortcutsIfOwnedBy(executablePath, out string shortcutError))
             {
                 failures.Add(shortcutError);
             }
 
             Log("Startup disabled");
-            StartupRegistrationState state = GetState();
+            StartupRegistrationState state = GetStateCore();
             return new StartupOperationResult(state, string.Join("; ", failures));
         }
         catch (Exception ex)
@@ -299,71 +418,105 @@ public sealed partial class DirectStartupService : IStartupService
         }
     }
 
-
     /// <summary>
-    /// Migrates only existing enabled startup registrations. Never creates an
-    /// entry for a user who has not enabled startup, or re-enables a disabled task.
+    /// Reconciles existing enabled startup registrations to the single preferred
+    /// fast logon task (or preserves verified standard fallback when tasks are
+    /// blocked). Never creates an entry for a user who has not enabled startup,
+    /// and never bypasses a user/Windows disable decision.
     /// </summary>
     internal void TryMigrateLegacyRegistration()
     {
-        lock (_registrationLock)
+        StartupMode? modeToPersist = ExecuteSerialized(TryMigrateLegacyRegistrationCore);
+        if (modeToPersist is { } mode)
         {
-            TryMigrateLegacyRegistrationCore();
+            PersistModeOutsideLock(mode);
         }
     }
 
-    private void TryMigrateLegacyRegistrationCore()
+    private StartupMode? TryMigrateLegacyRegistrationCore()
     {
         try
         {
             string? executablePath = GetExecutablePath();
             if (executablePath is null)
-                return;
+                return null;
 
             DirectStartupTaskRegistration? task = _taskBackend.Read();
             bool ownsTask = task?.IsOwnedBy(executablePath) == true;
+            bool isCompanionTask = task is not null && IsSameInstallCompanionTask(task, executablePath);
+            bool hasLegacyTaskTwin = _taskBackend.HasCurrentUserLegacyTask(executablePath);
             string? runValue = _runEntryStore.Read();
             bool ownsRun = IsCommandOwnedBy(runValue, executablePath);
-            bool ownsShortcut = IsLegacyShortcutOwnedBy(executablePath);
+            bool isCompanionRun = IsSameInstallCompanionCommand(runValue, executablePath);
+            bool ownsUserShortcut = IsLegacyShortcutOwnedBy(_legacyShortcutPath, executablePath);
+            bool ownsCommonShortcut = IsLegacyShortcutOwnedBy(_legacyCommonShortcutPath, executablePath);
+            bool ownsAnyShortcut = ownsUserShortcut || ownsCommonShortcut;
+
             Log($"Startup migration inspection: executable='{executablePath}' " +
                 $"runTarget='{ExtractExecutablePath(runValue) ?? "none"}' " +
-                $"ownsTask={ownsTask} ownsRun={ownsRun} ownsShortcut={ownsShortcut} " +
+                $"ownsTask={ownsTask} hasLegacyTaskTwin={hasLegacyTaskTwin} " +
+                $"ownsRun={ownsRun} ownsUserShortcut={ownsUserShortcut} ownsCommonShortcut={ownsCommonShortcut} " +
                 $"process64Bit={Environment.Is64BitProcess}");
-            if (!ownsTask && !ownsRun && !ownsShortcut)
-                return;
 
-            if (ownsRun && !_runEntryApprovedProvider())
+            if (!ownsTask && !ownsRun && !ownsAnyShortcut && !hasLegacyTaskTwin &&
+                !isCompanionTask && !isCompanionRun)
             {
-                string error = RemoveOwnedAlternativeRegistrations(executablePath);
+                return null;
+            }
+
+            // Respect Windows Startup apps opt-out on Run or Startup folder.
+            bool runDisabledByWindows = (ownsRun || isCompanionRun) && !_runEntryApprovedProvider();
+            bool shortcutDisabledByWindows = ownsUserShortcut && !_shortcutApprovedProvider();
+            if (runDisabledByWindows || shortcutDisabledByWindows)
+            {
+                string error = RemoveOwnedAlternativeRegistrations(
+                    executablePath,
+                    preserveRun: runDisabledByWindows,
+                    preserveUserShortcut: shortcutDisabledByWindows);
                 Log(CombineErrors("Preserved Windows-disabled startup registration.", error));
-                return;
+                return null;
             }
 
-            if (ownsTask && !task!.Enabled)
+            if ((ownsTask || isCompanionTask) && !task!.Enabled)
             {
-                // Keep the task disabled; older owned paths must not bypass it.
+                // Keep a disabled scheduled task disabled; older owned paths must not bypass it.
                 DeleteLegacyRunEntryIfOwnedBy(executablePath);
-                DeleteLegacyStartupShortcutIfOwnedBy(executablePath);
+                DeleteAllLegacyStartupShortcutsIfOwnedBy(executablePath);
                 Log("Preserved task disabled by the user.");
-                return;
+                return null;
             }
 
-            StartupMode mode = GetActiveMode(executablePath) ?? ResolveMode(executablePath);
-            SaveMode(mode);
-            if (mode == StartupMode.Standard && ownsRun && !ownsTask && !ownsShortcut)
-                return;
-            if (mode == StartupMode.ScheduledTask && ownsTask && _taskBackend.IsPreferred(task!, executablePath) &&
-                !ownsRun && !ownsShortcut)
-                return;
+            // Already cleanly on the single preferred SID-scoped logon task.
+            if (ownsTask &&
+                _taskBackend.IsPreferred(task!, executablePath) &&
+                !hasLegacyTaskTwin &&
+                !ownsRun &&
+                !isCompanionRun &&
+                !ownsAnyShortcut)
+            {
+                _selectedMode = StartupMode.ScheduledTask;
+                return StartupMode.ScheduledTask;
+            }
 
-            StartupOperationResult result = EnableCore();
+            // If Task Scheduler cannot even be queried right now, keep an existing
+            // working Run entry untouched instead of failing or duplicating.
+            if (_taskBackend.ReadFailed && ownsRun && !ownsAnyShortcut)
+            {
+                Log($"Task Scheduler read failed ({_taskBackend.LastError}); preserving existing Run registration.");
+                _selectedMode = StartupMode.Standard;
+                return StartupMode.Standard;
+            }
+
+            StartupOperationResult result = EnableCore(out StartupMode? modeToPersist);
             Log(result.State == StartupRegistrationState.Enabled
-                ? $"Startup registration reconciled using {result.EffectiveMode}"
+                ? $"Startup registration reconciled using {result.EffectiveMode} (fallback={result.UsedFallback})"
                 : $"Startup migration deferred; previous registration preserved: {result.ErrorMessage}");
+            return modeToPersist;
         }
         catch (Exception ex)
         {
             Log($"Startup migration failed: {ex.Message}");
+            return null;
         }
     }
 
@@ -372,7 +525,7 @@ public sealed partial class DirectStartupService : IStartupService
         DirectStartupTaskRegistration? existing = _taskBackend.Read();
         if (existing is not null && !existing.IsOwnedBy(executablePath))
         {
-            if (File.Exists(existing.ExecutablePath))
+            if (!IsSameInstallCompanionTask(existing, executablePath) && File.Exists(existing.ExecutablePath))
             {
                 Log(
                     $"Preserved startup task owned by another installation: " +
@@ -385,7 +538,9 @@ public sealed partial class DirectStartupService : IStartupService
                 $"target: '{existing.ExecutablePath}'");
         }
 
-        if (existing is not null && _taskBackend.IsPreferred(existing, executablePath))
+        if (existing is not null &&
+            _taskBackend.IsPreferred(existing, executablePath) &&
+            !_taskBackend.HasCurrentUserLegacyTask(executablePath))
         {
             return true;
         }
@@ -399,27 +554,53 @@ public sealed partial class DirectStartupService : IStartupService
     }
 
     /// <summary>
-    /// Windows' Startup apps page disables entries by flipping a bit under
-    /// Explorer\StartupApproved instead of deleting the Run value; the entry
+    /// Windows' Startup apps page disables entries by flipping bit 0 under
+    /// Explorer\StartupApproved\Run instead of deleting the Run value; the entry
     /// counts as enabled unless that state explicitly disables it.
     /// </summary>
-    private static bool IsRunEntryApproved()
+    private static bool IsRunEntryApproved() =>
+        IsStartupApprovedEntryEnabled(
+            @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+            AppName);
+
+    private static bool IsStartupFolderShortcutApproved() =>
+        IsStartupApprovedEntryEnabled(
+            @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder",
+            LegacyShortcutFileName);
+
+    internal static bool IsStartupApprovedByteEnabled(byte[]? state) =>
+        state is null || state.Length == 0 || (state[0] & 1) == 0;
+
+    private static bool IsStartupApprovedEntryEnabled(string registryPath, string valueName)
     {
         try
         {
             using RegistryKey? key = RegistryStartupRunEntryStore.OpenCurrentUserKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+                registryPath,
                 writable: false);
-            if (key?.GetValue(AppName) is byte[] state && state.Length > 0)
-            {
-                return (state[0] & 1) == 0;
-            }
-
-            return true;
+            return IsStartupApprovedByteEnabled(key?.GetValue(valueName) as byte[]);
         }
         catch
         {
             return true;
+        }
+    }
+
+    private static string? ResolveDistinctCommonStartupShortcutPath()
+    {
+        try
+        {
+            string commonStartup = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup);
+            if (string.IsNullOrWhiteSpace(commonStartup))
+            {
+                return null;
+            }
+
+            return Path.Combine(commonStartup, LegacyShortcutFileName);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -429,13 +610,17 @@ public sealed partial class DirectStartupService : IStartupService
         return !string.IsNullOrWhiteSpace(target) && File.Exists(target);
     }
 
-    private string RemoveOwnedAlternativeRegistrations(string executablePath)
+    private string RemoveOwnedAlternativeRegistrations(
+        string executablePath,
+        bool preserveRun = true,
+        bool preserveUserShortcut = false)
     {
         List<string> failures = [];
         DirectStartupTaskRegistration? task = _taskBackend.Read();
-        if (task is not null &&
-            task.IsOwnedBy(executablePath) &&
-            !_taskBackend.TryDelete())
+        bool hasOwnedOrCompanionTask =
+            (task is not null && (task.IsOwnedBy(executablePath) || IsSameInstallCompanionTask(task, executablePath))) ||
+            _taskBackend.HasCurrentUserLegacyTask(executablePath);
+        if (hasOwnedOrCompanionTask && !_taskBackend.TryDelete(executablePath))
         {
             string failure =
                 $"Failed to remove the superseded startup task: {_taskBackend.LastError}";
@@ -443,11 +628,27 @@ public sealed partial class DirectStartupService : IStartupService
             Log(failure);
         }
 
-        if (!DeleteLegacyStartupShortcutIfOwnedBy(
-                executablePath,
-                out string shortcutError))
+        if (!preserveRun)
         {
-            failures.Add(shortcutError);
+            try
+            {
+                DeleteLegacyRunEntryIfOwnedBy(executablePath);
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"Failed to remove the superseded Run entry: {ex.Message}");
+            }
+        }
+
+        if (!preserveUserShortcut &&
+            !DeleteLegacyStartupShortcutIfOwnedBy(_legacyShortcutPath, executablePath, out string userShortcutError))
+        {
+            failures.Add(userShortcutError);
+        }
+
+        if (!DeleteLegacyStartupShortcutIfOwnedBy(_legacyCommonShortcutPath, executablePath, out string commonShortcutError))
+        {
+            failures.Add(commonShortcutError);
         }
 
         return string.Join("; ", failures);
@@ -470,10 +671,14 @@ public sealed partial class DirectStartupService : IStartupService
 
     private void DeleteLegacyRunEntryIfOwnedBy(string executablePath)
     {
-        if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath))
+        string? current = _runEntryStore.Read();
+        if (IsCommandOwnedBy(current, executablePath) ||
+            IsSameInstallCompanionCommand(current, executablePath))
         {
             _runEntryStore.Delete();
-            if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath))
+            string? afterDelete = _runEntryStore.Read();
+            if (IsCommandOwnedBy(afterDelete, executablePath) ||
+                IsSameInstallCompanionCommand(afterDelete, executablePath))
             {
                 throw new IOException("The owned Run entry still exists after removal.");
             }
@@ -481,19 +686,19 @@ public sealed partial class DirectStartupService : IStartupService
         }
     }
 
-    private bool IsLegacyShortcutOwnedBy(string executablePath)
+    private bool IsLegacyShortcutOwnedBy(string? shortcutPath, string executablePath)
     {
-        if (string.IsNullOrWhiteSpace(_legacyShortcutPath) ||
-            !File.Exists(_legacyShortcutPath))
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            !File.Exists(shortcutPath))
         {
             return false;
         }
 
         try
         {
-            return DirectStartupTaskBackend.PathsEqual(
-                _shortcutTargetReader(_legacyShortcutPath),
-                executablePath);
+            string? target = _shortcutTargetReader(shortcutPath);
+            return DirectStartupTaskBackend.PathsEqual(target, executablePath) ||
+                   AppExecutablePath.IsSameInstallCompanionExecutable(target, executablePath);
         }
         catch
         {
@@ -501,23 +706,43 @@ public sealed partial class DirectStartupService : IStartupService
         }
     }
 
-    private void DeleteLegacyStartupShortcutIfOwnedBy(string executablePath) =>
-        _ = DeleteLegacyStartupShortcutIfOwnedBy(executablePath, out _);
+    private void DeleteAllLegacyStartupShortcutsIfOwnedBy(string executablePath) =>
+        _ = DeleteAllLegacyStartupShortcutsIfOwnedBy(executablePath, out _);
+
+    private bool DeleteAllLegacyStartupShortcutsIfOwnedBy(
+        string executablePath,
+        out string error)
+    {
+        List<string> failures = [];
+        if (!DeleteLegacyStartupShortcutIfOwnedBy(_legacyShortcutPath, executablePath, out string userError))
+        {
+            failures.Add(userError);
+        }
+
+        if (!DeleteLegacyStartupShortcutIfOwnedBy(_legacyCommonShortcutPath, executablePath, out string commonError))
+        {
+            failures.Add(commonError);
+        }
+
+        error = string.Join("; ", failures);
+        return failures.Count == 0;
+    }
 
     private bool DeleteLegacyStartupShortcutIfOwnedBy(
+        string? shortcutPath,
         string executablePath,
         out string error)
     {
         error = string.Empty;
-        if (!IsLegacyShortcutOwnedBy(executablePath) ||
-            string.IsNullOrWhiteSpace(_legacyShortcutPath))
+        if (!IsLegacyShortcutOwnedBy(shortcutPath, executablePath) ||
+            string.IsNullOrWhiteSpace(shortcutPath))
         {
             return true;
         }
 
         try
         {
-            _shortcutDelete(_legacyShortcutPath);
+            _shortcutDelete(shortcutPath);
             return true;
         }
         catch (Exception ex)
@@ -546,6 +771,20 @@ public sealed partial class DirectStartupService : IStartupService
             commandExecutablePath,
             executablePath);
     }
+
+    private static bool IsSameInstallCompanionCommand(
+        string? commandLine,
+        string executablePath) =>
+        AppExecutablePath.IsSameInstallCompanionExecutable(
+            ExtractExecutablePath(commandLine),
+            executablePath);
+
+    private static bool IsSameInstallCompanionTask(
+        DirectStartupTaskRegistration task,
+        string executablePath) =>
+        AppExecutablePath.IsSameInstallCompanionExecutable(
+            task.ExecutablePath,
+            executablePath);
 
     private static string? ExtractExecutablePath(string? commandLine)
     {

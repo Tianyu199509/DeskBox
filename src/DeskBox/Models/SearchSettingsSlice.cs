@@ -9,6 +9,9 @@ public sealed class SearchSettingsSlice
     /// <summary>Whether the search global hotkey is enabled.</summary>
     public bool SearchHotkeyEnabled { get; set; }
 
+    /// <summary>Search hotkey activation mode (Chord, DoubleControl, WindowsTap, DoubleTap).</summary>
+    public HotkeyActivationKind SearchHotkeyActivationKind { get; set; } = HotkeyActivationKind.Chord;
+
     /// <summary>Search hotkey modifier bit flags.</summary>
     public int SearchHotkeyModifiers { get; set; } = (int)HotkeyModifierKeys.Alt;
 
@@ -81,4 +84,50 @@ public sealed class SearchSettingsSlice
     public int? SearchPopupCustomWidth { get; set; }
 
     public int? SearchPopupCustomHeight { get; set; }
+
+    /// <summary>Category pill bar visibility mode: "auto" (on-demand across multiple categories), "always", or "hidden".</summary>
+    public string SearchCategoryBarMode { get; set; } = "auto";
+
+    /// <summary>Whether to show the sortable column header bar above search results. False by default.</summary>
+    public bool SearchShowSortHeader { get; set; }
+
+    /// <summary>Default sort column for results: "relevance", "date", "name", or "size".</summary>
+    public string SearchDefaultSortColumn { get; set; } = "relevance";
+
+    /// <summary>Whether global search queries DeskBox clipboard history.</summary>
+    public bool SearchIncludeClipboard { get; set; } = true;
+
+    /// <summary>Whether global search evaluates inline arithmetic expressions.</summary>
+    public bool SearchIncludeCalculator { get; set; } = true;
+
+    /// <summary>Whether the right-side details sidebar is expanded by default when searching.</summary>
+    public bool SearchShowDetailsPane { get; set; } = true;
+
+    /// <summary>Whether global search includes direct URL opening and fallback web search.</summary>
+    public bool SearchIncludeWebFallback { get; set; } = true;
+
+    /// <summary>Default web search engine identifier: "bing", "google", "baidu", "duckduckgo", or "custom".</summary>
+    public string SearchDefaultWebEngine { get; set; } = "bing";
+
+    /// <summary>Custom web search URL template containing {q} or %s placeholder when <see cref="SearchDefaultWebEngine"/> is "custom".</summary>
+    public string SearchCustomWebUrl { get; set; } = string.Empty;
+
+    /// <summary>Whether quick-create Todo actions are enabled in global search.</summary>
+    public bool SearchQuickCreateTodoEnabled { get; set; } = true;
+
+    /// <summary>Whether quick-create QuickCapture note actions are enabled in global search.</summary>
+    public bool SearchQuickCreateNoteEnabled { get; set; } = true;
+
+    /// <summary>
+    /// When inline quick-create rows appear for ordinary queries:
+    /// "always" (auto-top when zero local hits, below local hits otherwise),
+    /// "fallback" (only when zero local hits), or "prefix" (only with explicit prefix/scope).
+    /// </summary>
+    public string SearchQuickCreateDisplayMode { get; set; } = "always";
+
+    /// <summary>Default primary quick-create target when both Todo and QuickCapture are enabled: "todo" or "note".</summary>
+    public string SearchQuickCreateDefaultTarget { get; set; } = "todo";
+
+    /// <summary>Whether saving a Todo or QuickCapture note from search shows the desktop bottom capsule HUD with a View button.</summary>
+    public bool SearchQuickCreateShowHud { get; set; } = true;
 }

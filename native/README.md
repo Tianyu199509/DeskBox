@@ -26,12 +26,6 @@ of the production ABI, capability mask, or export list.
 - Targets: `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`
 - Library type: `cdylib`
 - Public header: `include/deskbox_native.h`
-- ARM64 Stage 7A report: `../docs/architecture/rust-stage-7a-arm64-static-report.md`
-- Detailed shortcut contract: `../docs/architecture/shortcut-native-abi-v2.md`
-- Detailed music-volume contract: `../docs/architecture/music-volume-native-abi-v1.md`
-- Detailed Explorer-launch contract: `../docs/architecture/explorer-shell-launch-native-abi-v1.md`
-- Detailed Quick Access contract: `../docs/architecture/quick-access-native-abi-v1.md`
-- Detailed Recycle Bin contract: `../docs/architecture/recycle-bin-native-abi-v1.md`
 - Panic policy: abort; panic must never cross the C ABI
 - COM and Shell bindings: official `windows` crate `0.62.2`, with only the
   required Win32 feature groups enabled
@@ -161,8 +155,7 @@ device before treating it as runtime-compatible or changing the product default.
 
 The Stage 3C-2 missing-target Shell dialog gate is complete. A Rust-enabled JIT
 build was used to verify the actual loaded module path plus owner-window,
-cancel, repair, and delete behavior; the record is described in
-`../docs/architecture/shortcut-native-abi-v2.md`. Stage 3C-3 also verified the
+cancel, repair, and delete behavior against `include/deskbox_native.h`. Stage 3C-3 also verified the
 compile-time AOT exclusion, side-effect-free diagnostics, unique x64 publish
 DLL, ARM64 exclusion, and detached updater boundary. A fresh ordinary JIT
 instance was then verified to load no `deskbox_native.dll` at startup. The
@@ -271,8 +264,7 @@ forced-termination recovery by an independent AOT process, preservation of the
 recovery intent when the session disappears, and unchanged system master
 volume. The Rust workspace passes 54 tests: 52 production-module tests and 2
 fixture tests. The production module remains ABI 2, capability mask 255, and
-nine required exports; only the test workspace membership changed. Full details
-are in `../docs/architecture/aot-stage-5b-3c-report.md`.
+nine required exports; only the test workspace membership changed.
 
 Stage 5B-4C1B1 adds the exact Recycle Bin query/recovery export without changing
 the File Widget's existing C# `SHFileOperationW` delete path. The Rust operation
@@ -281,13 +273,11 @@ name, and invokes `undelete` only after proving exactly one match. Audit profile
 47 / schema 44 confirms ABI 2, capability mask 511, ten required exports,
 matching staging/publish hashes, zero target warnings, and zero complete
 always-throw messages. The three-process x64 AOT matrix restores all three owned
-items and leaves zero exact matches. Full details are in
-`../docs/architecture/aot-stage-5b-4c1b1-report.md`.
+items and leaves zero exact matches.
 
 Stage 7A adds the pinned ARM64 Rust standard library, an audited x64-hosted MSVC
 ARM64 environment, case-sensitive static PE/export parsing, exact Platform/RID
 guards, and a separate cross-compiled static AOT audit. `DeskBox.exe`,
 `DeskBox.Updater.exe`, and `deskbox_native.dll` all report machine `0xAA64`;
 staging/publish DLL hashes match and symbols are separated. The evidence does
-not execute target code. Full results and the Stage 7B boundary are in
-`../docs/architecture/rust-stage-7a-arm64-static-report.md`.
+not execute target code.

@@ -201,7 +201,6 @@ internal static unsafe partial class ShellDropDelegator
                     _ = CallDragLeave(dropTarget);
                 }
 
-                ReleaseObject(dropTarget);
                 App.Log(
                     $"[ShortcutLaunch] Shell refused drop on '{shortcutPath}' " +
                     $"hr=0x{dragEnterHResult:X8} effect={effect}.");
@@ -216,7 +215,6 @@ internal static unsafe partial class ShellDropDelegator
                 keyState,
                 point,
                 ref effect);
-            ReleaseObject(dropTarget);
             bool handled = dropHResult >= 0 &&
                 effect != NativeDropEffectPolicy.None;
             App.Log(
@@ -238,6 +236,7 @@ internal static unsafe partial class ShellDropDelegator
         }
         finally
         {
+            ReleaseObject(dropTarget);
             if (savedElectronRunAsNode is not null)
             {
                 Environment.SetEnvironmentVariable(
@@ -256,7 +255,7 @@ internal static unsafe partial class ShellDropDelegator
 
         try
         {
-            var release = (delegate* unmanaged[Stdcall]<nint, nint>)
+            var release = (delegate* unmanaged[Stdcall]<nint, uint>)
                 GetVtableEntry(comObject, ReleaseVtableSlot);
             _ = release(comObject);
         }

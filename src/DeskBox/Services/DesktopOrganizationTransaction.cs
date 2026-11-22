@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Services.DesktopOrganization;
 
 namespace DeskBox.Services;
 
@@ -15,6 +16,8 @@ public sealed partial class DesktopOrganizationTransaction
     public bool HasPendingRecovery => _recoveryStore.HasPendingJournal;
 
     internal DesktopAutoOrganizationSuppressionRegistry? AutoOrganizationSuppressions { get; init; }
+
+    internal DesktopIconPositionService? DesktopIconPositions { get; init; }
 
     public DesktopOrganizationTransaction(
         SettingsService settingsService,
@@ -65,6 +68,7 @@ public sealed partial class DesktopOrganizationTransaction
             // in-memory settings back — the physical moves are committed and
             // no journal remains to reconcile them.
             bool committed = false;
+            DesktopIconCaptureSnapshot desktopIconCapture = DesktopIconCaptureSnapshot.Empty;
 
             try
             {
@@ -93,6 +97,13 @@ public sealed partial class DesktopOrganizationTransaction
                 }
 
                 ReserveDestinations(journal);
+                desktopIconCapture = DesktopIconPositions is not null && journal.Items.Count > 0
+                    ? await DesktopIconPositions.CaptureBeforeMoveFromDesktopAsync(
+                        journal.Items
+                            .Select(item => new FileService.FileTransferPlan(item.SourcePath, item.DestinationPath))
+                            .ToList(),
+                        cancellationToken)
+                    : DesktopIconCaptureSnapshot.Empty;
                 if (journal.Items.Count > 0)
                 {
                     await _recoveryStore.SaveAsync(journal);
@@ -105,29 +116,48 @@ public sealed partial class DesktopOrganizationTransaction
                         item => item.SourcePath,
                         StringComparer.OrdinalIgnoreCase);
 
+                void ReportPersonalItemProgress(DesktopOrganizationRecoveryItem item)
+                {
+                    completedCount++;
+                    progress?.Report(new DesktopOrganizationProgress(
+                        completedCount,
+                        totalCount,
+                        item.TargetWidgetId,
+                        plan.Targets.First(target => target.TargetWidgetId == item.TargetWidgetId).SuggestedDisplayName,
+                        item.SourceScope));
+                }
+
                 void RecordCompleted(FileService.FileTransferResult result)
                 {
+                    var item = journal.Items.FirstOrDefault(candidate => string.Equals(
+                        candidate.SourcePath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
+                    if (item is null || item.Completed) return;
                     // A cross-volume copy whose source cleanup failed is not a
                     // completed move, even if the transfer retained a full copy.
                     if (!FileService.IsCompletedShellMove(result.SourcePath, result.DestinationPath)) return;
-                    var item = journal.Items.First(candidate => string.Equals(
-                        candidate.SourcePath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
-                    if (item.Completed) return;
                     item.DestinationPath = result.DestinationPath;
                     item.Completed = true;
                     RecordDestinationIdentity(item);
                     _recoveryStore.Save(journal);
+                    if (item.SourceScope == DesktopOrganizationSourceScope.Personal)
+                    {
+                        ReportPersonalItemProgress(item);
+                    }
                 }
 
-                // Personal files are processed first. One public Shell batch
-                // shares authorization and preserves each completed receipt.
+                // Personal files are grouped per target widget so N desktop files
+                // share one transfer session and one SHChangeNotify refresh per
+                // directory while still persisting per-item journal receipts.
                 var batches = journal.Items
                     .Where(item => item.SourceScope == DesktopOrganizationSourceScope.Personal)
-                    .Select(item => new List<DesktopOrganizationRecoveryItem> { item }).ToList();
+                    .GroupBy(item => item.TargetWidgetId, StringComparer.Ordinal)
+                    .Select(group => group.ToList())
+                    .ToList();
                 var publicItems = journal.Items.Where(item => item.SourceScope == DesktopOrganizationSourceScope.Public).ToList();
                 if (publicItems.Count > 0) batches.Add(publicItems);
                 foreach (var batch in batches)
                 {
+                    bool isPublicBatch = batch[0].SourceScope == DesktopOrganizationSourceScope.Public;
                     var ready = new List<DesktopOrganizationRecoveryItem>();
                     foreach (var item in batch)
                     {
@@ -140,19 +170,23 @@ public sealed partial class DesktopOrganizationTransaction
                         catch (Exception ex)
                         {
                             retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath], ex));
+                            if (!isPublicBatch)
+                            {
+                                ReportPersonalItemProgress(item);
+                            }
                         }
                     }
                     Exception? failure = null;
                     if (ready.Count > 0)
                     {
-                        if (ready[0].SourceScope == DesktopOrganizationSourceScope.Public)
+                        if (isPublicBatch)
                             progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
                                 ready[0].TargetWidgetId, string.Empty, DesktopOrganizationSourceScope.Public));
                         try
                         {
                             var results = await _transfer.MoveAsync(
                                 ready.Select(item => new FileService.FileTransferPlan(item.SourcePath, item.DestinationPath)).ToList(),
-                                ready[0].SourceScope == DesktopOrganizationSourceScope.Public,
+                                isPublicBatch,
                                 ownerWindowHandle, RecordCompleted, cancellationToken);
                             foreach (var result in results) RecordCompleted(result);
                         }
@@ -163,15 +197,47 @@ public sealed partial class DesktopOrganizationTransaction
                             failure = ex;
                         }
                         foreach (var item in ready.Where(item => !item.Completed))
-                            retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath],
-                                failure ?? new IOException("The file was not moved.")));
+                        {
+                            Exception itemError =
+                                (_transfer as DesktopOrganizationTransfer)?.TryGetLastItemError(item.SourcePath) ??
+                                failure ??
+                                new IOException("The file was not moved.");
+                            retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath], itemError));
+                            if (!isPublicBatch)
+                            {
+                                ReportPersonalItemProgress(item);
+                            }
+                        }
                     }
-                    completedCount += batch.Count;
-                    var last = batch[^1];
-                    progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
-                        last.TargetWidgetId, plan.Targets.First(target => target.TargetWidgetId == last.TargetWidgetId).SuggestedDisplayName,
-                        last.SourceScope));
+                    if (isPublicBatch)
+                    {
+                        completedCount += batch.Count;
+                        var last = batch[^1];
+                        progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
+                            last.TargetWidgetId, plan.Targets.First(target => target.TargetWidgetId == last.TargetWidgetId).SuggestedDisplayName,
+                            last.SourceScope));
+                    }
                 }
+
+                if (DesktopIconPositions is not null)
+                {
+                    List<FileService.FileTransferResult> movedForPositions = journal.Items
+                        .Where(static item => item.Completed)
+                        .Select(static item => new FileService.FileTransferResult(
+                            item.SourcePath,
+                            item.DestinationPath))
+                        .ToList();
+                    if (movedForPositions.Count > 0)
+                    {
+                        await DesktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                            desktopIconCapture,
+                            movedForPositions);
+                    }
+                }
+
+                await RebaseCompletedShortcutsAndSaveJournalAsync(
+                    journal,
+                    isRestore: false);
 
                 DesktopOrganizationPlan committedPlan = CreateCommittedPlan(
                     plan,
@@ -275,6 +341,22 @@ public sealed partial class DesktopOrganizationTransaction
                     throw;
                 }
 
+                if (DesktopIconPositions is not null && !desktopIconCapture.IsEmpty)
+                {
+                    List<FileService.FileTransferResult> partialMovedForPositions = journal.Items
+                        .Where(static item => item.Completed)
+                        .Select(static item => new FileService.FileTransferResult(
+                            item.SourcePath,
+                            item.DestinationPath))
+                        .ToList();
+                    if (partialMovedForPositions.Count > 0)
+                    {
+                        await DesktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                            desktopIconCapture,
+                            partialMovedForPositions);
+                    }
+                }
+
                 settings.Widgets = originalWidgets;
                 settings.DesktopOrganizationRules = originalRules;
                 _settingsService.OrganizationHistory.Entries = originalHistory;
@@ -375,7 +457,7 @@ public sealed partial class DesktopOrganizationTransaction
         {
             long availableFreeBytes = availableFreeBytesProvider is not null
                 ? availableFreeBytesProvider(requirement.Key)
-                : new DriveInfo(requirement.Key).AvailableFreeSpace;
+                : QueryAvailableFreeBytes(requirement.Key);
             if (availableFreeBytes < requirement.Value + FreeSpaceSafetyMarginBytes)
             {
                 throw new DesktopOrganizationInsufficientSpaceException(requirement.Key);
@@ -383,10 +465,28 @@ public sealed partial class DesktopOrganizationTransaction
         }
     }
 
+    private static long QueryAvailableFreeBytes(string volumeRoot)
+    {
+        if (OperatingSystem.IsWindows() &&
+            Platform.Kernel32NativeMethods.GetDiskFreeSpaceEx(
+                volumeRoot,
+                out ulong freeBytesAvailable,
+                out _,
+                out _))
+        {
+            return freeBytesAvailable > long.MaxValue
+                ? long.MaxValue
+                : (long)freeBytesAvailable;
+        }
+
+        string driveRoot = Path.GetPathRoot(volumeRoot) ?? volumeRoot;
+        return new DriveInfo(driveRoot).AvailableFreeSpace;
+    }
+
     /// <summary>
     /// A same-volume move is a metadata rename and consumes no additional
-    /// space; only items crossing volumes are charged against the target
-    /// drive. Directory sizes are not recursed (existing behavior).
+    /// space; only items crossing volumes (including mounted volume folders on
+    /// the same drive letter) are charged against the target volume.
     /// </summary>
     internal static IReadOnlyDictionary<string, long> ComputeRequiredSpaceByDrive(
         DesktopOrganizationPlan plan)
@@ -399,15 +499,19 @@ public sealed partial class DesktopOrganizationTransaction
                          Snapshot = item
                      })))
         {
-            string? targetRoot = Path.GetPathRoot(Path.GetFullPath(entry.Target));
+            string? targetRoot = NormalizeVolumeRoot(
+                FileService.GetComparableVolumeRoot(entry.Target, useParentPath: false));
             if (string.IsNullOrWhiteSpace(targetRoot) ||
                 targetRoot.StartsWith(@"\\", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string? sourceRoot = Path.GetPathRoot(Path.GetFullPath(entry.Snapshot.SourcePath));
-            if (string.Equals(targetRoot, sourceRoot, StringComparison.OrdinalIgnoreCase))
+            string? targetIdentity = NormalizeVolumeRoot(
+                FileService.GetComparableVolumeIdentity(entry.Target, useParentPath: false));
+            string? sourceIdentity = NormalizeVolumeRoot(
+                FileService.GetComparableVolumeIdentity(entry.Snapshot.SourcePath, useParentPath: false));
+            if (string.Equals(targetIdentity, sourceIdentity, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -419,10 +523,26 @@ public sealed partial class DesktopOrganizationTransaction
         return requiredByDrive;
     }
 
-    private static void RevalidateSource(DesktopOrganizationFileSnapshot item)
+    private static string? NormalizeVolumeRoot(string? root)
     {
-        var attributes = File.GetAttributes(item.SourcePath);
-        if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System | FileAttributes.Offline | FileAttributes.Temporary)) != 0)
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return null;
+        }
+
+        return Path.EndsInDirectorySeparator(root)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+    }
+
+    internal static void RevalidateSource(
+        DesktopOrganizationFileSnapshot item,
+        Func<string, bool>? safeTraversableProbe = null,
+        Func<string, FileAttributes>? attributesProbe = null)
+    {
+        var attributes = (attributesProbe ?? File.GetAttributes)(item.SourcePath);
+        bool isSafeTraversable = (safeTraversableProbe ?? Platform.StorageMigrationNativeMethods.IsSafeTraversablePath)(item.SourcePath);
+        if ((attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.Temporary)) != 0 || !isSafeTraversable)
             throw new DesktopOrganizationSourceChangedException(item.Name);
         if (item.IsDirectory)
         {
@@ -533,19 +653,30 @@ public sealed partial class DesktopOrganizationTransaction
         DesktopOrganizationPlan plan,
         ICollection<DesktopOrganizationRule> rules)
     {
+        var activeCategories = rules
+            .Where(rule => rule.IsEnabled)
+            .SelectMany(rule => rule.CategoryIds)
+            .Where(categoryId => !string.IsNullOrWhiteSpace(categoryId))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (DesktopOrganizationTargetPlan target in plan.Targets.Where(target => target.CreatesWidget))
         {
-            string[] sourceCategories = target.Items
-                .Select(item => item.CategoryId)
-                .Where(categoryId => !string.IsNullOrWhiteSpace(categoryId))
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
+            // Never auto-bind the catch-all "Other" bucket, user-renamed or custom
+            // boxes (AutoBindCategoryRule = false), or duplicate active categories:
+            // doing so would hijack future auto-organization of concrete categories.
+            // Users can always configure custom rules explicitly.
+            if (!target.AutoBindCategoryRule ||
+                string.IsNullOrWhiteSpace(target.CategoryId) ||
+                string.Equals(target.CategoryId, DesktopOrganizationCategoryIds.Other, StringComparison.Ordinal) ||
+                !activeCategories.Add(target.CategoryId))
+            {
+                continue;
+            }
+
             rules.Add(new DesktopOrganizationRule
             {
                 TargetWidgetId = target.TargetWidgetId,
-                CategoryIds = sourceCategories.Length > 0
-                    ? sourceCategories.ToList()
-                    : [target.CategoryId]
+                CategoryIds = [target.CategoryId]
             });
         }
     }
@@ -689,7 +820,96 @@ public sealed partial class DesktopOrganizationTransaction
             FileIdHigh = fileId.High,
             FileIdLow = fileId.Low,
         };
+        if (Directory.Exists(path))
+        {
+            // Cross-volume directory copies create a fresh target folder whose
+            // LastWriteTimeUtc updates as child entries are populated. Refresh
+            // the baseline at completion so Undo and crash recovery match the
+            // completed destination folder while still catching later edits.
+            item.LastWriteTimeUtc = identity.LastWriteTimeUtc;
+        }
     }
+
+    private async Task RebaseCompletedShortcutsAndSaveJournalAsync(
+        DesktopOrganizationRecoveryJournal journal,
+        bool isRestore)
+    {
+        (string SourcePath, string DestinationPath)[] movedPairs = isRestore
+            ? journal.Items
+                .Where(item => item.Completed && !string.IsNullOrWhiteSpace(item.RestorePath))
+                .Select(item => (item.DestinationPath, item.RestorePath!))
+                .ToArray()
+            : journal.Items
+                .Where(item => item.Completed)
+                .Select(item => (item.SourcePath, item.DestinationPath))
+                .ToArray();
+        if (movedPairs.Length == 0)
+        {
+            return;
+        }
+
+        List<DesktopOrganizationRecoveryItem> shortcutCandidates = journal.Items
+            .Where(candidate =>
+            {
+                if (!candidate.Completed)
+                {
+                    return false;
+                }
+
+                string finalPath = isRestore
+                    ? candidate.RestorePath ?? string.Empty
+                    : candidate.DestinationPath;
+                return Path.GetExtension(finalPath).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+            })
+            .ToList();
+        if (shortcutCandidates.Count == 0)
+        {
+            return;
+        }
+
+        foreach (DesktopOrganizationRecoveryItem candidate in shortcutCandidates)
+        {
+            candidate.ShortcutRebaseInProgress = true;
+        }
+
+        await _recoveryStore.SaveAsync(journal);
+
+        IReadOnlySet<string> rewrittenShortcuts = await Task.Run(
+            () => Helpers.ShortcutHelper.RebaseMovedShortcuts(movedPairs),
+            CancellationToken.None);
+
+        foreach (DesktopOrganizationRecoveryItem item in shortcutCandidates)
+        {
+            item.ShortcutRebaseInProgress = false;
+            string finalPath = isRestore
+                ? item.RestorePath ?? string.Empty
+                : item.DestinationPath;
+            if (string.IsNullOrWhiteSpace(finalPath) ||
+                !rewrittenShortcuts.Contains(finalPath))
+            {
+                continue;
+            }
+
+            if (FileService.TryCaptureSourceIdentity(finalPath) is { } current)
+            {
+                item.Size = current.Length;
+                item.LastWriteTimeUtc = current.LastWriteTimeUtc;
+            }
+            else if (File.Exists(finalPath))
+            {
+                var info = new FileInfo(finalPath);
+                item.Size = info.Length;
+                item.LastWriteTimeUtc = info.LastWriteTimeUtc;
+            }
+
+            RecordDestinationIdentity(item, finalPath);
+        }
+
+        await _recoveryStore.SaveAsync(journal);
+    }
+
+    internal Task<DesktopOrganizationRecoveryJournal?> LoadPendingRecoveryJournalAsync() =>
+        _recoveryStore.LoadAsync();
 
     private static bool EntryExists(string path) =>
         File.Exists(path) || Directory.Exists(path);

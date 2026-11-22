@@ -21,6 +21,8 @@ public sealed class TodoSettingsSlice
 
     public bool TodoShowTodayTab { get; set; } = true;
 
+    public bool TodoShowOverdueTab { get; set; } = true;
+
     public bool TodoShowThisWeekTab { get; set; }
 
     public bool TodoShowThisMonthTab { get; set; }
@@ -58,6 +60,12 @@ public sealed class TodoSettingsSlice
 
     /// <summary>Default reminder lead time in minutes before a Todo due date.</summary>
     public int TodoDefaultReminderOffsetMinutes { get; set; } = 5;
+
+    /// <summary>Whether date-only (all-day) Todo tasks trigger a reminder on their due date.</summary>
+    public bool TodoAllDayReminderEnabled { get; set; } = true;
+
+    /// <summary>Local time-of-day in minutes from midnight (0..1439) for all-day Todo reminders. Default 540 (09:00).</summary>
+    public int TodoAllDayReminderTimeMinutes { get; set; } = 9 * 60;
 
     public bool TodoUseWideDetailPane { get; set; } = true;
 

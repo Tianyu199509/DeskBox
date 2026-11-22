@@ -21,6 +21,7 @@ name = "deskbox-thumbnail-proxy"
 version = "0.1.0"
 dependencies = [
  "windows",
+ "windows-future",
 ]
 
 [[package]]

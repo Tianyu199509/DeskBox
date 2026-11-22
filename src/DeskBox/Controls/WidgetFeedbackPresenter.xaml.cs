@@ -40,6 +40,12 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
             return;
         }
 
+        if (WidgetFeedbackPolicy.ShouldPreserveActiveAction(_current, request))
+        {
+            AnnounceToAutomation(request.Message, request.Severity);
+            return;
+        }
+
         _dismissCancellation?.Cancel();
         _dismissCancellation?.Dispose();
         _dismissCancellation = new CancellationTokenSource();
@@ -158,10 +164,14 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
         }
 
         ActionButton.IsEnabled = false;
+        _current = null;
         try
         {
             await action();
-            Clear();
+            if (_current is null)
+            {
+                Clear();
+            }
         }
         catch (Exception ex)
         {

@@ -1,0 +1,604 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.focus-dial",
+  "name": "${$i18n.widgetName}",
+  "version": "4.0.0",
+  "author": "DeskBox",
+  "origin": "official",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "🎧",
+  "minSize": {
+    "width": 288,
+    "height": 348
+  },
+  "defaultSize": {
+    "width": 324,
+    "height": 388
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 1000
+  },
+  "sources": [
+    {
+      "id": "device",
+      "type": "deviceState",
+      "intervalMs": 3000
+    }
+  ],
+  "state": {
+    "durationMin": 30,
+    "remainingSec": 1800,
+    "isRunning": false,
+    "hasStarted": false,
+    "endUnixSec": 0,
+    "level": 70,
+    "noiseMode": "off",
+    "lastSoundscape": "rain",
+    "previewTouch": false,
+    "todayMinutes": 0,
+    "todaySessions": 0,
+    "todayDateKey": "",
+    "fadeStep": 0,
+    "wavePhase": 0,
+    "pointerZone": "",
+    "lastTickDetent": -1
+  },
+  "settings": [
+    {
+      "key": "displayStyle",
+      "type": "choice",
+      "label": "${$i18n.setDisplayStyle}",
+      "default": "mmss",
+      "options": [
+        {
+          "value": "mmss",
+          "label": "${$i18n.styleMmss}"
+        },
+        {
+          "value": "calm",
+          "label": "${$i18n.styleCalm}"
+        }
+      ]
+    },
+    {
+      "key": "autoSoundOnStart",
+      "type": "toggle",
+      "label": "${$i18n.setAutoSound}",
+      "default": true
+    },
+    {
+      "key": "hapticTicks",
+      "type": "toggle",
+      "label": "${$i18n.setHapticTicks}",
+      "default": true
+    },
+    {
+      "key": "showNoiseBar",
+      "type": "toggle",
+      "label": "${$i18n.setShowNoise}",
+      "default": true
+    }
+  ],
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "🎧",
+    "badge": "${$computed.capsuleBadge}",
+    "progress": "${$computed.capsuleProgress}",
+    "enableBounceOnUpdate": false,
+    "primaryAction": {
+      "icon": "${$computed.capsulePrimaryIcon}",
+      "tooltip": "${$computed.primaryActionLabel}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "capsuleQuickAction"
+      }
+    }
+  },
+  "root": "main",
+  "popovers": {
+    "mixer": {
+      "title": "${$i18n.mixerTitle}",
+      "width": 268,
+      "root": "pop_mixer_body"
+    }
+  },
+  "elements": {
+    "main": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 8,
+      "children": [
+        "dial_hero_card",
+        "soundscape_grid",
+        "session_controls_grid"
+      ]
+    },
+    "dial_hero_card": {
+      "type": "Card",
+      "tone": "${$computed.heroCardTone}",
+      "padding": "12,10",
+      "spacing": 6,
+      "children": [
+        "dial_header_grid",
+        "dial_gauge_zstack",
+        "duration_presets_grid"
+      ]
+    },
+    "dial_header_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "dial_header_status",
+        "dial_header_actions"
+      ]
+    },
+    "dial_header_status": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.headerStatusText}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center",
+      "maxLines": 1
+    },
+    "dial_header_actions": {
+      "type": "Stack",
+      "column": 1,
+      "orientation": "horizontal",
+      "spacing": 2,
+      "children": [
+        "btn_toggle_mute",
+        "btn_toggle_keep_awake"
+      ]
+    },
+    "btn_toggle_mute": {
+      "type": "IconButton",
+      "icon": "${state.noiseMode == 'off' ? 'mute' : 'volume'}",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$computed.muteTooltip}",
+      "onClick": {
+        "type": "script.run",
+        "fn": "toggleMute"
+      }
+    },
+    "btn_toggle_keep_awake": {
+      "type": "IconButton",
+      "icon": "${$device.keepAwake == 'true' ? 'sun' : 'moon'}",
+      "size": 24,
+      "variant": "subtle",
+      "tooltip": "${$computed.keepAwakeTooltip}",
+      "onClick": [
+        {
+          "type": "system.control",
+          "targetId": "power.keepAwakeToggle"
+        },
+        {
+          "type": "source.refresh",
+          "targetId": "device"
+        },
+        {
+          "type": "script.run",
+          "fn": "refreshView"
+        }
+      ]
+    },
+    "dial_gauge_zstack": {
+      "type": "ZStack",
+      "width": 208,
+      "height": 138,
+      "horizontalAlignment": "center",
+      "children": [
+        "dial_center_stack",
+        "dial_interactive_canvas"
+      ]
+    },
+    "dial_center_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "verticalAlignment": "center",
+      "children": [
+        "dial_scene_label",
+        "dial_time_display",
+        "dial_sub_status"
+      ]
+    },
+    "dial_scene_label": {
+      "type": "Text",
+      "text": "${$computed.centerSceneLabel}",
+      "style": "caption",
+      "color": "secondary",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "dial_time_display": {
+      "type": "Text",
+      "dir": "ltr",
+      "text": "${$computed.timeDisplay}",
+      "fontFamily": "mono",
+      "fontSize": 28,
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "dial_sub_status": {
+      "type": "Text",
+      "text": "${$computed.subStatusText}",
+      "style": "caption",
+      "color": "muted",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "dial_interactive_canvas": {
+      "type": "Canvas",
+      "width": 208,
+      "height": 138,
+      "viewBox": "0 0 208 138",
+      "elementsSource": "${$computed.dialShapes}",
+      "onPointerDown": {
+        "type": "script.run",
+        "fn": "onDialPointerDown",
+        "args": {
+          "haptic": "${$settings.hapticTicks}"
+        }
+      },
+      "onPointerMove": {
+        "type": "script.run",
+        "fn": "onDialPointerMove"
+      },
+      "onPointerUp": {
+        "type": "script.run",
+        "fn": "onDialPointerUp"
+      }
+    },
+    "duration_presets_grid": {
+      "type": "Grid",
+      "columns": "*,*,*,*",
+      "columnSpacing": 6,
+      "children": [
+        "btn_preset_15m",
+        "btn_preset_30m",
+        "btn_preset_45m",
+        "btn_preset_60m"
+      ]
+    },
+    "btn_preset_15m": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$i18n.preset15}",
+      "variant": "${state.durationMin == '15' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.durationMin == '15' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "setDuration",
+        "args": {
+          "mins": "15",
+          "autoSound": "${$settings.autoSoundOnStart}",
+          "style": "${$settings.displayStyle}"
+        }
+      }
+    },
+    "btn_preset_30m": {
+      "type": "Button",
+      "column": 1,
+      "text": "${$i18n.preset30}",
+      "variant": "${state.durationMin == '30' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.durationMin == '30' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "setDuration",
+        "args": {
+          "mins": "30"
+        }
+      }
+    },
+    "btn_preset_45m": {
+      "type": "Button",
+      "column": 2,
+      "text": "${$i18n.preset45}",
+      "variant": "${state.durationMin == '45' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.durationMin == '45' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "setDuration",
+        "args": {
+          "mins": "45"
+        }
+      }
+    },
+    "btn_preset_60m": {
+      "type": "Button",
+      "column": 3,
+      "text": "${$i18n.preset60}",
+      "variant": "${state.durationMin == '60' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.durationMin == '60' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "stretch",
+      "padding": "4,3",
+      "onClick": {
+        "type": "script.run",
+        "fn": "setDuration",
+        "args": {
+          "mins": "60"
+        }
+      }
+    },
+    "soundscape_grid": {
+      "type": "Grid",
+      "when": "${$settings.showNoiseBar == 'true'}",
+      "columns": "*,*,*,*",
+      "columnSpacing": 6,
+      "children": [
+        "scene_rain_card",
+        "scene_forest_card",
+        "scene_ocean_card",
+        "scene_night_card"
+      ]
+    },
+    "scene_rain_card": {
+      "type": "Card",
+      "column": 0,
+      "tone": "${$computed.activeScene == 'rain' ? 'cyan' : 'default'}",
+      "padding": "6,7",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectSound",
+        "args": {
+          "scene": "rain"
+        }
+      },
+      "children": [
+        "scene_rain_stack"
+      ]
+    },
+    "scene_rain_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "scene_rain_emoji",
+        "scene_rain_label"
+      ]
+    },
+    "scene_rain_emoji": {
+      "type": "Text",
+      "text": "🌧️",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "scene_rain_label": {
+      "type": "Text",
+      "text": "${$i18n.sceneRain}",
+      "style": "caption",
+      "fontWeight": "${$computed.activeScene == 'rain' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "scene_forest_card": {
+      "type": "Card",
+      "column": 1,
+      "tone": "${$computed.activeScene == 'pink' ? 'emerald' : 'default'}",
+      "padding": "6,7",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectSound",
+        "args": {
+          "scene": "pink"
+        }
+      },
+      "children": [
+        "scene_forest_stack"
+      ]
+    },
+    "scene_forest_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "scene_forest_emoji",
+        "scene_forest_label"
+      ]
+    },
+    "scene_forest_emoji": {
+      "type": "Text",
+      "text": "🌿",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "scene_forest_label": {
+      "type": "Text",
+      "text": "${$i18n.sceneForest}",
+      "style": "caption",
+      "fontWeight": "${$computed.activeScene == 'pink' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "scene_ocean_card": {
+      "type": "Card",
+      "column": 2,
+      "tone": "${$computed.activeScene == 'brown' ? 'cyan' : 'default'}",
+      "padding": "6,7",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectSound",
+        "args": {
+          "scene": "brown"
+        }
+      },
+      "children": [
+        "scene_ocean_stack"
+      ]
+    },
+    "scene_ocean_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "scene_ocean_emoji",
+        "scene_ocean_label"
+      ]
+    },
+    "scene_ocean_emoji": {
+      "type": "Text",
+      "text": "🌊",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "scene_ocean_label": {
+      "type": "Text",
+      "text": "${$i18n.sceneOcean}",
+      "style": "caption",
+      "fontWeight": "${$computed.activeScene == 'brown' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "scene_night_card": {
+      "type": "Card",
+      "column": 3,
+      "tone": "${$computed.activeScene == 'night' ? 'violet' : 'default'}",
+      "padding": "6,7",
+      "onClick": {
+        "type": "script.run",
+        "fn": "selectSound",
+        "args": {
+          "scene": "night"
+        }
+      },
+      "children": [
+        "scene_night_stack"
+      ]
+    },
+    "scene_night_stack": {
+      "type": "Stack",
+      "spacing": 2,
+      "horizontalAlignment": "center",
+      "children": [
+        "scene_night_emoji",
+        "scene_night_label"
+      ]
+    },
+    "scene_night_emoji": {
+      "type": "Text",
+      "text": "🌙",
+      "style": "body",
+      "horizontalAlignment": "center"
+    },
+    "scene_night_label": {
+      "type": "Text",
+      "text": "${$i18n.sceneNight}",
+      "style": "caption",
+      "fontWeight": "${$computed.activeScene == 'night' ? 'semiBold' : 'normal'}",
+      "horizontalAlignment": "center",
+      "maxLines": 1
+    },
+    "session_controls_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "btn_toggle_session",
+        "btn_secondary_action"
+      ]
+    },
+    "btn_toggle_session": {
+      "type": "Button",
+      "column": 0,
+      "icon": "${$computed.primaryActionIcon}",
+      "text": "${$computed.primaryActionLabel}",
+      "variant": "standard",
+      "fontWeight": "semiBold",
+      "horizontalAlignment": "stretch",
+      "padding": "12,6",
+      "onClick": {
+        "type": "script.run",
+        "fn": "toggleSession"
+      }
+    },
+    "btn_secondary_action": {
+      "type": "Button",
+      "column": 1,
+      "icon": "${$computed.secondaryActionIcon}",
+      "text": "${$computed.secondaryActionLabel}",
+      "variant": "subtle",
+      "padding": "10,6",
+      "onClick": {
+        "type": "script.run",
+        "fn": "handleSecondaryAction"
+      }
+    },
+    "pop_mixer_body": {
+      "type": "Stack",
+      "padding": "12",
+      "spacing": 10,
+      "children": [
+        "mixer_volume_card",
+        "mixer_footer_grid"
+      ]
+    },
+    "mixer_volume_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8",
+      "spacing": 8,
+      "children": [
+        "slider_ambient_volume"
+      ]
+    },
+    "slider_ambient_volume": {
+      "type": "Slider",
+      "title": "${$i18n.volumeLabel}",
+      "bind": "state.level",
+      "min": 0,
+      "max": 100,
+      "step": 2,
+      "unit": "%",
+      "onChange": {
+        "type": "script.run",
+        "fn": "setVolume",
+        "arg": "${$value}"
+      }
+    },
+    "mixer_footer_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 8,
+      "verticalAlignment": "center",
+      "children": [
+        "mixer_today_summary",
+        "btn_mixer_mute"
+      ]
+    },
+    "mixer_today_summary": {
+      "type": "Text",
+      "column": 0,
+      "text": "${$computed.todaySummaryText}",
+      "style": "caption",
+      "color": "secondary",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "btn_mixer_mute": {
+      "type": "Button",
+      "column": 1,
+      "text": "${state.noiseMode == 'off' ? $i18n.btnUnmute : $i18n.btnMuteNow}",
+      "variant": "subtle",
+      "padding": "8,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleMute"
+        }
+      ]
+    }
+  }
+}

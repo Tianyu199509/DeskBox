@@ -38,7 +38,7 @@ public sealed class BackupRestoreActions : IBackupRestoreActions
         CloudBackupOptions options = CloudBackupSettingsPolicy.GetOptions(_settings.Settings);
         if (options.Endpoint != endpoint)
             throw new OperationCanceledException("The backup endpoint changed.");
-        return options;
+        return options.WithEffectiveConnectionProvider();
     }
 
     public Task DeleteSnapshotAsync(BackupEndpoint endpoint, string name,

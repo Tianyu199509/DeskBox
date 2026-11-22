@@ -150,6 +150,53 @@ public sealed class AotInteropShapeContractTests
             "Native AOT retail builds. Violations:\n" + string.Join('\n', violations));
     }
 
+    private static readonly Regex WinUiSubclassDeclarationsRegex = new(
+        @"^[\t ]*(?:(?:public|internal|private|protected|sealed|abstract|static|partial)\s+)*class\s+\w+\s*:\s*(?:global::)?(?:(?:Microsoft\.UI\.Xaml|CommunityToolkit\.Mvvm\.ComponentModel|System\.ComponentModel|System\.Collections\.Specialized)(?:\.\w+)*\.)?(?:UIElement|FrameworkElement|Panel|Grid|Border|StackPanel|Canvas|RelativePanel|Control|ContentControl|UserControl|Button|ButtonBase|Window|DependencyObject|SystemBackdrop|DataTemplateSelector|StyleSelector|ObservableObject|INotifyPropertyChanged|INotifyCollectionChanged)\b[^{;]*",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+
+    [Fact]
+    public void EveryWinUiElementSubclass_AndEnclosingTypes_AreDeclaredPartial()
+    {
+        List<string> violations = new();
+
+        foreach (string path in EnumerateProductSources())
+        {
+            string text = File.ReadAllText(path);
+            foreach (Match match in WinUiSubclassDeclarationsRegex.Matches(text))
+            {
+                if (!match.Value.Contains("partial", StringComparison.Ordinal))
+                {
+                    violations.Add($"{RelativeToRepository(path)}: {match.Value.Trim()}");
+                    continue;
+                }
+
+                // If nested inside an outer class, the outer class must also be partial
+                // so CsWinRT's source generator can emit nested vtable members (CsWinRT1028).
+                string prefix = text[..match.Index];
+                foreach (Match outer in Regex.Matches(
+                             prefix,
+                             @"^[\t ]*(?:(?:public|internal|private|protected|sealed|abstract|static|partial)\s+)*class\s+\w+[^{;]*\{",
+                             RegexOptions.Multiline))
+                {
+                    // Check if this outer class is still open at match.Index by counting braces.
+                    string between = text[outer.Index..match.Index];
+                    int depth = between.Count(static c => c == '{') - between.Count(static c => c == '}');
+                    if (depth > 0 && !outer.Value.Contains("partial", StringComparison.Ordinal))
+                    {
+                        violations.Add(
+                            $"{RelativeToRepository(path)}: enclosing type not partial ({outer.Value.Trim()}) for {match.Value.Trim()}");
+                    }
+                }
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Every WinUI/DependencyObject subclass (and any enclosing class) must be declared partial " +
+            "so CsWinRT generates Native AOT vtables instead of crashing with 0x80004002 (E_NOINTERFACE). Violations:\n" +
+            string.Join('\n', violations));
+    }
+
     private static IEnumerable<string> EnumerateProductSources()
     {
         foreach (string path in Directory.EnumerateFiles(

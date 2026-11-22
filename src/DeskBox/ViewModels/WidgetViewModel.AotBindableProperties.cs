@@ -6,7 +6,6 @@ namespace DeskBox.ViewModels;
 [WinRT.GeneratedBindableCustomProperty([
     nameof(CurrentFolderDisplayName),
     nameof(CurrentFolderRelativePath),
-    nameof(EmptyStateGlyph),
     nameof(EmptyStateTitle),
     nameof(FolderNavigationVisibility),
     nameof(IconCellHeight),

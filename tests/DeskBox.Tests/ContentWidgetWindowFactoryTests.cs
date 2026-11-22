@@ -64,6 +64,7 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]
     [InlineData(WidgetKind.Productivity)]
+    [InlineData(WidgetKind.Search)]
     public void CreateContentWindowPlan_RejectsWindowOwnedAndLegacyKinds(WidgetKind widgetKind)
     {
         var config = CreateConfig("unsupported-window", widgetKind);

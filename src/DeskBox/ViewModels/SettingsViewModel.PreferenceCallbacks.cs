@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -21,24 +21,101 @@ public partial class SettingsViewModel
             return;
         }
 
-        ApplyAutoStartOperationResult(StartupService.SetEnabled(value));
+        // User deliberately toggled the switch: update the baseline preference
+        // so turning AutoStart OFF never triggers the ExternallyRemoved banner.
+        _autoStartPreferenceAtLoad = value;
+        _ = SetAutoStartEnabledAsync(value);
     }
 
     public void RefreshAutoStartState()
     {
-        ApplyAutoStartState(StartupService.GetState());
+        _ = RefreshAutoStartStateAsync();
     }
 
-    partial void OnSelectedAutoStartModeChanged(string value)
+    internal async Task RefreshAutoStartStateAsync()
     {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot ||
-            StartupService.Current is not DirectStartupService directStartup ||
-            !Enum.TryParse(value, out StartupMode mode))
+        if (_isDisposed || Volatile.Read(ref _autoStartMutationInFlight) > 0)
+        {
             return;
-        ApplyAutoStartOperationResult(directStartup.SetMode(mode));
+        }
+
+        long sequence = Interlocked.Increment(ref _autoStartOperationSequence);
+        try
+        {
+            StartupOperationResult status = await _appActions.GetAutoStartStatusAsync();
+            void Apply()
+            {
+                if (_isDisposed || Volatile.Read(ref _autoStartOperationSequence) != sequence)
+                {
+                    return;
+                }
+
+                _autoStartUsedFallback = status.UsedFallback;
+                _autoStartOperationFailed = false;
+                ApplyAutoStartState(status.State);
+            }
+
+            DeskBox.Platform.UiDispatch.RunOrDefer(Apply);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Settings] Startup status refresh failed: {ex.Message}");
+        }
     }
 
-    private void ApplyAutoStartOperationResult(StartupOperationResult result)
+    internal async Task SetAutoStartEnabledAsync(bool value)
+    {
+        long sequence = Interlocked.Increment(ref _autoStartOperationSequence);
+        Interlocked.Increment(ref _autoStartMutationInFlight);
+        try
+        {
+            StartupOperationResult result = await _appActions.SetAutoStartEnabledAsync(value);
+            StartupOperationResult? refreshedStatus = null;
+            bool failed = IsAutoStartOperationFailure(result);
+            if (failed)
+            {
+                try
+                {
+                    refreshedStatus = await _appActions.GetAutoStartStatusAsync();
+                }
+                catch
+                {
+                    // Fall back to the operation result when live status lookup fails.
+                }
+            }
+
+            void Apply()
+            {
+                if (_isDisposed || Volatile.Read(ref _autoStartOperationSequence) != sequence)
+                {
+                    return;
+                }
+
+                ApplyAutoStartOperationResult(result, refreshedStatus);
+            }
+
+            DeskBox.Platform.UiDispatch.RunOrDefer(Apply);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Settings] Startup update failed: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _autoStartMutationInFlight);
+        }
+    }
+
+    private static bool IsAutoStartOperationFailure(StartupOperationResult result) =>
+        !result.UsedFallback &&
+        result.State != StartupRegistrationState.DisabledByUser &&
+        result.State != StartupRegistrationState.DisabledByTaskScheduler &&
+        (result.State is StartupRegistrationState.BlockedOrFailed or StartupRegistrationState.PathMismatch ||
+            !string.IsNullOrWhiteSpace(result.ErrorMessage));
+
+    private void ApplyAutoStartOperationResult(
+        StartupOperationResult result,
+        StartupOperationResult? refreshedStatus = null)
     {
         if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
         {
@@ -47,24 +124,15 @@ public partial class SettingsViewModel
         }
 
         _autoStartUsedFallback = result.UsedFallback;
-        _autoStartOperationFailed = !result.UsedFallback &&
-            (result.State is StartupRegistrationState.BlockedOrFailed or StartupRegistrationState.PathMismatch ||
-                !string.IsNullOrWhiteSpace(result.ErrorMessage));
-        // A failed mode switch may have preserved the old working entry.
-        // Keep the toggle truthful while showing the operation warning separately.
-        ApplyAutoStartState(_autoStartOperationFailed ? StartupService.GetState() : result.State);
+        _autoStartOperationFailed = IsAutoStartOperationFailure(result);
+        StartupRegistrationState stateToDisplay = _autoStartOperationFailed && refreshedStatus is not null
+            ? refreshedStatus.State
+            : result.State;
+        ApplyAutoStartState(stateToDisplay);
     }
 
     private void ApplyAutoStartState(StartupRegistrationState state)
     {
-        // First call runs before any overwrite: capture the persisted
-        // preference so a vanished registration can be attributed to
-        // external cleanup (see the field's comment).
-        if (_autoStartPreferenceAtLoad is null)
-        {
-            _autoStartPreferenceAtLoad = AutoStart;
-        }
-
         _autoStartState = state;
         bool effectiveValue = state is
             StartupRegistrationState.Enabled or
@@ -74,8 +142,6 @@ public partial class SettingsViewModel
         try
         {
             AutoStart = effectiveValue;
-            if (StartupService.Current is DirectStartupService directStartup)
-                SelectedAutoStartMode = directStartup.Mode.ToString();
         }
         finally
         {
@@ -85,11 +151,6 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AutoStartStatusText));
         OnPropertyChanged(nameof(AutoStartStatusVisibility));
         OnPropertyChanged(nameof(AutoStartSystemSettingsVisibility));
-        OnPropertyChanged(nameof(AutoStartModeVisibility));
-
-        // The coordinator skips unchanged values, mirroring the page's old
-        // read-before-write guard.
-        _interactionSettings.SetAutoStart(effectiveValue);
     }
 
     partial void OnAutoCheckForUpdatesChanged(bool value)

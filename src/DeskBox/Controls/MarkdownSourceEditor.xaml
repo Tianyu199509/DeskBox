@@ -68,7 +68,7 @@
             Spacing="1">
             <Button x:Name="BoldButton" Click="FormatButton_Click" Style="{StaticResource MarkdownFormattingButtonStyle}" Tag="Bold">
                 <FontIcon
-                    FontFamily="Segoe UI Variable Text"
+                    FontFamily="Segoe UI Variable Text, Segoe UI"
                     FontSize="13"
                     FontWeight="Bold"
                     Glyph="B"
@@ -85,7 +85,7 @@
             </Button>
             <Button x:Name="StrikeButton" Click="FormatButton_Click" Style="{StaticResource MarkdownFormattingButtonStyle}" Tag="Strike">
                 <FontIcon
-                    FontFamily="Segoe UI Variable Text"
+                    FontFamily="Segoe UI Variable Text, Segoe UI"
                     FontSize="12"
                     Glyph="S&#x0336;"
                     Style="{StaticResource MarkdownFormattingIconStyle}" />
@@ -104,7 +104,7 @@
             </Button>
             <Button x:Name="QuoteButton" Click="FormatButton_Click" Style="{StaticResource MarkdownFormattingButtonStyle}" Tag="Quote" Visibility="Collapsed">
                 <FontIcon
-                    FontFamily="Segoe UI Variable Text"
+                    FontFamily="Segoe UI Variable Text, Segoe UI"
                     FontSize="15"
                     FontWeight="SemiBold"
                     Glyph="“"
@@ -127,7 +127,7 @@
                             <Button x:Name="BoldMenuButton" Click="FormatButton_Click" Style="{StaticResource MarkdownFormattingMenuButtonStyle}" Tag="Bold" Visibility="Collapsed">
                                 <Grid ColumnSpacing="7">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <FontIcon FontFamily="Segoe UI Variable Text" FontSize="12" FontWeight="Bold" Glyph="B" />
+                                    <FontIcon FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="12" FontWeight="Bold" Glyph="B" />
                                     <TextBlock x:Name="BoldMenuButtonText" Grid.Column="1" VerticalAlignment="Center" />
                                 </Grid>
                             </Button>
@@ -141,7 +141,7 @@
                             <Button x:Name="StrikeMenuButton" Click="FormatButton_Click" Style="{StaticResource MarkdownFormattingMenuButtonStyle}" Tag="Strike" Visibility="Collapsed">
                                 <Grid ColumnSpacing="7">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <FontIcon FontFamily="Segoe UI Variable Text" FontSize="12" Glyph="S&#x0336;" />
+                                    <FontIcon FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="12" Glyph="S&#x0336;" />
                                     <TextBlock x:Name="StrikeMenuButtonText" Grid.Column="1" VerticalAlignment="Center" />
                                 </Grid>
                             </Button>
@@ -178,7 +178,7 @@
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <FontIcon
                                         HorizontalAlignment="Center"
-                                        FontFamily="Segoe UI Variable Text"
+                                        FontFamily="Segoe UI Variable Text, Segoe UI"
                                         FontSize="15"
                                         FontWeight="SemiBold"
                                         Glyph="“" />
@@ -213,7 +213,7 @@
             Background="Transparent"
             BorderBrush="Transparent"
             BorderThickness="0"
-            FontFamily="Cascadia Mono, Microsoft YaHei UI"
+            FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
             FontSize="{x:Bind EditorFontSize, Mode=OneWay}"
             IsReadOnly="{x:Bind IsReadOnly, Mode=OneWay}"
             IsSpellCheckEnabled="True"

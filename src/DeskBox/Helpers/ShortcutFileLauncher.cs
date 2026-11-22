@@ -35,6 +35,24 @@ namespace DeskBox.Helpers;
 /// </summary>
 internal static class ShortcutFileLauncher
 {
+    internal static bool CanLaunchWithFiles(
+        string? shortcutPath,
+        IReadOnlyList<string>? filePaths) =>
+        !string.IsNullOrWhiteSpace(shortcutPath) &&
+        filePaths is { Count: > 0 } &&
+        SanitizeDroppedPaths(filePaths).Length > 0;
+
+    internal static Task<DeskBox.Platform.ShellLaunchOutcome> LaunchWithFilesAsync(
+        string shortcutPath,
+        IReadOnlyList<string> filePaths,
+        IntPtr ownerHwnd = default,
+        CancellationToken cancellationToken = default) =>
+        DeskBox.Services.ShellLaunchService.LaunchShortcutWithFilesAsync(
+            shortcutPath,
+            filePaths,
+            ownerHwnd,
+            cancellationToken);
+
     /// <summary>
     /// Returns false when Windows refused the launch (missing target, no
     /// association, elevation declined) or when no usable path was left.
@@ -43,17 +61,28 @@ internal static class ShortcutFileLauncher
     /// </summary>
     internal static bool TryLaunchWithFiles(
         string shortcutPath,
-        IReadOnlyList<string> filePaths)
+        IReadOnlyList<string> filePaths,
+        IntPtr ownerHwnd = default) =>
+        TryLaunchWithFiles(shortcutPath, filePaths, ownerHwnd, out _) ==
+        DeskBox.Platform.ShellLaunchOutcome.Launched;
+
+    internal static DeskBox.Platform.ShellLaunchOutcome TryLaunchWithFiles(
+        string shortcutPath,
+        IReadOnlyList<string> filePaths,
+        IntPtr ownerHwnd,
+        out DeskBox.Platform.ShellLaunchOutcome outcome)
     {
         if (string.IsNullOrWhiteSpace(shortcutPath) || filePaths.Count == 0)
         {
-            return false;
+            outcome = DeskBox.Platform.ShellLaunchOutcome.Failed;
+            return outcome;
         }
 
         string[] paths = SanitizeDroppedPaths(filePaths);
         if (paths.Length == 0)
         {
-            return false;
+            outcome = DeskBox.Platform.ShellLaunchOutcome.Failed;
+            return outcome;
         }
 
         if (paths.Length != filePaths.Count)
@@ -68,50 +97,80 @@ internal static class ShortcutFileLauncher
         App.LogVerbose(
             $"[ShortcutLaunch] lpFile='{shortcutPath}' lpParameters={arguments}");
 
-        // ELECTRON_RUN_AS_NODE=1 makes an Electron target (Obsidian, VS Code,
-        // MarkText, ...) start as a plain Node process and fail on the file.
-        // Windows does not carry that variable, so scrub it around the launch
-        // exactly like Win32Helper.OpenFileOrChooseApp does for a plain open.
-        string? savedElectronRunAsNode =
-            Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");
-        if (savedElectronRunAsNode is not null)
-        {
-            Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
-        }
-
         try
         {
-            // No WorkingDirectory: the link's own start-in folder must win.
+            ShortcutInfo? storedMetadata = ShortcutHelper.ReadStoredMetadata(shortcutPath);
+            string fallbackWorkingDirectory = DeskBox.Services.FileService.ResolveShortcutLaunchDirectory(
+                storedMetadata,
+                storedMetadata?.TargetPath,
+                shortcutPath);
+
+            // When the .lnk stores a non-empty WorkingDirectory whose local folder
+            // was deleted, CShellLink ignores outer lpDirectory and fails with
+            // ERROR_DIRECTORY (267). Bypass CShellLink by launching the resolved
+            // target executable directly with combined arguments and preserved
+            // SLDF_RUNAS_USER elevation semantics.
+            if (ShortcutHelper.IsShellLinkPath(shortcutPath) &&
+                DeskBox.Services.FileService.HasBrokenShortcutWorkingDirectory(storedMetadata) &&
+                DeskBox.Services.FileService.TryResolveDirectLocalShortcutTarget(
+                    shortcutPath,
+                    storedMetadata?.TargetPath,
+                    storedMetadata,
+                    out string directTarget,
+                    out string? combinedArgs,
+                    out string? shortcutVerb,
+                    extraAppendedArguments: arguments) &&
+                File.Exists(directTarget))
+            {
+                DeskBox.Platform.Win32Helper.OpenWithParametersLocally(
+                    ownerHwnd,
+                    directTarget,
+                    combinedArgs,
+                    fallbackWorkingDirectory,
+                    shortcutVerb,
+                    out DeskBox.Platform.ShellLaunchOutcome directOutcome);
+                if (directOutcome == DeskBox.Platform.ShellLaunchOutcome.Launched)
+                {
+                    App.Log(
+                        $"[ShortcutLaunch] Launched '{shortcutPath}' via repaired working-directory target '{directTarget}' " +
+                        $"with {paths.Length} dropped file(s).");
+                    outcome = DeskBox.Platform.ShellLaunchOutcome.Launched;
+                    return outcome;
+                }
+
+                if (directOutcome == DeskBox.Platform.ShellLaunchOutcome.UserCancelled)
+                {
+                    outcome = DeskBox.Platform.ShellLaunchOutcome.UserCancelled;
+                    return outcome;
+                }
+            }
+
             // No Verb either (feedback 246): a NULL verb is the desktop
             // double-click dispatch, and link resolution forwards it to the
-            // target's default launch. An explicit "open" verb adds nothing
-            // on healthy machines and breaks where only the OS-side "open"
-            // resolution is damaged — the same machine still drops onto the
-            // shortcut in Explorer fine.
-            Process.Start(new ProcessStartInfo(shortcutPath, arguments)
+            // target's default launch.
+            DeskBox.Platform.Win32Helper.OpenWithParametersLocally(
+                ownerHwnd,
+                shortcutPath,
+                arguments,
+                fallbackWorkingDirectory,
+                verb: null,
+                out outcome);
+            if (outcome == DeskBox.Platform.ShellLaunchOutcome.Launched)
             {
-                UseShellExecute = true
-            });
-            App.Log(
-                $"[ShortcutLaunch] Launched '{shortcutPath}' with " +
-                $"{paths.Length} dropped file(s).");
-            return true;
+                App.Log(
+                    $"[ShortcutLaunch] Launched '{shortcutPath}' with " +
+                    $"{paths.Length} dropped file(s).");
+            }
+
+            return outcome;
         }
         catch (Exception ex)
         {
             App.Log(
                 $"[ShortcutLaunch] Launch failed for '{shortcutPath}': " +
                 $"{ex.Message}");
-            return false;
-        }
-        finally
-        {
-            if (savedElectronRunAsNode is not null)
-            {
-                Environment.SetEnvironmentVariable(
-                    "ELECTRON_RUN_AS_NODE",
-                    savedElectronRunAsNode);
-            }
+            outcome = DeskBox.Platform.ShellLaunchOutcome.Failed;
+            return outcome;
         }
     }
 
@@ -138,6 +197,18 @@ internal static class ShortcutFileLauncher
                 continue;
             }
 
+            if (ShortcutHelper.IsInternetShortcutPath(trimmed) &&
+                File.Exists(trimmed) &&
+                ShortcutHelper.ReadStoredMetadata(trimmed)?.TargetPath is { Length: > 0 } targetUrl &&
+                !targetUrl.Contains('"') &&
+                Uri.TryCreate(targetUrl, UriKind.Absolute, out Uri? parsedUri) &&
+                (string.Equals(parsedUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(parsedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                sanitized.Add(targetUrl);
+                continue;
+            }
+
             sanitized.Add(trimmed);
         }
 
@@ -161,12 +232,31 @@ internal static class ShortcutFileLauncher
                 continue;
             }
 
+            string rawTrimmed = path.Trim();
+            string trimmed = rawTrimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                             rawTrimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? rawTrimmed
+                : Path.TrimEndingDirectorySeparator(rawTrimmed);
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
             if (builder.Length > 0)
             {
                 builder.Append(' ');
             }
 
-            builder.Append('"').Append(path.Trim()).Append('"');
+            // In Win32 CommandLineToArgvW, a trailing backslash immediately
+            // before the closing quote (e.g. "D:\") escapes the quote itself.
+            // Doubling a drive-root trailing backslash ("D:\\") passes D:\ cleanly.
+            builder.Append('"').Append(trimmed);
+            if (trimmed.EndsWith('\\'))
+            {
+                builder.Append('\\');
+            }
+
+            builder.Append('"');
         }
 
         return builder.ToString();

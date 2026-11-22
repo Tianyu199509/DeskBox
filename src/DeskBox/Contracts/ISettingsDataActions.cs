@@ -1,12 +1,12 @@
 namespace DeskBox.Contracts;
 
+using DeskBox.Models;
 using DeskBox.Services;
 
 /// <summary>
-/// Settings-side surface for Quick Capture data management (counts, clears,
-/// image-cache upkeep), which lives in the main process once the settings UI
-/// runs in its own process. The image-cache members return null when the
-/// service is unavailable so the editor can show its unavailable line.
+/// Settings-side surface for Quick Capture and Clipboard data management
+/// (counts, clears, cache upkeep), which lives in the main process once the
+/// settings UI runs in its own process.
 /// </summary>
 public interface ISettingsDataActions
 {
@@ -23,4 +23,14 @@ public interface ISettingsDataActions
     Task<QuickCaptureImageCacheCleanupResult> ClearUnusedQuickCaptureImageCacheAsync();
 
     Task<QuickCaptureImageCacheInfo?> GetQuickCaptureImageCacheInfoAsync();
+
+    Task<string?> GetQuickCaptureMirrorFolderAsync();
+
+    Task SetQuickCaptureMirrorFolderAsync(string? folderPath);
+
+    Task<ClipboardStorageStats?> GetClipboardStorageStatsAsync();
+
+    Task<int> ClearClipboardUnpinnedAsync();
+
+    Task<IReadOnlyList<ClipboardObservedApp>> GetClipboardObservedAppsAsync();
 }

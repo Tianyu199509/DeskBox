@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DeskBox.Helpers;
 
 namespace DeskBox.Platform;
 
@@ -31,6 +32,12 @@ internal static unsafe partial class ShellItemDragNativeMethods
         nint innerDataObject,
         Guid* interfaceId,
         out nint dataObject);
+
+    [LibraryImport("shell32.dll")]
+    internal static partial int SHCreateStdEnumFmtEtc(
+        uint formatCount,
+        NativeFormatEtc* formats,
+        out nint enumerator);
 
     [LibraryImport("ole32.dll")]
     internal static partial void CoTaskMemFree(nint value);

@@ -39,8 +39,8 @@ internal sealed class BackupBackend(
     public Task<LocalBackupResult> CreateSnapshotAsync(bool force, CancellationToken cancellationToken) =>
         local.CreateAutomaticSnapshotResultAsync(force, cancellationToken);
 
-    public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken) =>
-        local.ExportBackupAsync(destinationDirectory, cancellationToken);
+    public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken, bool includeClipboard = false) =>
+        local.ExportBackupAsync(destinationDirectory, cancellationToken, includeClipboard);
 
     public Task<CloudBackupRunResult> UploadAsync(bool scheduled, CancellationToken cancellationToken) =>
         scheduled ? cloud.RunScheduledIfDueAsync(cancellationToken) : cloud.RunBackupNowAsync(cancellationToken);

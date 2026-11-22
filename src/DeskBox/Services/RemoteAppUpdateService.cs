@@ -13,13 +13,60 @@ namespace DeskBox.Services;
 public sealed class RemoteAppUpdateService : IAppUpdateService
 {
     private readonly SettingsIpcClient _client;
+    private readonly bool _useInProcessStoreService;
+    private IAppUpdateService? _storeUpdateService;
 
     private SettingsIpcUpdateState? _cachedState;
 
-    public RemoteAppUpdateService(SettingsIpcClient client)
+    public RemoteAppUpdateService(
+        SettingsIpcClient client,
+        IAppUpdateService? inProcessStoreUpdate = null)
     {
         _client = client;
+        _useInProcessStoreService =
+            inProcessStoreUpdate is not null ||
+            AppDistributionService.Current.IsMicrosoftStore ||
+            AppDistributionService.Current.IsPackaged;
+        if (inProcessStoreUpdate is not null)
+        {
+            _storeUpdateService = AttachStoreService(inProcessStoreUpdate);
+        }
+
         _client.EventReceived += OnEventReceived;
+        if (!_useInProcessStoreService)
+        {
+            _ = PrimeStateAsync();
+        }
+    }
+
+    private IAppUpdateService GetStoreService() =>
+        _storeUpdateService ??= AttachStoreService(new StoreAppUpdateService());
+
+    private IAppUpdateService AttachStoreService(IAppUpdateService service)
+    {
+        service.CheckCompleted += result => CheckCompleted?.Invoke(result);
+        service.DownloadProgressChanged += progress => DownloadProgressChanged?.Invoke(progress);
+        service.DownloadCompleted += result => DownloadCompleted?.Invoke(result);
+        return service;
+    }
+
+    private async Task PrimeStateAsync()
+    {
+        try
+        {
+            (bool ok, string? payload, _) = await _client.RequestAsync(SettingsIpcMethods.UpdateState)
+                .ConfigureAwait(false);
+            if (ok &&
+                _cachedState is null &&
+                SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcUpdateState) is { } state)
+            {
+                _cachedState = state;
+            }
+        }
+        catch
+        {
+            // Best-effort warm-up; synchronous ReadState() remains the fallback.
+        }
     }
 
     /// <summary>
@@ -68,33 +115,51 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         }
     }
 
-    public AppUpdateCheckResult? LastCheckResult => ReadState().CheckResultJson is { } json
-        ? SettingsIpcPayload.Decode(json, SettingsIpcJsonContext.Default.AppUpdateCheckResult)
-        : null;
+    public AppUpdateCheckResult? LastCheckResult => _useInProcessStoreService
+        ? GetStoreService().LastCheckResult
+        : ReadState().CheckResultJson is { } json
+            ? SettingsIpcPayload.Decode(json, SettingsIpcJsonContext.Default.AppUpdateCheckResult)
+            : null;
 
     public DateTime? LastCheckTimeUtc
     {
         get
         {
+            if (_useInProcessStoreService)
+            {
+                return GetStoreService().LastCheckTimeUtc;
+            }
+
             long ticks = ReadState().LastCheckTicks;
             return ticks > 0 ? new DateTime(ticks, DateTimeKind.Utc) : null;
         }
     }
 
-    public string ManifestUrl => ReadState().ManifestUrl;
+    public string ManifestUrl => _useInProcessStoreService
+        ? GetStoreService().ManifestUrl
+        : ReadState().ManifestUrl;
 
-    public AppUpdateDeliveryKind DeliveryKind =>
-        (AppUpdateDeliveryKind)ReadState().DeliveryKind;
+    public AppUpdateDeliveryKind DeliveryKind => _useInProcessStoreService
+        ? GetStoreService().DeliveryKind
+        : (AppUpdateDeliveryKind)ReadState().DeliveryKind;
 
-    public string? LastDownloadedInstallerPath => ReadState().LastDownloadedInstallerPath;
+    public string? LastDownloadedInstallerPath => _useInProcessStoreService
+        ? GetStoreService().LastDownloadedInstallerPath
+        : ReadState().LastDownloadedInstallerPath;
 
-    public bool IsDownloadInProgress => ReadState().DownloadInProgress;
+    public bool IsDownloadInProgress => _useInProcessStoreService
+        ? GetStoreService().IsDownloadInProgress
+        : ReadState().DownloadInProgress;
 
     public Task<AppUpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default) =>
-        CheckCoreAsync(null, cancellationToken);
+        _useInProcessStoreService
+            ? GetStoreService().CheckForUpdatesAsync(cancellationToken)
+            : CheckCoreAsync(null, cancellationToken);
 
     public Task<AppUpdateCheckResult> CheckForUpdatesAsync(string currentVersion, CancellationToken cancellationToken = default) =>
-        CheckCoreAsync(currentVersion, cancellationToken);
+        _useInProcessStoreService
+            ? GetStoreService().CheckForUpdatesAsync(currentVersion, cancellationToken)
+            : CheckCoreAsync(currentVersion, cancellationToken);
 
     private async Task<AppUpdateCheckResult> CheckCoreAsync(string? currentVersion, CancellationToken cancellationToken)
     {
@@ -104,6 +169,7 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
                 new SettingsIpcUpdateCheck(currentVersion),
                 SettingsIpcJsonContext.Default.SettingsIpcUpdateCheck),
             cancellationToken);
+        _cachedState = null;
         if (!ok ||
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateCheckResult)
                 is not { } result)
@@ -119,10 +185,25 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (_useInProcessStoreService)
+        {
+            // StoreContext.RequestDownloadAndInstallStorePackageUpdatesAsync
+            // requires an in-process foreground HWND via IInitializeWithWindow;
+            // run directly inside the settings-host MSIX process so it binds to
+            // the live SettingsWindow handle, reuses the check's pending updates,
+            // and streams real progress.
+            _cachedState = null;
+            return await GetStoreService().DownloadUpdateAsync(
+                manifest,
+                progress,
+                cancellationToken);
+        }
+
         (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.UpdateDownload,
             SettingsIpcPayload.Encode(manifest, SettingsIpcJsonContext.Default.AppUpdateManifest),
             cancellationToken);
+        _cachedState = null;
         if (!ok ||
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateDownloadResult)
                 is not { } result)
@@ -143,12 +224,12 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         bool silent = true,
         string? appCultureName = null)
     {
-        (bool ok, string? payload, string? error) = _client.RequestAsync(
-                SettingsIpcMethods.UpdateStartInstaller,
-                SettingsIpcPayload.Encode(
-                    new SettingsIpcStartInstaller(installerPath, silent, appCultureName),
-                    SettingsIpcJsonContext.Default.SettingsIpcStartInstaller))
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, string? error) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.UpdateStartInstaller,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcStartInstaller(installerPath, silent, appCultureName),
+                SettingsIpcJsonContext.Default.SettingsIpcStartInstaller));
         if (!ok ||
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateInstallResult)
                 is not { } result)
@@ -166,8 +247,7 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
             return cached;
         }
 
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.UpdateState)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.UpdateState);
         _cachedState = SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcUpdateState)
             ?? new SettingsIpcUpdateState(null, 0, string.Empty, 0, null, false);
         return _cachedState;

@@ -85,7 +85,7 @@ public sealed partial class FileStackSettingsViewModel : ObservableObject
     private string _groupBy = FileStackOptionKinds.GroupByKind;
     private int _threshold = FileStackOptionKinds.DefaultThreshold;
     private string _orderBy = FileStackOptionKinds.OrderByWidget;
-    private string _openMode = FileStackOptionKinds.OpenModeInline;
+    private string _openMode = FileStackOptionKinds.OpenModePopover;
     private string _popoverLayout = FileStackOptionKinds.PopoverLayoutGrid3;
     private string _popoverStyle = FileStackOptionKinds.PopoverStyleNeutral;
     private string _unmatchedBehavior = FileStackOptionKinds.UnmatchedKeepLoose;

@@ -315,9 +315,8 @@ $settings = [ordered]@{
     featureWidgetEnabledStates = [ordered]@{
         QuickCapture = $false
         Todo = $false
-        Music = $false
+        Music = $true
         Weather = $false
-        Search = $true
         Glance = $false
     }
     searchSaveHistory = $false
@@ -351,15 +350,15 @@ $settings = [ordered]@{
             fileAddedAtTrackingInitialized = $true
         },
         [ordered]@{
-            id = "aot-5b4a-search"
-            name = "AOT Search Fixture"
+            id = "aot-5b4a-music"
+            name = "AOT Music Fixture"
             isDefaultTitle = $false
             x = 500
             y = 80
             boundsCoordinateVersion = 1
             width = 300
             height = 360
-            widgetKind = "Search"
+            widgetKind = "Music"
             viewMode = "Icon"
             isVisible = $true
             isDisabled = $false
@@ -511,11 +510,11 @@ try {
     }
     Assert-StringSequence `
         -Actual @($smokeResult.seededWidgetIds) `
-        -Expected @("aot-5b4a-search", "aot-5b4c1b2b-file") `
+        -Expected @("aot-5b4a-music", "aot-5b4c1b2b-file") `
         -Name "seededWidgetIds"
     Assert-StringSequence `
         -Actual @($smokeResult.visibleWidgetKinds) `
-        -Expected @("File", "Search") `
+        -Expected @("File", "Music") `
         -Name "visibleWidgetKinds"
     if ([int]$smokeResult.loadedSurfaceCount -ne 2 -or
         [int]$smokeResult.visibleSurfaceCount -ne 2 -or

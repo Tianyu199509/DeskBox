@@ -7,9 +7,16 @@ namespace DeskBox.Features.Music;
 // GlanceWidgetViewModel bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
     nameof(AvailableDisplayModeOptions),
+    nameof(AvailableSpectrumStyleOptions),
     nameof(DisplayMode),
     nameof(EnableCoverHoverMotion),
+    nameof(HasLocalLyricsFolder),
     nameof(HideTimelineWhenUnavailable),
+    nameof(LocalLyricsFolder),
+    nameof(LocalLyricsFolderDisplayText),
+    nameof(ShowCapsuleLyrics),
+    nameof(ShowLyrics),
+    nameof(SpectrumStyle),
     nameof(UseArtworkBackdrop)
 ], [])]
 public sealed partial class MusicSettingsViewModel

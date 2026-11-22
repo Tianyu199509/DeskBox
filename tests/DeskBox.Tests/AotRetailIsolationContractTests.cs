@@ -29,27 +29,41 @@ public sealed class AotRetailIsolationContractTests
             harnessConstants.Element("DefineConstants")?.Value,
             StringComparison.Ordinal);
 
-        XElement retailExclusions = Assert.Single(
+        XElement smokeInclusions = Assert.Single(
             project.Descendants("ItemGroup")
                 .Where(element => (string?)element.Attribute("Condition") ==
-                    "'$(DeskBoxAotSmokeHarness)' != 'true'"));
-        string[] removedPatterns = retailExclusions.Elements("Compile")
-            .Select(element => (string?)element.Attribute("Remove"))
+                    "'$(DeskBoxAotSmokeHarness)' == 'true'"));
+        string[] includedPatterns = smokeInclusions.Elements("Compile")
+            .Select(element => (string?)element.Attribute("Include"))
             .OfType<string>()
             .ToArray();
         Assert.Equal(
-            ["**\\*.Aot*Smoke.cs", "Services\\Aot*Fixture.cs"],
-            removedPatterns);
+            ["..\\..\\tests\\DeskBox.AotSmoke\\**\\*.cs"],
+            includedPatterns);
 
         string sourceRoot = TestPaths.FromRepository("src/DeskBox");
-        string[] harnessSources = Directory
+        string[] remainingHarnessSources = Directory
             .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
             .Where(IsSmokeHarnessSource)
             .ToArray();
-        Assert.Equal(61, harnessSources.Length);
+        Assert.Empty(remainingHarnessSources);
+
+        string smokeRoot = TestPaths.FromRepository("tests/DeskBox.AotSmoke");
+        string[] externalSmokeSources = Directory
+            .EnumerateFiles(smokeRoot, "*.cs", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        Assert.True(
+            externalSmokeSources.Length >= 62,
+            $"Expected at least 62 isolated AOT smoke/fixture sources, found {externalSmokeSources.Length}.");
         Assert.DoesNotContain(
-            harnessSources,
+            externalSmokeSources,
             path => path.EndsWith(".AotBindableProperties.cs", StringComparison.Ordinal));
+        foreach (string smokePath in externalSmokeSources)
+        {
+            string source = File.ReadAllText(smokePath);
+            Assert.Contains(HarnessGuard, source, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -137,7 +151,8 @@ public sealed class AotRetailIsolationContractTests
         string fileName = Path.GetFileName(path);
         bool smokePartial =
             fileName.Contains(".Aot", StringComparison.Ordinal) &&
-            fileName.EndsWith("Smoke.cs", StringComparison.Ordinal);
+            (fileName.EndsWith("Smoke.cs", StringComparison.Ordinal) ||
+             fileName.EndsWith("Probe.cs", StringComparison.Ordinal));
         bool fixture =
             fileName.StartsWith("Aot", StringComparison.Ordinal) &&
             fileName.EndsWith("Fixture.cs", StringComparison.Ordinal) &&

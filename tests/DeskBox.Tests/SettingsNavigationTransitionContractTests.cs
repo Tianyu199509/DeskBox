@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 /// <summary>
 /// Pins the settings-window navigation transition wiring: the horizontal
@@ -114,27 +114,27 @@ public sealed class SettingsNavigationTransitionContractTests
     [Fact]
     public void DetermineNavigationEnterOffset_DepthThenNavOrderThenSubOrder()
     {
-        string[] navOrder = new[] { "General", "AppearanceDetail" };
+        string[] navOrder = new[] { "General", "Interaction" };
         string[] subOrder = new[]
         {
-            "FileDisplaySettings", "ManagedStorage", "FileStackSettings", "DesktopOrganizationSettings"
+            "WidgetGroups", "Displays"
         };
 
         float Forward(string previous, string next) =>
             DeskBox.Views.SettingsWindow.DetermineNavigationEnterOffset(previous, next, navOrder, subOrder);
 
         // Drilling into a sub-page enters from the right; backing out left.
-        Assert.Equal(40f, Forward("General", "FileDisplaySettings"));
-        Assert.Equal(-40f, Forward("FileDisplaySettings", "General"));
+        Assert.Equal(40f, Forward("General", "WidgetGroups"));
+        Assert.Equal(-40f, Forward("WidgetGroups", "General"));
 
         // Same-depth top-level pages follow the nav menu order.
-        Assert.Equal(40f, Forward("General", "AppearanceDetail"));
-        Assert.Equal(-40f, Forward("AppearanceDetail", "General"));
+        Assert.Equal(40f, Forward("General", "Interaction"));
+        Assert.Equal(-40f, Forward("Interaction", "General"));
 
         // Sibling sub-pages under one nav entry follow their drill-down
         // order instead of always sliding in from the left.
-        Assert.Equal(40f, Forward("FileDisplaySettings", "FileStackSettings"));
-        Assert.Equal(-40f, Forward("FileStackSettings", "FileDisplaySettings"));
+        Assert.Equal(40f, Forward("WidgetGroups", "Displays"));
+        Assert.Equal(-40f, Forward("Displays", "WidgetGroups"));
 
         // Unknown tags keep the forward default rather than guessing.
         Assert.Equal(40f, Forward("General", "NoSuchSection"));

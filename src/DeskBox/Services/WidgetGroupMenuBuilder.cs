@@ -83,6 +83,9 @@ internal static class WidgetGroupMenuBuilder
             WidgetGroupNavigationStyles.Tabs,
             GetNavigationName(WidgetGroupNavigationStyles.Tabs));
         AddNavigationItem(
+            WidgetGroupNavigationStyles.EqualTabs,
+            GetNavigationName(WidgetGroupNavigationStyles.EqualTabs));
+        AddNavigationItem(
             WidgetGroupNavigationStyles.Stack,
             GetNavigationName(WidgetGroupNavigationStyles.Stack));
         groupControlMenu.Items.Add(navigationMenu);
@@ -152,7 +155,7 @@ internal static class WidgetGroupMenuBuilder
         var wheelMenu = new MenuFlyoutSubItem
         {
             Text = localizationService.T("Widget.Group.WheelSwitch"),
-            Icon = new FontIcon { Glyph = "\uE7C2" }
+            Icon = new FontIcon { Glyph = WindowsCompatibilityService.IsWindows11OrLater ? "\uE7C2" : "\uE8AB" }
         };
         AddWheelItem(
             value: null,
@@ -248,6 +251,8 @@ internal static class WidgetGroupMenuBuilder
             {
                 WidgetGroupNavigationStyles.Tabs =>
                     localizationService.T("Widget.Group.Navigation.Tabs"),
+                WidgetGroupNavigationStyles.EqualTabs =>
+                    localizationService.T("Widget.Group.Navigation.EqualTabs"),
                 WidgetGroupNavigationStyles.Stack =>
                     localizationService.T("Widget.Group.Navigation.Stack"),
                 _ => localizationService.T("Widget.Group.Navigation.Stack")

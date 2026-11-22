@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using DeskBox.Platform;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
@@ -8,34 +7,12 @@ namespace DeskBox.Helpers;
 
 internal enum ShortcutBackendMode
 {
-    CSharp,
     Rust
 }
 
 internal static class ShortcutBackendPolicy
 {
-    internal const string EnvironmentVariable = "DESKBOX_SHORTCUT_BACKEND";
-
-#if DESKBOX_NATIVE_AOT
-    internal static ShortcutBackendMode Current { get; } = ShortcutBackendMode.Rust;
-#else
-    internal static ShortcutBackendMode Current { get; } = Resolve(
-        Environment.GetEnvironmentVariable(EnvironmentVariable),
-        RuntimeFeature.IsDynamicCodeSupported);
-
-    internal static ShortcutBackendMode Resolve(string? configuredValue, bool isDynamicCodeSupported)
-    {
-        if (!isDynamicCodeSupported)
-        {
-            // Native AOT must never fall back to the legacy ComImport backend.
-            return ShortcutBackendMode.Rust;
-        }
-
-        return string.Equals(configuredValue?.Trim(), "rust", StringComparison.OrdinalIgnoreCase)
-            ? ShortcutBackendMode.Rust
-            : ShortcutBackendMode.CSharp;
-    }
-#endif
+    internal static ShortcutBackendMode Current => ShortcutBackendMode.Rust;
 }
 
 internal enum ShortcutNativeLoadFailure
@@ -99,6 +76,17 @@ internal sealed record ShortcutNativeCallResult(
     uint SourceTruncatedFields)
 {
     internal bool Success => Metadata is not null && Failure == ShortcutNativeCallFailure.None;
+
+    /// <summary>
+    /// True when <c>IPersistFile::Load</c> succeeded on a valid shell link that
+    /// carries only a PIDL / namespace / AppX target and therefore returns
+    /// <c>E_FAIL</c> from <c>IShellLinkW::GetPath(..., SLGP_RAWPATH)</c>.
+    /// </summary>
+    internal bool IsExpectedPidlOnlyOutcome =>
+        Failure == ShortcutNativeCallFailure.NativeFailure &&
+        Status == ShortcutNativeModule.StatusOperationFailed &&
+        LoadHResult >= 0 &&
+        TargetHResult == ShortcutNativeModule.HResultFail;
 }
 
 internal sealed record ShortcutNativeWriteCallResult(
@@ -153,13 +141,16 @@ internal sealed unsafe partial class ShortcutNativeModule
     internal const uint WriteShellNamespaceTargetFlag = 1U << 0;
 
     internal const uint StatusOk = 0;
+    internal const uint StatusBufferTooSmall = 3;
+    internal const uint StatusOperationFailed = 7;
     internal const uint ModeStoredRaw = 1;
     internal const uint ModeEffectiveDiagnostic = 2;
+    internal const int HResultFail = unchecked((int)0x80004005);
     internal const int HResultNotAttempted = unchecked((int)0x8000000A);
 
     private const uint StructVersion = 2;
     private const int StoredFieldCapacity = 260;
-    private const int DiagnosticArgumentCapacity = 512;
+    private const int ArgumentFieldCapacity = 4096;
     private const int MaxInputPathChars = 32_767;
     private const int MaxInputValueChars = 32_767;
     private const uint LoadLibrarySearchDllLoadDir = 0x00000100;
@@ -538,124 +529,157 @@ internal sealed unsafe partial class ShortcutNativeModule
                 "Shortcut path is empty, too long, or contains an embedded NUL.");
         }
 
-        int argumentCapacity = mode == ModeEffectiveDiagnostic
-            ? DiagnosticArgumentCapacity
-            : StoredFieldCapacity;
-        char[] target = new char[StoredFieldCapacity];
-        char[] description = new char[StoredFieldCapacity];
-        char[] arguments = new char[argumentCapacity];
-        char[] workingDirectory = new char[StoredFieldCapacity];
-        char[] icon = new char[StoredFieldCapacity];
+        int targetCapacity = 1024;
+        int descriptionCapacity = StoredFieldCapacity;
+        int argumentsCapacity = ArgumentFieldCapacity;
+        int workingDirCapacity = StoredFieldCapacity;
+        int iconCapacity = StoredFieldCapacity;
 
-        fixed (char* pathPointer = shortcutPath)
-        fixed (char* targetPointer = target)
-        fixed (char* descriptionPointer = description)
-        fixed (char* argumentsPointer = arguments)
-        fixed (char* workingDirectoryPointer = workingDirectory)
-        fixed (char* iconPointer = icon)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            var readRequest = new NativeReadRequest
+            char[] target = System.Buffers.ArrayPool<char>.Shared.Rent(targetCapacity);
+            char[] description = System.Buffers.ArrayPool<char>.Shared.Rent(descriptionCapacity);
+            char[] arguments = System.Buffers.ArrayPool<char>.Shared.Rent(argumentsCapacity);
+            char[] workingDirectory = System.Buffers.ArrayPool<char>.Shared.Rent(workingDirCapacity);
+            char[] icon = System.Buffers.ArrayPool<char>.Shared.Rent(iconCapacity);
+            try
             {
-                StructSize = (uint)sizeof(NativeReadRequest),
-                StructVersion = StructVersion,
-                Mode = mode,
-                ShortcutPath = pathPointer,
-                ShortcutPathLengthChars = (uint)shortcutPath.Length,
-                TargetPath = new NativeUtf16Buffer(targetPointer, target.Length),
-                Description = new NativeUtf16Buffer(descriptionPointer, description.Length),
-                Arguments = new NativeUtf16Buffer(argumentsPointer, arguments.Length),
-                WorkingDirectory = new NativeUtf16Buffer(workingDirectoryPointer, workingDirectory.Length),
-                IconPath = new NativeUtf16Buffer(iconPointer, icon.Length)
-            };
-            var result = new NativeReadResult
-            {
-                StructSize = (uint)sizeof(NativeReadResult),
-                StructVersion = StructVersion
-            };
-
-            uint returnedStatus;
-            if (timeoutMs.HasValue)
-            {
-                var resolveRequest = new NativeResolveRequest
+                fixed (char* pathPointer = shortcutPath)
+                fixed (char* targetPointer = target)
+                fixed (char* descriptionPointer = description)
+                fixed (char* argumentsPointer = arguments)
+                fixed (char* workingDirectoryPointer = workingDirectory)
+                fixed (char* iconPointer = icon)
                 {
-                    StructSize = (uint)sizeof(NativeResolveRequest),
-                    StructVersion = StructVersion,
-                    TimeoutMs = timeoutMs.Value,
-                    ReadRequest = readRequest
-                };
-                returnedStatus = _resolve(&resolveRequest, &result);
-            }
-            else
-            {
-                returnedStatus = _read(&readRequest, &result);
-            }
+                    var readRequest = new NativeReadRequest
+                    {
+                        StructSize = (uint)sizeof(NativeReadRequest),
+                        StructVersion = StructVersion,
+                        Mode = mode,
+                        ShortcutPath = pathPointer,
+                        ShortcutPathLengthChars = (uint)shortcutPath.Length,
+                        TargetPath = new NativeUtf16Buffer(targetPointer, target.Length),
+                        Description = new NativeUtf16Buffer(descriptionPointer, description.Length),
+                        Arguments = new NativeUtf16Buffer(argumentsPointer, arguments.Length),
+                        WorkingDirectory = new NativeUtf16Buffer(workingDirectoryPointer, workingDirectory.Length),
+                        IconPath = new NativeUtf16Buffer(iconPointer, icon.Length)
+                    };
+                    var result = new NativeReadResult
+                    {
+                        StructSize = (uint)sizeof(NativeReadResult),
+                        StructVersion = StructVersion
+                    };
 
-            if (result.StructSize != (uint)sizeof(NativeReadResult) ||
-                result.StructVersion != StructVersion)
-            {
-                return FromResult(
-                    null,
-                    ShortcutNativeCallFailure.InvalidNativeResult,
-                    $"Native result envelope mismatch: size={result.StructSize}, version={result.StructVersion}.",
-                    result);
-            }
+                    uint returnedStatus;
+                    if (timeoutMs.HasValue)
+                    {
+                        var resolveRequest = new NativeResolveRequest
+                        {
+                            StructSize = (uint)sizeof(NativeResolveRequest),
+                            StructVersion = StructVersion,
+                            TimeoutMs = timeoutMs.Value,
+                            ReadRequest = readRequest
+                        };
+                        returnedStatus = _resolve(&resolveRequest, &result);
+                    }
+                    else
+                    {
+                        returnedStatus = _read(&readRequest, &result);
+                    }
 
-            if (returnedStatus != result.Status)
-            {
-                return FromResult(
-                    null,
-                    ShortcutNativeCallFailure.InvalidNativeResult,
-                    $"Native status mismatch: return={returnedStatus}, result={result.Status}.",
-                    result);
-            }
+                    if (result.StructSize != (uint)sizeof(NativeReadResult) ||
+                        result.StructVersion != StructVersion)
+                    {
+                        return FromResult(
+                            null,
+                            ShortcutNativeCallFailure.InvalidNativeResult,
+                            $"Native result envelope mismatch: size={result.StructSize}, version={result.StructVersion}.",
+                            result);
+                    }
 
-            if (result.Status != StatusOk)
-            {
-                return FromResult(
-                    null,
-                    ShortcutNativeCallFailure.NativeFailure,
-                    $"Native shortcut operation failed: status={result.Status}, HRESULT=0x{result.OperationHResult:X8}.",
-                    result);
-            }
+                    if (returnedStatus != result.Status)
+                    {
+                        return FromResult(
+                            null,
+                            ShortcutNativeCallFailure.InvalidNativeResult,
+                            $"Native status mismatch: return={returnedStatus}, result={result.Status}.",
+                            result);
+                    }
 
-            if (!TryDecode(target, result.TargetRequiredChars, out string targetValue) ||
-                !TryDecode(arguments, result.ArgumentsRequiredChars, out string argumentValue))
-            {
-                return FromResult(
-                    null,
-                    ShortcutNativeCallFailure.InvalidNativeResult,
-                    "Native shortcut result contains invalid target or argument lengths.",
-                    result);
-            }
+                    if (attempt == 0 &&
+                        result.Status == StatusBufferTooSmall &&
+                        result.CallerBufferTooSmallFields != 0)
+                    {
+                        const int maxRetryCapacity = MaxInputValueChars + 1;
+                        targetCapacity = Math.Clamp((int)Math.Max((uint)targetCapacity, result.TargetRequiredChars), targetCapacity, maxRetryCapacity);
+                        descriptionCapacity = Math.Clamp((int)Math.Max((uint)descriptionCapacity, result.DescriptionRequiredChars), descriptionCapacity, maxRetryCapacity);
+                        argumentsCapacity = Math.Clamp((int)Math.Max((uint)argumentsCapacity, result.ArgumentsRequiredChars), argumentsCapacity, maxRetryCapacity);
+                        workingDirCapacity = Math.Clamp((int)Math.Max((uint)workingDirCapacity, result.WorkingDirectoryRequiredChars), workingDirCapacity, maxRetryCapacity);
+                        iconCapacity = Math.Clamp((int)Math.Max((uint)iconCapacity, result.IconRequiredChars), iconCapacity, maxRetryCapacity);
+                        continue;
+                    }
 
-            string descriptionValue = string.Empty;
-            string workingDirectoryValue = string.Empty;
-            string iconValue = string.Empty;
-            if (mode == ModeStoredRaw &&
-                (!TryDecode(description, result.DescriptionRequiredChars, out descriptionValue) ||
-                 !TryDecode(workingDirectory, result.WorkingDirectoryRequiredChars, out workingDirectoryValue) ||
-                 !TryDecode(icon, result.IconRequiredChars, out iconValue)))
-            {
-                return FromResult(
-                    null,
-                    ShortcutNativeCallFailure.InvalidNativeResult,
-                    "Native shortcut result contains invalid optional-field lengths.",
-                    result);
-            }
+                    if (result.Status != StatusOk)
+                    {
+                        return FromResult(
+                            null,
+                            ShortcutNativeCallFailure.NativeFailure,
+                            $"Native shortcut operation failed: status={result.Status}, HRESULT=0x{result.OperationHResult:X8}.",
+                            result);
+                    }
 
-            var metadata = new ShortcutInfo(
-                targetValue,
-                descriptionValue,
-                argumentValue,
-                workingDirectoryValue,
-                iconValue,
-                result.IconIndex);
-            return FromResult(
-                metadata,
-                ShortcutNativeCallFailure.None,
-                string.Empty,
-                result);
+                    if (!TryDecode(target, result.TargetRequiredChars, out string targetValue) ||
+                        !TryDecode(arguments, result.ArgumentsRequiredChars, out string argumentValue))
+                    {
+                        return FromResult(
+                            null,
+                            ShortcutNativeCallFailure.InvalidNativeResult,
+                            "Native shortcut result contains invalid target or argument lengths.",
+                            result);
+                    }
+
+                    string descriptionValue = string.Empty;
+                    string workingDirectoryValue = string.Empty;
+                    string iconValue = string.Empty;
+                    if (mode == ModeStoredRaw &&
+                        (!TryDecode(description, result.DescriptionRequiredChars, out descriptionValue) ||
+                         !TryDecode(workingDirectory, result.WorkingDirectoryRequiredChars, out workingDirectoryValue) ||
+                         !TryDecode(icon, result.IconRequiredChars, out iconValue)))
+                    {
+                        return FromResult(
+                            null,
+                            ShortcutNativeCallFailure.InvalidNativeResult,
+                            "Native shortcut result contains invalid optional-field lengths.",
+                            result);
+                    }
+
+                    var metadata = new ShortcutInfo(
+                        targetValue,
+                        descriptionValue,
+                        argumentValue,
+                        workingDirectoryValue,
+                        iconValue,
+                        result.IconIndex);
+                    return FromResult(
+                        metadata,
+                        ShortcutNativeCallFailure.None,
+                        string.Empty,
+                        result);
+                }
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(target, clearArray: false);
+                System.Buffers.ArrayPool<char>.Shared.Return(description, clearArray: false);
+                System.Buffers.ArrayPool<char>.Shared.Return(arguments, clearArray: false);
+                System.Buffers.ArrayPool<char>.Shared.Return(workingDirectory, clearArray: false);
+                System.Buffers.ArrayPool<char>.Shared.Return(icon, clearArray: false);
+            }
         }
+
+        return CallFailure(
+            ShortcutNativeCallFailure.NativeFailure,
+            "Native shortcut read exceeded retry limit.");
     }
 
     private static bool TryDecode(char[] buffer, uint requiredChars, out string value)

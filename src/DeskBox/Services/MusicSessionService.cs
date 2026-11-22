@@ -1,6 +1,5 @@
-using Windows.Media;
-using Windows.Media.Control;
-using Windows.Storage.Streams;
+using System.Globalization;
+using DeskBox.Services.Media;
 
 namespace DeskBox.Services;
 
@@ -16,7 +15,8 @@ public enum MusicPlaybackMode
 {
     Normal,
     Shuffle,
-    Repeat
+    Repeat,
+    RepeatOne
 }
 
 public sealed record MusicSessionInfo(
@@ -29,6 +29,8 @@ public sealed record MusicSessionInfo(
     MusicPlaybackState PlaybackState,
     TimeSpan Position,
     TimeSpan Duration,
+    DateTimeOffset PositionUpdatedUtc,
+    double PlaybackRate,
     bool CanPlay,
     bool CanPause,
     bool CanGoPrevious,
@@ -37,7 +39,10 @@ public sealed record MusicSessionInfo(
     bool CanChangeShuffle,
     bool CanChangeRepeat,
     MusicPlaybackMode PlaybackMode,
-    IRandomAccessStreamReference? Thumbnail);
+    byte[]? ThumbnailBytes = null,
+    ulong ThumbnailFingerprint = 0,
+    bool ThumbnailUnchanged = false,
+    string? ThumbnailContentType = null);
 
 public sealed record MusicSessionOption(
     string SessionId,
@@ -48,10 +53,14 @@ public sealed record MusicSessionOption(
 
 public sealed record MusicTimelineSnapshot(
     TimeSpan Position,
-    TimeSpan Duration);
+    TimeSpan Duration,
+    DateTimeOffset PositionUpdatedUtc,
+    double PlaybackRate,
+    MusicPlaybackState PlaybackState);
 
 public sealed record MusicPlaybackSnapshot(
     MusicPlaybackState PlaybackState,
+    double PlaybackRate,
     bool CanPlay,
     bool CanPause,
     bool CanGoPrevious,
@@ -61,527 +70,457 @@ public sealed record MusicPlaybackSnapshot(
     bool CanChangeRepeat,
     MusicPlaybackMode PlaybackMode);
 
-public sealed class MusicSessionService : IDisposable
+internal readonly record struct SystemSessionCandidate(
+    MusicPlaybackState State,
+    bool IsClosed,
+    bool IsSystemCurrent,
+    bool IsPreviousCurrent);
+
+internal interface IMusicSessionController : IDisposable
 {
-    private GlobalSystemMediaTransportControlsSessionManager? _manager;
-    private GlobalSystemMediaTransportControlsSession? _currentSession;
+    event EventHandler? SessionsChanged;
+    event EventHandler? CurrentSessionChanged;
+    event EventHandler? PlaybackInfoChanged;
+    event EventHandler? MediaPropertiesChanged;
+    event EventHandler? TimelinePropertiesChanged;
+    event EventHandler? ConnectionStateChanged;
+
+    MediaSessionConnectionState ConnectionState { get; }
+
+    Task InitializeAsync();
+    Task<bool> RetryConnectionAsync();
+    IReadOnlyList<MusicSessionOption> GetSessionOptions();
+    Task<MusicSessionInfo?> GetCurrentSessionInfoAsync(
+        string? preferredSessionId = null,
+        ulong knownCoverFingerprint = 0);
+    Task<MusicThumbnailSnapshot?> GetCurrentThumbnailAsync(
+        string? preferredSessionId = null,
+        ulong knownCoverFingerprint = 0);
+    Task<MusicTimelineSnapshot?> GetCurrentTimelineAsync(string? preferredSessionId = null);
+    Task<MusicPlaybackSnapshot?> GetCurrentPlaybackAsync(string? preferredSessionId = null);
+    Task<bool> TrySetPreferredSessionAsync(string sessionId);
+    Task<bool> TryPlayAsync(string? sessionId);
+    Task<bool> TryPauseAsync(string? sessionId);
+    Task<bool> TryTogglePlayPauseAsync(string? sessionId);
+    Task<bool> TryPreviousAsync(string? sessionId);
+    Task<bool> TryNextAsync(string? sessionId);
+    Task<bool> TrySeekAsync(string? sessionId, TimeSpan position);
+    Task<bool> TryChangePlaybackModeAsync(string? sessionId, MusicPlaybackMode playbackMode);
+}
+
+/// <summary>
+/// Lease-backed facade over <see cref="MediaSessionProxyClient"/> so all
+/// Windows System Media Transport Controls (SMTC) interaction runs strictly
+/// out-of-process in <c>deskbox-thumbnail-proxy.exe --media-session-server</c>
+/// with zero in-process <c>Windows.Media.MediaControl.dll</c> activation.
+/// </summary>
+public sealed class MusicSessionService : IMusicSessionController, IDisposable
+{
+    internal static readonly TimeSpan MediaPropertiesIpcTimeout = TimeSpan.FromMilliseconds(2500);
+
+    private readonly MediaSessionProxyClient _client;
+    private readonly object _lifecycleGate = new();
+    private readonly SemaphoreSlim _initializeGate = new(1, 1);
+    private bool _holdsLease;
     private bool _isInitialized;
     private bool _isDisposed;
+
+    public MusicSessionService()
+        : this(MediaSessionProxyClient.Shared)
+    {
+    }
+
+    internal MusicSessionService(MediaSessionProxyClient client)
+    {
+        _client = client;
+    }
+
+    internal static int SharedManagerReferenceCount => MediaSessionProxyClient.Shared.ActiveLeaseCount;
+
+    public MediaSessionConnectionState ConnectionState => _client.ConnectionState;
 
     public event EventHandler? SessionsChanged;
     public event EventHandler? CurrentSessionChanged;
     public event EventHandler? PlaybackInfoChanged;
     public event EventHandler? MediaPropertiesChanged;
     public event EventHandler? TimelinePropertiesChanged;
+    public event EventHandler? ConnectionStateChanged;
 
     public async Task InitializeAsync()
     {
-        if (_isDisposed || _isInitialized)
+        if (Volatile.Read(ref _isDisposed) || Volatile.Read(ref _isInitialized))
         {
             return;
         }
 
-        var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+        await _initializeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_isDisposed || _isInitialized)
+            {
+                return;
+            }
+
+            lock (_lifecycleGate)
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+
+                if (!_holdsLease)
+                {
+                    _client.SessionsChanged += Client_SessionsChanged;
+                    _client.CurrentSessionChanged += Client_CurrentSessionChanged;
+                    _client.PlaybackInfoChanged += Client_PlaybackInfoChanged;
+                    _client.MediaPropertiesChanged += Client_MediaPropertiesChanged;
+                    _client.TimelinePropertiesChanged += Client_TimelinePropertiesChanged;
+                    _client.ConnectionStateChanged += Client_ConnectionStateChanged;
+                    _client.AcquireLease();
+                    _holdsLease = true;
+                }
+            }
+
+            _ = await _client.EnsureConnectedAsync().ConfigureAwait(false);
+            if (_isDisposed)
+            {
+                TearDownCore();
+                return;
+            }
+
+            _isInitialized = true;
+        }
+        finally
+        {
+            _initializeGate.Release();
+        }
+    }
+
+    public async Task<bool> RetryConnectionAsync()
+    {
         if (_isDisposed)
         {
-            return;
+            return false;
         }
 
-        _manager = manager;
-        _manager.SessionsChanged += Manager_SessionsChanged;
-        _manager.CurrentSessionChanged += Manager_CurrentSessionChanged;
-        AttachCurrentSession(_manager.GetCurrentSession());
-        _isInitialized = true;
+        await InitializeAsync().ConfigureAwait(false);
+        if (_isDisposed)
+        {
+            return false;
+        }
+
+        return await _client.RetryConnectionAsync().ConfigureAwait(false);
     }
 
     public IReadOnlyList<MusicSessionOption> GetSessionOptions()
     {
-        if (_isDisposed || _manager is null)
+        if (_isDisposed || !_holdsLease)
         {
             return [];
         }
 
-        GlobalSystemMediaTransportControlsSession? systemCurrent = _manager.GetCurrentSession();
-        var options = new List<MusicSessionOption>();
-        foreach (SessionEntry entry in EnumerateSessionEntries())
-        {
-            try
-            {
-                var playbackInfo = entry.Session.GetPlaybackInfo();
-                string sourceApp = entry.Session.SourceAppUserModelId ?? string.Empty;
-                options.Add(new MusicSessionOption(
-                    entry.SessionId,
-                    sourceApp,
-                    GetSourceDisplayName(sourceApp),
-                    MapPlaybackState(playbackInfo.PlaybackStatus),
-                    IsSameSession(entry.Session, systemCurrent)));
-            }
-            catch (Exception ex)
-            {
-                // A source can disappear between GetSessions() and reading its
-                // state. Skip that stale entry; SessionsChanged will repopulate
-                // the picker without turning an ordinary player exit into an
-                // application error.
-                App.LogVerbose($"[MusicSession] Skipped stale source: {ex.Message}");
-            }
-        }
-
-        return options;
+        return _client.GetCachedSessionOptions();
     }
 
-    public async Task<MusicSessionInfo?> GetCurrentSessionInfoAsync(string? preferredSessionId = null)
+    public async Task<MusicSessionInfo?> GetCurrentSessionInfoAsync(
+        string? preferredSessionId = null,
+        ulong knownCoverFingerprint = 0)
     {
-        await InitializeAsync();
+        await InitializeAsync().ConfigureAwait(false);
         if (_isDisposed)
         {
             return null;
         }
 
-        var session = ResolveSession(preferredSessionId);
-        AttachCurrentSession(session);
-        if (session is null)
+        return await _client
+            .GetCurrentSessionInfoAsync(preferredSessionId, knownCoverFingerprint)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<MusicThumbnailSnapshot?> GetCurrentThumbnailAsync(
+        string? preferredSessionId = null,
+        ulong knownCoverFingerprint = 0)
+    {
+        await InitializeAsync().ConfigureAwait(false);
+        if (_isDisposed)
         {
             return null;
         }
 
-        try
-        {
-            return await CreateInfoAsync(session);
-        }
-        catch (Exception ex)
-        {
-            // The full-info read races the player's exit on its synchronous
-            // halves too; callers treat null as "no update" and the next
-            // refresh or SessionsChanged reattaches — same contract as the
-            // timeline and playback snapshot reads.
-            App.LogVerbose($"[MusicSession] Skipped stale session info read: {ex.Message}");
-            return null;
-        }
+        return await _client
+            .GetCurrentThumbnailAsync(preferredSessionId, knownCoverFingerprint)
+            .ConfigureAwait(false);
     }
 
     public async Task<MusicTimelineSnapshot?> GetCurrentTimelineAsync(string? preferredSessionId = null)
     {
-        await InitializeAsync();
+        await InitializeAsync().ConfigureAwait(false);
         if (_isDisposed)
         {
             return null;
         }
 
-        var session = ResolveSession(preferredSessionId);
-        AttachCurrentSession(session);
-        if (session is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var timeline = session.GetTimelineProperties();
-            return new MusicTimelineSnapshot(
-                timeline.Position,
-                timeline.EndTime > timeline.StartTime
-                    ? timeline.EndTime - timeline.StartTime
-                    : TimeSpan.Zero);
-        }
-        catch (Exception ex)
-        {
-            // The session wrapper can go stale between resolution and this
-            // read (player exit, per-track session churn); callers treat null
-            // as "no update" and the next full refresh or SessionsChanged
-            // reattaches. Throwing here turned into the recurring timeline
-            // NRE spam seen in feedback diagnostics.
-            App.LogVerbose($"[MusicSession] Skipped stale timeline read: {ex.Message}");
-            return null;
-        }
+        return await _client.GetCurrentTimelineAsync(preferredSessionId).ConfigureAwait(false);
     }
 
     public async Task<MusicPlaybackSnapshot?> GetCurrentPlaybackAsync(string? preferredSessionId = null)
     {
-        await InitializeAsync();
+        await InitializeAsync().ConfigureAwait(false);
         if (_isDisposed)
         {
             return null;
         }
 
-        var session = ResolveSession(preferredSessionId);
-        AttachCurrentSession(session);
-        if (session is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var playbackInfo = session.GetPlaybackInfo();
-            var controls = playbackInfo.Controls;
-            return new MusicPlaybackSnapshot(
-                MapPlaybackState(playbackInfo.PlaybackStatus),
-                controls.IsPlayEnabled,
-                controls.IsPauseEnabled,
-                controls.IsPreviousEnabled,
-                controls.IsNextEnabled,
-                controls.IsPlaybackPositionEnabled,
-                controls.IsShuffleEnabled,
-                controls.IsRepeatEnabled,
-                MapPlaybackMode(playbackInfo));
-        }
-        catch (Exception ex)
-        {
-            // Same stale-session window as the timeline read above.
-            App.LogVerbose($"[MusicSession] Skipped stale playback read: {ex.Message}");
-            return null;
-        }
+        return await _client.GetCurrentPlaybackAsync(preferredSessionId).ConfigureAwait(false);
     }
 
     public async Task<bool> TrySetPreferredSessionAsync(string sessionId)
     {
-        await InitializeAsync();
+        await InitializeAsync().ConfigureAwait(false);
         if (_isDisposed)
         {
             return false;
         }
 
-        var session = FindSession(sessionId);
-        if (session is null)
-        {
-            return false;
-        }
-
-        AttachCurrentSession(session);
-        return true;
+        return await _client.TrySetPreferredSessionAsync(sessionId).ConfigureAwait(false);
     }
 
-    public async Task<bool> TryPlayAsync(string? sessionId)
-    {
-        return await TryControlAsync(sessionId, "play", session => session.TryPlayAsync());
-    }
+    public Task<bool> TryPlayAsync(string? sessionId) =>
+        RunControlAsync(sessionId, "play");
 
-    public async Task<bool> TryPauseAsync(string? sessionId)
-    {
-        return await TryControlAsync(sessionId, "pause", session => session.TryPauseAsync());
-    }
+    public Task<bool> TryPauseAsync(string? sessionId) =>
+        RunControlAsync(sessionId, "pause");
 
-    public async Task<bool> TryPreviousAsync(string? sessionId)
-    {
-        return await TryControlAsync(sessionId, "previous", session => session.TrySkipPreviousAsync());
-    }
+    public Task<bool> TryTogglePlayPauseAsync(string? sessionId) =>
+        RunControlAsync(sessionId, "toggle_play_pause");
 
-    public async Task<bool> TryNextAsync(string? sessionId)
-    {
-        return await TryControlAsync(sessionId, "next", session => session.TrySkipNextAsync());
-    }
+    public Task<bool> TryPreviousAsync(string? sessionId) =>
+        RunControlAsync(sessionId, "previous");
+
+    public Task<bool> TryNextAsync(string? sessionId) =>
+        RunControlAsync(sessionId, "next");
 
     public async Task<bool> TrySeekAsync(string? sessionId, TimeSpan position)
     {
-        long positionHundredNanoseconds = (long)position.TotalMilliseconds * 10_000;
-        return await TryControlAsync(
-            sessionId,
-            "seek",
-            session => session.TryChangePlaybackPositionAsync(positionHundredNanoseconds));
-    }
-
-    /// <summary>
-    /// Media commands target a session whose backing player can vanish at
-    /// any moment; the resulting COMException (0x800706BA) surfaced through
-    /// async-void click handlers as recurring unhandled exceptions in
-    /// feedback diagnostics. Reads already degraded silently for the same
-    /// reason — controls now do too.
-    /// </summary>
-    private async Task<bool> TryControlAsync(
-        string? sessionId,
-        string operation,
-        Func<GlobalSystemMediaTransportControlsSession, Windows.Foundation.IAsyncOperation<bool>> control)
-    {
-        // Resolution itself can race the player's exit, so it shares the
-        // guard instead of running in GetSessionAsync.
-        try
+        await InitializeAsync().ConfigureAwait(false);
+        if (_isDisposed)
         {
-            var session = await GetSessionAsync(sessionId);
-            return session is not null && await control(session);
-        }
-        catch (Exception ex)
-        {
-            App.LogVerbose($"[MusicSession] Skipped stale control '{operation}': {ex.Message}");
             return false;
         }
+
+        long positionHundredNanoseconds = Math.Max(0L, (long)position.TotalMilliseconds * 10_000L);
+        return await _client
+            .TryControlAsync(sessionId, "seek", positionTicks: positionHundredNanoseconds)
+            .ConfigureAwait(false);
     }
 
     public async Task<bool> TryChangePlaybackModeAsync(string? sessionId, MusicPlaybackMode playbackMode)
     {
-        try
+        await InitializeAsync().ConfigureAwait(false);
+        if (_isDisposed)
         {
-            var session = await GetSessionAsync(sessionId);
-            return session is not null && await ApplyPlaybackModeAsync(session, playbackMode);
-        }
-        catch (Exception ex)
-        {
-            App.LogVerbose($"[MusicSession] Skipped stale control 'mode': {ex.Message}");
             return false;
         }
-    }
 
-    private static async Task<bool> ApplyPlaybackModeAsync(
-        GlobalSystemMediaTransportControlsSession session,
-        MusicPlaybackMode playbackMode)
-    {
-
-        var playbackInfo = session.GetPlaybackInfo();
-        var controls = playbackInfo.Controls;
-        bool didChange = false;
-
-        switch (playbackMode)
-        {
-            case MusicPlaybackMode.Shuffle:
-                if (!controls.IsShuffleEnabled)
-                {
-                    return false;
-                }
-
-                if (controls.IsRepeatEnabled && playbackInfo.AutoRepeatMode != MediaPlaybackAutoRepeatMode.None)
-                {
-                    didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.None);
-                }
-
-                didChange |= await session.TryChangeShuffleActiveAsync(true);
-                return didChange;
-
-            case MusicPlaybackMode.Repeat:
-                if (!controls.IsRepeatEnabled)
-                {
-                    return false;
-                }
-
-                if (controls.IsShuffleEnabled && playbackInfo.IsShuffleActive == true)
-                {
-                    didChange |= await session.TryChangeShuffleActiveAsync(false);
-                }
-
-                didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.List);
-                return didChange;
-
-            default:
-                if (controls.IsShuffleEnabled && playbackInfo.IsShuffleActive == true)
-                {
-                    didChange |= await session.TryChangeShuffleActiveAsync(false);
-                }
-
-                if (controls.IsRepeatEnabled && playbackInfo.AutoRepeatMode != MediaPlaybackAutoRepeatMode.None)
-                {
-                    didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.None);
-                }
-
-                return didChange;
-        }
+        return await _client
+            .TryControlAsync(sessionId, "playback_mode", playbackMode: playbackMode)
+            .ConfigureAwait(false);
     }
 
     public void Dispose()
     {
+        lock (_lifecycleGate)
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+        }
+
+        TearDownCore();
+    }
+
+    private async Task<bool> RunControlAsync(string? sessionId, string action)
+    {
+        await InitializeAsync().ConfigureAwait(false);
         if (_isDisposed)
+        {
+            return false;
+        }
+
+        return await _client.TryControlAsync(sessionId, action).ConfigureAwait(false);
+    }
+
+    private void TearDownCore()
+    {
+        bool shouldReleaseLease;
+        lock (_lifecycleGate)
+        {
+            shouldReleaseLease = _holdsLease;
+            _holdsLease = false;
+        }
+
+        if (!shouldReleaseLease)
         {
             return;
         }
 
-        _isDisposed = true;
-        if (_manager is not null)
-        {
-            _manager.SessionsChanged -= Manager_SessionsChanged;
-            _manager.CurrentSessionChanged -= Manager_CurrentSessionChanged;
-        }
-
-        DetachSession(_currentSession);
-        _manager = null;
-        _currentSession = null;
+        _client.SessionsChanged -= Client_SessionsChanged;
+        _client.CurrentSessionChanged -= Client_CurrentSessionChanged;
+        _client.PlaybackInfoChanged -= Client_PlaybackInfoChanged;
+        _client.MediaPropertiesChanged -= Client_MediaPropertiesChanged;
+        _client.TimelinePropertiesChanged -= Client_TimelinePropertiesChanged;
+        _client.ConnectionStateChanged -= Client_ConnectionStateChanged;
+        _client.ReleaseLease();
     }
 
-    private async Task<GlobalSystemMediaTransportControlsSession?> GetSessionAsync(string? sessionId)
+    private void Client_SessionsChanged(object? sender, EventArgs e)
     {
-        await InitializeAsync();
-        if (_isDisposed)
+        if (!_isDisposed)
         {
-            return null;
+            SessionsChanged?.Invoke(this, EventArgs.Empty);
         }
-
-        return ResolveSession(sessionId);
     }
 
-    private GlobalSystemMediaTransportControlsSession? ResolveSession(string? preferredSessionId)
+    private void Client_CurrentSessionChanged(object? sender, EventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(preferredSessionId))
+        if (!_isDisposed)
         {
-            var preferred = FindSession(preferredSessionId);
-            if (preferred is not null)
+            CurrentSessionChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void Client_PlaybackInfoChanged(object? sender, EventArgs e)
+    {
+        if (!_isDisposed)
+        {
+            PlaybackInfoChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void Client_MediaPropertiesChanged(object? sender, EventArgs e)
+    {
+        if (!_isDisposed)
+        {
+            MediaPropertiesChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void Client_TimelinePropertiesChanged(object? sender, EventArgs e)
+    {
+        if (!_isDisposed)
+        {
+            TimelinePropertiesChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void Client_ConnectionStateChanged(object? sender, EventArgs e)
+    {
+        if (!_isDisposed)
+        {
+            ConnectionStateChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    internal static bool ShouldReuseCachedPreferredSession(
+        bool hasPreviousSession,
+        string? previousSessionId,
+        string preferredSessionId,
+        bool matchesLiveEntryIdentity,
+        bool isPreviousSessionClosed)
+    {
+        return hasPreviousSession &&
+            !isPreviousSessionClosed &&
+            matchesLiveEntryIdentity &&
+            string.Equals(previousSessionId, preferredSessionId, StringComparison.Ordinal);
+    }
+
+    internal static int SelectSystemSessionCandidateIndex(ReadOnlySpan<SystemSessionCandidate> candidates)
+    {
+        if (candidates.IsEmpty)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].State == MusicPlaybackState.Playing && candidates[i].IsSystemCurrent)
             {
-                return preferred;
+                return i;
             }
         }
 
-        return _manager?.GetCurrentSession() ?? _manager?.GetSessions().FirstOrDefault();
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].State == MusicPlaybackState.Playing)
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].IsPreviousCurrent &&
+                !candidates[i].IsClosed &&
+                candidates[i].State == MusicPlaybackState.Unknown)
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].IsSystemCurrent && !candidates[i].IsClosed)
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].IsPreviousCurrent && !candidates[i].IsClosed)
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (candidates[i].State == MusicPlaybackState.Paused)
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < candidates.Length; i++)
+        {
+            if (!candidates[i].IsClosed)
+            {
+                return i;
+            }
+        }
+
+        return 0;
     }
 
-    private GlobalSystemMediaTransportControlsSession? FindSession(string sessionId)
-    {
-        return EnumerateSessionEntries()
-            .FirstOrDefault(entry => string.Equals(entry.SessionId, sessionId, StringComparison.Ordinal))
-            ?.Session;
-    }
-
-    private async Task<MusicSessionInfo> CreateInfoAsync(GlobalSystemMediaTransportControlsSession session)
-    {
-        var mediaProperties = await TryGetMediaPropertiesAsync(session);
-        var playbackInfo = session.GetPlaybackInfo();
-        var timeline = session.GetTimelineProperties();
-        var controls = playbackInfo.Controls;
-
-        string sourceApp = session.SourceAppUserModelId ?? string.Empty;
-        string title = mediaProperties?.Title ?? string.Empty;
-        string artist = mediaProperties?.Artist ?? string.Empty;
-        string album = mediaProperties?.AlbumTitle ?? string.Empty;
-
-        return new MusicSessionInfo(
-            GetSessionId(session),
-            sourceApp,
-            GetSourceDisplayName(sourceApp),
-            title,
-            artist,
-            album,
-            MapPlaybackState(playbackInfo.PlaybackStatus),
-            timeline.Position,
-            timeline.EndTime > timeline.StartTime ? timeline.EndTime - timeline.StartTime : TimeSpan.Zero,
-            controls.IsPlayEnabled,
-            controls.IsPauseEnabled,
-            controls.IsPreviousEnabled,
-            controls.IsNextEnabled,
-            controls.IsPlaybackPositionEnabled,
-            controls.IsShuffleEnabled,
-            controls.IsRepeatEnabled,
-            MapPlaybackMode(playbackInfo),
-            mediaProperties?.Thumbnail);
-    }
-
-    private static async Task<GlobalSystemMediaTransportControlsSessionMediaProperties?> TryGetMediaPropertiesAsync(
-        GlobalSystemMediaTransportControlsSession session)
+    internal static async Task<T?> TryAwaitWithTimeoutAsync<T>(Task<T> operationTask, TimeSpan timeout)
     {
         try
         {
-            return await session.TryGetMediaPropertiesAsync();
+            return await operationTask.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            App.Log($"[MusicSession] Timed out waiting {timeout.TotalMilliseconds:F0}ms for cross-process SMTC async operation.");
+            return default;
         }
         catch (Exception ex)
         {
             App.Log($"[MusicSession] Failed to read media properties: {ex.Message}");
-            return null;
+            return default;
         }
-    }
-
-    private void AttachCurrentSession(GlobalSystemMediaTransportControlsSession? session)
-    {
-        if (ReferenceEquals(_currentSession, session))
-        {
-            return;
-        }
-
-        DetachSession(_currentSession);
-        _currentSession = session;
-
-        if (_currentSession is not null)
-        {
-            _currentSession.PlaybackInfoChanged += Session_PlaybackInfoChanged;
-            _currentSession.MediaPropertiesChanged += Session_MediaPropertiesChanged;
-            _currentSession.TimelinePropertiesChanged += Session_TimelinePropertiesChanged;
-        }
-    }
-
-    private void DetachSession(GlobalSystemMediaTransportControlsSession? session)
-    {
-        if (session is null)
-        {
-            return;
-        }
-
-        session.PlaybackInfoChanged -= Session_PlaybackInfoChanged;
-        session.MediaPropertiesChanged -= Session_MediaPropertiesChanged;
-        session.TimelinePropertiesChanged -= Session_TimelinePropertiesChanged;
-    }
-
-    private void Manager_SessionsChanged(
-        GlobalSystemMediaTransportControlsSessionManager sender,
-        SessionsChangedEventArgs args)
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        SessionsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Manager_CurrentSessionChanged(
-        GlobalSystemMediaTransportControlsSessionManager sender,
-        CurrentSessionChangedEventArgs args)
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        AttachCurrentSession(sender.GetCurrentSession());
-        CurrentSessionChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Session_PlaybackInfoChanged(
-        GlobalSystemMediaTransportControlsSession sender,
-        PlaybackInfoChangedEventArgs args)
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        PlaybackInfoChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Session_MediaPropertiesChanged(
-        GlobalSystemMediaTransportControlsSession sender,
-        MediaPropertiesChangedEventArgs args)
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        MediaPropertiesChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void Session_TimelinePropertiesChanged(
-        GlobalSystemMediaTransportControlsSession sender,
-        TimelinePropertiesChangedEventArgs args)
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        TimelinePropertiesChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private string GetSessionId(GlobalSystemMediaTransportControlsSession session)
-    {
-        IReadOnlyList<SessionEntry> entries = EnumerateSessionEntries();
-        SessionEntry? identityMatch = entries.FirstOrDefault(entry => IsSameSession(entry.Session, session));
-        if (identityMatch is not null)
-        {
-            return identityMatch.SessionId;
-        }
-
-        string sourceApp = session.SourceAppUserModelId ?? string.Empty;
-        SessionEntry[] sourceMatches = entries
-            .Where(entry => string.Equals(
-                entry.Session.SourceAppUserModelId,
-                sourceApp,
-                StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        return sourceMatches.Length == 1
-            ? sourceMatches[0].SessionId
-            : CreateSessionId(sourceApp, 0);
     }
 
     internal static string CreateSessionId(string sourceAppUserModelId, int sourceOrdinal)
@@ -589,7 +528,7 @@ public sealed class MusicSessionService : IDisposable
         return string.Concat(
             sourceAppUserModelId,
             "\u001F",
-            Math.Max(0, sourceOrdinal).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Math.Max(0, sourceOrdinal).ToString(CultureInfo.InvariantCulture));
     }
 
     internal static string GetSourceDisplayName(string sourceAppUserModelId)
@@ -672,63 +611,5 @@ public sealed class MusicSessionService : IDisposable
         }
 
         return result;
-    }
-
-    private IReadOnlyList<SessionEntry> EnumerateSessionEntries()
-    {
-        if (_manager is null)
-        {
-            return [];
-        }
-
-        var sourceOrdinals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var entries = new List<SessionEntry>();
-        foreach (GlobalSystemMediaTransportControlsSession session in _manager.GetSessions())
-        {
-            string sourceApp = session.SourceAppUserModelId ?? string.Empty;
-            int ordinal = sourceOrdinals.TryGetValue(sourceApp, out int nextOrdinal)
-                ? nextOrdinal
-                : 0;
-            sourceOrdinals[sourceApp] = ordinal + 1;
-            entries.Add(new SessionEntry(CreateSessionId(sourceApp, ordinal), session));
-        }
-
-        return entries;
-    }
-
-    private static bool IsSameSession(
-        GlobalSystemMediaTransportControlsSession? left,
-        GlobalSystemMediaTransportControlsSession? right)
-    {
-        return left is not null &&
-            right is not null &&
-            (ReferenceEquals(left, right) || left.Equals(right));
-    }
-
-    private sealed record SessionEntry(
-        string SessionId,
-        GlobalSystemMediaTransportControlsSession Session);
-
-    private static MusicPlaybackState MapPlaybackState(GlobalSystemMediaTransportControlsSessionPlaybackStatus status)
-    {
-        return status switch
-        {
-            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing => MusicPlaybackState.Playing,
-            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused => MusicPlaybackState.Paused,
-            GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped => MusicPlaybackState.Stopped,
-            _ => MusicPlaybackState.Unknown
-        };
-    }
-
-    private static MusicPlaybackMode MapPlaybackMode(GlobalSystemMediaTransportControlsSessionPlaybackInfo playbackInfo)
-    {
-        if (playbackInfo.IsShuffleActive == true)
-        {
-            return MusicPlaybackMode.Shuffle;
-        }
-
-        return playbackInfo.AutoRepeatMode == MediaPlaybackAutoRepeatMode.None
-            ? MusicPlaybackMode.Normal
-            : MusicPlaybackMode.Repeat;
     }
 }
