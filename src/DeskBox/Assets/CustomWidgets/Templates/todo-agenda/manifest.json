@@ -4,8 +4,8 @@
   "name": "${$i18n.widgetName}",
   "description": "${$i18n.widgetDescription}",
   "icon": "📆",
-  "version": "3.0.0",
-  "author": "DeskBox Official",
+  "version": "1.0.0",
+  "author": "DeskBox",
   "origin": "official",
   "capabilities": [
     "calendar",

@@ -134,15 +134,6 @@ public sealed partial class QuickCaptureSurfaceContent
             InlineComposerTextBox.FontSize = ViewModel.ContentTextSize;
         }
 
-        if (InlineComposerHintText is not null)
-        {
-            bool enterSaves = SettingsService.NormalizeEditorEnterBehavior(ViewModel.EditorEnterBehavior) ==
-                              SettingsService.EditorEnterBehaviorEnterSaves;
-            InlineComposerHintText.Text = T(enterSaves
-                ? "QuickCapture.QuickJotHintEnterSaves"
-                : "QuickCapture.QuickJotHint");
-        }
-
         if (InlineComposerAttachmentStrip is not null)
         {
             InlineComposerAttachmentStrip.RemoveAutomationName = T("QuickCapture.Detail.RemoveAttachment");
@@ -288,6 +279,26 @@ public sealed partial class QuickCaptureSurfaceContent
         {
             InlineComposerTextBox.FontSize = ViewModel.ContentTextSize;
         }
+
+        UpdateInlineComposerSaveButtonState();
+    }
+
+    private void UpdateInlineComposerSaveButtonState()
+    {
+        if (InlineComposerSaveButton is null)
+        {
+            return;
+        }
+
+        bool canSave = !string.IsNullOrWhiteSpace(InlineComposerTextBox?.Text) ||
+                       _pendingInlineAttachments.Count > 0;
+        InlineComposerSaveButton.IsEnabled = canSave;
+        InlineComposerSaveButton.Opacity = canSave ? 1.0 : 0.38;
+    }
+
+    private void InlineComposerTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateInlineComposerSaveButtonState();
     }
 
     private void RefreshInlineComposerAttachments()
@@ -310,6 +321,7 @@ public sealed partial class QuickCaptureSurfaceContent
         InlineComposerAttachmentStrip.Visibility = attachments.Length > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateInlineComposerSaveButtonState();
     }
 
     private async Task CommitInlineComposerAsync()

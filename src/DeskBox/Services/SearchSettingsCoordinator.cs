@@ -72,8 +72,9 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
             new(
                 hotkey is not null, search.SearchHotkeyEnabled, hotkey?.IsRegistered == true,
                 activation.Gesture, GlobalHotkeyService.FormatActivation(activation, _localization), activation.Kind),
-            TodoFeatureEnabled: FeatureWidgetSettings.IsEnabled(appSettings, WidgetKind.Todo),
-            QuickCaptureFeatureEnabled: FeatureWidgetSettings.IsEnabled(appSettings, WidgetKind.QuickCapture));
+            TodoFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryTodo),
+            QuickCaptureFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryNote),
+            ClipboardFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryClipboard));
     }
 
     private SearchPreferences ReadPreferences()
@@ -89,7 +90,8 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
             search.SearchCustomWebUrl,
             search.SearchQuickCreateTodoEnabled, search.SearchQuickCreateNoteEnabled,
             search.SearchQuickCreateDisplayMode, search.SearchQuickCreateDefaultTarget,
-            search.SearchQuickCreateShowHud);
+            search.SearchQuickCreateShowHud,
+            SearchSettingsSlice.NormalizeCategoryLayout(search.SearchCategoryLayout));
     }
 
     private async Task DrainRequestsAsync(bool forShutdown = false)
@@ -125,8 +127,7 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
         if (change.ShowRecommendations is { } recommendations) search.SearchShowRecommendations = recommendations;
         if (change.DefaultTab is { } tab)
         {
-            tab = tab.Trim().ToLowerInvariant();
-            search.SearchDefaultTab = tab is "all" or "app" or "file" or "deskbox" ? tab : "all";
+            search.SearchDefaultTab = SearchSettingsSlice.NormalizeDefaultTabId(tab);
         }
         if (change.IconAnimation is { } animation) search.SearchAppIconAnimation = Math.Clamp(animation, 0, 3);
         if (change.CategoryBarMode is { } barMode)
@@ -166,6 +167,28 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
             search.SearchQuickCreateDefaultTarget = qcTarget is "todo" or "note" ? qcTarget : "todo";
         }
         if (change.QuickCreateShowHud is { } qcHud) search.SearchQuickCreateShowHud = qcHud;
+        if (change.CategoryLayout is { } catLayout)
+        {
+            string normalizedLayout = SearchSettingsSlice.NormalizeCategoryLayout(catLayout);
+            search.SearchCategoryLayout = normalizedLayout;
+            IReadOnlyList<SearchCategoryEntry> parsedEntries = SearchSettingsSlice.ParseCategoryLayout(normalizedLayout);
+            if (!change.IncludeDeskBoxContent.HasValue)
+            {
+                search.SearchIncludeDeskBoxContent = parsedEntries.Any(static entry =>
+                    entry.Id is SearchSettingsSlice.CategoryTodo or SearchSettingsSlice.CategoryNote or SearchSettingsSlice.CategoryWidget &&
+                    entry.SearchEnabled);
+            }
+            if (!change.IncludeClipboard.HasValue)
+            {
+                search.SearchIncludeClipboard = parsedEntries.Any(static entry =>
+                    entry.Id == SearchSettingsSlice.CategoryClipboard && entry.SearchEnabled);
+            }
+            if (!string.Equals(search.SearchDefaultTab, SearchSettingsSlice.CategoryAll, StringComparison.Ordinal) &&
+                !parsedEntries.Any(entry => string.Equals(entry.Id, search.SearchDefaultTab, StringComparison.Ordinal) && entry.TabShown))
+            {
+                search.SearchDefaultTab = SearchSettingsSlice.CategoryAll;
+            }
+        }
         SearchPreferences after = ReadPreferences();
         if (before == after) return;
         _settings.SaveDebounced();

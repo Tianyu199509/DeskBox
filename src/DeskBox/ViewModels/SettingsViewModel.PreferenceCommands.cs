@@ -87,22 +87,23 @@ public partial class SettingsViewModel
             ApplySettingsSnapshot();
             IconHelper.ClearAllThumbnailCaches();
 
+            // Persist the restored snapshot BEFORE invoking live hotkey/tray
+            // refresh commands so that in out-of-process (--settings) mode the
+            // resident host re-registers hotkeys against the newly committed
+            // defaults rather than stale pre-reset settings.
+            await _settingsService.SaveAsync();
+
             // ApplySettingsSnapshot above already re-projected the
             // restored snap state onto the interaction editor.
             _appActions.SetSnapEnabled(_interactionSettings.SnapEnabled);
 
             _hotkeyActions.RefreshRegistration();
-            // The reset flipped SearchHotkeyEnabled back to its default in
-            // settings.json; re-run the live registration or the old
-            // gesture kept triggering search until the next restart
-            // (batch R9).
             _hotkeyActions.RefreshSearchHotkeyRegistration();
             _hotkeyActions.RefreshClipboardHotkeyRegistration();
             _appActions.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             _themeService.RefreshAppearance();
             RefreshAccentPreview();
-            await _settingsService.SaveAsync();
             _quickCaptureSettings.RefreshFromSettings();
             _settingsService.NotifyAppearancePreviewNow();
         }

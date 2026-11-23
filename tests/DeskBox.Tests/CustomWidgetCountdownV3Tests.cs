@@ -530,7 +530,7 @@ public sealed class CustomWidgetCountdownV3Tests
         Assert.Empty(parsed.Diagnostics);
 
         CustomWidgetManifest manifest = parsed.Manifest!;
-        Assert.Equal("5.0.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
 
         CustomWidgetSettingDefinition modules = Assert.Single(manifest.Settings, s => s.Key == "modules");
         Assert.Equal("hero:1,list:1,yearProgress:1", modules.DefaultValue);

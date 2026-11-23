@@ -1329,17 +1329,58 @@ public sealed partial class WidgetManager
             DateTime.UtcNow + TimeSpan.FromMilliseconds(400);
     }
 
+    private IntPtr _pendingRaisedGroupReassertHandle;
+    private long _pendingRaisedGroupReassertGeneration;
+    private string _pendingRaisedGroupReassertReason = string.Empty;
+    private bool _raisedGroupReassertQueued;
+
     internal bool ReassertRaisedWidgetGroupAfterDeskBoxActivation(
         IntPtr activeWidgetHandle,
         string reason)
     {
         if (!_widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
             WidgetLayerService.UsesDesktopPinnedMode() ||
             activeWidgetHandle == IntPtr.Zero ||
             !Win32Helper.IsWindow(activeWidgetHandle) ||
             !IsForegroundDeskBoxWindow() ||
             DateTime.UtcNow < _suppressRaisedGroupReassertUntilUtc)
         {
+            return false;
+        }
+
+        if (CallbackDepth.Depth > 0)
+        {
+            _pendingRaisedGroupReassertHandle = activeWidgetHandle;
+            _pendingRaisedGroupReassertGeneration = _trayRaiseBatchGeneration;
+            _pendingRaisedGroupReassertReason = reason;
+            if (!_raisedGroupReassertQueued)
+            {
+                _raisedGroupReassertQueued = true;
+                UiDispatch.PostAfterCallback(() =>
+                {
+                    _raisedGroupReassertQueued = false;
+                    IntPtr target = _pendingRaisedGroupReassertHandle;
+                    long generation = _pendingRaisedGroupReassertGeneration;
+                    string deferredReason = _pendingRaisedGroupReassertReason;
+                    _pendingRaisedGroupReassertHandle = IntPtr.Zero;
+                    if (!_widgetsRaisedFromTray ||
+                        _isTogglingWidgetsDesktopLayer ||
+                        generation != _trayRaiseBatchGeneration ||
+                        !Win32Helper.IsWindowInCurrentProcess(target) ||
+                        !WidgetLayerService.IsWindowOrOwnedByWidget(
+                            Win32Helper.GetForegroundWindow(),
+                            target))
+                    {
+                        return;
+                    }
+
+                    _ = ReassertRaisedWidgetGroupAfterDeskBoxActivation(
+                        target,
+                        deferredReason);
+                });
+            }
+
             return false;
         }
 

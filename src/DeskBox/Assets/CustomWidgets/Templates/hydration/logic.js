@@ -49,12 +49,11 @@ function shiftIsoDate(isoDate, deltaDays) {
 
 function resolveRecordDay(rec, fallbackIso) {
   if (rec && typeof rec.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.day)) return rec.day;
-  if (rec && typeof rec.dateText === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.dateText)) return rec.dateText;
   return fallbackIso;
 }
 
 function resolveRecordKind(rec) {
-  const raw = rec ? String(rec.kind || rec.drinkKind || '').trim().toLowerCase() : '';
+  const raw = rec ? String(rec.kind || '').trim().toLowerCase() : '';
   return Object.prototype.hasOwnProperty.call(DRINK_EMOJIS, raw) ? raw : 'water';
 }
 
@@ -82,10 +81,8 @@ function ensurePreviewDemoSeed(ctx, todayIso) {
     ctx.collections.append('logs', {
       day: dayIso,
       loggedTime: '18:00',
-      timeText: '18:00',
       amountMl: String(historyAmounts[i]),
       kind: 'water',
-      drinkKind: 'water',
       note: ''
     });
   }
@@ -101,10 +98,8 @@ function ensurePreviewDemoSeed(ctx, todayIso) {
     ctx.collections.prepend('logs', {
       day: todayIso,
       loggedTime: item.time,
-      timeText: item.time,
       amountMl: item.amount,
       kind: item.kind,
-      drinkKind: item.kind,
       note: item.note
     });
   }
@@ -133,7 +128,7 @@ function recomputeAll(ctx, opts) {
 
   for (let i = 0; i < logs.length; i++) {
     const rec = logs[i];
-    const amt = Math.max(0, parseIntSafe(rec.amountMl != null ? rec.amountMl : rec.amount, 0));
+    const amt = Math.max(0, parseIntSafe(rec.amountMl, 0));
     const recDay = resolveRecordDay(rec, todayIso);
     if (amt <= 0) continue;
 
@@ -156,7 +151,7 @@ function recomputeAll(ctx, opts) {
         emoji,
         amountMl: String(amt),
         noteOrLabel: displayLabel,
-        drinkTime: rec.loggedTime || rec.timeText || '--:--',
+        drinkTime: rec.loggedTime || '--:--',
         day: recDay
       });
     }
@@ -270,10 +265,8 @@ function addDrinkRecord(ctx, kindInput, amountMl, rawNote) {
     day: todayIso,
     loggedAtMs: String(nowMs),
     loggedTime: nowTime,
-    timeText: nowTime,
     amountMl: String(amountMl),
     kind: cleanKind,
-    drinkKind: cleanKind,
     note: cleanNote
   });
 

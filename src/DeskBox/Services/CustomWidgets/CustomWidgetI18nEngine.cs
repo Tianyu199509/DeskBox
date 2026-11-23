@@ -725,18 +725,10 @@ public static partial class CustomWidgetI18nEngine
             }
 
             if (string.Equals(prop.Name, "popovers", StringComparison.Ordinal) &&
-                prop.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                prop.Value.ValueKind == JsonValueKind.Object)
             {
                 writer.WritePropertyName("popovers");
                 WriteRootPopovers(writer, prop.Value, ctx);
-                continue;
-            }
-
-            if (string.Equals(prop.Name, "view", StringComparison.Ordinal) &&
-                prop.Value.ValueKind == JsonValueKind.Object)
-            {
-                writer.WritePropertyName("view");
-                WriteViewNodeObject(writer, prop.Value, "view", ctx);
                 continue;
             }
 
@@ -774,46 +766,23 @@ public static partial class CustomWidgetI18nEngine
         JsonElement popoversEl,
         CompilerContext ctx)
     {
-        if (popoversEl.ValueKind == JsonValueKind.Object)
+        writer.WriteStartObject();
+        int idx = 0;
+        foreach (JsonProperty popProp in popoversEl.EnumerateObject())
         {
-            writer.WriteStartObject();
-            int idx = 0;
-            foreach (JsonProperty popProp in popoversEl.EnumerateObject())
+            if (popProp.Value.ValueKind != JsonValueKind.Object)
             {
-                if (popProp.Value.ValueKind != JsonValueKind.Object)
-                {
-                    popProp.WriteTo(writer);
-                    idx++;
-                    continue;
-                }
-
-                string popSlug = SlugifySegment(popProp.Name, $"p{idx + 1}");
-                writer.WritePropertyName(popProp.Name);
-                WriteSinglePopoverDefinitionObject(writer, popProp.Value, $"popover.{popSlug}", ctx);
+                popProp.WriteTo(writer);
                 idx++;
-            }
-            writer.WriteEndObject();
-            return;
-        }
-
-        writer.WriteStartArray();
-        int arrIdx = 0;
-        foreach (JsonElement item in popoversEl.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object)
-            {
-                item.WriteTo(writer);
-                arrIdx++;
                 continue;
             }
 
-            string popSlug = item.TryGetProperty("id", out JsonElement idEl) && idEl.ValueKind == JsonValueKind.String
-                ? SlugifySegment(idEl.GetString(), $"p{arrIdx + 1}")
-                : $"p{arrIdx + 1}";
-            WriteSinglePopoverDefinitionObject(writer, item, $"popover.{popSlug}", ctx);
-            arrIdx++;
+            string popSlug = SlugifySegment(popProp.Name, $"p{idx + 1}");
+            writer.WritePropertyName(popProp.Name);
+            WriteSinglePopoverDefinitionObject(writer, popProp.Value, $"popover.{popSlug}", ctx);
+            idx++;
         }
-        writer.WriteEndArray();
+        writer.WriteEndObject();
     }
 
     private static void WriteSinglePopoverDefinitionObject(
@@ -836,39 +805,6 @@ public static partial class CustomWidgetI18nEngine
                         allowReuseExistingValueKey: true,
                         isUnit: false,
                         ctx));
-                continue;
-            }
-
-            if (string.Equals(prop.Name, "view", StringComparison.Ordinal) &&
-                prop.Value.ValueKind == JsonValueKind.Object)
-            {
-                writer.WritePropertyName("view");
-                WriteViewNodeObject(writer, prop.Value, $"{keyPrefix}.view", ctx);
-                continue;
-            }
-
-            if (string.Equals(prop.Name, "children", StringComparison.Ordinal) &&
-                prop.Value.ValueKind == JsonValueKind.Array)
-            {
-                writer.WritePropertyName("children");
-                writer.WriteStartArray();
-                int cIdx = 0;
-                foreach (JsonElement child in prop.Value.EnumerateArray())
-                {
-                    if (child.ValueKind == JsonValueKind.Object)
-                    {
-                        string childType = child.TryGetProperty("type", out JsonElement ctEl) && ctEl.ValueKind == JsonValueKind.String
-                            ? SlugifySegment(ctEl.GetString(), "n")
-                            : "n";
-                        WriteViewNodeObject(writer, child, $"{keyPrefix}.{childType}{cIdx + 1}", ctx);
-                    }
-                    else
-                    {
-                        child.WriteTo(writer);
-                    }
-                    cIdx++;
-                }
-                writer.WriteEndArray();
                 continue;
             }
 
@@ -1202,39 +1138,6 @@ public static partial class CustomWidgetI18nEngine
                     esProp.WriteTo(writer);
                 }
                 writer.WriteEndObject();
-                continue;
-            }
-
-            if (string.Equals(prop.Name, "itemTemplate", StringComparison.Ordinal) &&
-                prop.Value.ValueKind == JsonValueKind.Object)
-            {
-                writer.WritePropertyName("itemTemplate");
-                WriteViewNodeObject(writer, prop.Value, $"{nodeKeyBase}.item", ctx);
-                continue;
-            }
-
-            if (prop.Name is "children" or "tabs" or "hoverActions" &&
-                prop.Value.ValueKind == JsonValueKind.Array)
-            {
-                writer.WritePropertyName(prop.Name);
-                writer.WriteStartArray();
-                int childIdx = 0;
-                foreach (JsonElement child in prop.Value.EnumerateArray())
-                {
-                    if (child.ValueKind == JsonValueKind.Object)
-                    {
-                        string childType = child.TryGetProperty("type", out JsonElement ctEl) && ctEl.ValueKind == JsonValueKind.String
-                            ? SlugifySegment(ctEl.GetString(), "n")
-                            : "n";
-                        WriteViewNodeObject(writer, child, $"{nodeKeyBase}.{childType}{childIdx + 1}", ctx);
-                    }
-                    else
-                    {
-                        child.WriteTo(writer);
-                    }
-                    childIdx++;
-                }
-                writer.WriteEndArray();
                 continue;
             }
 

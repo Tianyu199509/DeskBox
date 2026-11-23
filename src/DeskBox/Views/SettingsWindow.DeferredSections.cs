@@ -235,6 +235,7 @@ public sealed partial class SettingsWindow
         {
             section.DataContext = _weatherSettingsViewModel;
             SyncMusicWeatherFeatureEnableState(sectionTag);
+            _ = ViewModel.EnsureWeatherNearbyCitiesInitializedAsync();
         }
 
         if (sectionTag == "Maintenance")

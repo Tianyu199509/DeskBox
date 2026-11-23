@@ -150,7 +150,7 @@ public static class CustomWidgetTemplates
           - `$todo.*` (`$todo.pendingCount`, `$todo.completedCount`, `$todo.totalCount`, `$todo.todayPendingCount`, `$todo.todayCompletedCount`, `$todo.overdueCount`, `$todo.importantPendingCount`, `$todo.completionPercent`, `$todo.nextTaskTitle`, `$todo.nextTaskDueText`, `$todo.summary`; plus privacy-safe rows in `collections.todos` with `$item.title`, `$item.done`, `$item.important`, `$item.dueDate`, `$item.priority`, `$item.listName`, `$item.isOverdue` and `ctx.env.todo` in `logic.js`) when `"sources": [{ "type": "todo", "targetCollection": "todos", "maxItems": 12, "intervalMs": 30000 }]`.
           - `$sys.*` (`$sys.cpu.percent`, `$sys.cpu.history`, `$sys.memory.percent`, `$sys.memory.summaryText`, `$sys.memory.history`, `$sys.gpu.name`, `$sys.gpu.percent`, `$sys.gpu.history`, `$sys.gpu.vramSummary`, `$sys.gpu.vramPercent`, `$sys.disk.selectedName`, `$sys.disk.selectedPercent`, `$sys.disk.selectedFreeGb`, `$sys.net.downText`, `$sys.net.upText`, `$sys.uptime.text`, `$sys.battery.statusText`) when `"sources": [{ "type": "systemMetrics", "intervalMs": 2000 }]`.
           - `$pomodoro.*` when `"sources": [{ "type": "pomodoro", "intervalMs": 1000 }]`.
-          - `$countdown.*` (supports solar + 1901-2100 Chinese lunar recurring birthdays/anniversaries via `"calendarType": "lunar"`, `"recurrence": "yearly"`; v3.0 adds payday weekend rules, count-up milestones, `${$countdown.work.percent}` work-hour progress and `${$countdown.holiday.days}` next-China-statutory-holiday countdown from the built-in 2025–2027 schedule) when `"sources": [{ "type": "countdown", "intervalMs": 60000 }]`.
+          - `$countdown.*` (supports solar + 1901-2100 Chinese lunar recurring birthdays/anniversaries via `"calendarType": "lunar"`, `"recurrence": "yearly"`, payday weekend rules, count-up milestones, `${$countdown.work.percent}` work-hour progress, and `${$countdown.holiday.days}` next-China-statutory-holiday countdown from the built-in 2025–2027 schedule) when `"sources": [{ "type": "countdown", "intervalMs": 60000 }]`.
           - `$ai.*` when `"sources": [{ "type": "aiMonitor", "intervalMs": 60000 }]`.
         """
 #if DESKBOX_STORE
@@ -1220,8 +1220,8 @@ public static class CustomWidgetTemplates
         {
             return RewriteTemplateSettingAndStateDefaults(
                 manifestJson,
-                oldSettingDefault: "https://sspai.com/feed",
-                newSettingDefault: "https://hnrss.org/frontpage",
+                oldSettingDefault: null,
+                newSettingDefault: null,
                 stateChannelKeyReplacement: "hn");
         }
 
@@ -1243,8 +1243,8 @@ public static class CustomWidgetTemplates
 
     private static string RewriteTemplateSettingAndStateDefaults(
         string manifestJson,
-        string oldSettingDefault,
-        string newSettingDefault,
+        string? oldSettingDefault,
+        string? newSettingDefault,
         string? stateChannelKeyReplacement)
     {
         try
@@ -1263,7 +1263,9 @@ public static class CustomWidgetTemplates
                 writer.WriteStartObject();
                 foreach (JsonProperty rootProp in root.EnumerateObject())
                 {
-                    if (string.Equals(rootProp.Name, "settings", StringComparison.Ordinal) &&
+                    if (oldSettingDefault is not null &&
+                        newSettingDefault is not null &&
+                        string.Equals(rootProp.Name, "settings", StringComparison.Ordinal) &&
                         rootProp.Value.ValueKind == JsonValueKind.Array)
                     {
                         writer.WritePropertyName("settings");
@@ -1307,7 +1309,7 @@ public static class CustomWidgetTemplates
                         {
                             if (string.Equals(stateProp.Name, "activeChannelKey", StringComparison.Ordinal) &&
                                 stateProp.Value.ValueKind == JsonValueKind.String &&
-                                stateProp.Value.GetString() is "auto" or "sspai")
+                                string.Equals(stateProp.Value.GetString(), "auto", StringComparison.Ordinal))
                             {
                                 writer.WriteString("activeChannelKey", stateChannelKeyReplacement);
                                 mutated = true;

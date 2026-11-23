@@ -17,7 +17,7 @@ public sealed class SystemPulseRecycleBinAndSearchTests
         Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => $"{d.Path}: {d.Message}")));
 
         CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(bundle.Locales);
-        Assert.Equal("4.2.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal(344, manifest.DefaultSize.Width);
         Assert.Equal(564, manifest.DefaultSize.Height);
 

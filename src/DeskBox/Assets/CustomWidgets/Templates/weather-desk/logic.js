@@ -3,8 +3,6 @@ function t(ctx, key, fallback) {
     const val = ctx.t(key, fallback || '');
     if (val) return String(val);
   }
-  const dict = ctx && ctx.i18n ? ctx.i18n : null;
-  if (dict && typeof dict[key] === 'string' && dict[key]) return dict[key];
   return fallback || '';
 }
 
@@ -65,7 +63,7 @@ function buildFallbackDays(ctx) {
 function normalizeForecastDay(ctx, rawItem, idx) {
   const d = rawItem || {};
   const rawId = String(d.id || '');
-  const isSampleId = /^s[0-4]$/.test(rawId) || /^d[0-4]$/.test(rawId) || /^fb-[0-4]$/.test(rawId);
+  const isSampleId = /^fb-[0-4]$/.test(rawId);
   return {
     id: rawId || ('day-' + idx),
     date: String(d.date || ''),
@@ -218,7 +216,7 @@ export function onInit(ctx) {
 
   const rawForecast = (ctx.collections && typeof ctx.collections.get === 'function')
     ? (ctx.collections.get('forecast') || [])
-    : (Array.isArray(ctx.collections && ctx.collections.forecast) ? ctx.collections.forecast : []);
+    : [];
 
   const fallbackDays = buildFallbackDays(ctx);
   const forecastSource = [];

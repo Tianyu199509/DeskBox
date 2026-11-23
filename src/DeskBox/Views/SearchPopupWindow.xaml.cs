@@ -74,6 +74,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
     private DispatcherQueueTimer? _coldHiddenCleanupTimer;
     private DispatcherQueueTimer? _unfocusedAutoHideTimer;
     private bool _isPopupInputActive;
+    private bool _pendingInitialSearchBoxFocus;
     private AppWindow? _appWindow;
     private IntPtr _hwnd;
 
@@ -87,8 +88,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
     private bool _micaControllerAttached;
     private bool _acrylicControllerAttached;
 
-    private const int MinPopupWidth = 400;
-    private const int MinPopupHeight = 300;
+    private const int MinPopupWidth = SearchPopupSurfacePolicy.MinPopupWidthLogical;
 
     // Close-path forensics: DeskBox never closes this window on its own except via
     // an explicit service dispose (which logs "[Search] Services disposed"), so a
@@ -121,9 +121,9 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
     private int _selectedRowHighlightGeneration;
     private int _tabFocusRestoreGeneration;
 
-    // One stable search surface. Layout differences should follow available width,
-    // not a user-facing mode that only changes the window dimensions.
-    private const int PopupWidth = 680;
+    // One stable search surface. Width is user-resizable horizontally and shared
+    // across all popup states; height remains strictly content-adaptive.
+    private const int PopupWidth = SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
     private const int PopupHeight = 500;
 
     public SearchPopupWindow(
@@ -366,6 +366,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
 
         // This is an interactive search window, so it must be activatable again after
         // the user works in another app.
+        _pendingInitialSearchBoxFocus = true;
         DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
 
         // Fluent entrance: quick scale + fade + rise, matching the Windows 11
@@ -375,17 +376,37 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             PopupShowStoryboard.Begin();
         }
 
-        // Focus immediately; recommendations can continue loading without making the
-        // freshly shown window feel inert.
-        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(SearchTextBox);
-        SearchTextBox.Focus(FocusState.Programmatic);
+        // Focus immediately; on the very first show of a newly created Window,
+        // SearchTextBox.IsLoaded may still be false so Focus() returns false —
+        // _pendingInitialSearchBoxFocus ensures Loaded, DispatcherQueue, and the
+        // post-yield continuation complete XAML + TSF/IME focus before typing.
+        if (!TryFocusSearchTextBoxForInput())
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (IsPopupVisible && !_isWindowClosed && _pendingInitialSearchBoxFocus)
+                {
+                    _ = TryFocusSearchTextBoxForInput();
+                }
+            });
+        }
 
         // Yield before recommendations, icons, or an idle-unloaded index do any work.
         // The native window can paint and accept input while those tasks continue.
         await Task.Yield();
-        if (!IsPopupVisible)
+        if (!IsPopupVisible || _isWindowClosed)
         {
             return;
+        }
+
+        if (_pendingInitialSearchBoxFocus)
+        {
+            if (Win32Helper.GetForegroundWindow() != _hwnd)
+            {
+                DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
+            }
+
+            _ = TryFocusSearchTextBoxForInput();
         }
 
         showStopwatch.Stop();
@@ -472,8 +493,38 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
             _hwnd,
             "search-popup-reactivated");
+        _pendingInitialSearchBoxFocus = true;
         DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
-        SearchTextBox.Focus(FocusState.Programmatic);
+        if (!TryFocusSearchTextBoxForInput())
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (IsPopupVisible && !_isWindowClosed && _pendingInitialSearchBoxFocus)
+                {
+                    _ = TryFocusSearchTextBoxForInput();
+                }
+            });
+        }
+    }
+
+    private bool TryFocusSearchTextBoxForInput()
+    {
+        if (_isWindowClosed || !IsPopupVisible)
+        {
+            return false;
+        }
+
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(SearchTextBox);
+        if (!SearchTextBox.IsLoaded)
+        {
+            _pendingInitialSearchBoxFocus = true;
+            return false;
+        }
+
+        bool focused = SearchTextBox.Focus(FocusState.Programmatic) ||
+                       SearchTextBox.FocusState != FocusState.Unfocused;
+        _pendingInitialSearchBoxFocus = !focused;
+        return focused;
     }
 
     /// <summary>
@@ -493,6 +544,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         StopHeightMorphTimer();
         CompleteDetailsPaneClose();
         _isPopupInputActive = false;
+        _pendingInitialSearchBoxFocus = false;
         IsPopupVisible = false;
         _hasPlayedOpenRecommendationsEntrance = false;
         RecommendedAppsGrid.CancelDrag();
@@ -501,6 +553,10 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         if (_isCmdBarFlyoutOpen)
         {
             CmdBarActionsFlyout.Hide();
+        }
+        if (_isManageTabsFlyoutOpen)
+        {
+            ManageTabsFlyout.Hide();
         }
         _activeRightDropMenu?.Hide();
         _activeRightDropMenu = null;
@@ -638,7 +694,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         RecommendationOverlays.HasActiveInteraction ||
         _isRubberBanding ||
                         _isExternalFileDragActive ||
-        _isCmdBarFlyoutOpen ||
+        IsAnyPopupFlyoutOpen ||
         _dragOutCandidate is not null ||
         _dragOutInProgress ||
         (RootGrid.XamlRoot is { } xamlRoot &&
@@ -811,9 +867,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         {
             if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
             {
-                row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
-                row.OpenLocationRequested -= OnRowOpenLocationRequested;
-                row.MoreActionsRequested -= OnRowMoreActionsRequested;
                 row.IsSelected = false;
                 row.IsMultiSelected = false;
                 row.IsTabStop = false;
@@ -940,6 +993,15 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         {
             CancelUnfocusedAutoHideTimer();
             UpdateSelectionActions();
+            if (IsPopupVisible &&
+                !_isWindowClosed &&
+                !IsAnyPopupFlyoutOpen &&
+                !RecommendationOverlays.IsAnyOverlayOpen &&
+                (_pendingInitialSearchBoxFocus ||
+                 GetPopupFocusedElement() is var focused && (focused is null || ReferenceEquals(focused, RootGrid))))
+            {
+                _ = TryFocusSearchTextBoxForInput();
+            }
         }
         else if (IsPopupVisible && !_isWindowClosed)
         {
@@ -953,248 +1015,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             ArmUnfocusedAutoHideTimer();
             PopupDeactivated?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    // Borderless drag and resize gestures.
-
-    private void PersistCustomBounds()
-    {
-        if (!Win32Helper.GetWindowRect(_hwnd, out var rect))
-        {
-            return;
-        }
-
-        _settingsService.Settings.Search.SearchPopupCustomX = rect.Left;
-        _settingsService.Settings.Search.SearchPopupCustomY = rect.Top;
-        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
-        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
-        // Persist without raising SettingsChanged. Raising it here re-triggers
-        // OnAppearanceSettingsChanged -> ApplyMaterialFromSettings, which re-applies the
-        // DWM backdrop and causes the window to flash on every drag release.
-        _settingsService.SaveDebounced(notifySubscribers: false);
-    }
-
-    private void ResetToDefaultBounds()
-    {
-        _settingsService.Settings.Search.SearchPopupCustomX = null;
-        _settingsService.Settings.Search.SearchPopupCustomY = null;
-        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
-        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
-        _settingsService.SaveDebounced(notifySubscribers: false);
-
-        UpdatePopupDynamicBounds(forceWhenOpening: true);
-    }
-
-    private static int ToPhysicalPixels(int logicalPixels, double scale)
-    {
-        double normalized = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
-        return Math.Max(1, (int)Math.Round(logicalPixels * normalized, MidpointRounding.AwayFromZero));
-    }
-
-    private void TopDragHotZone_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        SetPointerCursor(TopDragHotZone, InputSystemCursorShape.SizeAll);
-    }
-
-    private void TopDragHotZone_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-    }
-
-    private void TopDragHotZone_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            !e.GetCurrentPoint(element).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        SnapHeightMorphToTarget();
-        if (!TryBeginWindowInteraction(element, e))
-        {
-            return;
-        }
-
-        _isWindowDragging = true;
-        e.Handled = true;
-    }
-
-    private void TopDragHotZone_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        ResetToDefaultBounds();
-        e.Handled = true;
-    }
-
-    private void ResizeBorder_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element ||
-            !e.GetCurrentPoint(element).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        string direction = element.Tag as string ?? string.Empty;
-        SnapHeightMorphToTarget();
-        if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e))
-        {
-            return;
-        }
-
-        _resizeDirection = direction;
-        _isWindowResizing = true;
-        e.Handled = true;
-    }
-
-    private bool TryBeginWindowInteraction(FrameworkElement element, PointerRoutedEventArgs e)
-    {
-        bool anchored = Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out _interactionStartCursor) ||
-            Win32Helper.GetCursorPos(out _interactionStartCursor);
-        if (!anchored || !Win32Helper.GetWindowRect(_hwnd, out var rect))
-        {
-            return false;
-        }
-
-        _interactionStartBounds = new RectInt32(
-            rect.Left,
-            rect.Top,
-            rect.Right - rect.Left,
-            rect.Bottom - rect.Top);
-        _windowInteractionElement = element;
-        if (!element.CapturePointer(e.Pointer))
-        {
-            _windowInteractionElement = null;
-            return false;
-        }
-
-        return true;
-    }
-
-    private void WindowInteraction_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if ((!_isWindowDragging && !_isWindowResizing) || _appWindow is null)
-        {
-            return;
-        }
-
-        if (!Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out var cursor) &&
-            !Win32Helper.GetCursorPos(out cursor))
-        {
-            return;
-        }
-
-        int deltaX = cursor.X - _interactionStartCursor.X;
-        int deltaY = cursor.Y - _interactionStartCursor.Y;
-        if (_isWindowDragging)
-        {
-            WindowShellState.MoveWindowInteractive(
-                _appWindow,
-                _hwnd,
-                _interactionStartBounds.X + deltaX,
-                _interactionStartBounds.Y + deltaY);
-        }
-        else
-        {
-            ApplyResizeDelta(deltaX, deltaY);
-        }
-
-        e.Handled = true;
-    }
-
-    private void ApplyResizeDelta(int deltaX, int deltaY)
-    {
-        if (_appWindow is null)
-        {
-            return;
-        }
-
-        int x = _interactionStartBounds.X;
-        int y = _interactionStartBounds.Y;
-        int width = _interactionStartBounds.Width;
-        int height = _interactionStartBounds.Height;
-        double scale = Win32Helper.GetDpiScaleForWindow(_hwnd, Content?.XamlRoot);
-        int minWidth = ToPhysicalPixels(MinPopupWidth, scale);
-        int minHeight = ToPhysicalPixels(MinPopupHeight, scale);
-
-        if (_resizeDirection.Contains("Right", StringComparison.Ordinal))
-        {
-            width = Math.Max(minWidth, width + deltaX);
-        }
-        else if (_resizeDirection.Contains("Left", StringComparison.Ordinal))
-        {
-            int right = x + width;
-            width = Math.Max(minWidth, width - deltaX);
-            x = right - width;
-        }
-
-        if (_resizeDirection.Contains("Bottom", StringComparison.Ordinal))
-        {
-            height = Math.Max(minHeight, height + deltaY);
-        }
-        else if (_resizeDirection.Contains("Top", StringComparison.Ordinal))
-        {
-            int bottom = y + height;
-            height = Math.Max(minHeight, height - deltaY);
-            y = bottom - height;
-        }
-
-        WindowShellState.ResizeWindowInteractive(_appWindow, _hwnd, x, y, width, height);
-    }
-
-    private void WindowInteraction_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        CompleteWindowInteraction(e.Pointer, persist: true);
-        e.Handled = true;
-    }
-
-    private void WindowInteraction_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        CompleteWindowInteraction(e.Pointer, persist: true);
-    }
-
-    private void CompleteWindowInteraction(Pointer pointer, bool persist)
-    {
-        if (!_isWindowDragging && !_isWindowResizing)
-        {
-            return;
-        }
-
-        bool wasDragging = _isWindowDragging;
-        var captureElement = _windowInteractionElement;
-        _windowInteractionElement = null;
-        _isWindowDragging = false;
-        _isWindowResizing = false;
-        _resizeDirection = string.Empty;
-        captureElement?.ReleasePointerCapture(pointer);
-        if (persist)
-        {
-            PersistCustomBounds();
-            if (wasDragging && IsPopupVisible && !_isWindowClosed)
-            {
-                UpdatePopupDynamicBounds(forceWhenOpening: true);
-            }
-        }
-    }
-
-    private void ResizeBorder_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement element)
-        {
-            return;
-        }
-
-        var shape = (element.Tag as string) switch
-        {
-            "Left" or "Right" => InputSystemCursorShape.SizeWestEast,
-            "Top" or "Bottom" => InputSystemCursorShape.SizeNorthSouth,
-            "TopLeft" or "BottomRight" => InputSystemCursorShape.SizeNorthwestSoutheast,
-            "TopRight" or "BottomLeft" => InputSystemCursorShape.SizeNortheastSouthwest,
-            _ => InputSystemCursorShape.Arrow
-        };
-        SetPointerCursor(element, shape);
-    }
-
-    private static void SetPointerCursor(UIElement element, InputSystemCursorShape shape)
-    {
-        UiElementCursorHelper.SetCursor(element, shape);
     }
 
     /// <summary>
@@ -1355,12 +1175,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                 var opaqueBase = hc
                     ? WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark)
                     : BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity);
-                PopupSurfacePlate.Background = new SolidColorBrush(
-                    Windows.UI.Color.FromArgb(
-                        hc ? (byte)0xFF : materialResolution.SurfacePlateColor.A,
-                        opaqueBase.R,
-                        opaqueBase.G,
-                        opaqueBase.B));
+                PopupSurfacePlate.Background = new SolidColorBrush(opaqueBase);
             }
             else
             {
@@ -1764,75 +1579,10 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             (byte)Math.Round(from.B + ((to.B - from.B) * amount)));
     }
 
-    /// <summary>
-    /// Applies the persisted custom bounds (drag/resize memory) if they are complete and
-    /// still valid on the current display configuration. Returns false when the default
-    /// placement should be used instead (no custom bounds saved, bounds too small, or
-    /// the saved rectangle no longer intersects any visible work area — e.g. after a
-    /// monitor was disconnected).
-    /// </summary>
-    private bool TryApplyCustomBounds()
-    {
-        if (_appWindow is null)
-        {
-            return false;
-        }
-
-        var settings = _settingsService.Settings.Search;
-        if (settings.SearchPopupCustomX is not int x ||
-            settings.SearchPopupCustomY is not int y ||
-            settings.SearchPopupCustomWidth is not int width ||
-            settings.SearchPopupCustomHeight is not int height)
-        {
-            return false;
-        }
-
-        if (width < MinPopupWidth || height < MinPopupHeight)
-        {
-            return false;
-        }
-
-        // Validate against the work area of the display the saved position belongs to.
-        var displayArea = DisplayArea.GetFromPoint(
-            new PointInt32(x, y), DisplayAreaFallback.Nearest);
-        var work = displayArea.WorkArea;
-        bool intersects = x < work.X + work.Width && x + width > work.X &&
-                          y < work.Y + work.Height && y + height > work.Y;
-        if (!intersects)
-        {
-            return false;
-        }
-
-        _appWindow.MoveAndResize(new RectInt32(x, y, width, height));
-        return true;
-    }
-
-    private void PositionOnScreen()
-    {
-        if (_appWindow is null)
-        {
-            return;
-        }
-
-        var displayArea = DisplayArea.GetFromWindowId(
-            _appWindow.Id, DisplayAreaFallback.Primary);
-
-        int workWidth = displayArea.WorkArea.Width;
-        int workHeight = displayArea.WorkArea.Height;
-        int workLeft = displayArea.WorkArea.X;
-        int workTop = displayArea.WorkArea.Y;
-
-        int x = workLeft + (workWidth - PopupWidth) / 2;
-        int y = workTop + (int)(workHeight * 0.25);
-
-        _appWindow.Move(new PointInt32(x, y));
-    }
-
     private void SetupBindings()
     {
         UpdateHotkeyHint();
         SearchTextBox.PlaceholderText = _localizationService.T("Search.Placeholder");
-        ToolTipService.SetToolTip(ClosePopupButton, _localizationService.T("Search.Close"));
         NoResultsTitle.Text = _localizationService.T("Search.NoResults.Title");
         NoResultsSubtitle.Text = _localizationService.T("Search.NoResults.Subtitle");
         NoResultsEverythingHint.Text = _localizationService.T("Search.NoResults.EverythingHint");
@@ -1845,10 +1595,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         SortTypeLabel.Text = _localizationService.T("Search.Sort.Type");
         SortSizeLabel.Text = _localizationService.T("Search.Sort.Size");
         SortDateLabel.Text = _localizationService.T("Search.Sort.Date");
-        OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
-        OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
-        AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
-        SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
         ToolTipService.SetToolTip(
             HiddenAppsEntryButton,
@@ -1860,6 +1606,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         RecommendationOverlays.ApplyLocalizedStrings();
         SyncEditRecommendationsButtonVisuals();
         ApplyLocalizedCommandPaletteStrings();
+        ApplyLocalizedCategoryTabsStrings();
 
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
@@ -1887,9 +1634,31 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             : Visibility.Collapsed;
     }
 
+    private bool HasOpenModalOrContextPopup()
+    {
+        if (IsAnyPopupFlyoutOpen)
+        {
+            return true;
+        }
+
+        if (Content?.XamlRoot is { } xamlRoot)
+        {
+            var openPopups = VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot);
+            for (int i = 0; i < openPopups.Count; i++)
+            {
+                if (openPopups[i].Child is ContentDialog or MenuFlyoutPresenter or FlyoutPresenter)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Handled || _isCmdBarFlyoutOpen ||
+        if (e.Handled || HasOpenModalOrContextPopup() ||
             DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
         {
             return;
@@ -1983,6 +1752,22 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         // then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (_isManageTabsFlyoutOpen)
+            {
+                ManageTabsFlyout.Hide();
+                e.Handled = true;
+                return;
+            }
+            if (_isCmdBarFlyoutOpen)
+            {
+                CmdBarActionsFlyout.Hide();
+                e.Handled = true;
+                return;
+            }
+            if (HasOpenModalOrContextPopup())
+            {
+                return;
+            }
             if (RecommendationOverlays.IsEditingFolderTitle)
             {
                 RecommendationOverlays.CancelTitleEdit();
@@ -2025,7 +1810,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                 e.Handled = true;
                 return;
             }
-            if (FocusManager.GetFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
+            if (GetPopupFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
             {
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
@@ -2081,35 +1866,72 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                 e.Handled = true;
                 return;
             }
-            // Standard case: preview only when focus is outside the text box.
-            if (FocusManager.GetFocusedElement() is not TextBox)
+            // Standard case: preview only when focus is outside editable controls.
+            if (!IsTextInputCurrentlyFocused())
             {
                 TryPreviewSelectedItem();
                 e.Handled = true;
             }
         }
+    }
 
-        // Printable keys falling through from non-editable controls (sort
-        // headers, scroll viewers, recommendation chrome) flow into the query
-        // so the user can always start typing immediately. Modifier chords
-        // stay untouched — Ctrl+A/C/V must not insert literal characters.
-        if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
-            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
-            !RecommendationOverlays.IsEditingFolderTitle &&
-            !RecommendationOverlays.IsAnyOverlayOpen)
+    private void RootGrid_CharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs e)
+    {
+        if (e.Handled ||
+            IsAnyPopupFlyoutOpen ||
+            RecommendationOverlays.IsEditingFolderTitle ||
+            RecommendationOverlays.IsAnyOverlayOpen ||
+            DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace() ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.LeftWindows) ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.RightWindows))
         {
-            object? focused = FocusManager.GetFocusedElement();
-            if (focused is not TextBox and not ComboBox &&
-                (focused is not Button focusedBtn ||
-                 IsSortHeaderButton(focusedBtn) ||
-                 RecommendedAppsGrid.IsAppsPanelVisible))
-            {
-                if (TryRedirectCharToSearchBox(e.Key))
-                {
-                    e.Handled = true;
-                }
-            }
+            return;
         }
+
+        if (IsTextInputCurrentlyFocused())
+        {
+            return;
+        }
+
+        object? focused = GetPopupFocusedElement();
+        if (focused is ComboBox ||
+            (focused is Button focusedBtn &&
+             !IsSortHeaderButton(focusedBtn) &&
+             !RecommendedAppsGrid.IsAppsPanelVisible))
+        {
+            return;
+        }
+
+        char ch = e.Character;
+        if (ch == 0 || char.IsControl(ch) || ch == ' ')
+        {
+            return;
+        }
+
+        if (TryRedirectCharacterToSearchBox(ch))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private object? GetPopupFocusedElement() =>
+        RootGrid.XamlRoot is { } xamlRoot
+            ? FocusManager.GetFocusedElement(xamlRoot)
+            : null;
+
+    private bool IsTextInputCurrentlyFocused()
+    {
+        if (SearchTextBox.FocusState != FocusState.Unfocused)
+        {
+            return true;
+        }
+
+        object? focused = GetPopupFocusedElement();
+        return focused is TextBox or RichEditBox or PasswordBox or AutoSuggestBox or NumberBox ||
+               (focused is DependencyObject dep &&
+                DeskBox.Helpers.TransientInputFocusGuard.IsInsideTextInputControl(dep));
     }
 
     /// <summary>
@@ -2130,10 +1952,11 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             return false;
         }
 
-        object? focusedElement = FocusManager.GetFocusedElement();
+        object? focusedElement = GetPopupFocusedElement();
         DependencyObject? focusedObject = focusedElement as DependencyObject;
         TextBox? focusedTextBox = FindVisualAncestor<TextBox>(focusedObject);
-        bool searchInputFocused = ReferenceEquals(focusedTextBox, SearchTextBox);
+        bool searchInputFocused = SearchTextBox.FocusState != FocusState.Unfocused ||
+                                  ReferenceEquals(focusedTextBox, SearchTextBox);
         if (focusedTextBox is not null && !searchInputFocused)
         {
             // Do not take arrow keys from rename/dialog text editors.
@@ -2168,19 +1991,9 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         return true;
     }
 
-    private static bool IsVisualDescendantOf(
-        DependencyObject element,
-        DependencyObject ancestor) =>
-        SearchRecommendationLayoutEngine.IsVisualDescendantOf(element, ancestor);
-
     private static T? FindVisualAncestor<T>(DependencyObject? element)
         where T : DependencyObject =>
         SearchRecommendationLayoutEngine.FindVisualAncestor<T>(element);
-
-    private void ClosePopupButton_Click(object sender, RoutedEventArgs e)
-    {
-        HidePopup();
-    }
 
     /// <summary>
     /// Handles newly realized item containers in the recommended-apps repeater.
@@ -2381,16 +2194,34 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
 
         UpdateRecommendationEditStatusHint();
 
-        // Optional sortable header: hidden by default unless enabled in Search Settings.
+        // Optional sortable header: hidden by default unless enabled in Search Settings or Ctrl+K.
         bool fileSortTab = _viewModel.SelectedTab?.SupportsFileSort == true;
-        bool showSortHeader = showResultChrome &&
+        bool showSortHeader = showResults &&
                               fileSortTab &&
                               _settingsService.Settings.Search.SearchShowSortHeader;
+        if (!showSortHeader &&
+            IsPopupVisible &&
+            !_isWindowClosed &&
+            GetPopupFocusedElement() is Button focusedSortBtn &&
+            IsSortHeaderButton(focusedSortBtn))
+        {
+            SearchTextBox.Focus(FocusState.Programmatic);
+        }
+
         SortHeaderRow.Visibility = showSortHeader
             ? Visibility.Visible
             : Visibility.Collapsed;
+        SyncSortHeaderAndRowColumns();
+        if (showSortHeader)
+        {
+            UpdateSortHeaders();
+        }
 
         bool showEmptySelectedTab = hasQuery && !searching && hasResults && !tabHasItems && tabSelected;
+        if (showEmptySelectedTab)
+        {
+            EmptyTabHintIcon.Glyph = _viewModel.SelectedTab?.Glyph ?? "\uE8B7";
+        }
         EmptyTabHintPanel.Visibility = showEmptySelectedTab
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -2454,10 +2285,14 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             ? DisplayArea.GetFromPoint(new PointInt32(savedX, savedY), DisplayAreaFallback.Nearest)
             : DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
         RectInt32 workAreaPhysical = displayArea.WorkArea;
+        int workAreaLogicalWidth = Math.Max(320, (int)Math.Round(workAreaPhysical.Width / scale));
         int workAreaLogicalHeight = Math.Max(320, (int)Math.Round(workAreaPhysical.Height / scale));
+        int desiredLogicalWidth = SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(
+            searchSlice.SearchPopupCustomWidth,
+            workAreaLogicalWidth);
 
         bool hasQuery = HasActiveSearchOrScope;
-        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible && !_isDetailsPaneClosing;
+        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible;
         bool showNoResultsOrEmptyTab = NoResultsPanel.Visibility == Visibility.Visible ||
                                        EmptyTabHintPanel.Visibility == Visibility.Visible;
 
@@ -2491,7 +2326,8 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             ShowAllHiddenRecommendationsHint: RecommendedAppsGrid.IsAllHiddenHintVisible,
             ShowNoResults: showNoResultsOrEmptyTab,
             ShowFooter: FooterBar.Visibility == Visibility.Visible,
-            ShowDetailsPane: showDetailsPane);
+            ShowDetailsPane: showDetailsPane,
+            PopupWidthLogical: desiredLogicalWidth);
 
         int maxLogicalHeight = SearchPopupSurfacePolicy.ComputeMaxLogicalHeight(workAreaLogicalHeight);
         int desiredLogicalHeight = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
@@ -2508,14 +2344,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         int? minOverlayHeightPhysical = RecommendationOverlays.IsAnyOverlayOpen
             ? SearchPopupSurfacePolicy.ToPhysicalPixels(420, scale)
             : null;
-
-        // Keep split-pane width locked throughout an active query session whenever
-        // SearchShowDetailsPane is enabled so typing never snaps horizontally 780 <-> 660.
-        bool useDetailsSplitWidth = showDetailsPane ||
-                                    (hasQuery && searchSlice.SearchShowDetailsPane);
-        int desiredLogicalWidth = useDetailsSplitWidth
-            ? SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical
-            : SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
 
         RectInt32 targetBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
             workAreaPhysical,
@@ -2717,8 +2545,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                 Win32Helper.SWP_NOACTIVATE |
                 Win32Helper.SWP_NOCOPYBITS);
         }
-
-        ApplyDetailsSplitWidthForPopupWidth(widthStep.Width, isSettled: widthStep.IsSettled);
     }
 
     private void StopHeightMorphTimer()
@@ -2761,7 +2587,6 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         RootGrid.Width = targetLogicalWidth;
         RootGrid.Height = targetLogicalHeight;
         _lastMorphWindowX = targetBounds.X;
-        ApplyDetailsSplitWidthForPopupWidth(targetLogicalWidth, isSettled: true);
         if (syncMinHeight)
         {
             SyncResultsSurfaceMinHeight();
@@ -2783,6 +2608,29 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         }
     }
 
+    private void SearchBoxBorder_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(SearchBoxBorder).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        DependencyObject? source = e.OriginalSource as DependencyObject;
+        if (FindVisualAncestor<Button>(source) is not null ||
+            FindVisualAncestor<TextBox>(source) is not null)
+        {
+            return;
+        }
+
+        if (SearchTextBox.Focus(FocusState.Programmatic))
+        {
+            int end = SearchTextBox.Text?.Length ?? 0;
+            SearchTextBox.SelectionStart = end;
+            SearchTextBox.SelectionLength = 0;
+            e.Handled = true;
+        }
+    }
+
     private void SearchTextBox_Loaded(object sender, RoutedEventArgs e)
     {
         if (SearchRecommendationLayoutEngine.FindVisualChild<Button>(SearchTextBox, "DeleteButton") is { } nativeDeleteButton)
@@ -2791,6 +2639,11 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             nativeDeleteButton.MaxHeight = 0;
             nativeDeleteButton.Opacity = 0;
             nativeDeleteButton.IsHitTestVisible = false;
+        }
+
+        if (IsPopupVisible && !_isWindowClosed && _pendingInitialSearchBoxFocus)
+        {
+            _ = TryFocusSearchTextBoxForInput();
         }
     }
 
@@ -2884,6 +2737,8 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
 
     private void SearchTextBox_GotFocus(object sender, RoutedEventArgs e)
     {
+        _pendingInitialSearchBoxFocus = false;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(SearchTextBox);
         HotkeyHintBadge.Opacity = 0.50;
         ApplySearchInputWellVisuals();
     }
@@ -2919,6 +2774,22 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
+                if (_isManageTabsFlyoutOpen)
+                {
+                    ManageTabsFlyout.Hide();
+                    e.Handled = true;
+                    break;
+                }
+                if (_isCmdBarFlyoutOpen)
+                {
+                    CmdBarActionsFlyout.Hide();
+                    e.Handled = true;
+                    break;
+                }
+                if (HasOpenModalOrContextPopup())
+                {
+                    break;
+                }
                 if (RecommendationOverlays.IsEditingFolderTitle)
                 {
                     RecommendationOverlays.CancelTitleEdit();
@@ -3112,41 +2983,30 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                     e.Handled = true;
                 }
                 break;
-
-            default:
-                // Redirect printable characters back to the search text box so the
-                // user can seamlessly continue typing after navigating results.
-                if (TryRedirectCharToSearchBox(e.Key))
-                {
-                    e.Handled = true;
-                }
-                break;
         }
     }
 
     /// <summary>
-    /// When focus is in the results panel and the user types a letter/digit,
-    /// move focus back to the search text box and append the character.
+    /// Redirects a WM_CHAR character received outside editable controls into
+    /// the search text box without colliding with KeyDown/WM_CHAR double input.
     /// </summary>
-    private bool TryRedirectCharToSearchBox(Windows.System.VirtualKey key)
+    private bool TryRedirectCharacterToSearchBox(char ch)
     {
-        char? c = key switch
+        if (ch == 0 || char.IsControl(ch) || ch == ' ')
         {
-            >= Windows.System.VirtualKey.A and <= Windows.System.VirtualKey.Z =>
-                Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift)
-                    ? (char)('A' + (key - Windows.System.VirtualKey.A))
-                    : (char)('a' + (key - Windows.System.VirtualKey.A)),
-            >= Windows.System.VirtualKey.Number0 and <= Windows.System.VirtualKey.Number9 =>
-                (char)('0' + (key - Windows.System.VirtualKey.Number0)),
-            _ => null
-        };
-
-        if (c is null) return false;
+            return false;
+        }
 
         SearchTextBox.Focus(FocusState.Programmatic);
-        int caret = SearchTextBox.SelectionStart;
-        SearchTextBox.Text = SearchTextBox.Text.Insert(caret, c.Value.ToString());
-        SearchTextBox.SelectionStart = caret + 1;
+        string currentText = SearchTextBox.Text ?? string.Empty;
+        int start = Math.Clamp(SearchTextBox.SelectionStart, 0, currentText.Length);
+        int length = Math.Clamp(SearchTextBox.SelectionLength, 0, currentText.Length - start);
+        SearchTextBox.Text = string.Concat(
+            currentText.AsSpan(0, start),
+            new ReadOnlySpan<char>(in ch),
+            currentText.AsSpan(start + length));
+        SearchTextBox.SelectionStart = start + 1;
+        SearchTextBox.SelectionLength = 0;
         return true;
     }
 
@@ -3257,6 +3117,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
         {
             TabsList.SelectedItem = _viewModel.SelectedTab;
         }
+        ScrollSelectedTabIntoView();
         ClearMultiSelection();
     }
 
@@ -3376,7 +3237,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
     bool ISearchRecommendationGridHost.IsAnyOverlayOpen => RecommendationOverlays.IsAnyOverlayOpen;
     void ISearchRecommendationGridHost.HidePopup() => HidePopup();
     void ISearchRecommendationGridHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
-    void ISearchRecommendationGridHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationGridHost.FocusPopupRoot() => SearchTextBox.Focus(FocusState.Programmatic);
     void ISearchRecommendationGridHost.OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename) =>
         RecommendationOverlays.OpenFolder(folderEntry, startRename);
     void ISearchRecommendationGridHost.CloseOverlays(bool immediate) =>
@@ -3412,7 +3273,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
     FrameworkElement ISearchRecommendationOverlayHost.SearchHeaderElement => SearchBoxRow;
     void ISearchRecommendationOverlayHost.HidePopup() => HidePopup();
     void ISearchRecommendationOverlayHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
-    void ISearchRecommendationOverlayHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationOverlayHost.FocusPopupRoot() => SearchTextBox.Focus(FocusState.Programmatic);
     void ISearchRecommendationOverlayHost.CancelRecommendedGridDrag() => RecommendedAppsGrid.CancelDrag();
     void ISearchRecommendationOverlayHost.EndRecommendedGridRubberBand() => RecommendedAppsGrid.EndRubberBand();
     void ISearchRecommendationOverlayHost.UpdatePopupDynamicBounds() => UpdatePopupDynamicBounds();

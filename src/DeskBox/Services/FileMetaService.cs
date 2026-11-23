@@ -515,6 +515,12 @@ public sealed class FileMetaService : IDisposable
         {
             if (item.Kind == SearchResultKind.Folder)
             {
+                if (item.ModifiedAt is { } existingFolderModified)
+                {
+                    item.DateDisplay ??= FormatDate(existingFolderModified.LocalDateTime);
+                    return;
+                }
+
                 var dirInfo = new DirectoryInfo(item.DetailPath!);
                 if (!dirInfo.Exists)
                 {
@@ -523,7 +529,14 @@ public sealed class FileMetaService : IDisposable
 
                 item.ModifiedAt = dirInfo.LastWriteTime;
                 item.CreatedAt = dirInfo.CreationTime;
-                item.DateDisplay = FormatDate(dirInfo.CreationTime);
+                item.DateDisplay = FormatDate(dirInfo.LastWriteTime);
+                return;
+            }
+
+            if (item.FileSize is { } existingSize && item.ModifiedAt is { } existingFileModified)
+            {
+                item.SizeDisplay ??= FormatSize(existingSize);
+                item.DateDisplay ??= FormatDate(existingFileModified.LocalDateTime);
                 return;
             }
 
@@ -537,7 +550,7 @@ public sealed class FileMetaService : IDisposable
             item.SizeDisplay = FormatSize(fileInfo.Length);
             item.ModifiedAt = fileInfo.LastWriteTime;
             item.CreatedAt = fileInfo.CreationTime;
-            item.DateDisplay = FormatDate(fileInfo.CreationTime);
+            item.DateDisplay = FormatDate(fileInfo.LastWriteTime);
         }
         catch (Exception ex)
         {

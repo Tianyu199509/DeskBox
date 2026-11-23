@@ -3901,6 +3901,7 @@ public sealed partial class FileSurfaceContent
                         handledAsStackMembership: false,
                         hasStorageItems: true);
                     if (!showedGuide &&
+                        _settingsService.Settings.FileWidget.DragOutResultHintEnabled &&
                         move &&
                         undoEntry is { CanUndo: true, IsUndone: false })
                     {
@@ -3913,6 +3914,7 @@ public sealed partial class FileSurfaceContent
                                 Priority: DesktopToastPriority.ContextualGuide,
                                 ActionButtonText: T("Widget.DragHud.Action.Undo"),
                                 OnActionAsync: () => ExecuteUndoByHistoryIdAsync(undoHistoryId),
+                                OnDismissAsync: DisableDragOutResultHintAsync,
                                 DurationMs: 5000),
                             _settingsService);
                     }

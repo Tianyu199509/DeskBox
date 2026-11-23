@@ -151,6 +151,29 @@ public sealed class WidgetPresentationAndDetachContractTests
             registerDetached < replacementShown &&
             replacementShown < retargetDetached &&
             retargetDetached < showDetached);
+
+        int releaseInactiveClaim = remove.IndexOf(
+            "TransitionKeptActiveHostBeforeDetach(",
+            StringComparison.Ordinal);
+        int showInactiveStandalone = remove.IndexOf(
+            "await ShowStandaloneWindowAsync(",
+            releaseInactiveClaim >= 0 ? releaseInactiveClaim : 0,
+            StringComparison.Ordinal);
+        int settleKeptHostBounds = remove.IndexOf(
+            "survivingHost.RestoreBoundsForCurrentTopology();",
+            showInactiveStandalone >= 0 ? showInactiveStandalone : 0,
+            StringComparison.Ordinal);
+        Assert.True(
+            releaseInactiveClaim >= 0 &&
+            releaseInactiveClaim < showInactiveStandalone &&
+            showInactiveStandalone < settleKeptHostBounds);
+
+        string interaction = Read("src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs");
+        string showWithoutActivation = ExtractSection(
+            interaction,
+            "private void ShowWithoutActivation(",
+            "private void UpdatePersistedVisibility(");
+        Assert.Contains("AppWindow.Show(false);", showWithoutActivation, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -282,6 +305,42 @@ public sealed class WidgetPresentationAndDetachContractTests
         Assert.Same(remaining, fromRemainingAlias);
         Assert.Same(detachedHost, fromDetachedAlias!.Host);
         Assert.Same(remainingHost, fromRemainingAlias!.Host);
+    }
+
+    [Fact]
+    public void GroupGestureOverlays_UseNativeFluentFlyoutChipAndOuterSurfaceCornerRadius()
+    {
+        string shell = Read("src/DeskBox/Controls/WidgetShell.xaml.cs");
+        string setDropPreview = ExtractSection(
+            shell,
+            "public void SetGroupDropPreview(WidgetGroupDropPreviewState state)",
+            "public FrameworkElement GroupMergeSurfaceElement");
+        Assert.Contains("ShellOutlineBorder.CornerRadius", setDropPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShellRoot.CornerRadius", setDropPreview, StringComparison.Ordinal);
+
+        string overlayXaml = Read("src/DeskBox/Controls/WidgetGroupDropOverlay.xaml");
+        Assert.Contains("CornerRadius=\"8\"", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("SystemControlAcrylicElementBrush", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("CardStrokeColorDefaultBrush", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("FontWeight=\"Normal\"", overlayXaml, StringComparison.Ordinal);
+        Assert.Contains("helpers:WidgetTextShadow.Cast=\"False\"", overlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CornerRadius=\"20\"", overlayXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("TitleHighlight", overlayXaml, StringComparison.Ordinal);
+
+        string overlayCode = Read("src/DeskBox/Controls/WidgetGroupDropOverlay.xaml.cs");
+        Assert.Contains("ActualThemeChanged +=", overlayCode, StringComparison.Ordinal);
+        string updateRing = ExtractSection(
+            overlayCode,
+            "private void UpdateRingAndIcon(",
+            "private bool EnsureRing()");
+        Assert.Contains("if (state.Blocked || state.Ready || state.Dwell <= TimeSpan.Zero)", updateRing, StringComparison.Ordinal);
+        Assert.Contains("_ringVisual.IsVisible = false;", updateRing, StringComparison.Ordinal);
+
+        string detachPreview = Read("src/DeskBox/Views/WidgetDetachPlacementPreviewWindow.cs");
+        Assert.Contains("CornerRadius = new CornerRadius(8)", detachPreview, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.UI.Text.FontWeights.Normal", detachPreview, StringComparison.Ordinal);
+        Assert.Contains("WidgetTextShadow.SetCast(_captionTextBlock, false);", detachPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain("CornerRadius = new CornerRadius(20)", detachPreview, StringComparison.Ordinal);
     }
 
     private static string Read(string relativePath) =>

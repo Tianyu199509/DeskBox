@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "schemaVersion": 1,
   "baseLocale": "zh-CN",
   "hashes": {
     "addBtnTooltip": "99ffc711",

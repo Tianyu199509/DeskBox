@@ -1487,38 +1487,40 @@ internal sealed class StudioStartGalleryView : IDisposable
                 : "CustomWidget.Workshop.Card.SourceBuiltIn");
         string tooltipHeader = $"{label} · v{cleanSpecVer} · {sourceLabel}";
 
+        void OpenTemplateInStudio()
+        {
+            if (spec.RequiresClientUpgrade || string.IsNullOrWhiteSpace(spec.ManifestJson))
+            {
+                return;
+            }
+
+            _session.SelectedEmoji = WidgetTitleIconKindNames.FromCustomTemplateId(spec.Id) is not null
+                ? null
+                : (CustomWidgetTemplates.IsEmojiIcon(spec.Emoji) ? spec.Emoji : null);
+            _session.PendingPrompt = string.Empty;
+            _session.PendingDisplayPrompt = null;
+            _session.AddRevision(
+                spec.ManifestJson,
+                _loc.Format("CustomWidget.Workshop.History.FromTemplate", label),
+                isAiChange: false,
+                source: "template",
+                isCommitted: false,
+                markDirty: false,
+                logicJs: spec.LogicJs,
+                hasExplicitLogicJs: true,
+                locales: spec.Locales,
+                hasExplicitLocales: true);
+            _shell.StageViewport.ShowPreviewPage(justLoaded: true);
+            _shell.DispatcherQueue.TryEnqueue(() => _shell.ChatPanel.RefineTextBox?.Focus(FocusState.Programmatic));
+        }
+
         (Grid container, Button card, Border previewWell, StackPanel rightMetaCluster) = BuildGalleryCardShell(
             emoji: spec.Emoji,
             title: label,
             bodyText: cardBodyText,
             tooltip: string.IsNullOrWhiteSpace(cardBodyText) ? tooltipHeader : $"{tooltipHeader}\n{cardBodyText}",
             isEnabled: !spec.RequiresClientUpgrade,
-            onPrimaryClick: () =>
-            {
-                if (spec.RequiresClientUpgrade || string.IsNullOrWhiteSpace(spec.ManifestJson))
-                {
-                    return;
-                }
-
-                _session.SelectedEmoji = WidgetTitleIconKindNames.FromCustomTemplateId(spec.Id) is not null
-                    ? null
-                    : (CustomWidgetTemplates.IsEmojiIcon(spec.Emoji) ? spec.Emoji : null);
-                _session.PendingPrompt = string.Empty;
-                _session.PendingDisplayPrompt = null;
-                _session.AddRevision(
-                    spec.ManifestJson,
-                    _loc.Format("CustomWidget.Workshop.History.FromTemplate", label),
-                    isAiChange: false,
-                    source: "template",
-                    isCommitted: false,
-                    markDirty: false,
-                    logicJs: spec.LogicJs,
-                    hasExplicitLogicJs: true,
-                    locales: spec.Locales,
-                    hasExplicitLocales: true);
-                _shell.StageViewport.ShowPreviewPage(justLoaded: true);
-                _shell.DispatcherQueue.TryEnqueue(() => _shell.ChatPanel.RefineTextBox?.Focus(FocusState.Programmatic));
-            });
+            onPrimaryClick: OpenTemplateInStudio);
 
         if (!spec.RequiresClientUpgrade && (spec.IsRemoteOnly || spec.IsRemoteUpgraded))
         {
@@ -1579,31 +1581,34 @@ internal sealed class StudioStartGalleryView : IDisposable
                         spec.LogicJs)));
             container.Children.Add(quickPlaceBtn);
 
-            var remixBadgeBorder = new Border
+            string remixLabel = _loc.T("CustomWidget.Workshop.Card.RemixAction");
+            var remixBtn = new Button
+            {
+                MinHeight = 28,
+                Padding = new Thickness(10, 4, 10, 4),
+                CornerRadius = new CornerRadius(6),
+                IsTabStop = false,
+                Content = StudioUiPrimitives.CreateSmallIconLabel("\uE70F", remixLabel)
+            };
+            AutomationProperties.SetName(remixBtn, $"{label} — {remixLabel}");
+            remixBtn.Click += (_, _) => OpenTemplateInStudio();
+
+            var remixButtonHost = new Border
             {
                 Margin = new Thickness(0, 0, 10, 8),
-                Padding = new Thickness(7, 3, 7, 3),
-                CornerRadius = new CornerRadius(5),
+                CornerRadius = new CornerRadius(6),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Bottom,
                 Background = StudioUiPrimitives.ThemeBrush(_shell, "SolidBackgroundFillColorBaseBrush"),
-                BorderBrush = StudioUiPrimitives.ThemeBrush(_shell, "ControlElevationBorderBrush"),
-                BorderThickness = new Thickness(1),
                 IsHitTestVisible = false,
                 Opacity = 0,
                 OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(140) },
-                Child = new TextBlock
-                {
-                    Text = _loc.T("CustomWidget.Workshop.Card.RemixAction"),
-                    FontSize = 11,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = StudioUiPrimitives.ThemeBrush(_shell, "AccentTextFillColorPrimaryBrush")
-                }
+                Child = remixBtn
             };
-            Canvas.SetZIndex(remixBadgeBorder, 2);
-            container.Children.Add(remixBadgeBorder);
+            Canvas.SetZIndex(remixButtonHost, 2);
+            container.Children.Add(remixButtonHost);
 
-            WireGalleryCardHoverChrome(container, card, () => previewScaleTarget, [quickPlaceBtn], toggleButtonHitTest: false, remixBadgeBorder);
+            WireGalleryCardHoverChrome(container, card, () => previewScaleTarget, [quickPlaceBtn], toggleButtonHitTest: false, remixButtonHost);
         }
 
         return container;
@@ -2375,7 +2380,7 @@ internal sealed class StudioStartGalleryView : IDisposable
         Func<FrameworkElement?> getScaleTarget,
         IReadOnlyList<Button> quickButtons,
         bool toggleButtonHitTest,
-        Border? extraBadge = null)
+        UIElement? extraHoverOverlay = null)
     {
         bool isPointerOver = false;
         void Refresh()
@@ -2391,9 +2396,10 @@ internal sealed class StudioStartGalleryView : IDisposable
                     b.IsHitTestVisible = show;
                 }
             }
-            if (extraBadge is not null)
+            if (extraHoverOverlay is not null)
             {
-                extraBadge.Opacity = show ? 1 : 0;
+                extraHoverOverlay.Opacity = show ? 1 : 0;
+                extraHoverOverlay.IsHitTestVisible = show;
             }
 
             FluentMotionHelper.AnimateCardElevation(container, offsetY: isPointerOver ? -2f : 0f, scale: 1f, durationMs: 150);

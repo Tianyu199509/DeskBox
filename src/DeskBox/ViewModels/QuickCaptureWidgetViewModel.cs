@@ -311,6 +311,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                 OnPropertyChanged(nameof(DetailHeaderTextSize));
                 OnPropertyChanged(nameof(CaptionTextSize));
                 OnPropertyChanged(nameof(SegmentTextSize));
+                OnPropertyChanged(nameof(SegmentCountTextSize));
                 OnPropertyChanged(nameof(SegmentHeight));
                 OnPropertyChanged(nameof(SegmentPadding));
                 OnPropertyChanged(nameof(InputHeight));
@@ -376,6 +377,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public double SegmentTextSize => WidgetSegmentedMetrics.Create(TextSize).TextSize;
 
+    public double SegmentCountTextSize => Math.Max(10, SegmentTextSize - 1.5);
+
     public double SegmentHeight => WidgetSegmentedMetrics.Create(TextSize).Height;
 
     public Thickness SegmentPadding => WidgetSegmentedMetrics.Create(TextSize).Padding;
@@ -391,10 +394,10 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public Thickness InputPadding => WidgetInputMetrics.Create(TextSize).Padding;
 
     public Thickness RootPadding => new(
-        DensityMetric(8, 10, 14),
-        DensityMetric(4, 6, 9),
-        DensityMetric(4, 6, 9),
-        DensityMetric(6, 8, 12));
+        DensityMetric(8, 10, 12),
+        DensityMetric(6, 8, 10),
+        DensityMetric(8, 10, 12),
+        DensityMetric(6, 8, 10));
 
     public Thickness DetailPageMargin => new(0, 6 - RootPadding.Top, 0, 0);
 
@@ -488,9 +491,24 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         private set => SetProperty(ref _pinnedCount, value);
     }
 
-    public string RecordsTabText => _localizationService.Format("QuickCapture.Tab.Records", RecordCount);
+    private string ExtractTabLabel(string key) =>
+        _localizationService.Format(key, string.Empty).Trim();
 
-    public string PinnedTabText => _localizationService.Format("QuickCapture.Tab.Pinned", PinnedCount);
+    public string RecordsTabLabelText => ExtractTabLabel("QuickCapture.Tab.Records");
+
+    public string PinnedTabLabelText => ExtractTabLabel("QuickCapture.Tab.Pinned");
+
+    public Visibility RecordsTabCountVisibility => RecordCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility PinnedTabCountVisibility => PinnedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public string RecordsTabText => RecordCount > 0
+        ? _localizationService.Format("QuickCapture.Tab.Records", RecordCount)
+        : RecordsTabLabelText;
+
+    public string PinnedTabText => PinnedCount > 0
+        ? _localizationService.Format("QuickCapture.Tab.Pinned", PinnedCount)
+        : PinnedTabLabelText;
 
     public string EmptyStateTitle
     {

@@ -30,6 +30,19 @@ internal static class SettingsSearchChannelPolicy
         SettingsKeyPrefix + "About.StoreSupportTitle"
     };
 
+    // Store-only notices whose controls are collapsed in Direct builds.
+    internal static HashSet<string> StoreOnlyHeaderKeys { get; } = new(StringComparer.Ordinal)
+    {
+        SettingsKeyPrefix + "Backup.StoreUninstallDataNotice.Title"
+    };
+
     /// <summary>True when the settings-search entry must not surface in Store builds.</summary>
     internal static bool IsHiddenInStore(string headerKey) => DirectOnlyHeaderKeys.Contains(headerKey);
+
+    /// <summary>True when the settings-search entry must not surface in Direct builds.</summary>
+    internal static bool IsHiddenInDirect(string headerKey) => StoreOnlyHeaderKeys.Contains(headerKey);
+
+    /// <summary>True when the settings-search entry has no visible UI in the active distribution channel.</summary>
+    internal static bool IsHiddenForChannel(string headerKey, bool isStoreBuild) =>
+        isStoreBuild ? IsHiddenInStore(headerKey) : IsHiddenInDirect(headerKey);
 }

@@ -48,9 +48,9 @@ internal readonly record struct WidgetDetachPreviewAppearance(
 /// <summary>
 /// A click-through, non-activating placement silhouette used while a member is
 /// dragged out of a widget group. Draws a lightweight translucent landing frame
-/// with a simulated member header strip and a centered solid pill badge, avoiding
-/// live Mica/Acrylic backdrop controllers so cross-thread native positioning stays
-/// silky-smooth while OLE or pointer capture drives the drag.
+/// with a simulated member header strip and a centered 8 DIP Fluent flyout chip,
+/// avoiding live Mica/Acrylic backdrop controllers so cross-thread native
+/// positioning stays silky-smooth while OLE or pointer capture drives the drag.
 /// </summary>
 internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 {
@@ -92,11 +92,12 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         _memberTitleTextBlock = new TextBlock
         {
             FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
+        WidgetTextShadow.SetCast(_memberTitleTextBlock, false);
 
         var headerIdentity = new StackPanel
         {
@@ -123,7 +124,10 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         _badgeIcon = new FontIcon
         {
             Glyph = "\uE8A7",
-            FontSize = 12,
+            Width = 16,
+            Height = 16,
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
         _captionTextBlock = new TextBlock
@@ -131,11 +135,12 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             Text = appearance.Caption,
             MaxWidth = 240,
             FontSize = 13,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            FontWeight = Microsoft.UI.Text.FontWeights.Normal,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
+        WidgetTextShadow.SetCast(_captionTextBlock, false);
         var badgeRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -147,12 +152,13 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 
         _badgeBorder = new Border
         {
+            MinHeight = 34,
             Margin = new Thickness(12),
-            Padding = new Thickness(14, 8, 16, 8),
+            Padding = new Thickness(12, 7, 14, 7),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(20),
+            CornerRadius = new CornerRadius(8),
             Child = badgeRow
         };
         Grid.SetRow(_badgeBorder, 1);
@@ -438,44 +444,67 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             _memberIcon.CustomEmoji = appearance.MemberCustomEmoji ?? string.Empty;
         }
 
-        Color primaryText = appearance.IsDark
-            ? Colors.White
-            : Color.FromArgb(0xF2, 20, 22, 26);
+        bool highContrast = WindowsCompatibilityService.IsHighContrast;
+        Color primaryText = highContrast
+            ? Color.FromArgb(0xFF, tone.R, tone.G, tone.B)
+            : appearance.IsDark
+                ? Colors.White
+                : Color.FromArgb(0xE4, 0, 0, 0);
         SolidColorBrush textBrush = SharedBrushCache.GetOrCreate(primaryText);
         _memberTitleTextBlock.Foreground = textBrush;
         _captionTextBlock.Text = appearance.Caption;
         _captionTextBlock.Foreground = textBrush;
         _badgeIcon.Foreground = textBrush;
 
-        double resolvedBorderThickness = appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
-            ? Math.Max(1.5, appearance.BorderThickness)
-            : 1.5;
-        Color resolvedBorderColor = appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
-            ? Color.FromArgb(
-                Math.Max(appearance.BorderColor.A, appearance.IsDark ? (byte)0x96 : (byte)0x7A),
-                appearance.BorderColor.R,
-                appearance.BorderColor.G,
-                appearance.BorderColor.B)
-            : Color.FromArgb(
-                appearance.IsDark ? (byte)0x92 : (byte)0x72,
-                tone.R,
-                tone.G,
-                tone.B);
+        double resolvedBorderThickness = highContrast
+            ? 2.0
+            : appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
+                ? Math.Max(1.0, appearance.BorderThickness)
+                : 1.0;
+        Color resolvedBorderColor = highContrast
+            ? Color.FromArgb(0xFF, tone.R, tone.G, tone.B)
+            : appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
+                ? Color.FromArgb(
+                    Math.Max(appearance.BorderColor.A, appearance.IsDark ? (byte)0x78 : (byte)0x60),
+                    appearance.BorderColor.R,
+                    appearance.BorderColor.G,
+                    appearance.BorderColor.B)
+                : Color.FromArgb(
+                    appearance.IsDark ? (byte)0x68 : (byte)0x52,
+                    tone.R,
+                    tone.G,
+                    tone.B);
 
         _surfaceBorder.BorderBrush = SharedBrushCache.GetOrCreate(resolvedBorderColor);
         _surfaceBorder.BorderThickness = new Thickness(resolvedBorderThickness);
         _surfaceBorder.CornerRadius = new CornerRadius(surfaceRadius);
 
-        _badgeBorder.Background = SharedBrushCache.GetOrCreate(
-            appearance.IsDark
-                ? Color.FromArgb(0xF0, 28, 30, 36)
-                : Color.FromArgb(0xF4, 250, 251, 253));
-        _badgeBorder.BorderBrush = SharedBrushCache.GetOrCreate(Color.FromArgb(
-            appearance.IsDark ? (byte)0x90 : (byte)0x68,
-            tone.R,
-            tone.G,
-            tone.B));
+        Color flyoutBase = highContrast
+            ? (appearance.IsDark ? Colors.Black : Colors.White)
+            : appearance.IsDark
+                ? Color.FromArgb(0xF0, 44, 44, 44)
+                : Color.FromArgb(0xF4, 249, 249, 249);
+        if (!highContrast && appearance.CustomBackgroundColor is { } customTint)
+        {
+            flyoutBase = Color.FromArgb(
+                flyoutBase.A,
+                LerpChannel(flyoutBase.R, customTint.R, 0.16),
+                LerpChannel(flyoutBase.G, customTint.G, 0.16),
+                LerpChannel(flyoutBase.B, customTint.B, 0.16));
+        }
+
+        Color flyoutStroke = highContrast
+            ? Color.FromArgb(0xFF, tone.R, tone.G, tone.B)
+            : appearance.IsDark
+                ? Color.FromArgb(0x1D, 255, 255, 255)
+                : Color.FromArgb(0x14, 0, 0, 0);
+
+        _badgeBorder.Background = SharedBrushCache.GetOrCreate(flyoutBase);
+        _badgeBorder.BorderBrush = SharedBrushCache.GetOrCreate(flyoutStroke);
     }
+
+    private static byte LerpChannel(byte from, byte to, double amount) =>
+        (byte)Math.Clamp((int)Math.Round(from + ((to - from) * amount)), 0, 255);
 
     private static RectInt32 NormalizeBounds(RectInt32 bounds)
     {

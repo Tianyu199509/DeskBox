@@ -572,6 +572,88 @@ public sealed class FeedbackServiceTests : IDisposable
         Assert.Equal(1, rateLimited.RetryAfterMinutes);
     }
 
+    [Fact]
+    public async Task Submit_IpScopedRateLimitNeverRotatesClientId()
+    {
+        var responses = new Queue<HttpResponseMessage>(new[]
+        {
+            Json(HttpStatusCode.Created, """{"ok":true,"id":300}"""),
+            Json(HttpStatusCode.TooManyRequests, """{"ok":false,"error":"rate_limited","retry_after_minutes":5,"scope":"ip"}"""),
+        });
+        var handler = new RecordingHandler(_ => responses.Dequeue());
+        DateTimeOffset utcNow = new(2026, 11, 20, 8, 0, 0, TimeSpan.Zero);
+        FeedbackService service = CreateService(handler, () => utcNow);
+
+        Assert.True((await service.SubmitAsync(DeskBoxFeedbackKind.Bug, "Initial submission from this PC.")).Ok);
+        string originalClientId = service.ClientId;
+
+        // Days later, shared office/NAT IP triggers the 2-minute IP cooldown (scope="ip").
+        // Client must NOT rotate ClientId (which would forfeit "My feedback" history & OP ownership).
+        utcNow = utcNow.AddDays(2);
+        DeskBoxFeedbackSubmissionResult limited = await service.SubmitAsync(
+            DeskBoxFeedbackKind.Bug,
+            "Second submission under shared IP cooldown.");
+
+        Assert.False(limited.Ok);
+        Assert.Equal("rate_limited", limited.Error);
+        Assert.Equal(5, limited.RetryAfterMinutes);
+        Assert.Equal(originalClientId, service.ClientId);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Fact]
+    public async Task SubmitAndReply_NonJsonHtml429StillReturnsRateLimited()
+    {
+        var responses = new Queue<HttpResponseMessage>(new[]
+        {
+            new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("<html><body>429 Too Many Requests</body></html>", Encoding.UTF8, "text/html"),
+            },
+            new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("<html><body>429 Too Many Requests</body></html>", Encoding.UTF8, "text/html"),
+            },
+        });
+        var handler = new RecordingHandler(_ => responses.Dequeue());
+        FeedbackService service = CreateService(handler);
+
+        DeskBoxFeedbackSubmissionResult submitLimited = await service.SubmitAsync(
+            DeskBoxFeedbackKind.Bug,
+            "Submission hitting an nginx HTML 429 page.");
+        Assert.False(submitLimited.Ok);
+        Assert.Equal("rate_limited", submitLimited.Error);
+        Assert.Equal(5, submitLimited.RetryAfterMinutes);
+
+        DeskBoxFeedbackReplyResult replyLimited = await service.PostReplyAsync(
+            88,
+            "Follow-up hitting an nginx HTML 429 page.");
+        Assert.False(replyLimited.Ok);
+        Assert.Equal("rate_limited", replyLimited.Error);
+        Assert.Equal(1, replyLimited.RetryAfterMinutes);
+    }
+
+    [Fact]
+    public async Task UploadDiagnostics_PicksUpClientIdRotatedByCompanionProcess()
+    {
+        byte[] archive = [0x50, 0x4b, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04];
+        string archivePath = Path.Combine(_tempRoot, "diagnostics.zip");
+        await File.WriteAllBytesAsync(archivePath, archive);
+
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.OK, """{"ok":true}"""));
+        FeedbackService hostService = CreateService(handler);
+        string initialId = hostService.ClientId;
+
+        // Simulate the --settings companion process rotating feedback-client-id.txt on disk.
+        string rotatedId = new string('a', 64);
+        Assert.NotEqual(initialId, rotatedId);
+        await File.WriteAllTextAsync(Path.Combine(_tempRoot, "feedback-client-id.txt"), rotatedId);
+
+        DeskBoxFeedbackDiagnosticsStatus status = await hostService.UploadDiagnosticsAsync(909, archivePath);
+        Assert.Equal(DeskBoxFeedbackDiagnosticsStatus.Uploaded, status);
+        Assert.Equal(rotatedId, Assert.Single(handler.Requests).ClientIdHeader);
+    }
+
     private FeedbackService CreateService(
         HttpMessageHandler handler,
         Func<DateTimeOffset>? utcClock = null,

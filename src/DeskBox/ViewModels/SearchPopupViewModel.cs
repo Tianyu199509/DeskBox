@@ -30,6 +30,8 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     private int _nextFileResultOffset;
     private int _loadMoreRunning;
     private int _everythingProbeRunning;
+    private string _lastAppliedDefaultSortSetting = "relevance";
+    private bool _lastObservedShowSortHeader;
     private const int MaxEnrichedSearchResults = 40;
     private static readonly TimeSpan ProviderRefreshDebounceDelay = TimeSpan.FromSeconds(1);
 
@@ -224,7 +226,6 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         set => SetProperty(ref _isEverythingPromptWarning, value);
     }
 
-    public string DisplayMode => _settingsService.Settings.SearchDisplayMode;
     public string HotkeyHint => GetHotkeyHint();
 
     /// <summary>
@@ -239,33 +240,6 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// reconciled in batch so the view coalesces per-item notifications into one layout pass.
     /// </summary>
     public bool IsBatchUpdatingResults { get; private set; }
-
-    /// <summary>
-    /// Whether search history (recent queries + favorites) is currently being
-    /// recorded and shown. Driven by the <see cref="AppSettings.SearchSaveHistory"/> flag.
-    /// </summary>
-    public bool SaveSearchHistory => _settingsService.Settings.SearchSaveHistory;
-
-    /// <summary>
-    /// Enables or disables search-history recording and persists the change.
-    /// </summary>
-    public void SetSaveSearchHistory(bool enabled)
-    {
-        if (_settingsService.Settings.SearchSaveHistory == enabled)
-        {
-            return;
-        }
-
-        _settingsService.Settings.SearchSaveHistory = enabled;
-        _settingsService.SaveDebounced();
-        OnPropertyChanged(nameof(SaveSearchHistory));
-    }
-
-    /// <summary>Home mode: a roomier dashboard.</summary>
-    public bool IsHomeMode => string.Equals(DisplayMode, "Home", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Palette (command) mode: a compact launcher.</summary>
-    public bool IsPaletteMode => string.Equals(DisplayMode, "Palette", StringComparison.OrdinalIgnoreCase);
 
     private bool _suppressQueryChangedSearch;
 
@@ -975,10 +949,48 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     {
         PostToUi(() =>
         {
+            string currentDefaultSort = NormalizeDefaultSortSetting(
+                _settingsService.Settings.Search.SearchDefaultSortColumn);
+            bool currentShowSortHeader = _settingsService.Settings.Search.SearchShowSortHeader;
+            bool sortHeaderTurnedOff = _lastObservedShowSortHeader && !currentShowSortHeader;
+            _lastObservedShowSortHeader = currentShowSortHeader;
+
+            if (!string.Equals(currentDefaultSort, _lastAppliedDefaultSortSetting, StringComparison.Ordinal) ||
+                sortHeaderTurnedOff)
+            {
+                ApplyDefaultSortFromSettings();
+            }
+
             UpdateEverythingPromptState();
             RebuildTabs();
+            if (IsQueryActive && !string.IsNullOrWhiteSpace(Query))
+            {
+                _ = SearchAsync(Query, SearchRefreshKind.ProviderUpdate);
+            }
+            else if (!IsQueryActive)
+            {
+                _ = LoadRecommendationsAsync();
+            }
             _ = EnsureEverythingConnectionProbedAsync();
         });
+    }
+
+    public void EnsureDeskBoxContentSearchSynced(bool enabled)
+    {
+        _searchEngine.SetDeskBoxContentSearchEnabled(enabled);
+    }
+
+    public void RefreshActiveSearchAndTabs(bool rerunSearch)
+    {
+        RebuildTabs();
+        if (rerunSearch && IsQueryActive && !string.IsNullOrWhiteSpace(Query))
+        {
+            _ = SearchAsync(Query, SearchRefreshKind.ProviderUpdate);
+        }
+        else
+        {
+            RebuildCurrentResults(preserveSelection: true);
+        }
     }
 
     private void PostToUi(Action action)
@@ -1277,10 +1289,19 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             ? response.RankedItems.ToList()
             : response.Groups.SelectMany(g => g.Items).ToList();
 
-        // Stamp each result with a localized type label once (cheap, no I/O).
+        // Stamp each result with localized type, size, and modified-date labels once (cheap, zero I/O).
         foreach (SearchResultItem item in incoming)
         {
             item.TypeDisplay = GetTypeDisplay(item);
+            if (item.FileSize is { } bytes && string.IsNullOrEmpty(item.SizeDisplay))
+            {
+                item.SizeDisplay = Services.FileMetaService.FormatSize(bytes);
+            }
+
+            if ((item.ModifiedAt ?? item.CreatedAt) is { } timestamp && string.IsNullOrEmpty(item.DateDisplay))
+            {
+                item.DateDisplay = Services.FileMetaService.FormatDate(timestamp.LocalDateTime);
+            }
         }
 
         if (refreshKind == SearchRefreshKind.LoadMore)
@@ -1563,32 +1584,38 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         Func<SearchResultItem, bool> Predicate,
         bool SupportsFileSort);
 
-    private static readonly TabSpec[] QuerySubTabSpecs =
-    [
-        new("app", "Search.Tab.App", "\uE7AC",
-            item => item.Kind == SearchResultKind.File &&
-                    FileCategoryHelper.Categorize(item.Title) == FileCategory.App,
-            SupportsFileSort: false),
-        new("file", "Search.Tab.File", "\uE8E5",
-            item => item.Kind is SearchResultKind.File or SearchResultKind.Folder,
-            SupportsFileSort: true),
-        new("image", "Search.Filter.Images", "\uE8B9",
-            item => item.Kind == SearchResultKind.File &&
-                    FileCategoryHelper.Categorize(item.Title) == FileCategory.Image,
-            SupportsFileSort: true),
-        new("document", "Search.Filter.Documents", "\uE8A5",
-            item => item.Kind == SearchResultKind.File &&
-                    FileCategoryHelper.Categorize(item.Title) == FileCategory.Document,
-            SupportsFileSort: true),
-        new("deskbox", "Search.Tab.DeskBox", "\uE80F",
-            item => item.Kind is SearchResultKind.Todo or SearchResultKind.QuickCapture or SearchResultKind.CustomWidget or SearchResultKind.Clipboard or SearchResultKind.Action,
-            SupportsFileSort: false)
-    ];
+    private bool IsCategoryAvailableForTab(in SearchCategoryEntry entry)
+    {
+        if (!entry.SearchEnabled || !entry.TabShown)
+        {
+            return false;
+        }
+
+        AppSettings appSettings = _settingsService.Settings;
+        SearchSettingsSlice search = appSettings.Search;
+        if (entry.Id is SearchSettingsSlice.CategoryTodo or SearchSettingsSlice.CategoryNote or SearchSettingsSlice.CategoryWidget &&
+            !search.SearchIncludeDeskBoxContent)
+        {
+            return false;
+        }
+
+        if (entry.Id == SearchSettingsSlice.CategoryClipboard && !search.SearchIncludeClipboard)
+        {
+            return false;
+        }
+
+        if (!SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, entry.Id))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
-    /// Rebuilds top-level category pills according to <see cref="SearchSettingsSlice.SearchCategoryBarMode"/>:
-    /// - "auto" (default): shows only non-empty, narrowing category pills when results span multiple categories.
-    /// - "always": shows all standard category pills whenever results exist.
+    /// Rebuilds top-level category pills according to <see cref="SearchSettingsSlice.SearchCategoryBarMode"/>
+    /// and the user's ordered <see cref="SearchSettingsSlice.SearchCategoryLayout"/>:
+    /// - Enabled category tabs stay visible in their configured order while results are shown.
     /// - "hidden": hides the category bar completely and keeps the unified "all" pool active.
     /// </summary>
     private void RebuildTabs()
@@ -1596,44 +1623,50 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         string? previousTabId = SelectedTab?.Id;
         string categoryMode = NormalizeCategoryBarMode(
             _settingsService.Settings.Search.SearchCategoryBarMode);
+        bool hasInlineScope = IsQueryActive &&
+                              Services.SearchQuerySyntaxParser.Parse(Query).HasScopeFilter;
         string preferredTabId = IsQueryActive && previousTabId is null or "home"
             ? NormalizeDefaultTab(_settingsService.Settings.Search.SearchDefaultTab)
             : previousTabId ?? string.Empty;
-        if (categoryMode == "hidden")
+        if (categoryMode == "hidden" || hasInlineScope)
         {
-            preferredTabId = "all";
+            preferredTabId = SearchSettingsSlice.CategoryAll;
         }
 
         List<TabSpec> desiredSpecs = [];
         if (IsQueryActive)
         {
-            desiredSpecs.Add(new TabSpec("all", "Search.Tab.All", "\uE71D", _ => true, SupportsFileSort: true));
-            int totalCount = ActivePool.Count;
-            if (categoryMode == "always")
+            desiredSpecs.Add(new TabSpec(
+                SearchSettingsSlice.CategoryAll,
+                "Search.Tab.All",
+                "\uE71D",
+                static _ => true,
+                SupportsFileSort: true));
+
+            if (categoryMode != "hidden")
             {
-                desiredSpecs.AddRange(QuerySubTabSpecs);
-            }
-            else if (categoryMode == "auto" && totalCount > 0)
-            {
-                bool hasExplicitInlineScope = !string.IsNullOrWhiteSpace(ActiveScopeBadgeText);
-                foreach (TabSpec spec in QuerySubTabSpecs)
+                IReadOnlyList<SearchCategoryEntry> categoryEntries = SearchSettingsSlice.ParseCategoryLayout(
+                    _settingsService.Settings.Search.SearchCategoryLayout);
+                foreach (SearchCategoryEntry entry in categoryEntries)
                 {
-                    int subCount = ActivePool.Count(spec.Predicate);
-                    bool narrowsPool = !hasExplicitInlineScope && subCount > 0 && subCount < totalCount;
-                    bool preserveExplicitSelection =
-                        !string.IsNullOrEmpty(preferredTabId) &&
-                        preferredTabId != "all" &&
-                        string.Equals(spec.Id, preferredTabId, StringComparison.Ordinal);
-                    if (narrowsPool || preserveExplicitSelection)
+                    if (!IsCategoryAvailableForTab(in entry))
                     {
-                        desiredSpecs.Add(spec);
+                        continue;
                     }
+
+                    string tabId = entry.Id;
+                    desiredSpecs.Add(new TabSpec(
+                        tabId,
+                        SearchSettingsSlice.GetCategoryNameKey(tabId),
+                        SearchSettingsSlice.GetCategoryGlyph(tabId),
+                        item => SearchSettingsSlice.MatchesCategory(item, tabId),
+                        SearchSettingsSlice.SupportsCategoryFileSort(tabId)));
                 }
             }
         }
         else
         {
-            desiredSpecs.Add(new TabSpec("home", "Search.Tab.App", "\uE7AC", _ => true, SupportsFileSort: false));
+            desiredSpecs.Add(new TabSpec("home", "Search.Tab.App", "\uE7AC", static _ => true, SupportsFileSort: false));
         }
 
         // If the structure matches, update counts in-place (no flicker).
@@ -1681,7 +1714,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     private void UpdateShouldShowCategoryBar(string categoryMode)
     {
-        if (!IsQueryActive || ActivePool.Count == 0 || categoryMode == "hidden")
+        if (!IsQueryActive || categoryMode == "hidden")
         {
             ShouldShowCategoryBar = false;
             return;
@@ -1693,8 +1726,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             return;
         }
 
-        ShouldShowCategoryBar = Tabs.Count > 1 ||
-                                (SelectedTab is not null && SelectedTab.Id != "all");
+        ShouldShowCategoryBar = ActivePool.Count > 0;
     }
 
     private static string NormalizeCategoryBarMode(string? value)
@@ -1703,10 +1735,18 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         return normalized is "auto" or "always" or "hidden" ? normalized : "auto";
     }
 
+    private static string NormalizeDefaultSortSetting(string? value)
+    {
+        string normalized = value?.Trim().ToLowerInvariant() ?? "relevance";
+        return normalized is "date" or "name" or "size" ? normalized : "relevance";
+    }
+
     public void ApplyDefaultSortFromSettings()
     {
-        string raw = _settingsService.Settings.Search.SearchDefaultSortColumn?.Trim().ToLowerInvariant()
-                     ?? "relevance";
+        string raw = NormalizeDefaultSortSetting(
+            _settingsService.Settings.Search.SearchDefaultSortColumn);
+        _lastAppliedDefaultSortSetting = raw;
+        _lastObservedShowSortHeader = _settingsService.Settings.Search.SearchShowSortHeader;
         (ResultSortColumn column, bool ascending) = raw switch
         {
             "date" => (ResultSortColumn.Date, false),
@@ -1749,7 +1789,9 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         SearchResultKind.QuickCapture => _localizationService.T("Search.Type.Note"),
         SearchResultKind.CustomWidget => _localizationService.T("CustomWidget.Title"),
         SearchResultKind.Clipboard => _localizationService.T("Search.Type.Clipboard"),
-        SearchResultKind.Action => _localizationService.T("Search.Type.Action"),
+        SearchResultKind.Action => SearchSettingsSlice.IsSettingsActionItem(item)
+            ? _localizationService.T("Search.Tab.Settings")
+            : _localizationService.T("Search.Type.Action"),
         SearchResultKind.File => FileCategoryHelper.Categorize(item.Title) switch
         {
             FileCategory.App => _localizationService.T("Search.Type.App"),
@@ -1856,18 +1898,33 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
         return SortColumn switch
         {
-            ResultSortColumn.Name => SortAscending
-                ? items.OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList()
-                : items.OrderByDescending(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList(),
-            ResultSortColumn.Size => SortAscending
-                ? items.OrderBy(i => i.FileSize ?? long.MaxValue).ToList()
-                : items.OrderByDescending(i => i.FileSize ?? long.MinValue).ToList(),
-            ResultSortColumn.Date => SortAscending
-                ? items.OrderBy(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MaxValue).ToList()
-                : items.OrderByDescending(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
-            ResultSortColumn.Type => SortAscending
-                ? items.OrderBy(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList()
-                : items.OrderByDescending(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList(),
+            ResultSortColumn.Name => (SortAscending
+                    ? items.OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                    : items.OrderByDescending(i => i.Title, StringComparer.OrdinalIgnoreCase))
+                .ThenByDescending(i => i.RelevanceScore)
+                .ToList(),
+            ResultSortColumn.Size => (SortAscending
+                    ? items.OrderBy(i => i.FileSize.HasValue ? 0 : 1).ThenBy(i => i.FileSize ?? 0L)
+                    : items.OrderBy(i => i.FileSize.HasValue ? 0 : 1).ThenByDescending(i => i.FileSize ?? 0L))
+                .ThenByDescending(i => i.RelevanceScore)
+                .ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            ResultSortColumn.Date => (SortAscending
+                    ? items.OrderBy(i => (i.ModifiedAt ?? i.CreatedAt).HasValue ? 0 : 1)
+                           .ThenBy(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MinValue)
+                    : items.OrderBy(i => (i.ModifiedAt ?? i.CreatedAt).HasValue ? 0 : 1)
+                           .ThenByDescending(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MinValue))
+                .ThenByDescending(i => i.RelevanceScore)
+                .ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            ResultSortColumn.Type => (SortAscending
+                    ? items.OrderBy(i => string.IsNullOrEmpty(i.TypeDisplay) ? 1 : 0)
+                           .ThenBy(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                    : items.OrderBy(i => string.IsNullOrEmpty(i.TypeDisplay) ? 1 : 0)
+                           .ThenByDescending(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+                .ThenByDescending(i => i.RelevanceScore)
+                .ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             _ => items.ToList()
         };
     }
@@ -1889,33 +1946,49 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         _ => true
     };
 
-    private static string NormalizeDefaultTab(string? value)
+    private static string NormalizeDefaultTab(string? value) =>
+        SearchSettingsSlice.NormalizeDefaultTabId(value);
+
+    private static bool GetPrimarySortDirection(ResultSortColumn column) => column switch
     {
-        string normalized = value?.Trim().ToLowerInvariant() ?? "all";
-        return normalized is "all" or "app" or "file" or "deskbox" ? normalized : "all";
-    }
+        ResultSortColumn.Name => true,
+        ResultSortColumn.Size => false,
+        ResultSortColumn.Date => false,
+        ResultSortColumn.Type => true,
+        _ => true
+    };
 
     /// <summary>
-    /// Switches the sort column (or toggles direction when re-clicking the same
-    /// column). Sensible defaults: name ascending, size/date descending.
+    /// Switches the sort column (or cycles primary -> opposite -> default relevance when
+    /// re-clicking the same column). Sensible defaults: name/type ascending, size/date descending.
     /// </summary>
     public void ToggleSort(ResultSortColumn column)
     {
+        bool primaryAscending = GetPrimarySortDirection(column);
         if (SortColumn == column)
         {
-            SortAscending = !SortAscending;
+            if (SortAscending == primaryAscending)
+            {
+                SortAscending = !primaryAscending;
+                return;
+            }
+
+            if (string.Equals(
+                    NormalizeDefaultSortSetting(_settingsService.Settings.Search.SearchDefaultSortColumn),
+                    "relevance",
+                    StringComparison.Ordinal))
+            {
+                SortColumn = ResultSortColumn.Relevance;
+                SortAscending = true;
+                return;
+            }
+
+            SortAscending = primaryAscending;
             return;
         }
 
         SortColumn = column;
-        SortAscending = column switch
-        {
-            ResultSortColumn.Name => true,
-            ResultSortColumn.Size => false,
-            ResultSortColumn.Date => false,
-            ResultSortColumn.Type => true,
-            _ => true
-        };
+        SortAscending = primaryAscending;
     }
 
     /// <summary>
@@ -2417,40 +2490,18 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     private string GetHotkeyHint()
     {
-        var settings = _settingsService.Settings;
-        if (!settings.SearchHotkeyEnabled)
+        var search = _settingsService.Settings.Search;
+        if (!search.SearchHotkeyEnabled)
         {
             return string.Empty;
         }
 
-        var parts = new List<string>();
-        var modifiers = (HotkeyModifierKeys)settings.SearchHotkeyModifiers;
-        if (modifiers.HasFlag(HotkeyModifierKeys.Control))
-        {
-            parts.Add("Ctrl");
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Alt))
-        {
-            parts.Add("Alt");
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Shift))
-        {
-            parts.Add("Shift");
-        }
-
-        // Map virtual key to display name
-        string keyName = settings.SearchHotkeyKey switch
-        {
-            0x20 => "Space",
-            >= 0x41 and <= 0x5A => ((char)settings.SearchHotkeyKey).ToString(),
-            >= 0x30 and <= 0x39 => ((char)settings.SearchHotkeyKey).ToString(),
-            _ => $"VK:{settings.SearchHotkeyKey:X2}"
-        };
-        parts.Add(keyName);
-
-        return string.Join("+", parts);
+        GlobalHotkeyActivation activation = Services.GlobalHotkeyService.NormalizeActivation(
+            search.SearchHotkeyActivationKind,
+            search.SearchHotkeyModifiers,
+            search.SearchHotkeyKey);
+        return Services.GlobalHotkeyService.FormatActivation(activation, _localizationService)
+            .Replace(" + ", "+", StringComparison.Ordinal);
     }
 
     /// <summary>

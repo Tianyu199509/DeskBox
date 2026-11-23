@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "deskbox.news-rss",
   "name": "${$i18n.widgetName}",
-  "version": "4.0.0",
+  "version": "1.0.0",
   "author": "DeskBox",
   "origin": "official",
   "description": "${$i18n.widgetDescription}",

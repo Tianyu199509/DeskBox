@@ -420,10 +420,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             Title = _localizationService.T("QuickCapture.QuickJotTitle");
             WindowTitleText.Text = Title;
             PopoutMarkdownEditor.PlaceholderText = _localizationService.T("QuickCapture.QuickJotPlaceholder");
-            QuickJotHintText.Text = _localizationService.T(
-                IsEnterSavesActive
-                    ? "QuickCapture.QuickJotHintEnterSaves"
-                    : "QuickCapture.QuickJotHint");
             QuickJotSaveButton.Content = _localizationService.T("Common.Save");
         }
         else
@@ -505,7 +501,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             DoneButton.Visibility = Visibility.Collapsed;
             CopyButton.Visibility = Visibility.Collapsed;
             AddAttachmentButton.Visibility = Visibility.Visible;
-            QuickJotHintText.Visibility = Visibility.Visible;
             QuickJotSaveButton.Visibility = Visibility.Visible;
             PopoutMarkdownView.Visibility = Visibility.Collapsed;
             PopoutMarkdownEditor.Visibility = Visibility.Visible;
@@ -517,7 +512,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
             return;
         }
 
-        QuickJotHintText.Visibility = Visibility.Collapsed;
         QuickJotSaveButton.Visibility = Visibility.Collapsed;
         EditButton.Visibility = !_isEditing ? Visibility.Visible : Visibility.Collapsed;
         DoneButton.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;

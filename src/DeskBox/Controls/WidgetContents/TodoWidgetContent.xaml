@@ -228,7 +228,7 @@
         <Style x:Key="TodoCardBorderStyle" TargetType="Border">
             <Setter Property="MinHeight" Value="48" />
             <Setter Property="Padding" Value="8,5" />
-            <Setter Property="Background" Value="{ThemeResource WidgetLayerFillSecondaryBrush}" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
@@ -244,8 +244,8 @@
         </Style>
 
         <Style x:Key="TodoDetailTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource WidgetBorderlessInputTextBoxStyle}">
-            <Setter Property="Background" Value="{ThemeResource WidgetLayerFillSecondaryBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource WidgetLayerStrokeBrush}" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
             <Setter Property="FontWeight" Value="Normal" />
@@ -260,7 +260,7 @@
         DragOver="RootGrid_DragOver"
         Drop="RootGrid_Drop"
         Padding="{Binding RootPadding}"
-        RowSpacing="{Binding RootRowSpacing}">
+        RowSpacing="0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -276,6 +276,7 @@
             x:Name="ListHeaderArea"
             Grid.Row="0"
             Grid.Column="0"
+            Margin="0,0,0,2"
             Spacing="6">
             <toolkit:Segmented
                 x:Name="TodoFilterSegmented"
@@ -288,28 +289,60 @@
                 SelectionChanged="TodoFilterSegmented_SelectionChanged"
                 SizeChanged="TodoFilterSegmented_SizeChanged">
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="All" ToolTipService.ToolTip="{Binding AllFilterText}" Visibility="{Binding AllTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding AllFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding AllFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding AllFilterCount}" VerticalAlignment="Center" Visibility="{Binding AllFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Active" ToolTipService.ToolTip="{Binding ActiveFilterText}" Visibility="{Binding ActiveTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ActiveFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ActiveFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding ActiveCount}" VerticalAlignment="Center" Visibility="{Binding ActiveFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Today" ToolTipService.ToolTip="{Binding TodayFilterText}" Visibility="{Binding TodayTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding TodayFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding TodayFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding TodayFilterCount}" VerticalAlignment="Center" Visibility="{Binding TodayFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Overdue" ToolTipService.ToolTip="{Binding OverdueFilterText}" Visibility="{Binding OverdueTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding OverdueFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding OverdueFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding OverdueFilterCount}" VerticalAlignment="Center" Visibility="{Binding OverdueFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="ThisWeek" ToolTipService.ToolTip="{Binding ThisWeekFilterText}" Visibility="{Binding ThisWeekTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisWeekFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisWeekFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding ThisWeekFilterCount}" VerticalAlignment="Center" Visibility="{Binding ThisWeekFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="ThisMonth" ToolTipService.ToolTip="{Binding ThisMonthFilterText}" Visibility="{Binding ThisMonthTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisMonthFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisMonthFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding ThisMonthFilterCount}" VerticalAlignment="Center" Visibility="{Binding ThisMonthFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Important" ToolTipService.ToolTip="{Binding ImportantFilterText}" Visibility="{Binding ImportantTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ImportantFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ImportantFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding ImportantFilterCount}" VerticalAlignment="Center" Visibility="{Binding ImportantFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
                 <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Completed" ToolTipService.ToolTip="{Binding CompletedFilterText}" Visibility="{Binding CompletedTabVisibility}">
-                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding CompletedFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Grid HorizontalAlignment="Center">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding CompletedFilterLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding CompletedCount}" VerticalAlignment="Center" Visibility="{Binding CompletedFilterCountVisibility}" />
+                    </Grid>
                 </toolkit:SegmentedItem>
             </toolkit:Segmented>
 
@@ -339,8 +372,8 @@
             <Border
                 x:Name="TodoSearchBarHost"
                 Padding="8,2"
-                Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
-                BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                 Visibility="{Binding SearchBarVisibility}">
@@ -419,6 +452,7 @@
             <ListView
                 x:Name="TodoListView"
                 Grid.Row="1"
+                Margin="0,0,-6,0"
                 Padding="0,0,6,0"
                 AllowDrop="True"
                 CanDragItems="True"
@@ -494,7 +528,7 @@
                             PointerEntered="TodoItem_PointerEntered"
                             PointerExited="TodoItem_PointerExited"
                             RightTapped="TodoItem_RightTapped">
-                            <Grid ColumnSpacing="2">
+                            <Grid ColumnSpacing="0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="32" />
                                     <ColumnDefinition Width="Auto" />
@@ -556,7 +590,7 @@
                                     Grid.Column="1"
                                     Width="3"
                                     Height="20"
-                                    Margin="0,0,5,0"
+                                    Margin="2,0,4,0"
                                     VerticalAlignment="Center"
                                     Background="{Binding ColorMarkerBrush}"
                                     CornerRadius="1.5"
@@ -565,7 +599,7 @@
                                 <StackPanel
                                     x:Name="TodoItemContentPanel"
                                     Grid.Column="2"
-                                    Margin="0"
+                                    Margin="2,0,0,0"
                                     VerticalAlignment="Center"
                                     Opacity="{Binding ContentOpacity}"
                                     Spacing="2">
@@ -726,11 +760,13 @@
                                 <Border
                                     x:Name="TodoItemActionHost"
                                     Grid.ColumnSpan="4"
-                                    Padding="1"
+                                    Padding="2,1"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     Background="{ThemeResource WidgetOverlaySurfaceBrush}"
-                                    CornerRadius="4"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
                                     IsHitTestVisible="False"
                                     Opacity="0"
                                     Canvas.ZIndex="2">
@@ -816,7 +852,7 @@
             </StackPanel>
         </Grid>
 
-        <Grid x:Name="ListFooterArea" Grid.Row="2" Grid.Column="0" ColumnSpacing="8">
+        <Grid x:Name="ListFooterArea" Grid.Row="2" Grid.Column="0" Margin="0,4,0,0" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -1231,7 +1267,7 @@
                             x:Name="DetailNotesReaderHost"
                             MinHeight="72"
                             Padding="8,8,8,10"
-                            Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="Transparent"
                             BorderThickness="0"
                             CornerRadius="{StaticResource WidgetCornerRadiusSmall}"

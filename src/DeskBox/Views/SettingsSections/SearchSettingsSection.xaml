@@ -73,6 +73,34 @@
                     Toggled="SearchRecommendationsToggle_Toggled" />
             </toolkit:SettingsCard>
 
+            <toolkit:SettingsCard
+                x:Name="SearchIconAnimationCard"
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.IconAnimation.Description"
+                svc:Localized.HeaderKey="Settings.Search.IconAnimation.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE945;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Search.IconAnimation.Title"
+                    x:Name="SearchIconAnimationComboBox"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    SelectionChanged="SearchIconAnimationComboBox_SelectionChanged">
+                    <ComboBoxItem Tag="0">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style0" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="1">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style1" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="2">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style2" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="3">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style3" />
+                    </ComboBoxItem>
+                </ComboBox>
+            </toolkit:SettingsCard>
+
             <!-- 3. Everything File Search (EverythingEnableToggle replaces legacy EverythingConsentCheckBox) -->
             <toolkit:SettingsExpander
                 x:Name="EverythingConnectionExpander"
@@ -228,37 +256,57 @@
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
 
-            <!-- 5. Local Search Scopes -->
+            <!-- 5. Unified Search Content & Category Tabs -->
             <toolkit:SettingsExpander
                 x:Name="SearchLocalScopeExpander"
                 IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.Search.CategoryLayout.Description"
                 svc:Localized.HeaderKey="Settings.Search.LocalScope.Title">
                 <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE8B7;" />
+                    <FontIcon Glyph="&#xE71C;" />
                 </toolkit:SettingsExpander.HeaderIcon>
                 <toolkit:SettingsExpander.Items>
                     <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Search.Scope.DeskBox.Description"
-                        svc:Localized.HeaderKey="Settings.Search.Scope.DeskBox">
-                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Scope.DeskBox"
-                            x:Name="SearchDeskBoxContentToggle"
-                            MinWidth="0"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="SearchScopeToggle_Toggled" />
-                    </toolkit:SettingsCard>
+                        x:Name="SearchCategoryLayoutCard"
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock
+                                        Style="{StaticResource SettingTitleTextStyle}"
+                                        svc:Localized.Key="Settings.Search.CategoryLayout.Title" />
+                                    <TextBlock
+                                        Style="{StaticResource SettingDescriptionTextStyle}"
+                                        TextWrapping="Wrap"
+                                        svc:Localized.Key="Settings.Search.CategoryLayout.Description" />
+                                </StackPanel>
+                                <Button
+                                    x:Name="ResetSearchCategoryLayoutButton"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Click="ResetSearchCategoryLayoutButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.AutomationNameKey="Settings.Clipboard.TabLayout.Reset">
+                                    <TextBlock svc:Localized.Key="Settings.Clipboard.TabLayout.Reset" />
+                                </Button>
+                            </Grid>
 
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Search.Scope.Clipboard.Description"
-                        svc:Localized.HeaderKey="Settings.Search.Scope.Clipboard">
-                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Scope.Clipboard"
-                            x:Name="SearchClipboardScopeToggle"
-                            MinWidth="0"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="SearchClipboardScopeToggle_Toggled" />
+                            <ListView
+                                x:Name="SearchCategoryLayoutListView"
+                                MaxHeight="308"
+                                Padding="0,2"
+                                AllowDrop="True"
+                                Background="Transparent"
+                                CanDragItems="True"
+                                CanReorderItems="True"
+                                DragItemsCompleted="SearchCategoryLayoutListView_DragItemsCompleted"
+                                IsItemClickEnabled="False"
+                                ReorderMode="Enabled"
+                                SelectionMode="None"
+                                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                        </StackPanel>
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsCard
@@ -395,14 +443,11 @@
                             <ComboBoxItem Tag="all">
                                 <TextBlock svc:Localized.Key="Search.Tab.All" />
                             </ComboBoxItem>
-                            <ComboBoxItem Tag="app">
-                                <TextBlock svc:Localized.Key="Search.Tab.App" />
-                            </ComboBoxItem>
                             <ComboBoxItem Tag="file">
                                 <TextBlock svc:Localized.Key="Search.Tab.File" />
                             </ComboBoxItem>
-                            <ComboBoxItem Tag="deskbox">
-                                <TextBlock svc:Localized.Key="Search.Tab.DeskBox" />
+                            <ComboBoxItem Tag="image">
+                                <TextBlock svc:Localized.Key="Search.Tab.Image" />
                             </ComboBoxItem>
                         </ComboBox>
                     </toolkit:SettingsCard>
@@ -441,6 +486,19 @@
                     </toolkit:SettingsCard>
 
                     <toolkit:SettingsCard
+                        x:Name="SearchShowSortHeaderCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.ShowSortHeader.Description"
+                        svc:Localized.HeaderKey="Settings.Search.ShowSortHeader.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.ShowSortHeader.Title"
+                            x:Name="SearchShowSortHeaderToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="SearchShowSortHeaderToggle_Toggled" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Search.DefaultSort.Description"
                         svc:Localized.HeaderKey="Settings.Search.DefaultSort.Title">
@@ -460,31 +518,6 @@
                             </ComboBoxItem>
                             <ComboBoxItem Tag="size">
                                 <TextBlock svc:Localized.Key="Search.Sort.Size" />
-                            </ComboBoxItem>
-                        </ComboBox>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        x:Name="SearchIconAnimationCard"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Search.IconAnimation.Description"
-                        svc:Localized.HeaderKey="Settings.Search.IconAnimation.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Search.IconAnimation.Title"
-                            x:Name="SearchIconAnimationComboBox"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            SelectionChanged="SearchIconAnimationComboBox_SelectionChanged">
-                            <ComboBoxItem Tag="0">
-                                <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style0" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="1">
-                                <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style1" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="2">
-                                <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style2" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="3">
-                                <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style3" />
                             </ComboBoxItem>
                         </ComboBox>
                     </toolkit:SettingsCard>

@@ -478,7 +478,10 @@ public abstract partial class WidgetWindowBase
 
     private void FlushPendingTitleBarDragFrame()
     {
-        ApplyPendingTitleBarDragFrame();
+        if (CallbackDepth.Depth == 0)
+        {
+            ApplyPendingTitleBarDragFrame();
+        }
         CancelPendingTitleBarDragFrame();
         CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag");
     }
@@ -555,6 +558,7 @@ public abstract partial class WidgetWindowBase
             RectInt32 originBounds = GetTitleBarDragOriginBounds();
             EndWidgetBoundsInteraction();
             DisplayChangeWatcher?.ResumeRestore();
+            RestoreBackdropAfterInteraction();
             HasMovedTitleBarDrag = false;
             _ = manager.CompleteWidgetGroupDragAsync(
                 Config.Id,

@@ -41,6 +41,8 @@ public sealed partial class QuickCaptureWidgetViewModel
         ArchivedCount = archivedItems.Count;
         OnPropertyChanged(nameof(RecordsTabText));
         OnPropertyChanged(nameof(PinnedTabText));
+        OnPropertyChanged(nameof(RecordsTabCountVisibility));
+        OnPropertyChanged(nameof(PinnedTabCountVisibility));
 
         if (ShowArchived && ArchivedCount == 0)
         {

@@ -509,7 +509,7 @@ public sealed class CustomWidgetTests
         Assert.Equal("deskbox.sys-pulse", manifest.Id);
         Assert.Equal("${$i18n.widgetName}", manifest.Name);
         Assert.Equal("系统监控", manifest.ResolveLocalizedName("zh-CN"));
-        Assert.Equal("4.2.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal("📊", manifest.Icon);
         Assert.Contains(manifest.Settings, s => s.Key == "modules" && s.Type == "moduleList");
         Assert.Contains(manifest.Settings, s => s.Key == "chartBackdrop" && s.DefaultValue == "grid");
@@ -565,7 +565,7 @@ public sealed class CustomWidgetTests
               "id": "deskbox.sys-pulse",
               "origin": "official",
               "name": "性能脉冲",
-              "version": "1.0.0",
+              "version": "0.9.0",
               "root": "main",
               "elements": {
                 "main": { "type": "Stack", "children": [] }
@@ -575,7 +575,7 @@ public sealed class CustomWidgetTests
             await File.WriteAllTextAsync(store.ManifestPath, legacyV1);
 
             string loaded = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.SystemPulseTemplateId);
-            Assert.Contains("\"version\": \"4.2.0\"", loaded, StringComparison.Ordinal);
+            Assert.Contains("\"version\": \"1.0.0\"", loaded, StringComparison.Ordinal);
             Assert.Contains("\"name\": \"${$i18n.widgetName}\"", loaded, StringComparison.Ordinal);
         }
         finally
@@ -620,7 +620,7 @@ public sealed class CustomWidgetTests
 
         CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(bundle.Locales);
         Assert.Equal("deskbox.pomodoro", manifest.Id);
-        Assert.Equal("8.0.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal("${$i18n.widgetName}", manifest.Name);
         Assert.Equal("专注时段", manifest.ResolveLocalizedName("zh-CN"));
         Assert.Equal("🍅", manifest.Icon);
@@ -653,18 +653,18 @@ public sealed class CustomWidgetTests
             var store = new CustomWidgetDataStore("pomo-v2", tempRoot);
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "2.0.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "Stack", "children": [] } } }""");
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "0.8.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "Stack", "children": [] } } }""");
 
             string upgraded = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
-            Assert.Contains("\"version\": \"8.0.0\"", upgraded, StringComparison.Ordinal);
+            Assert.Contains("\"version\": \"1.0.0\"", upgraded, StringComparison.Ordinal);
             Assert.True(Directory.Exists(store.LocalesDirectoryPath));
             Assert.True(File.Exists(Path.Combine(store.LocalesDirectoryPath, "zh-CN.json")));
 
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "3.1.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "ModuleStack", "children": [] } } }""");
-            string upgradedFrom31 = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
-            Assert.Contains("\"version\": \"8.0.0\"", upgradedFrom31, StringComparison.Ordinal);
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "origin": "official", "version": "0.9.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "ModuleStack", "children": [] } } }""");
+            string upgradedFrom09 = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
+            Assert.Contains("\"version\": \"1.0.0\"", upgradedFrom09, StringComparison.Ordinal);
 
             var state = new Dictionary<string, string>(StringComparer.Ordinal);
             var settings = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -816,7 +816,7 @@ public sealed class CustomWidgetTests
 
         CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(bundle.Locales);
         Assert.Equal("deskbox.countdown", manifest.Id);
-        Assert.Equal("5.0.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal("${$i18n.widgetName}", manifest.Name);
         Assert.Equal("倒数纪念日", manifest.ResolveLocalizedName("zh-CN"));
         Assert.Equal("📅", manifest.Icon);
@@ -985,7 +985,7 @@ public sealed class CustomWidgetTests
 
         CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(zhBundle.Locales);
         Assert.Equal("deskbox.ai-pulse", manifest.Id);
-        Assert.Equal("4.1.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal("${$i18n.widgetName}", manifest.Name);
         Assert.Equal("AI 监控", manifest.ResolveLocalizedName("zh-CN"));
         Assert.Equal("🧠", manifest.Icon);
@@ -1050,7 +1050,7 @@ public sealed class CustomWidgetTests
         Assert.Equal("emerald", adjustedTone);
         Assert.InRange(adjustedPct, 77.0, 78.0);
 
-        // Both ai-pulse v4.0.0 and agent-hud v4.0.0 have 0 DOM drift and 0 compiler hard/soft diagnostics
+        // Both ai-pulse v1.0.0 and agent-hud v1.0.0 have 0 DOM drift and 0 compiler hard/soft diagnostics
         foreach (string tplId in new[] { CustomWidgetTemplates.AiPulseTemplateId, CustomWidgetTemplates.AgentHudTemplateId })
         {
             CustomWidgetTemplateBundle rawBundle = CustomWidgetTemplates.GetTemplateBundle(tplId, "zh-CN");

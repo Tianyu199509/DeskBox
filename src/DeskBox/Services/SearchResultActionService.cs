@@ -23,35 +23,23 @@ public sealed class SearchResultActionService
         _refreshTodoWidgetAsync = refreshTodoWidgetAsync;
     }
 
-    /// <summary>
-    /// Creates a todo in the first available Todo widget with the file attached.
-    /// Returns a human-readable outcome for display in a tooltip/toast.
-    /// </summary>
-    public async Task<bool> AttachFileToTodoAsync(string? path)
-    {
-        var result = await AttachFileToTodoWithResultAsync(path);
-        return result.Succeeded;
-    }
-
     public async Task<(bool Succeeded, string? WidgetId, string? ItemId, string FileName)> AttachFileToTodoWithResultAsync(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path) ||
+            !File.Exists(path) ||
+            !SearchSettingsSlice.IsCategoryFeatureEnabled(_settingsService.Settings, SearchSettingsSlice.CategoryTodo))
         {
             return (false, null, null, string.Empty);
         }
 
         try
         {
-            var todoWidget = _settingsService.Settings.Widgets
+            var todoWidget = _settingsService.Settings.WidgetLayout.Widgets
                 .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled);
 
-            if (todoWidget is null)
-            {
-                App.Log("[SearchAction] No Todo widget available to attach to.");
-                return (false, null, null, string.Empty);
-            }
-
-            var store = new TodoWidgetStore(todoWidget.Id);
+            string targetWidgetId = todoWidget?.Id ?? CustomWidgetHostSnapshotService.FallbackTodoWidgetId;
+            string todoWidgetsRoot = CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(_settingsService);
+            var store = new TodoWidgetStore(todoWidgetsRoot, targetWidgetId);
             var data = await store.LoadAsync();
 
             string fileName = Path.GetFileName(path);
@@ -74,13 +62,13 @@ public sealed class SearchResultActionService
 
             data.Items.Add(item);
             await store.SaveAsync(data);
-            if (_refreshTodoWidgetAsync is not null)
+            if (_refreshTodoWidgetAsync is not null && todoWidget is not null)
             {
                 await _refreshTodoWidgetAsync(todoWidget.Id);
             }
 
-            App.Log($"[SearchAction] Attached '{fileName}' to todo widget '{todoWidget.Id}'.");
-            return (true, todoWidget.Id, item.Id, fileName);
+            App.Log($"[SearchAction] Attached '{fileName}' to todo widget '{targetWidgetId}'.");
+            return (true, targetWidgetId, item.Id, fileName);
         }
         catch (Exception ex)
         {
@@ -100,7 +88,9 @@ public sealed class SearchResultActionService
 
     public async Task<(bool Succeeded, string? ItemId, string FileName)> SaveFileToNoteWithResultAsync(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path) ||
+            !File.Exists(path) ||
+            !SearchSettingsSlice.IsCategoryFeatureEnabled(_settingsService.Settings, SearchSettingsSlice.CategoryNote))
         {
             return (false, null, string.Empty);
         }

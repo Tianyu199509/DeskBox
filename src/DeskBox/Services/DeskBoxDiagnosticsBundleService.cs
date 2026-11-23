@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -251,6 +252,39 @@ public sealed partial class DeskBoxDiagnosticsBundleService
     [GeneratedRegex(@"^0x[0-9a-f]{1,8}[.,;:)]?$", RegexOptions.IgnoreCase)]
     private static partial Regex HexErrorCodeValueRegex();
 
+    [GeneratedRegex(@"^[0-9]{1,9}[.,;:)]?$")]
+    private static partial Regex PlainCountValueRegex();
+
+    [GeneratedRegex(@"(?i)(?:token|secret|apikey|api_key|password|authorization)")]
+    private static partial Regex SecretKeywordRegex();
+
+    [GeneratedRegex(@"(?i)^(?:apiKey|api_key|api-key|x-api-key|secret|token|password|authorization|accessToken|access_token|refreshToken|refresh_token|authToken|auth_token|clientSecret|client_secret)$")]
+    private static partial Regex StudioSecretJsonKeyRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])[A-Za-z]:(?:\\\\|\\)[^\s'""\x60,;)\]}>\\]+(?:[\\][^\s'""\x60,;)\]}>\\]+)*")]
+    private static partial Regex StudioWindowsBackslashPathRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_])[A-Za-z]:/(?!/)(?:Users|Windows|Program\s*Files(?:\s*\(x86\))?|ProgramData|Temp|inetpub|[A-Za-z0-9._\-]+/[A-Za-z0-9._\-])[^\s'""\x60,;)\]}>]*", RegexOptions.IgnoreCase)]
+    private static partial Regex StudioWindowsForwardSlashPathRegex();
+
+    [GeneratedRegex(@"(?<![\\/])\\\\[A-Za-z0-9._\-]{1,63}\\[A-Za-z0-9._$\-]+[^\s'""\x60,;)\]}>]*")]
+    private static partial Regex StudioUncPathRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_/:\\])/(?:Users|home)/[A-Za-z0-9._\-]+(?:/[^\s'""\x60,;)\]}>\\]*)?", RegexOptions.IgnoreCase)]
+    private static partial Regex StudioUnixUserPathRegex();
+
+    [GeneratedRegex(@"(?i)\b(?<key>apiKey|api_key|secret|password|accessToken|access_token|refreshToken|refresh_token|authToken|auth_token|clientSecret|client_secret)\s*=\s*(?<quote>[""'\x60])[^""'\x60\r\n]+\k<quote>")]
+    private static partial Regex StudioJsSecretLiteralAssignmentRegex();
+
+    [GeneratedRegex(@"(?i)\b(?<key>token)\s*=\s*(?<quote>[""'\x60])[A-Za-z0-9._\-+/=]{8,}\k<quote>")]
+    private static partial Regex StudioJsTokenLiteralAssignmentRegex();
+
+    [GeneratedRegex(@"(?i)(?<quote>[""'])(?<key>apiKey|api_key|api-key|x-api-key|secret|token|password|authorization)\k<quote>\s*:\s*(?<valQuote>[""'])[^""'\r\n]*\k<valQuote>")]
+    private static partial Regex StudioQuotedObjectSecretRegex();
+
+    [GeneratedRegex(@"(?i)(https?://[^\s\x27""\x60<>?)]+)\?[^\s\x27""\x60<>)]+")]
+    private static partial Regex StudioUrlQueryParametersRegex();
+
     public async Task<string> ExportAsync(
         string destinationDirectory,
         DeskBoxDiagnosticSnapshot snapshot,
@@ -334,10 +368,7 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                 : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "DeskBox.Studio.log") : null)),
             ("deskbox-settings-host-sanitized.log", isAppRootExport
                 ? Path.Combine(Path.GetTempPath(), "deskbox-settings-host.log")
-                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "deskbox-settings-host.log") : null)),
-            ("studio-ai-recent.json", isAppRootExport
-                ? Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "cache", CustomWidgetDiagnosticArchive.FileName)
-                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "data", "cache", CustomWidgetDiagnosticArchive.FileName) : null))
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "deskbox-settings-host.log") : null))
         ];
 
         foreach ((string entryName, string? candidatePath) in optionalLogs)
@@ -361,6 +392,215 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                 // Best-effort companion artifact; never fail primary support export.
             }
         }
+
+        string? studioArchivePath = isAppRootExport
+            ? Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "cache", CustomWidgetDiagnosticArchive.FileName)
+            : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "data", "cache", CustomWidgetDiagnosticArchive.FileName) : null);
+        if (!string.IsNullOrWhiteSpace(studioArchivePath) && File.Exists(studioArchivePath))
+        {
+            try
+            {
+                string rawStudioJson = await File.ReadAllTextAsync(studioArchivePath, Encoding.UTF8, cancellationToken);
+                string sanitizedStudioJson = SanitizeStudioArchiveJson(rawStudioJson);
+                await WriteTextEntryAsync(archive, "studio-ai-recent.json", sanitizedStudioJson, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                // Best-effort companion artifact; never fail primary support export.
+            }
+        }
+    }
+
+    internal static string SanitizeStudioArchiveJson(string rawJson)
+    {
+        const string fallbackEmptyJson = "{\n  \"schemaVersion\": 1,\n  \"entries\": []\n}";
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return fallbackEmptyJson;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(
+                rawJson,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(
+                       buffer,
+                       new JsonWriterOptions
+                       {
+                           Indented = true,
+                           Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                       }))
+            {
+                WriteSanitizedStudioJsonElement(writer, document.RootElement, propertyName: null, insideManifest: false);
+            }
+
+            return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
+        }
+        catch (JsonException)
+        {
+            return fallbackEmptyJson;
+        }
+    }
+
+    private static void WriteSanitizedStudioJsonElement(
+        Utf8JsonWriter writer,
+        JsonElement element,
+        string? propertyName,
+        bool insideManifest)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (JsonProperty prop in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(prop.Name);
+                    if (StudioSecretJsonKeyRegex().IsMatch(prop.Name) &&
+                        prop.Value.ValueKind == JsonValueKind.String)
+                    {
+                        writer.WriteStringValue("<REDACTED>");
+                        continue;
+                    }
+
+                    WriteSanitizedStudioJsonElement(writer, prop.Value, prop.Name, insideManifest);
+                }
+
+                writer.WriteEndObject();
+                break;
+
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    WriteSanitizedStudioJsonElement(writer, item, propertyName, insideManifest);
+                }
+
+                writer.WriteEndArray();
+                break;
+
+            case JsonValueKind.String:
+                string raw = element.GetString() ?? string.Empty;
+                if (!insideManifest && string.Equals(propertyName, "manifestJson", StringComparison.Ordinal))
+                {
+                    writer.WriteStringValue(SanitizeEmbeddedManifestJsonString(raw));
+                }
+                else if (insideManifest || string.Equals(propertyName, "logicJs", StringComparison.Ordinal))
+                {
+                    writer.WriteStringValue(ScrubStudioCodeOrConfigString(raw));
+                }
+                else if (propertyName is "entryId" or "createdAtUtc" or "eventKind" or "thinkingMode")
+                {
+                    writer.WriteStringValue(raw);
+                }
+                else
+                {
+                    writer.WriteStringValue(ScrubStudioFreeText(raw));
+                }
+
+                break;
+
+            default:
+                element.WriteTo(writer);
+                break;
+        }
+    }
+
+    private static string SanitizeEmbeddedManifestJsonString(string rawManifest)
+    {
+        if (string.IsNullOrWhiteSpace(rawManifest))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(
+                rawManifest,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(
+                       buffer,
+                       new JsonWriterOptions
+                       {
+                           Indented = true,
+                           Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                       }))
+            {
+                WriteSanitizedStudioJsonElement(writer, doc.RootElement, propertyName: null, insideManifest: true);
+            }
+
+            return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
+        }
+        catch (JsonException)
+        {
+            return ScrubStudioCodeOrConfigString(rawManifest);
+        }
+    }
+
+    private static string ScrubStudioCodeOrConfigString(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        string scrubbed = value;
+        string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            string normalizedBackslash = userProfile.TrimEnd('\\', '/');
+            string normalizedForward = normalizedBackslash.Replace('\\', '/');
+            scrubbed = scrubbed.Replace(normalizedBackslash, "<PATH>", StringComparison.OrdinalIgnoreCase);
+            scrubbed = scrubbed.Replace(normalizedForward, "<PATH>", StringComparison.OrdinalIgnoreCase);
+        }
+
+        scrubbed = StudioQuotedObjectSecretRegex().Replace(
+            scrubbed,
+            "${quote}${key}${quote}: ${valQuote}<REDACTED>${valQuote}");
+        scrubbed = StudioJsSecretLiteralAssignmentRegex().Replace(
+            scrubbed,
+            "${key} = ${quote}<REDACTED>${quote}");
+        scrubbed = StudioJsTokenLiteralAssignmentRegex().Replace(
+            scrubbed,
+            "${key} = ${quote}<REDACTED>${quote}");
+        scrubbed = InlineCredentialTokenRegex().Replace(scrubbed, "<SECRET>");
+        scrubbed = StudioUncPathRegex().Replace(scrubbed, "<PATH>");
+        scrubbed = StudioWindowsBackslashPathRegex().Replace(scrubbed, "<PATH>");
+        scrubbed = StudioWindowsForwardSlashPathRegex().Replace(scrubbed, "<PATH>");
+        scrubbed = StudioUnixUserPathRegex().Replace(scrubbed, "<PATH>");
+        scrubbed = StudioUrlQueryParametersRegex().Replace(scrubbed, "$1?<QUERY_REDACTED>");
+        scrubbed = EmailRegex().Replace(scrubbed, "<EMAIL>");
+        scrubbed = SecurityIdentifierRegex().Replace(scrubbed, "<SID>");
+        return scrubbed;
+    }
+
+    private static string ScrubStudioFreeText(string value)
+    {
+        string scrubbed = ScrubStudioCodeOrConfigString(value);
+        foreach (string accountValue in GetAccountValues())
+        {
+            scrubbed = Regex.Replace(
+                scrubbed,
+                $@"(?<![A-Za-z0-9_.$]){Regex.Escape(accountValue)}(?![A-Za-z0-9_.$:(])",
+                "<USER>",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        return scrubbed;
     }
 
     internal static string SanitizeLog(string value)
@@ -374,12 +614,18 @@ public sealed partial class DeskBoxDiagnosticsBundleService
             value,
             match =>
             {
+                string key = match.Groups[1].Value;
                 string raw = match.Groups["value"].Value;
                 // The key keywords substring-match unrelated keys ("executeHr" contains
-                // "exe"), but HRESULT hex values carry no user data, so keep them.
-                return bool.TryParse(raw, out _) || HexErrorCodeValueRegex().IsMatch(raw)
+                // "exe", "paths=1" / "pathCount=4" / "file=2" are plain item counts).
+                // Preserve booleans, HRESULT hex values, and non-secret integer counts.
+                bool isSafeNonSecretCount = PlainCountValueRegex().IsMatch(raw) &&
+                    !SecretKeywordRegex().IsMatch(key);
+                return bool.TryParse(raw, out _) ||
+                       HexErrorCodeValueRegex().IsMatch(raw) ||
+                       isSafeNonSecretCount
                     ? match.Value
-                    : $"{match.Groups[1].Value}=<REDACTED>";
+                    : $"{key}=<REDACTED>";
             });
         sanitized = JsonSecretPropertyRegex().Replace(sanitized, "\"$1\":\"<REDACTED>\"");
         sanitized = QuotedWindowsPathRegex().Replace(sanitized, "'<PATH>'");

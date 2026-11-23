@@ -755,7 +755,7 @@ public sealed class CustomWidgetAgentStudioTests
         Directory.CreateDirectory(tempRoot);
         try
         {
-            // 1. Official unmodified v1.0.0 preset automatically upgrades to built-in latest version while keeping store.json intact
+            // 1. Official unmodified older preset automatically upgrades to built-in v1.0.0 while keeping store.json intact
             var officialStore = new CustomWidgetDataStore("w-official", tempRoot);
             string olderOfficial = CustomWidgetManifestMetadataStamper.StampProvenance(
                 """
@@ -763,7 +763,7 @@ public sealed class CustomWidgetAgentStudioTests
                   "schemaVersion": 1,
                   "id": "deskbox.sys-pulse",
                   "name": "Old Official Pulse",
-                  "version": "1.0.0",
+                  "version": "0.9.0",
                   "root": "main",
                   "elements": {
                     "main": { "type": "Text", "text": "old" }
@@ -780,12 +780,12 @@ public sealed class CustomWidgetAgentStudioTests
 
             string resolvedOfficial = await officialStore.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.SystemPulseTemplateId);
             CustomWidgetManifest upgradedManifest = CustomWidgetManifestParser.Parse(resolvedOfficial).Manifest!;
-            Assert.NotEqual("1.0.0", upgradedManifest.Version);
+            Assert.Equal("1.0.0", upgradedManifest.Version);
             Assert.Equal(CustomWidgetOriginKinds.Official, upgradedManifest.Origin);
             Assert.False(upgradedManifest.IsCustomized);
             Assert.Equal("running", (await officialStore.LoadAsync()).State["status"]);
 
-            // 2. User/AI customized widget is NEVER overwritten even if version is 1.0.0 and id matches an official preset
+            // 2. User/AI customized widget is NEVER overwritten even if version is lower and id matches an official preset
             var aiStore = new CustomWidgetDataStore("w-ai", tempRoot);
             string customizedAi = CustomWidgetManifestMetadataStamper.StampProvenance(
                 """
@@ -793,7 +793,7 @@ public sealed class CustomWidgetAgentStudioTests
                   "schemaVersion": 1,
                   "id": "deskbox.sys-pulse",
                   "name": "My Personalized AI Board",
-                  "version": "1.0.0",
+                  "version": "0.9.0",
                   "root": "main",
                   "elements": {
                     "main": { "type": "Text", "text": "custom layout" }
@@ -803,7 +803,7 @@ public sealed class CustomWidgetAgentStudioTests
                 origin: CustomWidgetOriginKinds.Ai,
                 isCustomized: true,
                 forkedFromId: "deskbox.sys-pulse",
-                forkedFromVersion: "1.0.0");
+                forkedFromVersion: "0.9.0");
             await aiStore.WriteManifestJsonAsync(customizedAi);
 
             string resolvedAi = await aiStore.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.SystemPulseTemplateId);

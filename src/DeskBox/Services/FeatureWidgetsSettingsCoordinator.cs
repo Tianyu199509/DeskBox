@@ -442,14 +442,11 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         ThrowIfStopped();
         string normalized = NormalizeManagedAction(action);
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
-        string currentDrop = NormalizeManagedAction(fileWidget.ManagedDropAction);
-        string currentDragOut = NormalizeManagedAction(fileWidget.ManagedDragOutAction);
-        bool keepLinked = string.Equals(currentDrop, currentDragOut, StringComparison.Ordinal);
         bool dropSame = string.Equals(
             fileWidget.ManagedDropAction,
             normalized,
             StringComparison.Ordinal);
-        bool dragOutSame = !keepLinked || string.Equals(
+        bool dragOutSame = string.Equals(
             fileWidget.ManagedDragOutAction,
             normalized,
             StringComparison.Ordinal);
@@ -459,11 +456,7 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         }
 
         fileWidget.ManagedDropAction = normalized;
-        if (keepLinked)
-        {
-            fileWidget.ManagedDragOutAction = normalized;
-        }
-
+        fileWidget.ManagedDragOutAction = normalized;
         _settings.SaveDebounced();
         return true;
     }

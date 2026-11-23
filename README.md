@@ -23,7 +23,7 @@ English | [简体中文](README.zh-CN.md)
 
 > **Contribution status:** External pull requests are temporarily paused while core architecture and extensibility boundaries settle. Bug reports, feature ideas, and technical discussions are warmly welcomed via [GitHub Issues](https://github.com/Tianyu199509/DeskBox/issues) and Discussions — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-![DeskBox Windows desktop organizer with file, todo, search, weather, and music widgets](docs/images/brand/readme-hero-1-3-7-dark-en.png)
+![DeskBox Windows desktop organizer with file, todo, clipboard, weather, music, and custom widgets](docs/images/brand/readme-hero-1-3-7-dark-en.png)
 
 Built on C#, WinUI 3, .NET 10 Native AOT, and a Rust native Shell layer, DeskBox adds a lightweight widget layer over the Windows desktop without replacing Explorer or moving your files into a proprietary database. Real-folder-backed file widgets make it a modern open-source alternative to tools such as Stardock Fences, complemented by clipboard history, a global search popup, todos, quick notes, Glance, weather, media controls, and programmable custom desktop widgets.
 
@@ -50,13 +50,13 @@ Built on C#, WinUI 3, .NET 10 Native AOT, and a Rust native Shell layer, DeskBox
 - **Real-folder storage & mapping**: Create managed storage widgets backed by ordinary folders, or map existing desktop and disk folders in place without moving them. Migrating files into managed storage uses a copy-first, verify-before-commit workflow that never auto-deletes source files.
 - **Windows 11-native file interactions**: Single-column right-click menus with inline icons, Explorer-ordered items, real "Open with" app associations (including UWP), blank-area "New / View / Sort by" submenus, native ZIP compress/extract, and Spacebar [QuickLook](https://github.com/QL-Win/QuickLook) preview.
 - **Multi-source drag-and-drop & stacks**: Drag files and links seamlessly to and from Explorer, WeChat, and browsers (including downloading remote URLs), reorder tiles manually, expand nested folder stacks inside widgets or Adaptive / 3×3 / 5×5 popovers, and drag files out safely even from elevated sessions.
-- **Widget groups & Desktop Organization workbench**: Combine file widgets into tabbed groups (connected tabs or equal-width tabs with `Ctrl+Tab` and wheel switching); preview rule-based routing before moving desktop files, enable automatic background filing for newly settled items, and review or undo organization history.
+- **Widget groups & Desktop Organization workbench**: Combine any desktop widgets into tabbed groups (connected tabs or equal-width tabs with `Ctrl+Tab`, wheel switching, and acrylic merge/detach previews); preview rule-based routing before moving desktop files, enable automatic background filing for newly settled items, and review or undo organization history.
 
 ### 2. Everyday Productivity & Desktop Widgets
 
 - **Unified Global Search popup (`Alt+D`)**: Connects over local IPC to an existing Everything installation (not bundled) and merges file results with DeskBox notes, todos, clipboard history, apps, and settings in one window — featuring an instant calculator, command palette, one-keystroke web fallback, and Recommendation Edit Mode (app folders & multi-select drag-to-reorder).
-- **Clipboard History & Quick Paste (`Alt+V`)**: Captures text, HTML/RTF, images, files, and color swatches with instant search, a keyboard-first `Alt+V` Quick Paste popup, offline image OCR text indexing, per-app exclusions, externalized large entries, and automatic local DPAPI encryption and UI masking for sensitive secrets.
-- **Responsive Todo & Quick Capture**: Adaptive single- and dual-pane layouts, task reminders, recurrence, color markers, a popout pinned note window, and live Markdown folder mirroring with linked or managed attachments.
+- **Clipboard History & Quick Paste (`Alt+V`)**: Captures text, HTML/RTF, images, files, and color swatches with instant search, a keyboard-first `Alt+V` Quick Paste popup, offline image OCR text indexing, built-in text transforms, optional webpage URL title fetching, per-app exclusions, externalized large entries, and automatic local DPAPI encryption and UI masking for sensitive secrets.
+- **Responsive Todo & Quick Capture**: Adaptive single- and dual-pane layouts, natural-language date/time/recurrence input, full-text search, overdue reschedule bar, bidirectional Todo ↔ QuickCapture conversion, task reminders, color markers, a popout pinned note window, multi-note merge, and live Markdown folder mirroring with linked or managed attachments.
 - **Glance, Weather & Music**: Glance displays date, weekday, lunar calendar, solar terms, and custom rotating backgrounds; Weather pairs MSN Weather with Open-Meteo fallback across four bundled icon packs; Music controls Windows media sessions with album-color ambience, audio spectrum visualization, and LRCLIB / local `.lrc` synced lyrics.
 
 ### 3. Custom Widgets & Widget Studio

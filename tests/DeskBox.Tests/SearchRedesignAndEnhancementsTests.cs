@@ -318,11 +318,12 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
     }
 
     [Fact]
-    public void SurfacePolicy_ResolvesFullBleedHeaderDividerAndDetailsWidthExpansion()
+    public void SurfacePolicy_ResolvesFullBleedHeaderDividerAndUnifiedResizableWidth()
     {
         Assert.Equal(56, SearchPopupSurfacePolicy.CapsuleOnlyHeightLogical);
-        Assert.Equal(660, SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
-        Assert.Equal(780, SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical);
+        Assert.Equal(760, SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
+        Assert.Equal(520, SearchPopupSurfacePolicy.MinPopupWidthLogical);
+        Assert.Equal(640, SearchPopupSurfacePolicy.DetailsPaneMinPopupWidthLogical);
 
         SearchPopupInputWellVisuals collapsedDark = SearchPopupSurfacePolicy.ResolveInputWellVisuals(
             isExpanded: false,
@@ -350,8 +351,43 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         Assert.Equal(0, expandedLight.BorderColor.A);
         Assert.True(expandedLight.ShowHeaderBottomDivider);
 
+        // Width resolution clamps to [520, 85% workArea] and defaults to 760 across all states.
+        Assert.Equal(760, SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(null, 1920));
+        Assert.Equal(520, SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(380, 1920));
+        Assert.Equal(960, SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(960, 1920));
+        Assert.Equal(1632, SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(2400, 1920));
+
+        // Details pane auto-hides below 640px without altering user preference, and restores >= 640px.
+        Assert.False(SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(true, 639));
+        Assert.True(SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(true, 640));
+        Assert.False(SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(false, 900));
+
+        // Recommendation column estimation scales with resized width and updates row count height.
+        Assert.Equal(4, SearchPopupSurfacePolicy.EstimateRecommendationColumns(520));
+        Assert.Equal(6, SearchPopupSurfacePolicy.EstimateRecommendationColumns(660));
+        Assert.Equal(7, SearchPopupSurfacePolicy.EstimateRecommendationColumns(760));
+        Assert.Equal(10, SearchPopupSurfacePolicy.EstimateRecommendationColumns(1080));
+
+        var narrowRecState = new SearchPopupLayoutState(
+            HasQuery: false,
+            IsSearching: false,
+            ResultCount: 0,
+            ShowFilterBar: false,
+            ShowSortHeader: false,
+            ShowEverythingBanner: false,
+            ShowRecommendations: true,
+            RecommendationEntryCount: 8,
+            ShowAllHiddenRecommendationsHint: false,
+            ShowNoResults: false,
+            ShowFooter: true,
+            PopupWidthLogical: 520);
+        var wideRecState = narrowRecState with { PopupWidthLogical = 960 };
+        Assert.True(
+            SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(narrowRecState, 1080) >
+            SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(wideRecState, 1080));
+
         var workArea = new RectInt32(0, 0, 1920, 1040);
-        RectInt32 singleColumnBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+        RectInt32 defaultBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
             workArea,
             dpiScale: 1.0,
             desiredLogicalHeight: 420,
@@ -359,17 +395,47 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
             customYPhysical: null,
             minBottomHeightPhysical: null,
             desiredLogicalWidth: SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
-        RectInt32 splitDetailsBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+        RectInt32 customWideBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
             workArea,
             dpiScale: 1.0,
             desiredLogicalHeight: 420,
             customXPhysical: null,
             customYPhysical: null,
             minBottomHeightPhysical: null,
-            desiredLogicalWidth: SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical);
-        Assert.Equal(660, singleColumnBounds.Width);
-        Assert.Equal(780, splitDetailsBounds.Width);
-        Assert.Equal(singleColumnBounds.Y, splitDetailsBounds.Y);
+            desiredLogicalWidth: 960);
+        Assert.Equal(760, defaultBounds.Width);
+        Assert.Equal(960, customWideBounds.Width);
+        Assert.Equal(defaultBounds.Y, customWideBounds.Y);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Photos\hero.webp", true)]
+    [InlineData(@"C:\Photos\banner.png", true)]
+    [InlineData(@"C:\Videos\demo.mp4", true)]
+    [InlineData(@"C:\Docs\deck.pdf", true)]
+    [InlineData(@"C:\Docs\icon.svg", true)]
+    [InlineData(@"C:\Docs\notes.md", false)]
+    [InlineData(@"C:\Docs\report.docx", false)]
+    [InlineData(@"C:\Code\Program.cs", false)]
+    public void DetailsPreviewLoader_ExpectsVisualImagePreviewOnlyForVisualMedia(
+        string filePath,
+        bool expected)
+    {
+        var fileItem = new SearchResultItem
+        {
+            Title = Path.GetFileName(filePath),
+            DetailPath = filePath,
+            Kind = SearchResultKind.File
+        };
+        Assert.Equal(expected, SearchDetailsPreviewLoader.ExpectsVisualImagePreview(fileItem));
+
+        var clipboardImageItem = new SearchResultItem
+        {
+            Title = "Clipboard Image",
+            Kind = SearchResultKind.Clipboard,
+            PreviewImagePath = @"C:\Temp\clip.png"
+        };
+        Assert.True(SearchDetailsPreviewLoader.ExpectsVisualImagePreview(clipboardImageItem));
     }
 
     [Theory]
@@ -692,17 +758,20 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
     }
 
     [Fact]
-    public void WidthSpringStepper_ProvidesGentleElasticOvershootPreservesMomentumAndTracksDetailsColumn()
+    public void WidthSpringStepper_ProvidesGentleElasticOvershootPreservesMomentumAndAnchoredX()
     {
-        // 1. Expanding 660 -> 780 exhibits gentle elastic overshoot in (780.5, 788.0] and settles at 780
-        double w = SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
+        const double narrowWidth = 600.0;
+        const double wideWidth = 900.0;
+
+        // 1. Expanding 600 -> 900 exhibits gentle elastic overshoot and settles cleanly at 900
+        double w = narrowWidth;
         double v = 0.0;
         double peak = w;
         bool settled = false;
         for (int frame = 0; frame < 60; frame++)
         {
             SearchPopupWidthSpringStep step = SearchPopupSurfacePolicy.StepWidthSpring(
-                w, v, targetWidth: SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, deltaSeconds: 0.012, expandingDirection: true);
+                w, v, targetWidth: wideWidth, deltaSeconds: 0.012, expandingDirection: true);
             w = step.Width;
             v = step.Velocity;
             peak = Math.Max(peak, w);
@@ -714,14 +783,14 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         }
 
         Assert.True(settled);
-        Assert.Equal((double)SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, w);
-        Assert.True(peak > 780.5 && peak <= 788.0, $"Expected gentle elastic overshoot in (780.5, 788.0], actual peak={peak:F2}");
+        Assert.Equal(wideWidth, w);
+        Assert.True(peak > wideWidth + 0.5 && peak <= wideWidth + 8.0, $"Expected gentle elastic overshoot, actual peak={peak:F2}");
 
-        // 2. Closing 780 -> 660 preserves momentum across mid-flight updates and settles at 660
-        w = SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical;
+        // 2. Shrinking 900 -> 600 preserves momentum across mid-flight updates and settles at 600
+        w = wideWidth;
         v = 0.0;
         SearchPopupWidthSpringStep midFlight = SearchPopupSurfacePolicy.StepWidthSpring(
-            w, v, targetWidth: SearchPopupSurfacePolicy.DefaultPopupWidthLogical, deltaSeconds: 0.036, expandingDirection: false);
+            w, v, targetWidth: narrowWidth, deltaSeconds: 0.036, expandingDirection: false);
         Assert.True(midFlight.Velocity < -100.0);
 
         w = midFlight.Width;
@@ -731,7 +800,7 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         for (int frame = 0; frame < 60; frame++)
         {
             SearchPopupWidthSpringStep step = SearchPopupSurfacePolicy.StepWidthSpring(
-                w, v, targetWidth: SearchPopupSurfacePolicy.DefaultPopupWidthLogical, deltaSeconds: 0.012, expandingDirection: false);
+                w, v, targetWidth: narrowWidth, deltaSeconds: 0.012, expandingDirection: false);
             w = step.Width;
             v = step.Velocity;
             trough = Math.Min(trough, w);
@@ -744,23 +813,10 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         }
 
         Assert.True(settled);
-        Assert.Equal((double)SearchPopupSurfacePolicy.DefaultPopupWidthLogical, w);
-        Assert.True(trough >= 654.0 && trough < 659.5, $"Expected soft closing cushion in [654.0, 659.5), actual trough={trough:F2}");
+        Assert.Equal(narrowWidth, w);
+        Assert.True(trough >= narrowWidth - 6.0 && trough < narrowWidth - 0.5, $"Expected soft closing cushion, actual trough={trough:F2}");
 
-        // 3. Details column width and progress interpolate smoothly across 660 -> 720 -> 780
-        Assert.Equal(0.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(660));
-        Assert.Equal(156.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(720));
-        Assert.Equal(312.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(780));
-
-        Assert.Equal(0.0, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(660));
-        Assert.Equal(0.5, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(720));
-        Assert.Equal(1.0, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(780));
-
-        // 4. Overshoot above 780 is absorbed by DetailsPaneColumn so ResultsListColumn stays locked at 468px
-        Assert.Equal(468, SearchPopupSurfacePolicy.ResultsWithDetailsColumnWidthLogical);
-        Assert.Equal(468.0, Math.Round(784.6 - SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(784.6), 1));
-
-        // 5. Left-anchored SetWindowPos(SWP_NOSIZE) X glide matches ResolveAnchoredWindowBounds at both endpoints
+        // 3. Left-anchored SetWindowPos(SWP_NOSIZE) X glide matches ResolveAnchoredWindowBounds at endpoints
         var workAreas = new[]
         {
             new Windows.Graphics.RectInt32(0, 0, 1920, 1032),
@@ -772,20 +828,20 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
             foreach (double scale in new[] { 1.0, 1.25, 1.5, 2.0 })
             {
                 var narrowBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
-                    workArea, scale, 360, null, null, null, SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
+                    workArea, scale, 360, null, null, null, (int)narrowWidth);
                 var wideBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
-                    workArea, scale, 360, null, null, null, SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical);
+                    workArea, scale, 360, null, null, null, (int)wideWidth);
 
                 Assert.Equal(
                     narrowBounds.X,
                     SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
-                        workArea, scale, SearchPopupSurfacePolicy.DefaultPopupWidthLogical, null, null));
+                        workArea, scale, narrowWidth, null, null));
                 Assert.Equal(
                     wideBounds.X,
                     SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
-                        workArea, scale, SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, null, null));
+                        workArea, scale, wideWidth, null, null));
 
-                int midX = SearchPopupSurfacePolicy.ComputeAnchoredWindowX(workArea, scale, 720, null, null);
+                int midX = SearchPopupSurfacePolicy.ComputeAnchoredWindowX(workArea, scale, SearchPopupSurfacePolicy.DefaultPopupWidthLogical, null, null);
                 Assert.InRange(midX, wideBounds.X, narrowBounds.X);
             }
         }
@@ -847,7 +903,7 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
 
         Assert.Contains("bool preserveVisibleResults = IsQueryActive && HasResults;", viewModelSource, StringComparison.Ordinal);
         Assert.Contains("preserveSelection: refreshKind != SearchRefreshKind.UserQuery", viewModelSource, StringComparison.Ordinal);
-        Assert.Contains("bool useDetailsSplitWidth = showDetailsPane ||", popupSource, StringComparison.Ordinal);
+        Assert.Contains("SearchPopupSurfacePolicy.ResolveEffectiveLogicalWidth(", popupSource, StringComparison.Ordinal);
         Assert.Contains("SearchPopupSurfacePolicy.StepHeightSpring", popupSource, StringComparison.Ordinal);
     }
 
@@ -1007,6 +1063,460 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         Assert.Contains("GetQuickCaptureSvgIcon()", cmdPaletteSource, StringComparison.Ordinal);
         Assert.Contains("GetTodoSvgIcon()", popupSource, StringComparison.Ordinal);
         Assert.Contains("GetQuickCaptureSvgIcon()", popupSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SearchCategoryLayout_ParsesDefaultOrderAutoLinksSearchAndTabAndSupportsReorder()
+    {
+        Assert.Equal(14, SearchSettingsSlice.DefaultCategoryOrder.Count);
+        Assert.True(SearchSettingsSlice.IsDefaultCategoryLayout(null));
+        Assert.True(SearchSettingsSlice.IsDefaultCategoryLayout(SearchSettingsSlice.DefaultCategoryLayout));
+
+        IReadOnlyList<SearchCategoryEntry> defaults = SearchSettingsSlice.ParseCategoryLayout(null);
+        Assert.Equal(14, defaults.Count);
+        Assert.All(defaults, entry => Assert.True(entry.SearchEnabled));
+        Assert.Equal(
+            [SearchSettingsSlice.CategoryFile, SearchSettingsSlice.CategoryImage],
+            defaults.Where(static e => e.TabShown).Select(static e => e.Id).ToArray());
+
+        // Turning off Search automatically turns off TabShown.
+        string fileSearchOff = SearchSettingsSlice.SetCategorySearchEnabled(
+            SearchSettingsSlice.DefaultCategoryLayout,
+            SearchSettingsSlice.CategoryFile,
+            searchEnabled: false);
+        SearchCategoryEntry fileAfterOff = SearchSettingsSlice.ParseCategoryLayout(fileSearchOff)
+            .Single(e => e.Id == SearchSettingsSlice.CategoryFile);
+        Assert.False(fileAfterOff.SearchEnabled);
+        Assert.False(fileAfterOff.TabShown);
+
+        // Turning on TabShown automatically turns on SearchEnabled even when previously off.
+        string fileTabBackOn = SearchSettingsSlice.SetCategoryTabShown(
+            fileSearchOff,
+            SearchSettingsSlice.CategoryFile,
+            tabShown: true);
+        SearchCategoryEntry fileAfterTabOn = SearchSettingsSlice.ParseCategoryLayout(fileTabBackOn)
+            .Single(e => e.Id == SearchSettingsSlice.CategoryFile);
+        Assert.True(fileAfterTabOn.SearchEnabled);
+        Assert.True(fileAfterTabOn.TabShown);
+
+        // Reorder and move operations preserve per-category states while changing order.
+        string withSettingsAndTodoTabs = SearchSettingsSlice.SetCategoryTabShown(
+            SearchSettingsSlice.SetCategoryTabShown(
+                SearchSettingsSlice.DefaultCategoryLayout,
+                SearchSettingsSlice.CategorySettings,
+                tabShown: true),
+            SearchSettingsSlice.CategoryTodo,
+            tabShown: true);
+        string reordered = SearchSettingsSlice.ReorderCategories(
+            withSettingsAndTodoTabs,
+            [SearchSettingsSlice.CategorySettings, SearchSettingsSlice.CategoryTodo, SearchSettingsSlice.CategoryFile]);
+        IReadOnlyList<SearchCategoryEntry> reorderedParsed = SearchSettingsSlice.ParseCategoryLayout(reordered);
+        Assert.Equal(SearchSettingsSlice.CategorySettings, reorderedParsed[0].Id);
+        Assert.Equal(SearchSettingsSlice.CategoryTodo, reorderedParsed[1].Id);
+        Assert.Equal(SearchSettingsSlice.CategoryFile, reorderedParsed[2].Id);
+        Assert.Equal(14, reorderedParsed.Count);
+
+        string movedDown = SearchSettingsSlice.MoveCategory(reordered, SearchSettingsSlice.CategorySettings, +1);
+        IReadOnlyList<SearchCategoryEntry> movedParsed = SearchSettingsSlice.ParseCategoryLayout(movedDown);
+        Assert.Equal(SearchSettingsSlice.CategoryTodo, movedParsed[0].Id);
+        Assert.Equal(SearchSettingsSlice.CategorySettings, movedParsed[1].Id);
+
+        // Legacy "deskbox" default tab migrates cleanly to "all".
+        Assert.Equal(SearchSettingsSlice.CategoryAll, SearchSettingsSlice.NormalizeDefaultTabId("deskbox"));
+        Assert.Equal(SearchSettingsSlice.CategorySettings, SearchSettingsSlice.NormalizeDefaultTabId("SETTINGS"));
+    }
+
+    [Fact]
+    public async Task SearchCategoriesAndTabs_SupportSettingsTabGranularSplitOrderAndFeatureWidgetLinkage()
+    {
+        Directory.CreateDirectory(_root);
+        var settings = new SettingsService(Path.Combine(_root, "settings-categories"));
+        settings.Settings.Language = "zh-CN";
+        settings.Settings.SearchIncludeWebFallback = false;
+        settings.Settings.Search.SearchQuickCreateTodoEnabled = false;
+        settings.Settings.Search.SearchQuickCreateNoteEnabled = false;
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Todo, true);
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.QuickCapture, true);
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Clipboard, true);
+
+        var localization = new LocalizationService(settings);
+        Assert.Equal("搜索文件、设置、应用", localization.T("Search.Placeholder"));
+        Assert.Equal("设置", localization.T("Search.Tab.Settings"));
+
+        var store = new QuickCaptureStore(Path.Combine(_root, "quick-capture-categories"));
+        await store.SaveAsync(new QuickCaptureStoreData
+        {
+            Items =
+            [
+                new QuickCaptureItem
+                {
+                    Id = "note-theme",
+                    Title = "主题配色灵感",
+                    Body = "深色主题圆角笔记",
+                    UpdatedAt = DateTimeOffset.UtcNow
+                }
+            ]
+        });
+        var quickCapture = new QuickCaptureService(store);
+        var everything = new EverythingSearchService(settings);
+        var history = new SearchHistoryService(Path.Combine(_root, "history-categories"));
+        var fileMeta = new FileMetaService();
+
+        long nowTicks = DateTimeOffset.UtcNow.UtcTicks;
+        var clipboardItems = new List<ClipboardHistoryItem>
+        {
+            new()
+            {
+                Id = "clip-theme",
+                Kind = ClipboardItemKind.Text,
+                Summary = "主题设置备份片段",
+                TextContent = "主题设置备份片段",
+                SourceAppName = "Code",
+                CreatedAtUtcTicks = nowTicks,
+                UpdatedAtUtcTicks = nowTicks
+            }
+        };
+        string todoWidgetsRoot = CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(settings);
+        settings.Settings.WidgetLayout.Widgets.Add(new WidgetConfig
+        {
+            Id = "todo-widget-1",
+            Name = "今日待办",
+            WidgetKind = WidgetKind.Todo
+        });
+        await new TodoWidgetStore(todoWidgetsRoot, "todo-widget-1").SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "todo-theme",
+                    Text = "确认主题设置细节",
+                    CreatedAt = DateTimeOffset.UtcNow
+                }
+            ]
+        });
+
+        using var engine = new SearchEngineService(
+            settings,
+            localization,
+            everything,
+            quickCapture,
+            clipboardItemsProvider: _ => Task.FromResult<IReadOnlyList<ClipboardHistoryItem>>(clipboardItems));
+        using var vm = new ViewModels.SearchPopupViewModel(engine, settings, localization, history, fileMeta);
+
+        // 1. Default layout: All 14 types participate in search, while visible Tabs default to ["all", "file", "image"].
+        vm.Query = "主题";
+        await vm.RefreshSearchAsync();
+
+        Assert.Equal(
+            [SearchSettingsSlice.CategoryAll, SearchSettingsSlice.CategoryFile, SearchSettingsSlice.CategoryImage],
+            vm.Tabs.Select(static t => t.Id).ToArray());
+        Assert.True(vm.ShouldShowCategoryBar);
+        Assert.Contains(vm.CurrentResults, static i => SearchSettingsSlice.IsSettingsActionItem(i));
+        Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.Todo && i.TodoItemId == "todo-theme");
+        Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.QuickCapture && i.QuickCaptureItemId == "note-theme");
+        Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard && i.ClipboardItemId == "clip-theme");
+
+        // Single-character CJK query ("暗" / "圆") also matches DeskBox settings catalog items.
+        SearchResponse oneCharSettings = await engine.SearchAsync("圆");
+        Assert.Contains(oneCharSettings.RankedItems, static i => SearchSettingsSlice.IsSettingsActionItem(i));
+
+        // 2. Enabling granular Tabs (settings, todo, note, clipboard) in custom order exposes exact filtered Tabs.
+        string customLayout =
+            "settings:tab,todo:tab,note:tab,clipboard:tab,file:tab,image:search,app:search,document:search,folder:search,widget:search,command:search,video:search,music:search,archive:search";
+        using var coordinator = new SearchSettingsCoordinator(
+            settings,
+            localization,
+            () => null,
+            () => null,
+            () => null,
+            _ => { });
+        coordinator.UpdatePreferences(new(DefaultTab: SearchSettingsSlice.CategorySettings, CategoryLayout: customLayout));
+        vm.RefreshActiveSearchAndTabs(rerunSearch: false);
+
+        Assert.Equal(
+            [
+                SearchSettingsSlice.CategoryAll,
+                SearchSettingsSlice.CategorySettings,
+                SearchSettingsSlice.CategoryTodo,
+                SearchSettingsSlice.CategoryNote,
+                SearchSettingsSlice.CategoryClipboard,
+                SearchSettingsSlice.CategoryFile
+            ],
+            vm.Tabs.Select(static t => t.Id).ToArray());
+
+        // Selecting Settings Tab isolates settings items (excludes non-settings commands like toggle-theme).
+        vm.SelectedTab = vm.Tabs.Single(t => t.Id == SearchSettingsSlice.CategorySettings);
+        Assert.NotEmpty(vm.CurrentResults);
+        Assert.All(vm.CurrentResults, static i => Assert.True(SearchSettingsSlice.IsSettingsActionItem(i)));
+
+        // Selecting Todo / Note / Clipboard Tabs isolates each split DeskBox module.
+        vm.SelectedTab = vm.Tabs.Single(t => t.Id == SearchSettingsSlice.CategoryTodo);
+        Assert.Single(vm.CurrentResults, static i => i.TodoItemId == "todo-theme");
+
+        vm.SelectedTab = vm.Tabs.Single(t => t.Id == SearchSettingsSlice.CategoryNote);
+        Assert.Single(vm.CurrentResults, static i => i.QuickCaptureItemId == "note-theme");
+
+        vm.SelectedTab = vm.Tabs.Single(t => t.Id == SearchSettingsSlice.CategoryClipboard);
+        Assert.Single(vm.CurrentResults, static i => i.ClipboardItemId == "clip-theme");
+
+        // 3. Hiding the DefaultTab ("settings") in CategoryLayout automatically resets SearchDefaultTab to "all".
+        string hideSettingsTab = SearchSettingsSlice.SetCategoryTabShown(
+            customLayout,
+            SearchSettingsSlice.CategorySettings,
+            tabShown: false);
+        coordinator.UpdatePreferences(new(CategoryLayout: hideSettingsTab));
+        Assert.Equal(SearchSettingsSlice.CategoryAll, settings.Settings.Search.SearchDefaultTab);
+
+        // 4. Turning off SearchEnabled on "todo" omits Todo results from search altogether.
+        string disableTodoSearch = SearchSettingsSlice.SetCategorySearchEnabled(
+            customLayout,
+            SearchSettingsSlice.CategoryTodo,
+            searchEnabled: false);
+        coordinator.UpdatePreferences(new(CategoryLayout: disableTodoSearch));
+        await vm.RefreshSearchAsync();
+        vm.SelectedTab = vm.Tabs.Single(t => t.Id == SearchSettingsSlice.CategoryAll);
+        Assert.DoesNotContain(vm.CurrentResults, static i => i.Kind == SearchResultKind.Todo);
+        Assert.DoesNotContain(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryTodo);
+
+        // 5. FeatureWidgets linkage: disabling Clipboard in FeatureWidgets hides its Tab and search results
+        // without erasing the user's saved SearchCategoryLayout, and re-enabling restores both.
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Clipboard, false);
+        await vm.RefreshSearchAsync();
+        Assert.DoesNotContain(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryClipboard);
+        Assert.DoesNotContain(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard);
+        Assert.True(SearchSettingsSlice.ParseCategoryLayout(settings.Settings.Search.SearchCategoryLayout)
+            .Single(e => e.Id == SearchSettingsSlice.CategoryClipboard).TabShown);
+
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Clipboard, true);
+        await vm.RefreshSearchAsync();
+        Assert.Contains(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryClipboard);
+        Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard);
+    }
+
+    [Fact]
+    public async Task SearchRegressionAudit_DefaultHotkeyOnInlineScopesCategoryModesAndDetailsPreview()
+    {
+        Directory.CreateDirectory(_root);
+
+        // 1. New user install defaults SearchHotkeyEnabled to true (Alt+D), while explicit false in JSON is preserved.
+        var freshSettings = new SettingsService(Path.Combine(_root, "settings-fresh-install"));
+        Assert.True(freshSettings.Settings.SearchHotkeyEnabled);
+        Assert.Equal((int)HotkeyModifierKeys.Alt, freshSettings.Settings.SearchHotkeyModifiers);
+        Assert.Equal(0x44, freshSettings.Settings.SearchHotkeyKey);
+
+        string optedOutDir = Path.Combine(_root, "settings-opted-out");
+        Directory.CreateDirectory(optedOutDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(optedOutDir, "settings.json"),
+            """{"schemaVersion":18,"searchHotkeyEnabled":false}""");
+        var optedOutSettings = new SettingsService(optedOutDir);
+        await optedOutSettings.LoadAsync();
+        Assert.False(optedOutSettings.Settings.SearchHotkeyEnabled);
+
+        // 2. Full 14-category inline scope prefixes parse cleanly.
+        Assert.Equal(SearchInlineScope.Folders, SearchQuerySyntaxParser.Parse("folder:Specs").Scope);
+        Assert.Equal(SearchInlineScope.Images, SearchQuerySyntaxParser.Parse("img:hero").Scope);
+        Assert.Equal(SearchInlineScope.Documents, SearchQuerySyntaxParser.Parse("doc:report").Scope);
+        Assert.Equal(SearchInlineScope.Videos, SearchQuerySyntaxParser.Parse("video:demo").Scope);
+        Assert.Equal(SearchInlineScope.Music, SearchQuerySyntaxParser.Parse("music:bgm").Scope);
+        Assert.Equal(SearchInlineScope.Archives, SearchQuerySyntaxParser.Parse("zip:release").Scope);
+        Assert.Equal(SearchInlineScope.Widgets, SearchQuerySyntaxParser.Parse("widget:pomodoro").Scope);
+
+        // 3. HotkeyHint formats chords, Win+Space, and DoubleControl cleanly without "VK:00".
+        freshSettings.Settings.Language = "zh-CN";
+        freshSettings.Settings.SearchIncludeWebFallback = false;
+        var localization = new LocalizationService(freshSettings);
+        var store = new QuickCaptureStore(Path.Combine(_root, "quick-capture-audit"));
+        await store.SaveAsync(new QuickCaptureStoreData());
+        var quickCapture = new QuickCaptureService(store);
+        var everything = new EverythingSearchService(freshSettings);
+        var history = new SearchHistoryService(Path.Combine(_root, "history-audit"));
+        var fileMeta = new FileMetaService();
+
+        using var engine = new SearchEngineService(freshSettings, localization, everything, quickCapture);
+        using var vm = new ViewModels.SearchPopupViewModel(engine, freshSettings, localization, history, fileMeta);
+
+        Assert.Equal("Alt+D", vm.HotkeyHint);
+
+        freshSettings.Settings.Search.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Windows;
+        freshSettings.Settings.Search.SearchHotkeyKey = 0x20;
+        Assert.Equal("Win+Space", vm.HotkeyHint);
+
+        freshSettings.Settings.Search.SearchHotkeyActivationKind = HotkeyActivationKind.DoubleControl;
+        freshSettings.Settings.Search.SearchHotkeyModifiers = 0;
+        freshSettings.Settings.Search.SearchHotkeyKey = 0;
+        Assert.DoesNotContain("VK:", vm.HotkeyHint, StringComparison.Ordinal);
+        Assert.NotEmpty(vm.HotkeyHint);
+
+        // 4. Settings results populate PreviewText description for DetailsPane, and quick-create items match Todo/Note tabs.
+        SearchResponse settingsResp = await engine.SearchAsync("set:搜索");
+        Assert.Contains(settingsResp.RankedItems, static i =>
+            SearchSettingsSlice.IsSettingsActionItem(i) && !string.IsNullOrWhiteSpace(i.PreviewText));
+
+        var quickTodoItem = new SearchResultItem { Kind = SearchResultKind.Action, ActionId = "quick-todo:买牛奶", Title = "买牛奶" };
+        var quickNoteItem = new SearchResultItem { Kind = SearchResultKind.Action, ActionId = "quick-note:记灵感", Title = "记灵感" };
+        Assert.True(SearchSettingsSlice.MatchesCategory(quickTodoItem, SearchSettingsSlice.CategoryTodo));
+        Assert.False(SearchSettingsSlice.MatchesCategory(quickTodoItem, SearchSettingsSlice.CategoryCommand));
+        Assert.True(SearchSettingsSlice.MatchesCategory(quickNoteItem, SearchSettingsSlice.CategoryNote));
+        Assert.False(SearchSettingsSlice.MatchesCategory(quickNoteItem, SearchSettingsSlice.CategoryCommand));
+
+        // 5. CategoryBarMode: "auto" hides on 0 results, "always" stays visible on 0 results, "hidden" always hides.
+        freshSettings.Settings.Search.SearchQuickCreateTodoEnabled = false;
+        freshSettings.Settings.Search.SearchQuickCreateNoteEnabled = false;
+        freshSettings.Settings.Search.SearchCategoryBarMode = "auto";
+        vm.Query = "zzzxxyy_zero_hits_audit_2026";
+        await vm.RefreshSearchAsync();
+        Assert.False(vm.ShouldShowCategoryBar);
+
+        freshSettings.Settings.Search.SearchCategoryBarMode = "always";
+        vm.RefreshActiveSearchAndTabs(rerunSearch: false);
+        Assert.True(vm.ShouldShowCategoryBar);
+
+        freshSettings.Settings.Search.SearchCategoryBarMode = "hidden";
+        vm.RefreshActiveSearchAndTabs(rerunSearch: false);
+        Assert.False(vm.ShouldShowCategoryBar);
+    }
+
+    [Fact]
+    public void SortHeaderResponsivePolicy_SuppressesRowColumnsWhenDetailsOpenBelow880AndSharesSplitHeight()
+    {
+        Assert.False(SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader: false,
+            detailsPaneVisible: false,
+            popupWidthLogical: 960));
+
+        // Without DetailsPane open, default 760px width shows full 4-column table.
+        Assert.True(SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader: true,
+            detailsPaneVisible: false,
+            popupWidthLogical: SearchPopupSurfacePolicy.DefaultPopupWidthLogical));
+
+        // With DetailsPane open below 880px, suppress 260px secondary row columns so filenames stay readable.
+        Assert.False(SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader: true,
+            detailsPaneVisible: true,
+            popupWidthLogical: SearchPopupSurfacePolicy.DefaultPopupWidthLogical));
+        Assert.False(SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader: true,
+            detailsPaneVisible: true,
+            popupWidthLogical: SearchPopupSurfacePolicy.FullTableColumnsWithDetailsMinWidthLogical - 1));
+
+        // Wide popup (>= 880px) fits both full 4-column table and DetailsPane cleanly.
+        Assert.True(SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader: true,
+            detailsPaneVisible: true,
+            popupWidthLogical: SearchPopupSurfacePolicy.FullTableColumnsWithDetailsMinWidthLogical));
+
+        var baseState = new SearchPopupLayoutState(
+            HasQuery: true,
+            IsSearching: false,
+            ResultCount: 2,
+            ShowFilterBar: true,
+            ShowSortHeader: false,
+            ShowEverythingBanner: false,
+            ShowRecommendations: false,
+            RecommendationEntryCount: 0,
+            ShowAllHiddenRecommendationsHint: false,
+            ShowNoResults: false,
+            ShowFooter: true,
+            ShowDetailsPane: false);
+
+        int withoutSortNoDetails = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(baseState, 1080);
+        int withSortNoDetails = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
+            baseState with { ShowSortHeader = true },
+            1080);
+        Assert.Equal(SearchPopupSurfacePolicy.SortHeaderHeightLogical, withSortNoDetails - withoutSortNoDetails);
+
+        int withoutSortWithDetails = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
+            baseState with { ShowDetailsPane = true },
+            1080);
+        int withSortWithDetails = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
+            baseState with { ShowDetailsPane = true, ShowSortHeader = true },
+            1080);
+        Assert.Equal(withoutSortWithDetails, withSortWithDetails);
+
+        var settings = new SettingsService(Path.Combine(_root, "sort-header-pref"));
+        Assert.False(settings.Settings.Search.SearchShowSortHeader);
+        settings.Settings.Search.SearchShowSortHeader = true;
+        Assert.True(settings.Settings.SearchShowSortHeader);
+    }
+
+    [Fact]
+    public async Task SortStateMachine_CyclesThreeStatesBackToRelevanceAndStampsModifiedDateImmediately()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "sort-cycle-audit"));
+        settings.Settings.Language = "zh-CN";
+        settings.Settings.Search.SearchShowSortHeader = true;
+        settings.Settings.Search.SearchDefaultSortColumn = "relevance";
+        settings.Settings.Search.SearchIncludeWebFallback = false;
+
+        var localization = new LocalizationService(settings);
+        var store = new QuickCaptureStore(Path.Combine(_root, "qc-sort-cycle"));
+        var older = new DateTimeOffset(2025, 3, 10, 9, 0, 0, TimeSpan.FromHours(8));
+        var newer = new DateTimeOffset(2025, 11, 20, 14, 30, 0, TimeSpan.FromHours(8));
+        await store.SaveAsync(new QuickCaptureStoreData
+        {
+            Items =
+            [
+                new QuickCaptureItem { Id = "n1", Title = "预算报表A", Body = "预算报表A", CreatedAt = older, UpdatedAt = older },
+                new QuickCaptureItem { Id = "n2", Title = "预算报表B", Body = "预算报表B", CreatedAt = newer, UpdatedAt = newer }
+            ]
+        });
+        var quickCapture = new QuickCaptureService(store);
+        var everything = new EverythingSearchService(settings);
+        var history = new SearchHistoryService(Path.Combine(_root, "hist-sort-cycle"));
+        var fileMeta = new FileMetaService();
+
+        using var engine = new SearchEngineService(settings, localization, everything, quickCapture);
+        using var vm = new ViewModels.SearchPopupViewModel(engine, settings, localization, history, fileMeta);
+
+        vm.Query = "预算报表";
+        await vm.RefreshSearchAsync();
+
+        // DateDisplay is stamped immediately on first frame from ModifiedAt without waiting 220ms.
+        Assert.Equal(2, vm.CurrentResults.Count(static i => i.Kind == SearchResultKind.QuickCapture));
+        Assert.All(
+            vm.CurrentResults.Where(static i => i.Kind == SearchResultKind.QuickCapture),
+            static item => Assert.False(string.IsNullOrWhiteSpace(item.DateDisplay)));
+
+        // 3-state ToggleSort cycle when DefaultSortColumn == "relevance":
+        // Click 1 on Size -> Size Descending; Click 2 -> Size Ascending; Click 3 -> Relevance.
+        Assert.Equal(ResultSortColumn.Relevance, vm.SortColumn);
+        vm.ToggleSort(ResultSortColumn.Size);
+        Assert.Equal(ResultSortColumn.Size, vm.SortColumn);
+        Assert.False(vm.SortAscending);
+
+        vm.ToggleSort(ResultSortColumn.Size);
+        Assert.Equal(ResultSortColumn.Size, vm.SortColumn);
+        Assert.True(vm.SortAscending);
+
+        vm.ToggleSort(ResultSortColumn.Size);
+        Assert.Equal(ResultSortColumn.Relevance, vm.SortColumn);
+
+        // Turning off SearchShowSortHeader resets any manual column sort back to default.
+        vm.ToggleSort(ResultSortColumn.Name);
+        Assert.Equal(ResultSortColumn.Name, vm.SortColumn);
+        settings.Settings.Search.SearchShowSortHeader = false;
+        await settings.SaveAsync();
+        Assert.Equal(ResultSortColumn.Relevance, vm.SortColumn);
+
+        // FileMetaService formats ModifiedAt (LastWriteTime) rather than CreationTime.
+        string sampleFile = Path.Combine(_root, "modified_vs_created.txt");
+        await File.WriteAllTextAsync(sampleFile, "hello");
+        var createdDate = new DateTime(2021, 1, 15, 10, 0, 0, DateTimeKind.Local);
+        var modifiedDate = new DateTime(2024, 8, 22, 16, 45, 0, DateTimeKind.Local);
+        File.SetCreationTime(sampleFile, createdDate);
+        File.SetLastWriteTime(sampleFile, modifiedDate);
+
+        var probeItem = new SearchResultItem
+        {
+            Kind = SearchResultKind.File,
+            Title = "modified_vs_created.txt",
+            DetailPath = sampleFile
+        };
+        await fileMeta.EnrichAsync([probeItem]);
+        Assert.Equal(FileMetaService.FormatDate(modifiedDate), probeItem.DateDisplay);
     }
 
     public void Dispose()

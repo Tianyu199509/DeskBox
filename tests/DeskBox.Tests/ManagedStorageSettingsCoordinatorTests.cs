@@ -83,4 +83,29 @@ public sealed class ManagedStorageSettingsCoordinatorTests : IDisposable
             Path.Combine(_root, "late"),
             settings.Settings.FileWidget.DefaultManagedStorageRootPath);
     }
+
+    [Fact]
+    public void ReEnablingDragTipToggles_ClearsDismissedDragHudHints()
+    {
+        Directory.CreateDirectory(_root);
+        var settings = new SettingsService(_root);
+        var coordinator = new ManagedStorageSettingsCoordinator(settings);
+
+        DesktopToastHudService.Shared.RecordHintDismissed(
+            DesktopToastHudService.HintIdWin10MoveRejected,
+            _root);
+        Assert.True(DesktopToastHudService.Shared.IsHintDismissed(
+            DesktopToastHudService.HintIdWin10MoveRejected,
+            _root));
+
+        Assert.True(coordinator.SetDragOutResultHintEnabled(false));
+        Assert.True(DesktopToastHudService.Shared.IsHintDismissed(
+            DesktopToastHudService.HintIdWin10MoveRejected,
+            _root));
+
+        Assert.True(coordinator.SetDragOutResultHintEnabled(true));
+        Assert.False(DesktopToastHudService.Shared.IsHintDismissed(
+            DesktopToastHudService.HintIdWin10MoveRejected,
+            _root));
+    }
 }

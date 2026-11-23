@@ -615,4 +615,54 @@ public sealed class Win10PlatformCompatibilityTests : IDisposable
             targetKind: DropTargetWindowKind.ExplorerFileView,
             win10MoveRejectedByNonExplorer: false));
     }
+
+    [Fact]
+    public void ResolveOutboundModifierTipResourceKey_UsesCtrlBeforeDragOnWin10MoveAndDynamicModifiersOnWin11()
+    {
+        Assert.Equal(
+            "Widget.DragOutTip.Modifiers",
+            FileSurfaceContent.ResolveOutboundModifierTipResourceKey(
+                DataPackageOperation.Copy | DataPackageOperation.Move,
+                isWindows11OrLater: true,
+                SettingsService.ManagedDragOutActionMove));
+
+        Assert.Equal(
+            "Widget.DragOutTip.Win10MoveCtrlCopy",
+            FileSurfaceContent.ResolveOutboundModifierTipResourceKey(
+                DataPackageOperation.Move,
+                isWindows11OrLater: false,
+                SettingsService.ManagedDragOutActionMove));
+
+        Assert.Null(
+            FileSurfaceContent.ResolveOutboundModifierTipResourceKey(
+                DataPackageOperation.Copy,
+                isWindows11OrLater: false,
+                SettingsService.ManagedDragOutActionCopy));
+
+        Assert.Null(
+            FileSurfaceContent.ResolveOutboundModifierTipResourceKey(
+                DataPackageOperation.Copy,
+                isWindows11OrLater: false,
+                SettingsService.ManagedDragOutActionFollowWindows));
+    }
+
+    [Fact]
+    public void ShouldSuppressNativeShellDragVisual_SuppressesTargetWidgetHelperDuringActiveCrossWidgetXamlDrag()
+    {
+        Assert.True(FileSurfaceContent.ShouldSuppressNativeShellDragVisual(
+            isWin10NativeShellDragActive: false,
+            hasActiveDragSession: false,
+            isSurfaceReorderDragActive: false,
+            isStackPopoverDragActive: false,
+            isDeskBoxFileDragSnapshot: false,
+            hasActiveProcessDeskBoxDrag: true));
+
+        Assert.False(FileSurfaceContent.ShouldSuppressNativeShellDragVisual(
+            isWin10NativeShellDragActive: false,
+            hasActiveDragSession: false,
+            isSurfaceReorderDragActive: false,
+            isStackPopoverDragActive: false,
+            isDeskBoxFileDragSnapshot: false,
+            hasActiveProcessDeskBoxDrag: false));
+    }
 }

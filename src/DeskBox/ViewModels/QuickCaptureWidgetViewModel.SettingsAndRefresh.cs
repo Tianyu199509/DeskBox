@@ -42,6 +42,8 @@ public sealed partial class QuickCaptureWidgetViewModel
 
         UpdateEmptyStateText();
         OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(RecordsTabLabelText));
+        OnPropertyChanged(nameof(PinnedTabLabelText));
         OnPropertyChanged(nameof(RecordsTabText));
         OnPropertyChanged(nameof(PinnedTabText));
         OnPropertyChanged(nameof(SearchPlaceholderText));

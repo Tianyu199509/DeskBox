@@ -34,7 +34,6 @@ public sealed record CustomWidgetImportedBundle(
 public static partial class CustomWidgetPackageService
 {
     public const string SharePackageExtension = ".dbxwidget";
-    public const int CurrentPackageVersion = 1;
     private const long MaxPackageEntryBytes = 2 * 1024 * 1024; // 2 MB
 
     public static IReadOnlyList<string> SupportedImportExtensions { get; } =
@@ -573,7 +572,7 @@ public static partial class CustomWidgetPackageService
                 effectiveLogicJs,
                 effectiveLocales,
                 enforceBundledLocales: isZip);
-        return new CustomWidgetImportedBundle(manifest, preparedJson, effectiveLogicJs, manifest.I18n.Count > 0 && effectiveLocales is null ? null : effectiveLocales);
+        return new CustomWidgetImportedBundle(manifest, preparedJson, effectiveLogicJs, effectiveLocales);
     }
 
     public static async Task<CustomWidgetImportedBundle> ReadPackageBundleFromBytesAsync(
@@ -656,7 +655,7 @@ public static partial class CustomWidgetPackageService
                 effectiveLogicJs,
                 effectiveLocales,
                 enforceBundledLocales: isZip);
-        return new CustomWidgetImportedBundle(manifest, preparedJson, effectiveLogicJs, manifest.I18n.Count > 0 && effectiveLocales is null ? null : effectiveLocales);
+        return new CustomWidgetImportedBundle(manifest, preparedJson, effectiveLogicJs, effectiveLocales);
     }
 
     private static async Task<CustomWidgetLocaleCatalog?> ReadLocalesFromZipArchiveAsync(ZipArchive archive)

@@ -1,4 +1,4 @@
-// DeskBox AI Progress HUD (deskbox.agent-hud v4.0)
+// DeskBox AI Progress HUD (deskbox.agent-hud v1.0.0)
 // Dynamic MCP/CLI bridge snippets, compute-time localization, and 4-stage pipeline simulator.
 
 const STAGES = {
@@ -26,9 +26,6 @@ function resolveWidgetId(ctx) {
 function getEventsList(ctx) {
   if (ctx && ctx.collections && typeof ctx.collections.get === 'function') {
     return ctx.collections.get('events') || [];
-  }
-  if (ctx && ctx.collections && Array.isArray(ctx.collections.events)) {
-    return ctx.collections.events;
   }
   return [];
 }

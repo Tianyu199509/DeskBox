@@ -32,7 +32,7 @@ internal static class SearchDetailsPreviewLoader
     private const int MaxTextReadBytes = 4096;
     private const int MaxSnippetLines = 10;
     private const int MaxSnippetChars = 420;
-    private const int PreviewDecodeWidth = 360;
+    private const int PreviewDecodeWidth = 480;
 
     private static readonly System.Collections.Frozen.FrozenSet<string> s_rasterImageExtensions =
         System.Collections.Frozen.FrozenSet.ToFrozenSet(
@@ -80,6 +80,51 @@ internal static class SearchDetailsPreviewLoader
         }
 
         return CanAttemptPathPreview(item.DetailPath);
+    }
+
+    /// <summary>
+    /// Returns true when the Details sidebar expects to render a visual preview image
+    /// (raster image, clipboard/note preview image, video poster frame, PDF page-1 cover,
+    /// or shell-thumbnail document) so the redundant 56x56 hero icon can stay hidden
+    /// while loading and only reappear if image decoding fails.
+    /// </summary>
+    public static bool ExpectsVisualImagePreview(SearchResultItem? item)
+    {
+        if (item is null)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.PreviewImagePath))
+        {
+            return true;
+        }
+
+        if (item.Kind != SearchResultKind.File || string.IsNullOrWhiteSpace(item.DetailPath))
+        {
+            return false;
+        }
+
+        return ExpectsVisualImagePreviewPath(item.DetailPath);
+    }
+
+    public static bool ExpectsVisualImagePreviewPath(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return false;
+        }
+
+        string ext = Path.GetExtension(filePath);
+        if (string.IsNullOrWhiteSpace(ext))
+        {
+            return false;
+        }
+
+        return s_rasterImageExtensions.Contains(ext) ||
+               IconHelper.IsVideoFile(filePath) ||
+               IsPdfExtension(ext) ||
+               s_shellThumbnailDocumentExtensions.Contains(ext);
     }
 
     public static bool CanAttemptPathPreview(string? filePath)

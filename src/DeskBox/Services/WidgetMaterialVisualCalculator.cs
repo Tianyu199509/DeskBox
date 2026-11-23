@@ -201,6 +201,20 @@ internal static class WidgetMaterialVisualCalculator
         return clampedSurface;
     }
 
+    public static Windows.UI.Color BuildInteractionSimplifiedAcrylicColor(
+        Windows.UI.Color tintColor,
+        bool useBase,
+        double surfaceOpacity,
+        double materialIntensity)
+    {
+        double opacity = CalculateLegacyAcrylicOpacity(
+            useBase,
+            Math.Clamp(surfaceOpacity, 0.0, 1.0),
+            materialIntensity);
+        byte alpha = (byte)Math.Clamp(Math.Round(opacity * 255.0), 1, 255);
+        return Windows.UI.Color.FromArgb(alpha, tintColor.R, tintColor.G, tintColor.B);
+    }
+
     public static Windows.UI.Color BuildContentSolidSurfaceColor(
         bool isDark,
         Windows.UI.Color accentColor,

@@ -1695,9 +1695,6 @@ public sealed partial class WidgetManager
                     detachedPosition));
         }
 
-        // Hand-edited settings can leave a blank SurfaceId; the switch-gate
-        // pool rejects those, so repair the topology before any lookup.
-        WidgetGroupSettings.Normalize(_settingsService.Settings);
         WidgetGroupConfig? pendingGroup = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
             widgetId);
@@ -1710,6 +1707,7 @@ public sealed partial class WidgetManager
         await _widgetGroupGate.WaitAsync();
         try
         {
+            WidgetGroupSettings.Normalize(_settingsService.Settings);
             WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
                 _settingsService.Settings,
                 widgetId);
@@ -1890,6 +1888,12 @@ public sealed partial class WidgetManager
                             }
                         }
 
+                        TransitionKeptActiveHostBeforeDetach(
+                            group,
+                            survivingGroup,
+                            previousActiveId,
+                            survivingHost);
+
                         if (removedConfig.IsVisible)
                         {
                             IDesktopWidgetWindow replacement =
@@ -1900,24 +1904,9 @@ public sealed partial class WidgetManager
                             await WaitForGroupReplacementFirstFrameAsync(replacement);
                         }
 
-                        if (survivingGroup is not null)
+                        if (survivingGroup is null)
                         {
-                            CommitSurfaceHost(survivingGroup, survivingHost);
-                        }
-                        else
-                        {
-                            _widgetSurfaces.RemoveSurface(group.SurfaceId);
-                            if (FindConfig(previousActiveId) is { } remainingCfg)
-                            {
-                                _widgetSurfaces.RegisterActive(
-                                    CreateSurfaceDefinition(remainingCfg),
-                                    survivingHost);
-                                RegisterStandaloneUnifiedFileSessionIfNeeded(
-                                    remainingCfg,
-                                    survivingHost,
-                                    survivingHost.CurrentContent);
-                                survivingHost.RestoreBoundsForCurrentTopology();
-                            }
+                            survivingHost.RestoreBoundsForCurrentTopology();
                         }
 
                         reusedSurface = true;
@@ -2027,9 +2016,6 @@ public sealed partial class WidgetManager
                 () => DissolveWidgetGroupContainingAsync(widgetId));
         }
 
-        // Hand-edited settings can leave a blank SurfaceId; the switch-gate
-        // pool rejects those, so repair the topology before any lookup.
-        WidgetGroupSettings.Normalize(_settingsService.Settings);
         WidgetGroupConfig? pendingGroup = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
             widgetId);
@@ -2628,6 +2614,7 @@ public sealed partial class WidgetManager
                 detachedHost.HideWindow();
             }
 
+            detachedHost.EvictDisownedCachedGroupContents();
             App.Log(
                 $"[WidgetGroup] Reused active Surface for detach " +
                 $"group={originalGroup.Id} member={removedConfig.Id} " +
@@ -3013,6 +3000,8 @@ public sealed partial class WidgetManager
                 $"[WidgetGroup] {operation} rollback save failed; " +
                 $"retaining committed topology group={originalGroup.Id}: " +
                 rollbackError);
+            _ = CloseFailedReplacementCandidates(created, originalHost);
+            SettleRetainedCommittedKeepInPlaceHost(originalHost);
             RaiseWidgetGroupsChanged();
             ApplyCapsuleArrangementIfChanged(force: true);
             return;
@@ -3023,29 +3012,16 @@ public sealed partial class WidgetManager
             App.Log(
                 $"[WidgetGroup] {operation} rollback save was rejected; " +
                 $"retaining committed topology group={originalGroup.Id}");
+            _ = CloseFailedReplacementCandidates(created, originalHost);
+            SettleRetainedCommittedKeepInPlaceHost(originalHost);
             RaiseWidgetGroupsChanged();
             ApplyCapsuleArrangementIfChanged(force: true);
             return;
         }
 
-        var closed = new HashSet<IDesktopWidgetWindow>(
-            ReferenceEqualityComparer.Instance);
-        foreach ((string memberId, IDesktopWidgetWindow host) in created)
-        {
-            if (!ReferenceEquals(host, originalHost) && closed.Add(host))
-            {
-                CloseFailedGroupReplacement(memberId, host);
-            }
-        }
-
-        bool originalStillActive = originalHost is not null &&
-            originalHost.Visible &&
-            _widgetSurfaces.TryGet(originalGroup.SurfaceId, out var active) &&
-            ReferenceEquals(active!.Host, originalHost) &&
-            ReferenceEquals(
-                GetLegacyLoadedWindow(originalGroup.ActiveMemberId),
-                originalHost);
-        if (!originalStillActive)
+        HashSet<IDesktopWidgetWindow> closed =
+            CloseFailedReplacementCandidates(created, originalHost);
+        if (!TryRestoreOriginalGroupHostInPlace(originalGroup, originalHost))
         {
             if (originalHost is not null && closed.Add(originalHost))
             {
@@ -3172,6 +3148,7 @@ public sealed partial class WidgetManager
         try
         {
             RemoveFileWidgetSessionsForHost(window);
+            _widgetSurfaces.UnregisterHost(window);
             if (window is ContentWidgetWindow content &&
                 _contentWindowRegistration.Unregister(content).Count > 0)
             {
@@ -3571,34 +3548,34 @@ public sealed partial class WidgetManager
 
         public void Restore(WidgetManager manager)
         {
-            AppSettings settings = manager._settingsService.Settings;
-            settings.WidgetGroups.RemoveAll(group => ReferenceEquals(group, _group));
-            if (_groupIndex >= 0)
+            manager._settingsService.MutateGraphUnderLock(() =>
             {
-                int insertIndex = Math.Clamp(
-                    _groupIndex,
-                    0,
-                    settings.WidgetGroups.Count);
-                settings.WidgetGroups.Insert(insertIndex, _group);
-            }
+                AppSettings settings = manager._settingsService.Settings;
+                List<WidgetGroupConfig> groups = settings.WidgetLayout.WidgetGroups;
+                groups.RemoveAll(group => ReferenceEquals(group, _group));
+                if (_groupIndex >= 0)
+                {
+                    groups.Insert(Math.Clamp(_groupIndex, 0, groups.Count), _group);
+                }
 
-            _group.MemberIds.Clear();
-            _group.MemberIds.AddRange(_memberIds);
-            _group.ActiveMemberId = _activeMemberId;
+                _group.MemberIds.Clear();
+                _group.MemberIds.AddRange(_memberIds);
+                _group.ActiveMemberId = _activeMemberId;
 
-            foreach (MemberState member in _members)
-            {
-                member.Restore();
-            }
+                foreach (MemberState member in _members)
+                {
+                    member.Restore();
+                }
 
-            settings.WidgetCapsuleBarOrder.Clear();
-            settings.WidgetCapsuleBarOrder.AddRange(_capsuleBarOrder);
-            settings.WidgetCapsuleFreePlacements.Clear();
-            foreach (var placement in _freePlacements)
-            {
-                settings.WidgetCapsuleFreePlacements[placement.Key] =
-                    CloneCompactPlacement(placement.Value)!;
-            }
+                settings.WidgetShell.WidgetCapsuleBarOrder.Clear();
+                settings.WidgetShell.WidgetCapsuleBarOrder.AddRange(_capsuleBarOrder);
+                settings.WidgetShell.WidgetCapsuleFreePlacements.Clear();
+                foreach (var placement in _freePlacements)
+                {
+                    settings.WidgetShell.WidgetCapsuleFreePlacements[placement.Key] =
+                        CloneCompactPlacement(placement.Value)!;
+                }
+            });
 
             manager._lastCapsuleBarBounds.Clear();
             foreach (var bounds in _capsuleBounds)
@@ -3627,6 +3604,9 @@ public sealed partial class WidgetManager
             private readonly string? _positionMonitorDeviceName;
             private readonly string? _positionMonitorStableId;
             private readonly bool? _positionMonitorWasPrimary;
+            private readonly WidgetScreenBindingMode _screenBindingMode;
+            private readonly string? _boundScreenId;
+            private readonly string? _boundScreenLabel;
             private readonly int _boundsCoordinateVersion;
             private readonly double _width;
             private readonly double _height;
@@ -3652,6 +3632,9 @@ public sealed partial class WidgetManager
                 _positionMonitorDeviceName = config.PositionMonitorDeviceName;
                 _positionMonitorStableId = config.PositionMonitorStableId;
                 _positionMonitorWasPrimary = config.PositionMonitorWasPrimary;
+                _screenBindingMode = config.ScreenBindingMode;
+                _boundScreenId = config.BoundScreenId;
+                _boundScreenLabel = config.BoundScreenLabel;
                 _boundsCoordinateVersion = config.BoundsCoordinateVersion;
                 _width = config.Width;
                 _height = config.Height;
@@ -3679,6 +3662,9 @@ public sealed partial class WidgetManager
                 _config.PositionMonitorDeviceName = _positionMonitorDeviceName;
                 _config.PositionMonitorStableId = _positionMonitorStableId;
                 _config.PositionMonitorWasPrimary = _positionMonitorWasPrimary;
+                _config.ScreenBindingMode = _screenBindingMode;
+                _config.BoundScreenId = _boundScreenId;
+                _config.BoundScreenLabel = _boundScreenLabel;
                 _config.BoundsCoordinateVersion = _boundsCoordinateVersion;
                 _config.Width = _width;
                 _config.Height = _height;

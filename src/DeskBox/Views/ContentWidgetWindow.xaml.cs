@@ -811,7 +811,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 isDark,
                 surfaceOpacity,
                 SettingsService.Settings.WidgetMaterialIntensity,
-                acrylicControllerAttached: AcrylicController is { IsClosed: false } && AcrylicControllerAttached,
+                acrylicControllerAttached: (AcrylicController is { IsClosed: false } && AcrylicControllerAttached) ||
+                    IsInteractionControllerAcrylicSimplified,
                 micaControllerAttached: MicaController is not null && MicaControllerAttached,
                 legacyAccentBackdropActive: LegacyAccentBackdropActive,
                 usesLegacyWindowAcrylic: WindowsCompatibilityService.UsesLegacyWindowAcrylic,
@@ -1195,8 +1196,8 @@ IsHideAnimationRunning = true;
             ResumeContentFromMonitorOcclusion();
         }
 
-        AppWindow.Show();
-        Win32Helper.ShowWindow(HWnd, Win32Helper.SW_SHOWNORMAL);
+        AppWindow.Show(false);
+        Win32Helper.ShowWindow(HWnd, Win32Helper.SW_SHOWNOACTIVATE);
         WidgetLayerService.BringToFront(HWnd);
         HoldTemporaryTopMost();
     }

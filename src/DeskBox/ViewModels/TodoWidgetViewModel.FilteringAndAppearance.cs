@@ -440,6 +440,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
+        OnPropertyChanged(nameof(AllFilterCountVisibility));
+        OnPropertyChanged(nameof(ActiveFilterCountVisibility));
+        OnPropertyChanged(nameof(TodayFilterCountVisibility));
+        OnPropertyChanged(nameof(OverdueFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisWeekFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisMonthFilterCountVisibility));
+        OnPropertyChanged(nameof(ImportantFilterCountVisibility));
+        OnPropertyChanged(nameof(CompletedFilterCountVisibility));
         OnPropertyChanged(nameof(ColorFilterVisibility));
         RefreshColorFilterVisibilityProperties();
         OnPropertyChanged(nameof(ListVisibility));
@@ -478,6 +486,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(OverdueTabSummaryText));
         OnPropertyChanged(nameof(TodayOverdueToggleTooltipText));
         OnPropertyChanged(nameof(RescheduleOverdueText));
+        OnPropertyChanged(nameof(AllFilterLabelText));
+        OnPropertyChanged(nameof(ActiveFilterLabelText));
+        OnPropertyChanged(nameof(TodayFilterLabelText));
+        OnPropertyChanged(nameof(OverdueFilterLabelText));
+        OnPropertyChanged(nameof(ThisWeekFilterLabelText));
+        OnPropertyChanged(nameof(ThisMonthFilterLabelText));
+        OnPropertyChanged(nameof(ImportantFilterLabelText));
+        OnPropertyChanged(nameof(CompletedFilterLabelText));
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
@@ -486,6 +502,14 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
+        OnPropertyChanged(nameof(AllFilterCountVisibility));
+        OnPropertyChanged(nameof(ActiveFilterCountVisibility));
+        OnPropertyChanged(nameof(TodayFilterCountVisibility));
+        OnPropertyChanged(nameof(OverdueFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisWeekFilterCountVisibility));
+        OnPropertyChanged(nameof(ThisMonthFilterCountVisibility));
+        OnPropertyChanged(nameof(ImportantFilterCountVisibility));
+        OnPropertyChanged(nameof(CompletedFilterCountVisibility));
         OnPropertyChanged(nameof(EmptyStateTitle));
         OnPropertyChanged(nameof(EmptyStateText));
         OnPropertyChanged(nameof(ClearCompletedText));
@@ -899,7 +923,8 @@ public sealed partial class TodoWidgetViewModel
 
     private string FormatFilterText(string key, int count)
     {
-        return $"{_localizationService.T(key)} {count}";
+        string label = _localizationService.T(key);
+        return count > 0 ? $"{label} {count}" : label;
     }
 
     private int GetUnderlyingInsertIndex(int targetVisibleIndex, TodoItemViewModel movingItem)

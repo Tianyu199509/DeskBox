@@ -3372,292 +3372,6 @@ public sealed partial class FileSurfaceContent :
                 destination)));
     }
 
-    internal static DesktopToastRequest CreateDragOutModifierTipRequest(
-        string message,
-        string actionButtonText,
-        Func<Task>? onDismissAsync = null) =>
-        new(
-            HintId: "drag-out-modifier-tip",
-            Message: message,
-            Severity: DesktopToastSeverity.Info,
-            Priority: DesktopToastPriority.Routine,
-            ActionButtonText: actionButtonText,
-            OnActionAsync: DesktopToastHudService.OpenDragBehaviorSettingsAsync,
-            OnDismissAsync: onDismissAsync,
-            DurationMs: 4500,
-            KeepVisibleDuringDrag: true);
-
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _outboundModifierTipWatchTimer;
-    private long _outboundDragSerial;
-    private DataPackageOperation _outboundModifierTipPendingOperations;
-    private int _outboundModifierTipOutsideTickCount;
-    private bool _outboundModifierTipPending;
-    private long _outboundVisualRefreshSessionSerial;
-
-    private void ArmOutboundModifierTipWatch(
-        DataPackageOperation allowedOperations,
-        bool isPlatformDragSession = false)
-    {
-        StopOutboundModifierTipWatch();
-
-        bool trackModifierTip =
-            _settingsService.Settings.FileWidget.DragOutModifierTipEnabled &&
-            allowedOperations.HasFlag(DataPackageOperation.Copy) &&
-            allowedOperations.HasFlag(DataPackageOperation.Move);
-
-        long refreshSerial = 0;
-        bool trackVisualRefresh =
-            isPlatformDragSession &&
-            OutboundDragVisualRefreshCoordinator.Shared.TryBeginDragSession(
-                Environment.TickCount64,
-                out refreshSerial);
-
-        if (!trackModifierTip && !trackVisualRefresh)
-        {
-            return;
-        }
-
-        if (DispatcherQueue is not { } dispatcher)
-        {
-            if (refreshSerial != 0)
-            {
-                OutboundDragVisualRefreshCoordinator.Shared.EndDragSession(refreshSerial);
-            }
-
-            return;
-        }
-
-        _outboundModifierTipPending = trackModifierTip;
-        _outboundModifierTipPendingOperations = trackModifierTip
-            ? allowedOperations
-            : DataPackageOperation.None;
-        _outboundModifierTipOutsideTickCount = 0;
-        _outboundVisualRefreshSessionSerial = refreshSerial;
-
-        if (_outboundModifierTipWatchTimer is null)
-        {
-            _outboundModifierTipWatchTimer = dispatcher.CreateTimer();
-            _outboundModifierTipWatchTimer.Interval = TimeSpan.FromMilliseconds(40);
-            _outboundModifierTipWatchTimer.IsRepeating = true;
-            _outboundModifierTipWatchTimer.Tick += OutboundModifierTipWatchTimer_Tick;
-        }
-
-        _outboundModifierTipWatchTimer.Start();
-    }
-
-    private void StopOutboundModifierTipWatch()
-    {
-        _outboundModifierTipWatchTimer?.Stop();
-        _outboundModifierTipPending = false;
-        _outboundModifierTipPendingOperations = DataPackageOperation.None;
-        _outboundModifierTipOutsideTickCount = 0;
-        if (_outboundVisualRefreshSessionSerial != 0)
-        {
-            long serial = _outboundVisualRefreshSessionSerial;
-            _outboundVisualRefreshSessionSerial = 0;
-            OutboundDragVisualRefreshCoordinator.Shared.EndDragSession(serial);
-        }
-    }
-
-    private void OutboundModifierTipWatchTimer_Tick(
-        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
-        object args)
-    {
-        if (_isDisposed ||
-            (!ActiveDeskBoxDragRegistry.HasActiveDrag && _elevatedDragSession is null) ||
-            !DesktopToastHudInterop.IsAnyMouseButtonDown())
-        {
-            StopOutboundModifierTipWatch();
-            return;
-        }
-
-        IntPtr popoverHwnd = _stackPopoverPopupOpen && _stackPopoverHostWindow is { IsVisible: true } host
-            ? host.WindowHandle
-            : IntPtr.Zero;
-
-        DataPackageOperation modifierTipOperationsToShow = DataPackageOperation.None;
-        if (_outboundModifierTipPending)
-        {
-            if (!_settingsService.Settings.FileWidget.DragOutModifierTipEnabled)
-            {
-                _outboundModifierTipPending = false;
-                _outboundModifierTipPendingOperations = DataPackageOperation.None;
-                _outboundModifierTipOutsideTickCount = 0;
-            }
-            else if (!DesktopToastHudInterop.IsCursorOutsideAllDeskBoxWindows(_hostWindowHandle, popoverHwnd))
-            {
-                _outboundModifierTipOutsideTickCount = 0;
-            }
-            else if (++_outboundModifierTipOutsideTickCount >= 2)
-            {
-                modifierTipOperationsToShow = _outboundModifierTipPendingOperations;
-                _outboundModifierTipPending = false;
-                _outboundModifierTipPendingOperations = DataPackageOperation.None;
-                _outboundModifierTipOutsideTickCount = 0;
-            }
-        }
-
-        if (_outboundVisualRefreshSessionSerial != 0)
-        {
-            long serial = _outboundVisualRefreshSessionSerial;
-            OutboundCursorEnvironmentSnapshot env =
-                DesktopToastHudInterop.SampleOutboundDragRefreshEnvironment(
-                    _hostWindowHandle,
-                    popoverHwnd);
-            OutboundDragVisualRefreshDecision decision =
-                OutboundDragVisualRefreshCoordinator.Shared.EvaluateTick(
-                    serial,
-                    Environment.TickCount64,
-                    in env);
-
-            switch (decision.Action)
-            {
-                case OutboundDragVisualRefreshAction.MoveCursor:
-                    if (!DesktopToastHudInterop.TryMoveCursorAndPulseDragOver(decision.TargetPoint))
-                    {
-                        OutboundDragVisualRefreshDecision failDecision =
-                            OutboundDragVisualRefreshCoordinator.Shared.NotifyMoveFailed(serial);
-                        if (failDecision.Action == OutboundDragVisualRefreshAction.StopWatching)
-                        {
-                            _outboundVisualRefreshSessionSerial = 0;
-                        }
-                    }
-                    else
-                    {
-                        if (decision.IsReturnStep)
-                        {
-                            App.Log(
-                                $"[DragProtocol] stage=ColdStartVisualRefresh widget={WidgetId} " +
-                                $"pulse={decision.PulseNumber} complete={decision.CompletesWarmup}");
-                        }
-
-                        if (decision.CompletesWarmup)
-                        {
-                            _outboundVisualRefreshSessionSerial = 0;
-                        }
-                    }
-
-                    break;
-
-                case OutboundDragVisualRefreshAction.StopWatching:
-                    _outboundVisualRefreshSessionSerial = 0;
-                    break;
-            }
-        }
-
-        if (!_outboundModifierTipPending && _outboundVisualRefreshSessionSerial == 0)
-        {
-            StopOutboundModifierTipWatch();
-        }
-
-        if (modifierTipOperationsToShow != DataPackageOperation.None)
-        {
-            MaybeShowDragOutModifierTip(modifierTipOperationsToShow);
-        }
-    }
-
-    // Teaches the modifier vocabulary only after the drag actually crosses
-    // outside DeskBox-owned window boundaries. On by default; settings (or the
-    // HUD ✕ button) can switch it off. The drag's advertised set must contain
-    // both Copy and Move for the gesture to mean anything — a single-effect
-    // drag (Windows 10) has nothing to switch to.
-    private void MaybeShowDragOutModifierTip(
-        DataPackageOperation allowedOperations)
-    {
-        if (!_settingsService.Settings.FileWidget.DragOutModifierTipEnabled ||
-            !allowedOperations.HasFlag(DataPackageOperation.Copy) ||
-            !allowedOperations.HasFlag(DataPackageOperation.Move))
-        {
-            return;
-        }
-
-        // Contract §9.23: never create or activate a top-level HUD window
-        // synchronously inside the DragStarting callback frame.
-        long dragSerial = ++_outboundDragSerial;
-        if (DispatcherQueue is { } dispatcher)
-        {
-            _ = dispatcher.TryEnqueue(
-                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () =>
-                {
-                    // Serial + live-registry check kills the late tip: a
-                    // Low-priority enqueue can land after the user already
-                    // finished the drag, and "hold Shift" advice after the
-                    // fact is noise. HasActiveDrag alone is not enough —
-                    // starting the NEXT drag would also pass that check.
-                    if (_isDisposed ||
-                        dragSerial != _outboundDragSerial ||
-                        !ActiveDeskBoxDragRegistry.HasActiveDrag ||
-                        !_settingsService.Settings.FileWidget.DragOutModifierTipEnabled)
-                    {
-                        return;
-                    }
-
-                    DesktopToastHudService.Shared.TryShow(
-                        CreateDragOutModifierTipRequest(
-                            T("Widget.DragOutTip.Modifiers"),
-                            T("Widget.DragHud.Action.OpenSettings"),
-                            DisableDragOutModifierTipAsync),
-                        _settingsService);
-                });
-            return;
-        }
-
-        DesktopToastHudService.Shared.TryShow(
-            CreateDragOutModifierTipRequest(
-                T("Widget.DragOutTip.Modifiers"),
-                T("Widget.DragHud.Action.OpenSettings"),
-                DisableDragOutModifierTipAsync),
-            _settingsService);
-    }
-
-    internal static bool ShouldSuppressDragOutResultHint(
-        bool handledAsStackMembership,
-        ExternalDragObservation observation,
-        DropTargetWindowKind targetKind,
-        bool win10MoveRejectedByNonExplorer = false) =>
-        handledAsStackMembership ||
-        observation == ExternalDragObservation.None ||
-        targetKind == DropTargetWindowKind.DeskBoxOwnWindow ||
-        win10MoveRejectedByNonExplorer;
-
-    private void MaybeShowDragOutResultHint(
-        DataPackageOperation dropResult,
-        DataPackageOperation allowedOperations,
-        ExternalDragObservation observation,
-        bool handledAsStackMembership,
-        DropTargetWindowKind targetKind = DropTargetWindowKind.NonExplorerWindow,
-        bool win10MoveRejectedByNonExplorer = false)
-    {
-        if (!_settingsService.Settings.FileWidget.DragOutResultHintEnabled ||
-            ShouldSuppressDragOutResultHint(
-                handledAsStackMembership,
-                observation,
-                targetKind,
-                win10MoveRejectedByNonExplorer))
-        {
-            return;
-        }
-
-        string? key = GetDragOutResultHintKey(dropResult, allowedOperations);
-        if (key is null)
-        {
-            return;
-        }
-
-        DesktopToastHudService.Shared.TryShow(
-            new DesktopToastRequest(
-                HintId: "drag-out-result-tip",
-                Message: T(key),
-                Severity: DesktopToastSeverity.Info,
-                Priority: DesktopToastPriority.Routine,
-                ActionButtonText: T("Widget.DragHud.Action.OpenSettings"),
-                OnActionAsync: DesktopToastHudService.OpenDragBehaviorSettingsAsync,
-                OnDismissAsync: DisableDragOutResultHintAsync,
-                DurationMs: 4500),
-            _settingsService);
-    }
-
     internal static bool ShouldMonitorWin10MoveNonExplorerDrop(
         bool isWindows11OrLater,
         string? dragOutAction,
@@ -3715,6 +3429,11 @@ public sealed partial class FileSurfaceContent :
         bool handledAsStackMembership,
         bool hasStorageItems)
     {
+        if (!_settingsService.Settings.FileWidget.DragOutResultHintEnabled)
+        {
+            return false;
+        }
+
         bool protectedCopyOnlySource = FileItemDragPackage.IsProtectedCopyOnlySource(movedPaths);
         string? guideId = EvaluateContextualDragOutGuideId(
             dropResult,
@@ -3957,6 +3676,11 @@ public sealed partial class FileSurfaceContent :
         string? sourceWidgetId = null,
         string? fallbackMessage = null)
     {
+        if (!_settingsService.Settings.FileWidget.DragOutResultHintEnabled)
+        {
+            return false;
+        }
+
         if (autoProtectedExternalCopyOverride == true &&
             moveWhenMapped == false &&
             DesktopToastHudService.Shared.TryShow(
@@ -4035,6 +3759,7 @@ public sealed partial class FileSurfaceContent :
                     Priority: DesktopToastPriority.ContextualGuide,
                     ActionButtonText: T("Widget.DragHud.Action.Undo"),
                     OnActionAsync: () => ExecuteUndoByHistoryIdAsync(boundUndoHistoryId, undoSourceWidgetId),
+                    OnDismissAsync: DisableDragOutResultHintAsync,
                     DurationMs: 5000),
                 _settingsService);
         }
@@ -4892,7 +4617,8 @@ public sealed partial class FileSurfaceContent :
             hasActiveDragSession: !string.IsNullOrWhiteSpace(_activeDragSessionId),
             isSurfaceReorderDragActive: _isSurfaceReorderDragActive,
             isStackPopoverDragActive: _stackPopoverDragActive,
-            isDeskBoxFileDragSnapshot: _dragPayloadSnapshot?.IsDeskBoxFileDrag == true);
+            isDeskBoxFileDragSnapshot: _dragPayloadSnapshot?.IsDeskBoxFileDrag == true,
+            hasActiveProcessDeskBoxDrag: ActiveDeskBoxDragRegistry.HasActiveDrag);
 
     /// <summary>
     /// Recycles dropped files for the Recycle Bin namespace tile — the tile's

@@ -266,8 +266,7 @@ public sealed partial class SettingsWindow
             // policy only have UI in the direct-installer build, so their
             // search results would dead-end in Store builds. The key set is
             // pinned against the catalog by SettingsSearchChannelPolicyTests.
-            if (SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey) &&
-                isStoreBuild)
+            if (SettingsSearchChannelPolicy.IsHiddenForChannel(entry.HeaderKey, isStoreBuild))
             {
                 continue;
             }

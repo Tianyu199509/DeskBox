@@ -116,6 +116,15 @@ public partial class App
             handles.Add(organize.WindowHandle);
         }
 
+        if (_onboardingWindow is { } onboarding)
+        {
+            IntPtr onboardingHwnd = WinRT.Interop.WindowNative.GetWindowHandle(onboarding);
+            if (onboardingHwnd != IntPtr.Zero)
+            {
+                handles.Add(onboardingHwnd);
+            }
+        }
+
         if (GetStudioHostWindowHandle() is var studioHostHwnd && studioHostHwnd != IntPtr.Zero)
         {
             handles.Add(studioHostHwnd);
@@ -269,15 +278,15 @@ public partial class App
                 }
                 break;
 
-            default:
-                await HandleQuickCaptureSearchActionAsync(actionId);
-                break;
-
             case "open-quickcapture":
                 if (WidgetManager is not null)
                 {
                     await WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
                 }
+                break;
+
+            default:
+                await HandleQuickCaptureSearchActionAsync(actionId);
                 break;
         }
     }

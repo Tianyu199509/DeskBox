@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "deskbox.hydration",
-  "version": "4.0.0",
+  "version": "1.0.0",
   "name": "${$i18n.widgetName}",
   "description": "${$i18n.widgetDescription}",
   "author": "DeskBox",

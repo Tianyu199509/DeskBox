@@ -5320,6 +5320,7 @@ public abstract partial class WidgetWindowBase
         _isCollapseAnimationRendering = false;
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration = null;
+        if (cancelShellTransition) RestoreBackdropAfterInteraction();
         if (_isShellTransitionActive)
         {
             if (cancelShellTransition)
@@ -5327,7 +5328,6 @@ public abstract partial class WidgetWindowBase
                 _deferExpandedContentHydrationForActiveTransition = false;
                 WidgetShellControl.CancelCompactTransition();
             }
-
             _isShellTransitionActive = false;
         }
         _collapseAnimationAnchor = null;

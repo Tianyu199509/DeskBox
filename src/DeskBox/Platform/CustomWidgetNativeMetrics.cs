@@ -322,6 +322,88 @@ internal static partial class CustomWidgetNativeMetrics
         }
     }
 
+    private const uint MicrosoftPciVendorId = 0x1414u;
+    private const uint MicrosoftBasicRenderDeviceId = 0x008Cu;
+    private const uint MicrosoftHyperVVideoDeviceId = 0x5353u;
+
+    private static readonly Lazy<bool> s_isPrimaryAdapterSoftwareOrSynthetic =
+        new(DetectPrimaryAdapterSoftwareOrSynthetic);
+
+    internal static bool IsPrimaryAdapterSoftwareOrSynthetic() =>
+        s_isPrimaryAdapterSoftwareOrSynthetic.Value;
+
+    internal static bool IsSoftwareOrSyntheticDxgiAdapter(uint vendorId, uint deviceId, uint flags) =>
+        (flags & DxgiAdapterFlagSoftware) != 0 ||
+        (vendorId == MicrosoftPciVendorId &&
+         deviceId is MicrosoftBasicRenderDeviceId or MicrosoftHyperVVideoDeviceId);
+
+    private static bool DetectPrimaryAdapterSoftwareOrSynthetic()
+    {
+        IntPtr factory = IntPtr.Zero;
+        try
+        {
+            Guid factoryIid = IidIDxgiFactory1;
+            if (CreateDXGIFactory1Native(ref factoryIid, out factory) < 0 || factory == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool inspectedPrimary = false;
+            bool hasHardwareAdapter = false;
+            for (uint index = 0; index < 16; index++)
+            {
+                int hr = DxgiEnumAdapters1(factory, index, out IntPtr adapter);
+                if (hr == DxgiErrorNotFound || hr < 0 || adapter == IntPtr.Zero)
+                {
+                    break;
+                }
+
+                try
+                {
+                    if (DxgiGetDesc1(adapter, out DxgiAdapterDesc1 desc) < 0)
+                    {
+                        continue;
+                    }
+
+                    bool isSoftware = IsSoftwareOrSyntheticDxgiAdapter(
+                        desc.VendorId,
+                        desc.DeviceId,
+                        desc.Flags);
+                    if (!inspectedPrimary)
+                    {
+                        inspectedPrimary = true;
+                        if (isSoftware)
+                        {
+                            return true;
+                        }
+                    }
+
+                    if (!isSoftware)
+                    {
+                        hasHardwareAdapter = true;
+                    }
+                }
+                finally
+                {
+                    Marshal.Release(adapter);
+                }
+            }
+
+            return inspectedPrimary && !hasHardwareAdapter;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (factory != IntPtr.Zero)
+            {
+                Marshal.Release(factory);
+            }
+        }
+    }
+
     /// <summary>
     /// Queries primary hardware GPU name and video memory usage via DXGI vtable slots.
     /// Automatically uses Dedicated VRAM on discrete GPUs and falls back to Shared GPU memory

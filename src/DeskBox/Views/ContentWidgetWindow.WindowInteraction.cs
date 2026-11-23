@@ -970,16 +970,11 @@ public sealed partial class ContentWidgetWindow
         {
             IsAtDesktopLayer = false;
         }
-        // Deliberately synchronous (callback-isolation exemption): deferring
-        // this reassert one dispatcher turn turns its SetForegroundWindow
-        // (active) from a no-op — the window is still the foreground when the
-        // handler runs — into a REAL foreground switch against whichever
-        // sibling the raise batch activated next. Each switch raises another
-        // Activated event, whose deferred reassert switches again: a 3ms
-        // activation ping-pong ring across the whole group (2026-10-15
-        // incident, 1805 band-split transactions during one raise). The
-        // manager's own guards (session flag, foreground ownership, the
-        // 400ms reassert suppression) bound the synchronous form.
+        // Direct call into the manager: during an active tray-raise toggle the
+        // manager ignores mid-batch activations synchronously, and during an
+        // established raised session it coalesces callback-frame requests into
+        // one foreground-verified post-callback slot (avoiding competing
+        // sibling closures that caused the 2026-10-15 ping-pong ring).
         App.Current.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
             HWnd,
             "content-window-activated");
@@ -1040,7 +1035,7 @@ public sealed partial class ContentWidgetWindow
         SuppressAppWindowCompactVisibilityNotification = true;
         try
         {
-            AppWindow.Show();
+            AppWindow.Show(false);
         }
         finally
         {

@@ -107,6 +107,19 @@ public sealed class ImeCompatibilityTests
     }
 
     [Fact]
+    public void TransientInputFocusGuard_PrefersXamlContentBridgeOverCompositionBackdropBridge()
+    {
+        Assert.True(TransientInputFocusGuard.IsPreferredContentIslandClass("Microsoft.UI.Content.DesktopChildSiteBridge"));
+        Assert.True(TransientInputFocusGuard.IsPreferredContentIslandClass("DesktopWindowXamlSource"));
+        Assert.True(TransientInputFocusGuard.IsPreferredContentIslandClass("InputSiteWindowClass"));
+        Assert.True(TransientInputFocusGuard.IsPreferredContentIslandClass("Microsoft.UI.Input.InputSite.WindowClass"));
+
+        Assert.False(TransientInputFocusGuard.IsPreferredContentIslandClass("Windows.UI.Composition.DesktopWindowContentBridge"));
+        Assert.True(TransientInputFocusGuard.IsCompositionBackdropBridgeClass("Windows.UI.Composition.DesktopWindowContentBridge"));
+        Assert.False(TransientInputFocusGuard.IsCompositionBackdropBridgeClass("Microsoft.UI.Content.DesktopChildSiteBridge"));
+    }
+
+    [Fact]
     public void GlobalImeFocusTracking_IsInstalledInBothMainAndSettingsHosts()
     {
         string mainApp = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml.cs"));

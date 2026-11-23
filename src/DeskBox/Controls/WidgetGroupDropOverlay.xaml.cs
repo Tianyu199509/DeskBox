@@ -12,22 +12,24 @@ using Windows.UI;
 namespace DeskBox.Controls;
 
 /// <summary>
-/// Drop preview drawn over a widget while another widget is dragged onto it
-/// to form a group. Rather than drawing an inner box across the target's icons,
-/// the target's content layer dims in place and this overlay presents a crisp,
-/// solid pill badge (countdown ring + caption) kept clear of the dragged
-/// widget's shrunken thumbnail. All tones draw from the neutral palette.
+/// Windows 11 Fluent drop preview drawn over a target widget while another
+/// widget is dragged onto it to form a group. Preserves the target's header
+/// clarity with no full-window wash, outlines the outer surface at its exact
+/// corner radius, and presents an 8 DIP acrylic flyout chip (16 DIP countdown
+/// ring or status glyph + regular caption) kept clear of the dragged widget's
+/// shrunken thumbnail.
 /// </summary>
 public sealed partial class WidgetGroupDropOverlay : UserControl
 {
-    private const float RingSize = 24f;
-    private const float RingStrokeThickness = 2.5f;
-    private const double EstimatedBadgeHeight = 40;
+    private const float RingSize = 16f;
+    private const float RingStrokeThickness = 1.6f;
+    private const double EstimatedBadgeHeight = 34;
     private const double ThumbnailClearanceAbovePointer = 14;
     private const double ThumbnailEstimatedSpanBelowPointer = 152;
     private const double EdgePadding = 10;
 
     private WidgetGroupDropPreviewState _state = WidgetGroupDropPreviewState.Hidden;
+    private double _lastTitleBottom;
     private ShapeVisual? _ringVisual;
     private CompositionEllipseGeometry? _ringGeometry;
     private CompositionColorBrush? _ringBrush;
@@ -38,10 +40,21 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
     public WidgetGroupDropOverlay()
     {
         InitializeComponent();
+        ActualThemeChanged += OnActualThemeChanged;
+        SizeChanged += OnLayoutMetricsChanged;
+        BadgeBorder.SizeChanged += OnLayoutMetricsChanged;
     }
 
     /// <summary>Whether a preview is currently on screen.</summary>
     public bool IsShowing => _state.Visible;
+
+    public void SetCornerRadius(CornerRadius cornerRadius)
+    {
+        if (MaskBorder.CornerRadius != cornerRadius)
+        {
+            MaskBorder.CornerRadius = cornerRadius;
+        }
+    }
 
     public void Apply(
         WidgetGroupDropPreviewState state,
@@ -58,12 +71,10 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         _state = state;
         Visibility = Visibility.Visible;
         Opacity = 1;
-        MaskBorder.CornerRadius = cornerRadius;
+        SetCornerRadius(cornerRadius);
 
-        double titleBottom = PlaceTitleHighlight(
-            state.Zone == WidgetGroupDropPreviewZone.Title ? titleElement : null,
-            titleElement);
-        PlaceBadge(state.PointerOffsetY, titleBottom);
+        _lastTitleBottom = ResolveTitleBottom(titleElement);
+        PlaceBadge(state.PointerOffsetY, _lastTitleBottom);
 
         bool visualStateChanged =
             !previous.Visible ||
@@ -74,11 +85,6 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         if (visualStateChanged)
         {
             ApplyGroupDropPreviewAppearance(state);
-            StateIcon.Glyph = state.Blocked
-                ? "\uE7BA"
-                : state.Ready
-                    ? "\uE73E"
-                    : "\uE8F1";
             StateLabel.Text = state.Message ?? string.Empty;
             StateLabel.Visibility = string.IsNullOrWhiteSpace(state.Message)
                 ? Visibility.Collapsed
@@ -91,9 +97,9 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
             previous.Ready != state.Ready ||
             previous.Blocked != state.Blocked ||
             previous.Dwell != state.Dwell;
-        if (countdownChanged)
+        if (countdownChanged || visualStateChanged)
         {
-            UpdateRing(state);
+            UpdateRingAndIcon(state, restartCountdown: countdownChanged);
         }
 
         if (state.Ready && !previous.Ready)
@@ -111,6 +117,11 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
 
         _state = WidgetGroupDropPreviewState.Hidden;
         _ringGeometry?.StopAnimation("TrimEnd");
+        if (_ringVisual is not null)
+        {
+            _ringVisual.IsVisible = false;
+        }
+
         Visibility = Visibility.Collapsed;
         Opacity = 0;
     }
@@ -119,6 +130,9 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
     public void Release()
     {
         Hide();
+        ActualThemeChanged -= OnActualThemeChanged;
+        SizeChanged -= OnLayoutMetricsChanged;
+        BadgeBorder.SizeChanged -= OnLayoutMetricsChanged;
         try
         {
             ElementCompositionPreview.SetElementChildVisual(RingHost, null);
@@ -142,6 +156,22 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         _ringTrackBrush = null;
     }
 
+    private void OnActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_state.Visible)
+        {
+            ApplyGroupDropPreviewAppearance(_state);
+        }
+    }
+
+    private void OnLayoutMetricsChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_state.Visible)
+        {
+            PlaceBadge(_state.PointerOffsetY, _lastTitleBottom);
+        }
+    }
+
     private void PlaceBadge(double pointerOffsetY, double titleBottom)
     {
         double height = ActualHeight;
@@ -153,7 +183,7 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         }
 
         BadgeBorder.Visibility = Visibility.Visible;
-        StateLabel.MaxWidth = Math.Max(72, width - 84);
+        StateLabel.MaxWidth = Math.Max(72, width - 76);
 
         double badgeHeight = BadgeBorder.ActualHeight > 0
             ? BadgeBorder.ActualHeight
@@ -169,7 +199,7 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         if (double.IsFinite(pointerOffsetY))
         {
             // The dragged widget is grabbed by its top bar and hangs downward
-            // from the cursor: keep the pill clear of [pointerY - 12, pointerY + 152].
+            // from the cursor: keep the chip clear of [pointerY - 12, pointerY + 152].
             double occludedTop = pointerOffsetY - 12;
             double occludedBottom = pointerOffsetY + ThumbnailEstimatedSpanBelowPointer;
             bool overlapsCentered =
@@ -196,110 +226,115 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         BadgeTranslate.Y = Math.Round(targetTop);
     }
 
-    private double PlaceTitleHighlight(
-        FrameworkElement? highlightTarget,
-        FrameworkElement? anyTitleElement)
+    private double ResolveTitleBottom(FrameworkElement? titleElement)
     {
-        double titleBottom = 0;
-        if (anyTitleElement is { ActualWidth: > 0, ActualHeight: > 0 })
+        if (titleElement is not { ActualWidth: > 0, ActualHeight: > 0 })
         {
-            try
-            {
-                Windows.Foundation.Point origin = anyTitleElement.TransformToVisual(this)
-                    .TransformPoint(new Windows.Foundation.Point(0, 0));
-                titleBottom = Math.Max(0, origin.Y + anyTitleElement.ActualHeight);
-                if (highlightTarget is not null)
-                {
-                    TitleHighlight.Margin = new Thickness(origin.X, origin.Y, 0, 0);
-                    TitleHighlight.Width = highlightTarget.ActualWidth;
-                    TitleHighlight.Height = highlightTarget.ActualHeight;
-                    TitleHighlight.Visibility = Visibility.Visible;
-                    return titleBottom;
-                }
-            }
-            catch
-            {
-                // Detached subtree; fall through to hide highlight.
-            }
+            return 0;
         }
 
-        TitleHighlight.Visibility = Visibility.Collapsed;
-        return titleBottom;
+        try
+        {
+            Windows.Foundation.Point origin = titleElement.TransformToVisual(this)
+                .TransformPoint(new Windows.Foundation.Point(0, 0));
+            return Math.Max(0, origin.Y + titleElement.ActualHeight);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private void ApplyGroupDropPreviewAppearance(WidgetGroupDropPreviewState state)
     {
-        // Where a dragged widget would land is a drag state, so the wash,
-        // outline, pill stroke, ring and caption draw from the neutral palette.
+        // Where a dragged widget would land is a transient drag state: the
+        // single outer frame and countdown ring draw from the neutral palette,
+        // while the chip plate uses WinUI's scoped in-app acrylic resource.
         Color line = NeutralInteractionBrush.Line(this);
-        Color fill = NeutralInteractionBrush.Fill(this);
         bool isDark = NeutralInteractionBrush.IsDarkTheme(this);
         bool highContrast = WindowsCompatibilityService.IsHighContrast;
 
-        byte washAlpha = highContrast
-            ? (byte)0
-            : state.Ready ? (byte)0x42 : state.Blocked ? (byte)0x1E : (byte)0x2C;
-        MaskBorder.Background = SharedBrushCache.GetOrCreate(
-            Color.FromArgb(washAlpha, fill.R, fill.G, fill.B));
-        MaskBorder.BorderBrush = SharedBrushCache.GetOrCreate(
-            WithAlpha(line, state.Ready ? (byte)0xF0 : state.Blocked ? (byte)0x70 : (byte)0x98));
-        MaskBorder.BorderThickness = new Thickness(state.Ready ? 2 : 1.5);
+        Color frameColor = highContrast
+            ? Color.FromArgb(0xFF, line.R, line.G, line.B)
+            : WithAlpha(line, state.Ready ? (byte)0xD8 : state.Blocked ? (byte)0x58 : (byte)0x78);
+        MaskBorder.BorderBrush = SharedBrushCache.GetOrCreate(frameColor);
+        MaskBorder.BorderThickness = new Thickness(highContrast ? 2 : state.Ready ? 1.5 : 1);
 
-        TitleHighlight.BorderBrush = SharedBrushCache.GetOrCreate(WithAlpha(line, 0xEC));
-
-        Color pillFill = highContrast
-            ? (isDark ? Colors.Black : Colors.White)
+        Color fallbackPrimary = highContrast
+            ? Color.FromArgb(0xFF, line.R, line.G, line.B)
             : isDark
-                ? Color.FromArgb(state.Ready ? (byte)0xF4 : (byte)0xE8, 28, 30, 36)
-                : Color.FromArgb(state.Ready ? (byte)0xF6 : (byte)0xEE, 250, 251, 253);
-        BadgeBorder.Background = SharedBrushCache.GetOrCreate(pillFill);
-        BadgeBorder.BorderBrush = SharedBrushCache.GetOrCreate(
-            WithAlpha(line, state.Ready ? (byte)0xD8 : (byte)0x68));
-
-        Color foregroundColor = highContrast
-            ? WithAlpha(line, 0xFF)
+                ? Colors.White
+                : Color.FromArgb(0xE4, 0, 0, 0);
+        Color fallbackSecondary = highContrast
+            ? fallbackPrimary
             : isDark
-                ? Color.FromArgb(state.Ready ? (byte)0xFF : (byte)0xEA, 255, 255, 255)
-                : Color.FromArgb(state.Ready ? (byte)0xF4 : (byte)0xDC, 20, 22, 26);
-        SolidColorBrush contentBrush = SharedBrushCache.GetOrCreate(foregroundColor);
-        StateIcon.Foreground = contentBrush;
-        StateLabel.Foreground = contentBrush;
+                ? Color.FromArgb(0xC5, 255, 255, 255)
+                : Color.FromArgb(0x93, 0, 0, 0);
 
+        Brush primaryBrush = NeutralInteractionBrush.ResolveThemedResource("TextFillColorPrimaryBrush", this)
+            ?? SharedBrushCache.GetOrCreate(fallbackPrimary);
+        Brush secondaryBrush = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", this)
+            ?? SharedBrushCache.GetOrCreate(fallbackSecondary);
+
+        StateLabel.Foreground = state.Ready || state.Blocked
+            ? primaryBrush
+            : secondaryBrush;
+
+        if (state.Blocked && !highContrast)
+        {
+            StateIcon.Foreground = NeutralInteractionBrush.ResolveThemedResource("SystemFillColorCautionBrush", this)
+                ?? SharedBrushCache.GetOrCreate(Color.FromArgb(0xFF, 157, 93, 0));
+        }
+        else
+        {
+            StateIcon.Foreground = primaryBrush;
+        }
+
+        Color ringColor = (primaryBrush as SolidColorBrush)?.Color ?? fallbackPrimary;
         if (_ringBrush is not null)
         {
-            _ringBrush.Color = foregroundColor;
+            _ringBrush.Color = highContrast ? ringColor : WithAlpha(ringColor, 0xD8);
         }
 
         if (_ringTrackBrush is not null)
         {
-            _ringTrackBrush.Color = WithAlpha(line, 0x3C);
+            _ringTrackBrush.Color = WithAlpha(line, 0x38);
         }
     }
 
-    private void UpdateRing(WidgetGroupDropPreviewState state)
+    private void UpdateRingAndIcon(WidgetGroupDropPreviewState state, bool restartCountdown)
     {
+        if (state.Blocked || state.Ready || state.Dwell <= TimeSpan.Zero)
+        {
+            _ringGeometry?.StopAnimation("TrimEnd");
+            if (_ringVisual is not null)
+            {
+                _ringVisual.IsVisible = false;
+            }
+
+            StateIcon.Glyph = state.Blocked ? "\uE7BA" : "\uE73E";
+            StateIcon.Visibility = Visibility.Visible;
+            return;
+        }
+
         if (!EnsureRing())
+        {
+            StateIcon.Glyph = "\uE8F1";
+            StateIcon.Visibility = Visibility.Visible;
+            return;
+        }
+
+        StateIcon.Visibility = Visibility.Collapsed;
+        _ringVisual!.IsVisible = true;
+        if (!restartCountdown)
         {
             return;
         }
 
         _ringGeometry!.StopAnimation("TrimEnd");
-        if (state.Blocked)
-        {
-            _ringVisual!.IsVisible = false;
-            return;
-        }
-
-        _ringVisual!.IsVisible = true;
-        if (state.Ready || state.Dwell <= TimeSpan.Zero)
-        {
-            _ringGeometry.TrimEnd = 1f;
-            return;
-        }
-
         if (!WindowsCompatibilityService.ShouldAnimate)
         {
-            _ringGeometry.TrimEnd = 0f;
+            _ringGeometry.TrimEnd = 0.65f;
             return;
         }
 
@@ -329,14 +364,19 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
             Compositor compositor = ElementCompositionPreview.GetElementVisual(RingHost).Compositor;
             Color line = NeutralInteractionBrush.Line(this);
             bool isDark = NeutralInteractionBrush.IsDarkTheme(this);
-            Color fg = isDark ? Colors.White : Color.FromArgb(0xEC, 20, 22, 26);
+            bool highContrast = WindowsCompatibilityService.IsHighContrast;
+            Color fg = highContrast
+                ? Color.FromArgb(0xFF, line.R, line.G, line.B)
+                : isDark
+                    ? Color.FromArgb(0xD8, 255, 255, 255)
+                    : Color.FromArgb(0xC2, 0, 0, 0);
             float center = RingSize / 2f;
             float radius = center - (RingStrokeThickness / 2f) - 0.5f;
 
             CompositionEllipseGeometry trackGeometry = compositor.CreateEllipseGeometry();
             trackGeometry.Center = new Vector2(center, center);
             trackGeometry.Radius = new Vector2(radius, radius);
-            _ringTrackBrush = compositor.CreateColorBrush(WithAlpha(line, 0x3C));
+            _ringTrackBrush = compositor.CreateColorBrush(WithAlpha(line, 0x38));
             CompositionSpriteShape track = compositor.CreateSpriteShape(trackGeometry);
             track.StrokeBrush = _ringTrackBrush;
             track.StrokeThickness = RingStrokeThickness;
@@ -385,11 +425,11 @@ public sealed partial class WidgetGroupDropOverlay : UserControl
         if (_readyPopAnimation is null)
         {
             Vector3KeyFrameAnimation pop = compositor.CreateVector3KeyFrameAnimation();
-            pop.InsertKeyFrame(0f, new Vector3(0.92f, 0.92f, 1f));
+            pop.InsertKeyFrame(0f, new Vector3(0.94f, 0.94f, 1f));
             pop.InsertKeyFrame(
                 1f,
                 Vector3.One,
-                compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.9f), new Vector2(0.3f, 1.18f)));
+                compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.9f), new Vector2(0.3f, 1.12f)));
             pop.Duration = TimeSpan.FromMilliseconds(165);
             _readyPopAnimation = pop;
         }

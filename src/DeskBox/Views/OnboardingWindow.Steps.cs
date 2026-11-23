@@ -18,6 +18,7 @@ public sealed partial class OnboardingWindow
 
     private int _summonToggleCount;
     private bool _isSynchronizingDoubleClick;
+    private bool _isSynchronizingSearchHotkey;
     private bool _isChangingStoragePath;
     private readonly Dictionary<WidgetKind, bool> _featureTileStates = new();
 
@@ -499,7 +500,114 @@ public sealed partial class OnboardingWindow
         SceneKeycapText.Text = hotkeyText;
         RefreshSummonStatus();
         SynchronizeDoubleClickToggle();
+        RefreshSearchHotkeyStepControls();
     }
+
+    private SearchHotkeyService? ResolveSearchHotkeyService()
+    {
+        EnsureSearchHotkeySubscription();
+        return _observedSearchHotkeyService;
+    }
+
+    private void RefreshSearchHotkeyStepControls()
+    {
+        if (Step3SearchHotkeyBadgeText is null || Step3SearchHotkeyToggle is null)
+        {
+            return;
+        }
+
+        SearchHotkeyService? hotkeyService = ResolveSearchHotkeyService();
+        bool enabled = _settingsService.Settings.Search.SearchHotkeyEnabled;
+        string searchHotkeyText = GlobalHotkeyService.FormatActivation(
+            GlobalHotkeyService.NormalizeActivation(
+                _settingsService.Settings.Search.SearchHotkeyActivationKind,
+                _settingsService.Settings.Search.SearchHotkeyModifiers,
+                _settingsService.Settings.Search.SearchHotkeyKey),
+            _localizationService);
+        Step3SearchHotkeyBadgeText.Text = searchHotkeyText;
+        string changeLabel = _localizationService.T("Onboarding.Step3.ChangeHotkey");
+
+        bool hasConflict = enabled && hotkeyService is { IsRegistered: false };
+        if (Step3SearchHotkeyWarningIcon is not null)
+        {
+            Step3SearchHotkeyWarningIcon.Visibility = hasConflict
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (Step3SearchHotkeyBadgeButton is not null)
+        {
+            Step3SearchHotkeyBadgeButton.Background = NeutralInteractionBrush.ResolveThemedResource(
+                hasConflict ? "SystemFillColorCautionBackgroundBrush" : "SubtleFillColorSecondaryBrush",
+                RootGrid);
+            ToolTipService.SetToolTip(Step3SearchHotkeyBadgeButton, $"{searchHotkeyText} · {changeLabel}");
+        }
+
+        if (Step3SearchHotkeyBodyText is not null)
+        {
+            if (hasConflict)
+            {
+                string conflictReason = !string.IsNullOrWhiteSpace(hotkeyService!.LastError)
+                    ? hotkeyService.LastError
+                    : _localizationService.T("Settings.GlobalHotkey.Status.Conflict");
+                Step3SearchHotkeyBodyText.Text = $"{conflictReason}（{changeLabel}）";
+                Step3SearchHotkeyBodyText.Foreground = NeutralInteractionBrush.ResolveThemedResource(
+                    "SystemFillColorCautionBrush",
+                    RootGrid);
+            }
+            else
+            {
+                Step3SearchHotkeyBodyText.Text = _localizationService.T("Onboarding.Step3.SearchBody");
+                Step3SearchHotkeyBodyText.Foreground = NeutralInteractionBrush.ResolveThemedResource(
+                    "TextFillColorSecondaryBrush",
+                    RootGrid);
+            }
+        }
+
+        SynchronizeSearchHotkeyToggle();
+    }
+
+    private void SynchronizeSearchHotkeyToggle()
+    {
+        if (Step3SearchHotkeyToggle is null)
+        {
+            return;
+        }
+
+        _isSynchronizingSearchHotkey = true;
+        try
+        {
+            Step3SearchHotkeyToggle.IsOn = _settingsService.Settings.Search.SearchHotkeyEnabled;
+        }
+        finally
+        {
+            _isSynchronizingSearchHotkey = false;
+        }
+    }
+
+    private void Step3SearchHotkeyToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isSynchronizingSearchHotkey)
+        {
+            return;
+        }
+
+        bool requested = Step3SearchHotkeyToggle.IsOn;
+        if (ResolveSearchHotkeyService() is { } hotkeyService)
+        {
+            hotkeyService.SetEnabled(requested);
+        }
+        else
+        {
+            _settingsService.Settings.Search.SearchHotkeyEnabled = requested;
+            _settingsService.SaveDebounced();
+        }
+
+        RefreshSearchHotkeyStepControls();
+    }
+
+    private void Step3ChangeSearchHotkey_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsSection("SearchSettings");
 
     private void SynchronizeDoubleClickToggle()
     {
@@ -548,10 +656,11 @@ public sealed partial class OnboardingWindow
         }
     }
 
-    private void Step3ChangeHotkey_Click(object sender, RoutedEventArgs e)
-    {
-        App.Current.ShowSettings("InteractionWindowSettings");
-    }
+    private void Step3ChangeHotkey_Click(object sender, RoutedEventArgs e) =>
+        OpenSettingsSection("InteractionWindowSettings");
+
+    private static void OpenSettingsSection(string sectionTag) =>
+        App.Current.ShowSettings(sectionTag);
 
     private void RefreshSummonStatus()
     {
@@ -665,7 +774,7 @@ public sealed partial class OnboardingWindow
         if (sender is FrameworkElement { Tag: string sectionTag } &&
             !string.IsNullOrWhiteSpace(sectionTag))
         {
-            App.Current.ShowSettings(sectionTag);
+            OpenSettingsSection(sectionTag);
         }
     }
 
@@ -818,6 +927,7 @@ public sealed partial class OnboardingWindow
         }
 
         SynchronizeDoubleClickToggle();
+        RefreshSearchHotkeyStepControls();
         if (_stepIndex == 3)
         {
             SetupTrayStep();

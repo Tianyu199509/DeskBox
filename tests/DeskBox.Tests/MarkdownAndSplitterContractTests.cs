@@ -496,7 +496,7 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("x:Name=\"DetailNotesReaderHost\"", todoXaml, StringComparison.Ordinal);
         Assert.Contains("DetailNotesReaderHost.AddHandler", todoCode, StringComparison.Ordinal);
         Assert.Contains("handledEventsToo: true", todoCode, StringComparison.Ordinal);
-        Assert.Contains("Background=\"{ThemeResource WidgetLayerFillSecondaryBrush}\"", todoXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{ThemeResource CardBackgroundFillColorDefaultBrush}\"", todoXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailBodyReaderSurface\"", quickCaptureXaml, StringComparison.Ordinal);
         Assert.Contains("DetailBodyReaderSurface.AddHandler", quickCaptureCode, StringComparison.Ordinal);
         Assert.Contains("handledEventsToo: true", quickCaptureCode, StringComparison.Ordinal);
@@ -548,7 +548,7 @@ public sealed class MarkdownAndSplitterContractTests
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "MinHeight=\"42\"\n            Padding=\"8,5\"",
+            "MinHeight=\"44\"\n            Padding=\"8,6\"",
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
@@ -556,7 +556,7 @@ public sealed class MarkdownAndSplitterContractTests
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "BorderBrush=\"Transparent\"\n                BorderThickness=\"0\"",
+            "BorderBrush=\"Transparent\"\n                        BorderThickness=\"0\"",
             quickCaptureXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
     }
@@ -665,5 +665,37 @@ public sealed class MarkdownAndSplitterContractTests
             "AccentTextFillColorPrimaryBrush",
             surfaceXaml,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TodoAndQuickCapture_NativeFluentComposerAndSpacingContracts_HoldAcrossSurfaces()
+    {
+        string appXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml"));
+        string todoBarXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/Todo/TodoQuickAddBar.xaml"));
+        string todoXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
+        string qcXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
+        string popoutXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/QuickCapturePopoutWindow.xaml"));
+
+        Assert.DoesNotContain("InlineComposerHintText", todoBarXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("InlineComposerHintText", qcXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickJotHintText", popoutXaml, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("TextBoxBackground", todoBarXaml, StringComparison.Ordinal);
+        Assert.Contains("TextControlBackgroundFocused", todoBarXaml, StringComparison.Ordinal);
+        Assert.Contains("TextControlBackgroundFocused", qcXaml, StringComparison.Ordinal);
+        Assert.Contains("Padding=\"10,8,10,6\"", todoBarXaml, StringComparison.Ordinal);
+        Assert.Contains("Padding=\"10,8,10,6\"", qcXaml, StringComparison.Ordinal);
+
+        Assert.Contains("WidgetQuickAddCardButtonStyle", appXaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource WidgetQuickAddCardButtonStyle}\"", todoBarXaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource WidgetQuickAddCardButtonStyle}\"", qcXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetLayerFillSecondaryBrush", todoBarXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetLayerFillSecondaryBrush", todoXaml, StringComparison.Ordinal);
+
+        Assert.Contains("Margin=\"0,0,-6,0\"", todoXaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0,0,-6,0\"", qcXaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0,0,0,2\"", todoXaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0,0,0,2\"", qcXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("#2A3038", appXaml, StringComparison.Ordinal);
     }
 }

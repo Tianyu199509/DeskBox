@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "deskbox.snippet-grid",
   "name": "${$i18n.widgetName}",
-  "version": "3.0.0",
+  "version": "1.0.0",
   "author": "DeskBox",
   "origin": "official",
   "description": "${$i18n.widgetDescription}",
@@ -273,7 +273,7 @@
             {
               "type": "state.set",
               "key": "editingId",
-              "value": "${$item.id != '' ? $item.id : $item.body}"
+              "value": "${$item.id}"
             },
             {
               "type": "state.set",

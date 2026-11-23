@@ -218,7 +218,7 @@ public sealed partial class WidgetManager
     private void SynchronizeLoadedSurfaceDefinitions()
     {
         foreach (WidgetGroupConfig group in
-                 _settingsService.Settings.WidgetGroups)
+                 _settingsService.Settings.WidgetLayout.WidgetGroups)
         {
             SynchronizeGroupSurfaceHost(group);
         }
@@ -234,6 +234,18 @@ public sealed partial class WidgetManager
         }
 
         WidgetSurfaceDefinition definition = CreateSurfaceDefinition(group);
+        foreach (string memberId in definition.MemberIds)
+        {
+            if (_widgetSurfaces.TryGetByMember(memberId, out var owner) &&
+                owner is not null &&
+                !ReferenceEquals(owner.Host, activeHost))
+            {
+                // A group merge/promotion is mid-flight before retiring a member's
+                // previous host; leave both claims untouched until promotion commits.
+                return;
+            }
+        }
+
         if (_widgetSurfaces.TryGet(group.SurfaceId, out var existing) &&
             ReferenceEquals(existing!.Host, activeHost))
         {
@@ -251,6 +263,96 @@ public sealed partial class WidgetManager
             definition,
             activeHost,
             expectedRetiringClaims: retiring);
+    }
+
+    private void TransitionKeptActiveHostBeforeDetach(
+        WidgetGroupConfig removedGroup,
+        WidgetGroupConfig? survivingGroup,
+        string keptActiveMemberId,
+        ContentWidgetWindow survivingHost)
+    {
+        survivingHost.EvictDisownedCachedGroupContents(survivingGroup?.MemberIds);
+        if (survivingGroup is not null)
+        {
+            CommitSurfaceHost(survivingGroup, survivingHost);
+            return;
+        }
+
+        _widgetSurfaces.RemoveSurface(removedGroup.SurfaceId);
+        if (FindConfig(keptActiveMemberId) is { } remainingCfg)
+        {
+            _widgetSurfaces.RegisterActive(
+                CreateSurfaceDefinition(remainingCfg),
+                survivingHost);
+            RegisterStandaloneUnifiedFileSessionIfNeeded(
+                remainingCfg,
+                survivingHost,
+                survivingHost.CurrentContent);
+        }
+    }
+
+    private HashSet<IDesktopWidgetWindow> CloseFailedReplacementCandidates(
+        IReadOnlyList<(string MemberId, IDesktopWidgetWindow Host)> created,
+        IDesktopWidgetWindow? originalHost)
+    {
+        var closed = new HashSet<IDesktopWidgetWindow>(
+            ReferenceEqualityComparer.Instance);
+        foreach ((string memberId, IDesktopWidgetWindow host) in created)
+        {
+            if (!ReferenceEquals(host, originalHost) && closed.Add(host))
+            {
+                CloseFailedGroupReplacement(memberId, host);
+            }
+        }
+
+        return closed;
+    }
+
+    private void SettleRetainedCommittedKeepInPlaceHost(
+        IDesktopWidgetWindow? originalHost)
+    {
+        if (originalHost is ContentWidgetWindow { Visible: true } keptHost &&
+            WidgetGroupSettings.FindByMember(
+                _settingsService.Settings,
+                keptHost.Config.Id) is null)
+        {
+            keptHost.RestoreBoundsForCurrentTopology();
+        }
+    }
+
+    private bool TryRestoreOriginalGroupHostInPlace(
+        WidgetGroupConfig originalGroup,
+        IDesktopWidgetWindow? originalHost)
+    {
+        if (originalHost is not { Visible: true } ||
+            !ReferenceEquals(
+                GetLegacyLoadedWindow(originalGroup.ActiveMemberId),
+                originalHost))
+        {
+            return false;
+        }
+
+        bool registeredAsGroup =
+            _widgetSurfaces.TryGet(originalGroup.SurfaceId, out var groupSession) &&
+            ReferenceEquals(groupSession!.Host, originalHost);
+        bool registeredAsStandaloneActiveMember =
+            !registeredAsGroup &&
+            _widgetSurfaces.TryGet(originalGroup.ActiveMemberId, out var standaloneSession) &&
+            standaloneSession!.GroupId is null &&
+            ReferenceEquals(standaloneSession.Host, originalHost);
+        if (!registeredAsGroup && !registeredAsStandaloneActiveMember)
+        {
+            return false;
+        }
+
+        if (!registeredAsGroup)
+        {
+            _widgetSurfaces.UnregisterHost(originalHost);
+        }
+
+        CommitSurfaceHost(originalGroup, originalHost);
+        originalHost.RestoreBoundsForCurrentTopology();
+        return true;
     }
 
     private IDesktopWidgetWindow? GetLegacyLoadedWindow(string widgetId)

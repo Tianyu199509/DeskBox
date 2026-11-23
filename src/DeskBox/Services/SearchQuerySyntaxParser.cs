@@ -10,9 +10,13 @@ internal enum SearchInlineScope
     Folders,
     Images,
     Documents,
+    Videos,
+    Music,
+    Archives,
     Todos,
     Notes,
     Clipboard,
+    Widgets,
     Settings,
     Commands
 }
@@ -32,6 +36,7 @@ internal readonly record struct ParsedSearchQuery(
         Scope is SearchInlineScope.Clipboard or
                  SearchInlineScope.Todos or
                  SearchInlineScope.Notes or
+                 SearchInlineScope.Widgets or
                  SearchInlineScope.Settings or
                  SearchInlineScope.Commands or
                  SearchInlineScope.Apps;
@@ -39,8 +44,8 @@ internal readonly record struct ParsedSearchQuery(
 
 /// <summary>
 /// Parses lightweight command-palette style prefixes (app:, file:, folder:, img:, doc:,
-/// todo:, note:, clip:, set:, >) and quick-create commands (todo/待办, note/随记) without
-/// colliding with Windows drive paths (e.g. C:\ or D:/).
+/// video:, music:, archive:, todo:, note:, clip:, widget:, set:, >) and quick-create commands
+/// (todo/待办, note/随记) without colliding with Windows drive paths (e.g. C:\ or D:/).
 /// </summary>
 internal static class SearchQuerySyntaxParser
 {
@@ -62,9 +67,22 @@ internal static class SearchQuerySyntaxParser
         ("img", SearchInlineScope.Images, "img:"),
         ("pic", SearchInlineScope.Images, "pic:"),
         ("图片", SearchInlineScope.Images, "图片:"),
+        ("documents", SearchInlineScope.Documents, "doc:"),
+        ("document", SearchInlineScope.Documents, "doc:"),
         ("docs", SearchInlineScope.Documents, "doc:"),
         ("doc", SearchInlineScope.Documents, "doc:"),
         ("文档", SearchInlineScope.Documents, "文档:"),
+        ("videos", SearchInlineScope.Videos, "video:"),
+        ("video", SearchInlineScope.Videos, "video:"),
+        ("视频", SearchInlineScope.Videos, "视频:"),
+        ("music", SearchInlineScope.Music, "music:"),
+        ("audio", SearchInlineScope.Music, "audio:"),
+        ("音乐", SearchInlineScope.Music, "音乐:"),
+        ("音频", SearchInlineScope.Music, "音频:"),
+        ("archives", SearchInlineScope.Archives, "archive:"),
+        ("archive", SearchInlineScope.Archives, "archive:"),
+        ("zip", SearchInlineScope.Archives, "zip:"),
+        ("压缩包", SearchInlineScope.Archives, "压缩包:"),
         ("todos", SearchInlineScope.Todos, "todo:"),
         ("todo", SearchInlineScope.Todos, "todo:"),
         ("待办", SearchInlineScope.Todos, "待办:"),
@@ -75,6 +93,9 @@ internal static class SearchQuerySyntaxParser
         ("clip", SearchInlineScope.Clipboard, "clip:"),
         ("cb", SearchInlineScope.Clipboard, "cb:"),
         ("剪贴板", SearchInlineScope.Clipboard, "剪贴板:"),
+        ("widgets", SearchInlineScope.Widgets, "widget:"),
+        ("widget", SearchInlineScope.Widgets, "widget:"),
+        ("小组件", SearchInlineScope.Widgets, "小组件:"),
         ("settings", SearchInlineScope.Settings, "set:"),
         ("setting", SearchInlineScope.Settings, "set:"),
         ("set", SearchInlineScope.Settings, "set:"),
@@ -232,6 +253,15 @@ internal static class SearchQuerySyntaxParser
         SearchInlineScope.Documents =>
             item.Kind == SearchResultKind.File &&
             FileCategoryHelper.Categorize(item.Title) == FileCategory.Document,
+        SearchInlineScope.Videos =>
+            item.Kind == SearchResultKind.File &&
+            FileCategoryHelper.Categorize(item.Title) == FileCategory.Video,
+        SearchInlineScope.Music =>
+            item.Kind == SearchResultKind.File &&
+            FileCategoryHelper.Categorize(item.Title) == FileCategory.Music,
+        SearchInlineScope.Archives =>
+            item.Kind == SearchResultKind.File &&
+            FileCategoryHelper.Categorize(item.Title) == FileCategory.Archive,
         SearchInlineScope.Todos =>
             item.Kind == SearchResultKind.Todo ||
             (item.Kind == SearchResultKind.Action &&
@@ -253,6 +283,8 @@ internal static class SearchQuerySyntaxParser
              item.ActionId is not null &&
              (item.ActionId.StartsWith("clipboard:", StringComparison.Ordinal) ||
               item.ActionId.StartsWith("clipboard-copy:", StringComparison.Ordinal))),
+        SearchInlineScope.Widgets =>
+            item.Kind == SearchResultKind.CustomWidget,
         SearchInlineScope.Settings =>
             item.Kind == SearchResultKind.Action &&
             item.ActionId is not null &&
@@ -269,13 +301,17 @@ internal static class SearchQuerySyntaxParser
         SearchInlineScope.Files or
         SearchInlineScope.Folders or
         SearchInlineScope.Images or
-        SearchInlineScope.Documents;
+        SearchInlineScope.Documents or
+        SearchInlineScope.Videos or
+        SearchInlineScope.Music or
+        SearchInlineScope.Archives;
 
     public static bool NeedsDeskBoxContentProvider(SearchInlineScope scope) => scope is
         SearchInlineScope.None or
         SearchInlineScope.Todos or
         SearchInlineScope.Notes or
-        SearchInlineScope.Clipboard;
+        SearchInlineScope.Clipboard or
+        SearchInlineScope.Widgets;
 
     private static bool IsWindowsDrivePrefix(ReadOnlySpan<char> trimmed) =>
         trimmed.Length >= 2 &&

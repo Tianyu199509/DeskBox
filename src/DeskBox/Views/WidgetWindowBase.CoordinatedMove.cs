@@ -17,6 +17,7 @@ public abstract partial class WidgetWindowBase
     {
         if (!isSource)
         {
+            SimplifyBackdropForInteraction();
             BeginWidgetBoundsInteraction();
             DisplayChangeWatcher?.SuppressRestore();
         }
@@ -79,6 +80,7 @@ public abstract partial class WidgetWindowBase
             {
                 OnDragEnd(hasMoved);
             }
+            RestoreBackdropAfterInteraction();
             QueueBackdropRefresh();
         }
     }

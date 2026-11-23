@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "schemaVersion": 1,
   "baseLocale": "zh-CN",
   "hashes": {
     "actB64Decode": "7d5dbf64",

@@ -3,7 +3,7 @@
   "id": "deskbox.sys-pulse",
   "origin": "official",
   "name": "${$i18n.widgetName}",
-  "version": "4.2.0",
+  "version": "1.0.0",
   "author": "DeskBox",
   "description": "${$i18n.widgetDescription}",
   "icon": "📊",

@@ -63,6 +63,7 @@ public sealed class Windows10InstallerCompatibilityContractTests
         {
             string content = File.ReadAllText(scriptPath);
             Assert.DoesNotContain("Windows App Runtime 2.5", content, StringComparison.Ordinal);
+            Assert.DoesNotContain("Windows App Runtime 2.6", content, StringComparison.Ordinal);
         }
     }
 

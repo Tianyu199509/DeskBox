@@ -47,7 +47,7 @@ public sealed partial class FileWidgetSettingsSection : UserControl
             nameof(ManagedStorage),
             typeof(ManagedStorageSettingsViewModel),
             typeof(FileWidgetSettingsSection),
-            new PropertyMetadata(null, OnManagedStorageChanged));
+            new PropertyMetadata(null));
 
     public static readonly DependencyProperty FileDisplayProperty =
         DependencyProperty.Register(
@@ -65,68 +65,17 @@ public sealed partial class FileWidgetSettingsSection : UserControl
 
     private bool _isSyncingQuickAccessToggle;
     private bool _isSyncingDesktopShortcutToggle;
-    private ManagedStorageSettingsViewModel? _subscribedManagedStorage;
 
     public FileWidgetSettingsSection()
     {
         InitializeComponent();
+        if (IsWin10DragNoteVisible && DragOutModifierTipCard is not null)
+        {
+            Services.Localized.SetDescriptionKey(
+                DragOutModifierTipCard,
+                "Settings.DragOutTips.Modifier.Win10Description");
+        }
         DesktopOrganizationPart.SubPageChanged += OnDesktopOrganizationSubPageChanged;
-        Loaded += FileWidgetSettingsSection_Loaded;
-        Unloaded += FileWidgetSettingsSection_Unloaded;
-    }
-
-    private static void OnManagedStorageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is FileWidgetSettingsSection section)
-        {
-            section.RebindManagedStorage(e.NewValue as ManagedStorageSettingsViewModel);
-        }
-    }
-
-    private void FileWidgetSettingsSection_Loaded(object sender, RoutedEventArgs e)
-    {
-        RebindManagedStorage(ManagedStorage);
-    }
-
-    private void FileWidgetSettingsSection_Unloaded(object sender, RoutedEventArgs e)
-    {
-        if (_subscribedManagedStorage is not null)
-        {
-            _subscribedManagedStorage.PropertyChanged -= OnManagedStoragePropertyChanged;
-            _subscribedManagedStorage = null;
-        }
-    }
-
-    private void RebindManagedStorage(ManagedStorageSettingsViewModel? viewModel)
-    {
-        if (!ReferenceEquals(_subscribedManagedStorage, viewModel))
-        {
-            if (_subscribedManagedStorage is not null)
-            {
-                _subscribedManagedStorage.PropertyChanged -= OnManagedStoragePropertyChanged;
-            }
-
-            _subscribedManagedStorage = viewModel;
-            if (_subscribedManagedStorage is not null)
-            {
-                _subscribedManagedStorage.PropertyChanged += OnManagedStoragePropertyChanged;
-            }
-        }
-
-        if (viewModel is { IsDragOutCustomized: true } && DragBehaviorExpander is not null)
-        {
-            DragBehaviorExpander.IsExpanded = true;
-        }
-    }
-
-    private void OnManagedStoragePropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if ((e.PropertyName is nameof(ManagedStorageSettingsViewModel.IsDragOutCustomized) or "" or null) &&
-            ManagedStorage is { IsDragOutCustomized: true } &&
-            DragBehaviorExpander is not null)
-        {
-            DragBehaviorExpander.IsExpanded = true;
-        }
     }
 
     public DesktopOrganizationSettingsSection OrganizationSection => DesktopOrganizationPart;

@@ -367,14 +367,31 @@ public sealed class CustomWidgetTemplateAuditRegressionTests
         Directory.CreateDirectory(tempDir);
         try
         {
-            CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId);
+            const string manifestJson = """
+            {
+              "schemaVersion": 1,
+              "id": "custom.dirty-input-reproject",
+              "name": "Dirty Input Reproject",
+              "script": { "entry": "logic.js", "tickIntervalMs": 0 },
+              "state": { "draft": "", "result": "" },
+              "root": "main",
+              "elements": {
+                "main": { "type": "Text", "text": "${state.result}" }
+              }
+            }
+            """;
+            const string logicJs = """
+            export function onInit(ctx) {
+              ctx.computed.trimmedDraft = String((ctx.state && ctx.state.draft) || '').trim();
+            }
+            """;
             var store = new CustomWidgetDataStore("devtool-dirty", tempDir);
-            await store.WriteWorkspaceBundleAsync(bundle.ManifestJson, bundle.LogicJs, locales: bundle.Locales);
+            await store.WriteWorkspaceBundleAsync(manifestJson, logicJs);
 
             var settingsSvc = new SettingsService(Path.Combine(tempDir, "settings.json"));
             var locSvc = new LocalizationService(settingsSvc);
             using var vm = new CustomWidgetViewModel(
-                new WidgetConfig { Id = "devtool-dirty", Name = "Dev Toolbox" },
+                new WidgetConfig { Id = "devtool-dirty", Name = "Dirty Input Reproject" },
                 locSvc,
                 store: store,
                 dispatcherQueue: null,
@@ -382,12 +399,12 @@ public sealed class CustomWidgetTemplateAuditRegressionTests
             await vm.InitializeAsync();
 
             // Simulate user typing into Input (SetStateValueWithoutRebuild) then immediately pressing Enter
-            vm.SetStateValueWithoutRebuild("draft", "{\"hello\":1}");
+            vm.SetStateValueWithoutRebuild("draft", "  {\"hello\":1}  ");
             await vm.ExecuteActionsAsync(
                 CustomWidgetManifestParser.ParseDispatchedActions(
-                    """[{ "type": "text.transform", "format": "${$computed.primaryActionFormat}", "text": "${$computed.effectiveInput}", "key": "output" }]"""));
+                    """[{ "type": "text.transform", "format": "jsonPretty", "text": "${$computed.trimmedDraft}", "key": "result" }]"""));
 
-            string output = vm.CreateEvaluationContext().State.GetValueOrDefault("output") ?? string.Empty;
+            string output = vm.CreateEvaluationContext().State.GetValueOrDefault("result") ?? string.Empty;
             Assert.Contains("\"hello\"", output, StringComparison.Ordinal);
         }
         finally

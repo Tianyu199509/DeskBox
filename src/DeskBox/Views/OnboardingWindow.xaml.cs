@@ -40,6 +40,8 @@ public sealed partial class OnboardingWindow : Window
     private readonly WidgetManager? _widgetManager;
     private readonly ManagedStorageDesktopShortcutService? _desktopShortcutService;
     private readonly Action? _showDesktopOrganization;
+    private readonly Func<SearchHotkeyService?>? _searchHotkeyProvider;
+    private SearchHotkeyService? _observedSearchHotkeyService;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
 
@@ -65,7 +67,8 @@ public sealed partial class OnboardingWindow : Window
         ThemeService? themeService = null,
         WidgetManager? widgetManager = null,
         ManagedStorageDesktopShortcutService? desktopShortcutService = null,
-        Action? showDesktopOrganization = null)
+        Action? showDesktopOrganization = null,
+        Func<SearchHotkeyService?>? searchHotkeyProvider = null)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
@@ -73,11 +76,13 @@ public sealed partial class OnboardingWindow : Window
         _widgetManager = widgetManager;
         _desktopShortcutService = desktopShortcutService;
         _showDesktopOrganization = showDesktopOrganization;
+        _searchHotkeyProvider = searchHotkeyProvider;
         _stepIndex = Math.Clamp(initialStep, 0, StepCount - 1);
         _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         InitializeComponent();
         _localizationService.LanguageChanged += OnLanguageChanged;
         _settingsService.SettingsChanged += OnFeatureWidgetSettingsChanged;
+        EnsureSearchHotkeySubscription();
         App.Current.OnboardingWidgetsVisibilityChanged += OnOnboardingWidgetsVisibilityChanged;
 
         WindowsCompatibilityService.ApplySafeBackdrop(this);
@@ -170,9 +175,30 @@ public sealed partial class OnboardingWindow : Window
         RemoveMinimumSizeHook();
         _localizationService.LanguageChanged -= OnLanguageChanged;
         _settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged;
+        EnsureSearchHotkeySubscription();
         App.Current.OnboardingWidgetsVisibilityChanged -= OnOnboardingWidgetsVisibilityChanged;
         RootGrid.Children.Clear();
         Content = null;
+    }
+
+    internal void EnsureSearchHotkeySubscription()
+    {
+        SearchHotkeyService? latest = _isClosed ? null : _searchHotkeyProvider?.Invoke();
+        if (ReferenceEquals(_observedSearchHotkeyService, latest))
+        {
+            return;
+        }
+
+        if (_observedSearchHotkeyService is not null)
+        {
+            _observedSearchHotkeyService.RegistrationChanged -= OnFeatureWidgetSettingsChanged;
+        }
+
+        _observedSearchHotkeyService = latest;
+        if (_observedSearchHotkeyService is not null)
+        {
+            _observedSearchHotkeyService.RegistrationChanged += OnFeatureWidgetSettingsChanged;
+        }
     }
 
     public void RestartIntro(int stepIndex = 0)

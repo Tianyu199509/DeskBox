@@ -41,12 +41,6 @@ public sealed partial class SearchPopupWindow
         var item = ResolveResultItem(source);
         _suppressNextSearchRightTap = false;
 
-        if (row is not null && row.IsElementInsideActionButtons(source))
-        {
-            DisarmDragOutCandidate();
-            return;
-        }
-
         bool isCtrlPressed = Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Control);
         bool isShiftPressed = Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Shift);
         bool isLeft = point.Properties.IsLeftButtonPressed;
@@ -124,7 +118,6 @@ public sealed partial class SearchPopupWindow
         bool pointerIsOnDragHandle =
             item is not null &&
             row is not null &&
-            !row.IsElementInsideActionButtons(source) &&
             item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
             !string.IsNullOrWhiteSpace(item.DetailPath);
         bool preserveSelectionForDrag =
@@ -307,13 +300,6 @@ public sealed partial class SearchPopupWindow
 
     private void ResultsPanel_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        var source = e.OriginalSource as DependencyObject;
-        var pressedRow = FindItemRow(source);
-        if (pressedRow is not null && pressedRow.IsElementInsideActionButtons(source))
-        {
-            return;
-        }
-
         var item = ResolveResultItem(e.OriginalSource as DependencyObject);
         if (item is null)
         {
@@ -637,23 +623,10 @@ public sealed partial class SearchPopupWindow
                                          args.Index < _viewModel.CurrentResults.Count
             ? _viewModel.CurrentResults[args.Index]
             : row.DataContext as SearchResultItem;
-        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
-        row.OpenLocationRequested -= OnRowOpenLocationRequested;
-        row.MoreActionsRequested -= OnRowMoreActionsRequested;
-        row.PrimaryActionRequested += OnRowPrimaryActionRequested;
-        row.OpenLocationRequested += OnRowOpenLocationRequested;
-        row.MoreActionsRequested += OnRowMoreActionsRequested;
 
-        bool isCopyItem = preparedItem?.Kind == SearchResultKind.Clipboard ||
-                          (preparedItem?.Kind == SearchResultKind.Action &&
-                           preparedItem.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
         row.DataContext = preparedItem;
         row.PrepareItem(preparedItem);
-        row.ConfigureRowPresentation(
-            _viewModel.EffectiveHighlightQuery,
-            openTooltip: _localizationService.T(isCopyItem ? "Common.Copy" : "Search.Menu.Open"),
-            openLocationTooltip: _localizationService.T("Search.Menu.OpenLocation"),
-            moreTooltip: _localizationService.T("Search.Row.MoreActions"));
+        row.ConfigureRowPresentation(_viewModel.EffectiveHighlightQuery);
 
         // Lazy shell icon: show the real icon once resolved, otherwise the glyph block.
         // Recycled rows can be re-bound to the same item instance (no DataContextChanged),
@@ -707,44 +680,12 @@ public sealed partial class SearchPopupWindow
             DisarmDragOutCandidate();
         }
 
-        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
-        row.OpenLocationRequested -= OnRowOpenLocationRequested;
-        row.MoreActionsRequested -= OnRowMoreActionsRequested;
         row.IsSelected = false;
         row.IsMultiSelected = false;
         row.IsTabStop = false;
         row.PrepareItem(null);
         row.RefreshIconVisuals();
         row.DataContext = null;
-    }
-
-    private void OnRowPrimaryActionRequested(SearchResultRowControl row, SearchResultItem item)
-    {
-        SelectResultItem(item, row);
-        if (_viewModel.ExecuteItem(item))
-        {
-            HidePopup();
-        }
-    }
-
-    private void OnRowOpenLocationRequested(SearchResultRowControl row, SearchResultItem item)
-    {
-        SelectResultItem(item, row);
-        if (_viewModel.OpenSelectedLocation())
-        {
-            HidePopup();
-        }
-    }
-
-    private void OnRowMoreActionsRequested(
-        SearchResultRowControl row,
-        SearchResultItem item,
-        FrameworkElement anchorButton)
-    {
-        ClearMultiSelection();
-        SelectResultItem(item, row);
-        _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        ShowResultFlyout(item, anchorButton, new Windows.Foundation.Point(0, anchorButton.ActualHeight));
     }
 
     private async Task EnrichPreparedResultRowAsync(
@@ -771,8 +712,7 @@ public sealed partial class SearchPopupWindow
         }
 
         if (ReferenceEquals(_displayedDetailsItem, item) &&
-            DetailsPaneCard.Visibility == Visibility.Visible &&
-            !_isDetailsPaneClosing)
+            DetailsPaneCard.Visibility == Visibility.Visible)
         {
             PopulateDetailsPane(item, immediate: true);
         }
@@ -2004,9 +1944,36 @@ public sealed partial class SearchPopupWindow
         ActionRequested?.Invoke(this, actionId);
     }
 
-    private bool AreFileColumnsVisible() =>
-        _viewModel.SelectedTab?.SupportsFileSort == true &&
-        _settingsService.Settings.Search.SearchShowSortHeader;
+    private bool _lastAppliedFileColumnsVisible;
+
+    private bool AreFileColumnsVisible()
+    {
+        bool showSortHeader = ResultsPanel.Visibility == Visibility.Visible &&
+                              _viewModel.SelectedTab?.SupportsFileSort == true &&
+                              _settingsService.Settings.Search.SearchShowSortHeader;
+        bool detailsVisible = DetailsPaneCard.Visibility == Visibility.Visible;
+        return SearchPopupSurfacePolicy.ShouldShowFullFileColumns(
+            showSortHeader,
+            detailsVisible,
+            GetCurrentPopupLogicalWidth());
+    }
+
+    private void SyncSortHeaderAndRowColumns(bool forceRefreshRows = false)
+    {
+        bool fullColumns = AreFileColumnsVisible();
+        if (SortHeaderRow is not null)
+        {
+            SortHeaderTypeCol.Width = fullColumns ? new GridLength(72) : GridLength.Auto;
+            SortHeaderSizeCol.Width = fullColumns ? new GridLength(84) : GridLength.Auto;
+            SortHeaderDateCol.Width = fullColumns ? new GridLength(106) : GridLength.Auto;
+        }
+
+        if (forceRefreshRows || _lastAppliedFileColumnsVisible != fullColumns)
+        {
+            _lastAppliedFileColumnsVisible = fullColumns;
+            RefreshPreparedResultRows();
+        }
+    }
 
     private void RefreshPreparedResultRows()
     {
@@ -2037,10 +2004,13 @@ public sealed partial class SearchPopupWindow
                             StatusBar.Visibility != Visibility.Visible;
         SelectionActionBar.Visibility = showBatchBar ? Visibility.Visible : Visibility.Collapsed;
 
+        bool showEmptyOrNoResults = EmptyTabHintPanel.Visibility == Visibility.Visible ||
+                                    NoResultsPanel.Visibility == Visibility.Visible;
         bool showSingleResultCmdBar = !showBatchBar &&
                                       StatusBar.Visibility != Visibility.Visible &&
-                                      ResultsPanel.Visibility == Visibility.Visible &&
-                                      _viewModel.SelectedItem is not null;
+                                      ((ResultsPanel.Visibility == Visibility.Visible &&
+                                        _viewModel.SelectedItem is not null) ||
+                                       showEmptyOrNoResults);
         CmdPalResultFooterGrid.Visibility = showSingleResultCmdBar
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -2068,47 +2038,11 @@ public sealed partial class SearchPopupWindow
             CopySelectedLabel.Text = _localizationService.T("Common.Copy");
             CutSelectedLabel.Text = _localizationService.T("Common.Cut");
             DeleteSelectedLabel.Text = _localizationService.T("Search.Delete.Action");
-            OpenSelectedButton.Visibility = Visibility.Collapsed;
-            OpenLocationButton.Visibility = Visibility.Collapsed;
-            AttachSelectedButton.Visibility = Visibility.Collapsed;
-            SaveSelectedButton.Visibility = Visibility.Collapsed;
         }
 
         if (footerChanged && IsPopupVisible && !_isWindowClosed)
         {
             UpdatePopupDynamicBounds();
-        }
-    }
-
-    private void OpenSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.ExecuteSelectedItem())
-        {
-            HidePopup();
-        }
-    }
-
-    private void OpenLocationButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.OpenSelectedLocation())
-        {
-            HidePopup();
-        }
-    }
-
-    private async void AttachSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await AttachItemToTodoAsync(item);
-        }
-    }
-
-    private async void SaveSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await SaveItemToNoteAsync(item);
         }
     }
 

@@ -93,17 +93,6 @@
                     </Button>
                 </StackPanel>
 
-                <TextBlock
-                    x:Name="QuickJotHintText"
-                    Grid.Column="1"
-                    Margin="4,0"
-                    VerticalAlignment="Center"
-                    FontSize="11.5"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    MaxLines="1"
-                    TextTrimming="CharacterEllipsis"
-                    Visibility="Collapsed" />
-
                 <StackPanel
                     Grid.Column="2"
                     HorizontalAlignment="Right"

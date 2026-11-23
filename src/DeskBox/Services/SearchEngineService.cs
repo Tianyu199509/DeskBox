@@ -237,8 +237,11 @@ public sealed class SearchEngineService : IDisposable
         ParsedSearchQuery parsed = SearchQuerySyntaxParser.Parse(query);
         string effectiveQuery = parsed.EffectiveQuery;
 
+        var searchSlice = _settingsService.Settings.Search;
+        SearchCategoryGate categoryGate = BuildCategoryGate(_settingsService.Settings);
         bool queryEverything = SearchQuerySyntaxParser.NeedsFileProvider(parsed.Scope) &&
-                               !string.IsNullOrWhiteSpace(effectiveQuery);
+                               !string.IsNullOrWhiteSpace(effectiveQuery) &&
+                               (parsed.HasScopeFilter || categoryGate.AnyFileOrFolderEnabled);
         Task<MeasuredProviderResult<SearchFileQueryPage>> fileTask = queryEverything
             ? MeasureProviderAsync(
                 "everything",
@@ -253,12 +256,9 @@ public sealed class SearchEngineService : IDisposable
                 null,
                 "everything"));
 
-        var searchSlice = _settingsService.Settings.Search;
         bool includeDeskBox = normalizedOffset == 0 &&
                               SearchQuerySyntaxParser.NeedsDeskBoxContentProvider(parsed.Scope) &&
-                              (searchSlice.SearchIncludeDeskBoxContent ||
-                               searchSlice.SearchIncludeClipboard ||
-                               parsed.HasScopeFilter);
+                              (parsed.HasScopeFilter || categoryGate.AnyDeskBoxOrClipboardEnabled);
         Task<MeasuredProviderResult<IReadOnlyList<SearchResultItem>>> deskBoxTask = includeDeskBox
             ? MeasureProviderAsync(
                 "deskbox-content",
@@ -269,7 +269,9 @@ public sealed class SearchEngineService : IDisposable
                 null));
 
         Task<MeasuredProviderResult<IReadOnlyList<SearchResultItem>>> localAppsTask =
-            normalizedOffset == 0 && parsed.Scope is SearchInlineScope.None or SearchInlineScope.Apps
+            normalizedOffset == 0 &&
+            parsed.Scope is SearchInlineScope.None or SearchInlineScope.Apps &&
+            (parsed.HasScopeFilter || categoryGate.App)
                 ? MeasureProviderAsync(
                     "local-apps",
                     () => Task.Run(() => SearchLocalApps(parsed, cancellationToken), cancellationToken))
@@ -352,6 +354,11 @@ public sealed class SearchEngineService : IDisposable
         if (parsed.HasScopeFilter)
         {
             combined = combined.Where(item => SearchQuerySyntaxParser.MatchesScope(item, parsed.Scope));
+        }
+        else
+        {
+            SearchCategoryGate categoryGate = BuildCategoryGate(_settingsService.Settings);
+            combined = combined.Where(item => IsItemAllowedByCategoryGate(item, in categoryGate));
         }
 
         string rankQuery = !string.IsNullOrWhiteSpace(parsed.EffectiveQuery)
@@ -460,6 +467,142 @@ public sealed class SearchEngineService : IDisposable
         long ElapsedMilliseconds,
         Exception? Failure,
         string Provider = "deskbox-content");
+
+    private readonly record struct SearchCategoryGate(
+        bool File,
+        bool Folder,
+        bool Image,
+        bool Document,
+        bool Video,
+        bool Music,
+        bool Archive,
+        bool App,
+        bool Settings,
+        bool Todo,
+        bool Note,
+        bool Clipboard,
+        bool Widget,
+        bool Command)
+    {
+        public bool AnyFileOrFolderEnabled =>
+            File || Folder || Image || Document || Video || Music || Archive || App;
+
+        public bool AnyDeskBoxOrClipboardEnabled =>
+            Todo || Note || Widget || Clipboard;
+    }
+
+    private static SearchCategoryGate BuildCategoryGate(AppSettings appSettings)
+    {
+        SearchSettingsSlice search = appSettings.Search;
+        IReadOnlyList<SearchCategoryEntry> entries =
+            SearchSettingsSlice.ParseCategoryLayout(search.SearchCategoryLayout);
+
+        bool file = true;
+        bool folder = true;
+        bool image = true;
+        bool document = true;
+        bool video = true;
+        bool music = true;
+        bool archive = true;
+        bool app = true;
+        bool settings = true;
+        bool todo = true;
+        bool note = true;
+        bool clipboard = true;
+        bool widget = true;
+        bool command = true;
+
+        foreach (SearchCategoryEntry entry in entries)
+        {
+            switch (entry.Id)
+            {
+                case SearchSettingsSlice.CategoryFile: file = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryFolder: folder = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryImage: image = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryDocument: document = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryVideo: video = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryMusic: music = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryArchive: archive = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryApp: app = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategorySettings: settings = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryTodo: todo = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryNote: note = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryClipboard: clipboard = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryWidget: widget = entry.SearchEnabled; break;
+                case SearchSettingsSlice.CategoryCommand: command = entry.SearchEnabled; break;
+            }
+        }
+
+        return new SearchCategoryGate(
+            File: file,
+            Folder: folder,
+            Image: image,
+            Document: document,
+            Video: video,
+            Music: music,
+            Archive: archive,
+            App: app,
+            Settings: settings,
+            Todo: todo && search.SearchIncludeDeskBoxContent && SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryTodo),
+            Note: note && search.SearchIncludeDeskBoxContent && SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryNote),
+            Clipboard: clipboard && search.SearchIncludeClipboard && SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryClipboard),
+            Widget: widget && search.SearchIncludeDeskBoxContent,
+            Command: command);
+    }
+
+    private static bool IsItemAllowedByCategoryGate(SearchResultItem item, in SearchCategoryGate gate)
+    {
+        switch (item.Kind)
+        {
+            case SearchResultKind.Folder:
+                return gate.Folder;
+
+            case SearchResultKind.File:
+                return FileCategoryHelper.Categorize(item.Title) switch
+                {
+                    FileCategory.App => gate.App,
+                    FileCategory.Image => gate.Image,
+                    FileCategory.Document => gate.Document,
+                    FileCategory.Video => gate.Video,
+                    FileCategory.Music => gate.Music,
+                    FileCategory.Archive => gate.Archive,
+                    _ => gate.File
+                };
+
+            case SearchResultKind.Todo:
+                return gate.Todo;
+
+            case SearchResultKind.QuickCapture:
+                return gate.Note;
+
+            case SearchResultKind.Clipboard:
+                return gate.Clipboard;
+
+            case SearchResultKind.CustomWidget:
+                return gate.Widget;
+
+            case SearchResultKind.Action:
+                if (SearchSettingsSlice.IsSettingsActionItem(item))
+                {
+                    return gate.Settings;
+                }
+
+                string actionId = item.ActionId ?? string.Empty;
+                if (actionId.StartsWith("copy-calc:", StringComparison.Ordinal) ||
+                    actionId.StartsWith(SearchWebAndUrlEvaluator.OpenUrlActionPrefix, StringComparison.Ordinal) ||
+                    actionId.StartsWith(SearchWebAndUrlEvaluator.WebSearchActionPrefix, StringComparison.Ordinal) ||
+                    actionId.StartsWith("quick-todo", StringComparison.Ordinal) ||
+                    actionId.StartsWith("quick-note", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                return gate.Command;
+
+            default:
+                return true;
+        }
+    }
 
     /// <summary>
     /// Gets recommendations for the empty-state view.
@@ -870,7 +1013,7 @@ public sealed class SearchEngineService : IDisposable
 
         var searchSlice = _settingsService.Settings.Search;
         if ((searchSlice.SearchIncludeDeskBoxContent || parsed.HasScopeFilter) &&
-            parsed.Scope is SearchInlineScope.None or SearchInlineScope.Todos or SearchInlineScope.Notes)
+            parsed.Scope is SearchInlineScope.None or SearchInlineScope.Todos or SearchInlineScope.Notes or SearchInlineScope.Widgets)
         {
             bool initialized = Volatile.Read(ref _deskBoxContentInitialized) != 0;
             if (!initialized || Volatile.Read(ref _deskBoxContentDirty) != 0)
@@ -1585,9 +1728,12 @@ public sealed class SearchEngineService : IDisposable
         CancellationToken cancellationToken)
     {
         var documents = new List<DeskBoxSearchDocument>();
-        IReadOnlyList<QuickCaptureSearchProjection> quickCaptureProjections = await _quickCaptureService
-            .GetSearchIndexProjectionsAsync(MaxIndexedBodyCharacters, cancellationToken)
-            .ConfigureAwait(false);
+        IReadOnlyList<QuickCaptureSearchProjection> quickCaptureProjections =
+            SearchSettingsSlice.IsCategoryFeatureEnabled(_settingsService.Settings, SearchSettingsSlice.CategoryNote)
+                ? await _quickCaptureService
+                    .GetSearchIndexProjectionsAsync(MaxIndexedBodyCharacters, cancellationToken)
+                    .ConfigureAwait(false)
+                : [];
         string noteTypeLabel = _localizationService.T("Search.Type.Note");
         string todoTypeLabel = _localizationService.T("Search.Type.Todo");
         foreach (QuickCaptureSearchProjection item in quickCaptureProjections)
@@ -1966,12 +2112,14 @@ public sealed class SearchEngineService : IDisposable
         string query = parsed.EffectiveQuery;
         bool browseTodos = parsed.Scope == SearchInlineScope.Todos && string.IsNullOrWhiteSpace(query);
         bool browseNotes = parsed.Scope == SearchInlineScope.Notes && string.IsNullOrWhiteSpace(query);
-        if (!browseTodos && !browseNotes && string.IsNullOrWhiteSpace(query))
+        bool browseWidgets = parsed.Scope == SearchInlineScope.Widgets && string.IsNullOrWhiteSpace(query);
+        bool browseAny = browseTodos || browseNotes || browseWidgets;
+        if (!browseAny && string.IsNullOrWhiteSpace(query))
         {
             return [];
         }
 
-        string[] queryTerms = browseTodos || browseNotes
+        string[] queryTerms = browseAny
             ? []
             : query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
@@ -1987,9 +2135,13 @@ public sealed class SearchEngineService : IDisposable
             {
                 continue;
             }
+            if (parsed.Scope == SearchInlineScope.Widgets && document.Kind != SearchResultKind.CustomWidget)
+            {
+                continue;
+            }
 
             double score;
-            if (browseTodos || browseNotes)
+            if (browseAny)
             {
                 score = 72;
             }
@@ -2245,9 +2397,19 @@ public sealed class SearchEngineService : IDisposable
         {
             bool listDefaultSettings = parsed.Scope == SearchInlineScope.Settings &&
                                        string.IsNullOrWhiteSpace(effectiveQuery);
+            bool hasCjkChar = false;
+            for (int i = 0; i < effectiveQuery.Length; i++)
+            {
+                if (effectiveQuery[i] > 127)
+                {
+                    hasCjkChar = true;
+                    break;
+                }
+            }
+
             bool allowSettingsMatch = listDefaultSettings ||
                                       (!string.IsNullOrWhiteSpace(effectiveQuery) &&
-                                       (parsed.Scope != SearchInlineScope.None || effectiveQuery.Length >= 2));
+                                       (parsed.Scope != SearchInlineScope.None || effectiveQuery.Length >= 2 || hasCjkChar));
             if (allowSettingsMatch)
             {
                 SettingsCatalogItem[] catalog = GetOrBuildSettingsCatalog();
@@ -2261,6 +2423,7 @@ public sealed class SearchEngineService : IDisposable
                             Kind = SearchResultKind.Action,
                             Title = entry.Title,
                             Subtitle = entry.Breadcrumb,
+                            PreviewText = string.IsNullOrWhiteSpace(entry.Description) ? null : entry.Description,
                             ActionId = $"open-settings:{entry.SectionTag}@{entry.HeaderKey}",
                             Glyph = "\uE713",
                             RelevanceScore = 80 - rank++
@@ -2269,7 +2432,7 @@ public sealed class SearchEngineService : IDisposable
                 }
                 else
                 {
-                    int limit = parsed.Scope == SearchInlineScope.Settings ? 24 : 8;
+                    int limit = parsed.Scope == SearchInlineScope.Settings ? 24 : 20;
                     var matchedSettings = catalog
                         .Select(entry => (
                             Entry: entry,
@@ -2293,6 +2456,7 @@ public sealed class SearchEngineService : IDisposable
                             Kind = SearchResultKind.Action,
                             Title = entry.Title,
                             Subtitle = entry.Breadcrumb,
+                            PreviewText = string.IsNullOrWhiteSpace(entry.Description) ? null : entry.Description,
                             ActionId = $"open-settings:{entry.SectionTag}@{entry.HeaderKey}",
                             Glyph = "\uE713",
                             RelevanceScore = relevance
@@ -2329,7 +2493,7 @@ public sealed class SearchEngineService : IDisposable
         string settingsRootLabel = _localizationService.T("Search.Action.OpenSettings");
         foreach (SettingsSearchCatalogEntry entry in SettingsSearchCatalog.Entries)
         {
-            if (isStoreBuild && SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey))
+            if (SettingsSearchChannelPolicy.IsHiddenForChannel(entry.HeaderKey, isStoreBuild))
             {
                 continue;
             }

@@ -225,7 +225,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.WeatherShowWind);
         Assert.False(s.WeatherShowPressure);
         Assert.Equal(60, s.WeatherRefreshIntervalMinutes);
-        Assert.False(s.SearchHotkeyEnabled);
+        Assert.True(s.SearchHotkeyEnabled);
         Assert.Equal(HotkeyActivationKind.Chord, s.SearchHotkeyActivationKind);
         Assert.Equal((int)HotkeyModifierKeys.Alt, s.SearchHotkeyModifiers);
         Assert.Equal(0x44, s.SearchHotkeyKey);
@@ -257,6 +257,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("always", s.SearchQuickCreateDisplayMode);
         Assert.Equal("todo", s.SearchQuickCreateDefaultTarget);
         Assert.True(s.SearchQuickCreateShowHud);
+        Assert.Equal(SearchSettingsSlice.DefaultCategoryLayout, s.SearchCategoryLayout);
         Assert.Equal("none", s.CloudBackupProvider);
         Assert.Equal("", s.CloudBackupServerUrl);
         Assert.Equal("DeskBox/backups", s.CloudBackupRemotePath);
@@ -563,6 +564,7 @@ public sealed class SettingsSliceContractBaselineTests
         "searchQuickCreateDisplayMode",
         "searchQuickCreateDefaultTarget",
         "searchQuickCreateShowHud",
+        "searchCategoryLayout",
         "cloudBackupProvider",
         "cloudBackupServerUrl",
         "cloudBackupRemotePath",

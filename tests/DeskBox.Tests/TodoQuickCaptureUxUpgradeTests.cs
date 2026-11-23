@@ -334,6 +334,65 @@ public sealed class TodoQuickCaptureUxUpgradeTests : IDisposable
                 taskbarCreatedMessage: 0xC001));
     }
 
+    [Fact]
+    public async Task TodoAndQuickCapture_ViewModels_UseSymmetricRootPaddingAndHideZeroTabCounts()
+    {
+        var settingsService = new SettingsService(Path.Combine(_tempRoot, "ux-settings.json"));
+        var localization = new LocalizationService(settingsService);
+        var todoVm = new TodoWidgetViewModel(
+            new TodoWidgetStore(_widgetsDataRoot, "todo-symmetric"),
+            localization,
+            new WidgetConfig { Id = "todo-symmetric", Name = "Todo", WidgetKind = WidgetKind.Todo },
+            settingsService);
+        await todoVm.InitializeAsync();
+
+        var qcService = new QuickCaptureService(new QuickCaptureStore(_quickCaptureRoot));
+        var controller = Microsoft.UI.Dispatching.DispatcherQueueController.CreateOnDedicatedThread();
+        try
+        {
+            var qcVm = new QuickCaptureWidgetViewModel(
+                new WidgetConfig { Id = "qc-symmetric", Name = "Notes", WidgetKind = WidgetKind.QuickCapture },
+                qcService,
+                settingsService,
+                localization,
+                controller.DispatcherQueue);
+            await qcVm.InitializeAsync();
+
+            Assert.Equal(todoVm.RootPadding.Left, todoVm.RootPadding.Right);
+            Assert.Equal(qcVm.RootPadding.Left, qcVm.RootPadding.Right);
+            Assert.Equal(todoVm.RootPadding.Left, qcVm.RootPadding.Left);
+
+            Assert.DoesNotContain(" 0", todoVm.AllFilterText, StringComparison.Ordinal);
+            Assert.DoesNotContain(" 0", todoVm.OverdueFilterText, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Collapsed, todoVm.AllFilterCountVisibility);
+            Assert.Equal(Visibility.Collapsed, todoVm.OverdueFilterCountVisibility);
+
+            Assert.DoesNotContain(" 0", qcVm.RecordsTabText, StringComparison.Ordinal);
+            Assert.DoesNotContain(" 0", qcVm.PinnedTabText, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Collapsed, qcVm.RecordsTabCountVisibility);
+            Assert.Equal(Visibility.Collapsed, qcVm.PinnedTabCountVisibility);
+
+            await todoVm.AddItemAsync("Ship Fluent polish");
+            Assert.EndsWith(" 1", todoVm.AllFilterText, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Visible, todoVm.AllFilterCountVisibility);
+            Assert.DoesNotContain(" 0", todoVm.OverdueFilterText, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Collapsed, todoVm.OverdueFilterCountVisibility);
+
+            await qcService.AddDetailedItemAsync(null, "Pinned memo", QuickCaptureAppearancePreset.Default, pin: true);
+            await qcVm.RefreshItemsAsync();
+            Assert.EndsWith(" 1", qcVm.RecordsTabText, StringComparison.Ordinal);
+            Assert.EndsWith(" 1", qcVm.PinnedTabText, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Visible, qcVm.RecordsTabCountVisibility);
+            Assert.Equal(Visibility.Visible, qcVm.PinnedTabCountVisibility);
+
+            qcVm.Dispose();
+        }
+        finally
+        {
+            await controller.ShutdownQueueAsync();
+        }
+    }
+
     private TodoWidgetViewModel CreateTodoViewModel(string widgetId, Func<DateTimeOffset>? clock = null)
     {
         var config = new WidgetConfig

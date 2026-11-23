@@ -73,6 +73,7 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
             {
                 _viewModel.InputText = value;
                 RaisePropertyChanged(nameof(CanSaveDraft));
+                RaisePropertyChanged(nameof(SaveButtonOpacity));
                 RaisePropertyChanged(nameof(CollapsedCardText));
             }
         }
@@ -97,11 +98,21 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
 
     public bool CanSaveDraft => !string.IsNullOrWhiteSpace(_viewModel?.InputText);
 
+    public double SaveButtonOpacity => CanSaveDraft ? 1.0 : 0.38;
+
     public double InputFontSize => _viewModel?.TextSize ?? SettingsService.DefaultTextSize;
 
     public double SecondaryFontSize => _viewModel?.SecondaryTextSize ?? (SettingsService.DefaultTextSize - 1);
 
     public string ImportantGlyph => _viewModel?.DraftImportantGlyph ?? "\uE734";
+
+    public Visibility ImportantActiveVisibility => _viewModel?.DraftImportant == true
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public Visibility ImportantInactiveVisibility => _viewModel?.DraftImportant == true
+        ? Visibility.Collapsed
+        : Visibility.Visible;
 
     public string ImportantTooltipText => _viewModel?.DraftImportantTooltipText ?? string.Empty;
 
@@ -198,6 +209,7 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
             RaisePropertyChanged(nameof(ExpandedCardVisibility));
             RaisePropertyChanged(nameof(CollapsedCardText));
             RaisePropertyChanged(nameof(CanSaveDraft));
+            RaisePropertyChanged(nameof(SaveButtonOpacity));
         }
     }
 
@@ -217,6 +229,7 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
             case nameof(TodoWidgetViewModel.InputText):
                 RaisePropertyChanged(nameof(InputText));
                 RaisePropertyChanged(nameof(CanSaveDraft));
+                RaisePropertyChanged(nameof(SaveButtonOpacity));
                 RaisePropertyChanged(nameof(CollapsedCardText));
                 break;
             case nameof(TodoWidgetViewModel.AddPlaceholderText):
@@ -232,6 +245,8 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
             case nameof(TodoWidgetViewModel.DraftImportantGlyph):
             case nameof(TodoWidgetViewModel.DraftImportantTooltipText):
                 RaisePropertyChanged(nameof(ImportantGlyph));
+                RaisePropertyChanged(nameof(ImportantActiveVisibility));
+                RaisePropertyChanged(nameof(ImportantInactiveVisibility));
                 RaisePropertyChanged(nameof(ImportantTooltipText));
                 break;
             case nameof(TodoWidgetViewModel.DraftDueDate):
@@ -420,9 +435,12 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
         RaisePropertyChanged(nameof(PlaceholderText));
         RaisePropertyChanged(nameof(CollapsedCardText));
         RaisePropertyChanged(nameof(CanSaveDraft));
+        RaisePropertyChanged(nameof(SaveButtonOpacity));
         RaisePropertyChanged(nameof(InputFontSize));
         RaisePropertyChanged(nameof(SecondaryFontSize));
         RaisePropertyChanged(nameof(ImportantGlyph));
+        RaisePropertyChanged(nameof(ImportantActiveVisibility));
+        RaisePropertyChanged(nameof(ImportantInactiveVisibility));
         RaisePropertyChanged(nameof(ImportantTooltipText));
         RaisePropertyChanged(nameof(DueDateTooltipText));
         RaisePropertyChanged(nameof(DueDateChipText));

@@ -38,8 +38,7 @@ public sealed record CustomWidgetPomodoroSnapshot(
     bool IsPaused = false,
     string HeaderPillText = "",
     string DialSubtext = "",
-    // v5.0 dual-rhythm (Pomodoro focus / sedentary guardian) extension fields.
-    // All defaults keep the historical pomodoro-only behavior for legacy stores.
+    // Dual-rhythm (Pomodoro focus / sedentary guardian) extension fields.
     string Mode = "pomodoro",
     bool IsAwaySuspended = false,
     bool IsDue = false,
@@ -51,7 +50,7 @@ public sealed record CustomWidgetPomodoroSnapshot(
     string HealthSummary = "",
     string ConfirmActionText = "",
     string SnoozeActionText = "",
-    // v7.0 dual-track concurrent projection tokens (both tracks observable simultaneously).
+    // Dual-track concurrent projection tokens (both tracks observable simultaneously).
     bool SedentaryIsRunning = false,
     bool SedentaryIsDue = false,
     bool SedentaryIsAway = false,
@@ -94,7 +93,7 @@ public static class CustomWidgetPomodoroEngine
     public const string KeyCurrentTask = "currentTask";
     public const string KeyLinkedTaskTitle = "pomo.linkedTaskTitle";
 
-    // v5.0 / v7.0 independent sedentary guardian track keys.
+    // Independent sedentary guardian track keys.
     public const string KeySedentaryRunning = "pomo.sedentary.running";
     public const string KeySedentaryEndUtcTicks = "pomo.sedentary.endUtcTicks";
     public const string KeySedentaryRemainingSec = "pomo.sedentary.remainingSec";
@@ -168,9 +167,7 @@ public static class CustomWidgetPomodoroEngine
     }
 
     /// <summary>
-    /// Reads the v5.0 dual-rhythm preferences. Every value is optional and defaults to the
-    /// exact pre-v5 behavior (<c>pomodoro</c> mode), so legacy <c>store.json</c> payloads
-    /// keep working untouched.
+    /// Reads the dual-rhythm preferences, defaulting to <c>pomodoro</c> mode when omitted.
     /// </summary>
     public static (string RhythmMode, int SedentaryIntervalMin, int IdleAutoResetMin) ReadRhythmPreferences(
         IReadOnlyDictionary<string, string> settings)
@@ -1559,7 +1556,7 @@ public static class CustomWidgetPomodoroEngine
             "capsuleTitle" => s.CapsuleTitle,
             "capsuleSummary" => s.CapsuleSummary,
             "capsuleBadge" => s.CapsuleBadge,
-            // v5.0 / v7.0 dual-track tokens.
+            // Dual-track tokens.
             "mode" or "rhythmMode" => s.Mode,
             "isAway" or "isAwaySuspended" => s.IsAwaySuspended ? "true" : "false",
             "isDue" => s.IsDue ? "true" : "false",

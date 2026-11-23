@@ -94,6 +94,15 @@ public sealed partial class WidgetManager
             {
                 await beforeRetireAsync();
             }
+
+            if (retiringSurfaceClaims is not null)
+            {
+                foreach (WidgetSurfaceClaimTransfer<IDesktopWidgetWindow> claim in retiringSurfaceClaims)
+                {
+                    _widgetSurfaces.RemoveSurface(claim.Session.SurfaceId);
+                }
+            }
+
             return;
         }
 

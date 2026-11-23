@@ -190,6 +190,10 @@ function Get-PeImports {
             }
         }
     ) | Sort-Object -Unique
+    # A single unique import (the statically linked QuickJS module imports only
+    # KERNEL32.dll) comes back as a scalar string; force an array so the Count
+    # check holds under Set-StrictMode.
+    $imports = @($imports)
 
     if ($imports.Count -eq 0) {
         throw "No PE imports were found for '$Path'."

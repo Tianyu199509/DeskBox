@@ -10,7 +10,7 @@
 
     <Grid
         x:Name="RootGrid"
-        Margin="2,0,6,4"
+        Margin="2,0,0,4"
         MinHeight="28"
         ColumnSpacing="8"
         Visibility="{x:Bind BarVisibility, Mode=OneWay}">
@@ -82,8 +82,8 @@
             Padding="10,3"
             VerticalAlignment="Center"
             AutomationProperties.Name="{x:Bind RescheduleText, Mode=OneWay}"
-            Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
-            BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             Click="RescheduleButton_Click"
             CornerRadius="6"

@@ -666,31 +666,29 @@ internal sealed class DesktopToastHudService
         return Task.CompletedTask;
     }
 
-    public static async Task SwitchDragOutActionAsync(
+    public static Task SwitchDragOutActionAsync(
+        SettingsService settingsService,
+        string action) =>
+        SwitchUnifiedDragBehaviorActionAsync(settingsService, action);
+
+    public static Task SwitchDropActionAsync(
+        SettingsService settingsService,
+        string action) =>
+        SwitchUnifiedDragBehaviorActionAsync(settingsService, action);
+
+    private static async Task SwitchUnifiedDragBehaviorActionAsync(
         SettingsService settingsService,
         string action)
     {
         var fileWidget = settingsService.Settings.FileWidget;
-        if (string.Equals(fileWidget.ManagedDragOutAction, action, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        fileWidget.ManagedDragOutAction = action;
-        await settingsService.SaveAsync();
-    }
-
-    public static async Task SwitchDropActionAsync(
-        SettingsService settingsService,
-        string action)
-    {
-        var fileWidget = settingsService.Settings.FileWidget;
-        if (string.Equals(fileWidget.ManagedDropAction, action, StringComparison.Ordinal))
+        if (string.Equals(fileWidget.ManagedDropAction, action, StringComparison.Ordinal) &&
+            string.Equals(fileWidget.ManagedDragOutAction, action, StringComparison.Ordinal))
         {
             return;
         }
 
         fileWidget.ManagedDropAction = action;
+        fileWidget.ManagedDragOutAction = action;
         await settingsService.SaveAsync();
     }
 

@@ -262,9 +262,8 @@ internal static class WidgetCompactAnimationCoordinator
         else if (s_isClockPreArmed && FrameCallbacks.Count == 1)
         {
             // The first real registration adopts a running pre-armed clock.
-            // Idle-linger ticks must not seed the overrun mask that the
-            // interaction-backdrop simplification policy reads.
-            s_recentOverrunMask = 0;
+            // Idle pre-arm ticks already return before RecordFrameTickCadence,
+            // so keep s_recentOverrunMask intact for backdrop simplification.
             s_lastFrameTickTimestamp = 0;
         }
 
@@ -513,12 +512,29 @@ internal static class WidgetCompactAnimationCoordinator
         s_lastFrameTickTimestamp = 0;
     }
 
+    private static bool s_deferredCallbackEscapePending;
+
     private static void OnRendering(object? sender, object args)
     {
         if (!s_isRenderingSubscribed || s_isDispatchingFrame) return;
         // A pre-armed idle clock has no callbacks to dispatch, and its ticks
         // carry no evidence about real animation cadence.
         if (FrameCallbacks.Count == 0) return;
+        if (CallbackDepth.Depth > 0)
+        {
+            if (!s_deferredCallbackEscapePending)
+            {
+                s_deferredCallbackEscapePending = true;
+                UiDispatch.PostAfterCallback(() =>
+                {
+                    s_deferredCallbackEscapePending = false;
+                    OnRendering(null, EventArgs.Empty);
+                });
+            }
+
+            return;
+        }
+
         RefreshFrameBudgets();
         RecordFrameTickCadence();
         PendingBoundsMoves.Clear();

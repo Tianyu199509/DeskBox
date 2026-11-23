@@ -754,7 +754,6 @@ public sealed partial class SettingsWindow : Window
             Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(section)?.Recycle();
             section.DataContext = null;
         }
-        Win32Helper.ClearWindowTopMost(_hWnd);
         RemoveMinimumSizeHook();
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;

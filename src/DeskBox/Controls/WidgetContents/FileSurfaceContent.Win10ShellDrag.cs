@@ -31,9 +31,11 @@ public sealed partial class FileSurfaceContent
         bool hasActiveDragSession,
         bool isSurfaceReorderDragActive,
         bool isStackPopoverDragActive,
-        bool isDeskBoxFileDragSnapshot) =>
+        bool isDeskBoxFileDragSnapshot,
+        bool hasActiveProcessDeskBoxDrag = false) =>
         !isWin10NativeShellDragActive &&
         (hasActiveDragSession ||
+         hasActiveProcessDeskBoxDrag ||
          isSurfaceReorderDragActive ||
          isStackPopoverDragActive ||
          isDeskBoxFileDragSnapshot);
@@ -100,13 +102,22 @@ public sealed partial class FileSurfaceContent
 
         if (observation != ExternalDragObservation.None && movedPaths.Length > 0)
         {
+            DropTargetWindowKind releaseTargetKind = releaseSnapshot.TargetKind;
             Action? onSourceRemoved = isWin10MoveNonExplorerDrop
                 ? () =>
                 {
                     Win10MoveCopyFallbackPolicy.Shared.Clear();
                     ShowWin10MoveNonExplorerRemovalWarning();
                 }
-                : null;
+                : dropResult == DataPackageOperation.None
+                    ? () => MaybeShowDragOutResultHint(
+                        DataPackageOperation.Move,
+                        allowedOperations,
+                        observation,
+                        handledAsStackMembership: false,
+                        releaseTargetKind,
+                        win10MoveRejectedByNonExplorer: false)
+                    : null;
             Action? onFirstProbeRetained = rejectedByNonExplorer
                 ? ShowWin10MoveRejectedByAppHint
                 : null;

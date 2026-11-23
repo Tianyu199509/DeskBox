@@ -1477,9 +1477,9 @@ public sealed partial class WidgetShell : UserControl
             return;
         }
 
-        contentVisual.Opacity = state.Blocked ? 0.42f : 0.18f;
+        contentVisual.Opacity = state.Blocked ? 0.45f : 0.38f;
         EnsureGroupDropPreview();
-        GroupDropPreview?.Apply(state, GroupMergeTitleTargetElement, ShellRoot.CornerRadius);
+        GroupDropPreview?.Apply(state, GroupMergeTitleTargetElement, ShellOutlineBorder.CornerRadius);
     }
 
     /// <summary>The whole visible surface; its inner half is the drag-merge drop zone.</summary>
@@ -4049,36 +4049,15 @@ public sealed partial class WidgetShell : UserControl
             _expandedOuterCornerRadius = clamped;
         }
 
-        if (ShellRoot.CornerRadius != default)
-        {
-            ShellRoot.CornerRadius = default;
-        }
+        if (ShellRoot.CornerRadius != default) ShellRoot.CornerRadius = default;
 
         var outerCornerRadius = new CornerRadius(clamped);
-        if (BackgroundPlate.CornerRadius != outerCornerRadius)
-        {
-            BackgroundPlate.CornerRadius = outerCornerRadius;
-        }
-
-        if (CustomBackgroundClipHost.CornerRadius != outerCornerRadius)
-        {
-            CustomBackgroundClipHost.CornerRadius = outerCornerRadius;
-        }
-
-        if (CustomBackgroundColorLayer.CornerRadius != outerCornerRadius)
-        {
-            CustomBackgroundColorLayer.CornerRadius = outerCornerRadius;
-        }
-
-        if (CustomBackgroundScrim.CornerRadius != outerCornerRadius)
-        {
-            CustomBackgroundScrim.CornerRadius = outerCornerRadius;
-        }
-
-        if (ShellOutlineBorder.CornerRadius != outerCornerRadius)
-        {
-            ShellOutlineBorder.CornerRadius = outerCornerRadius;
-        }
+        if (BackgroundPlate.CornerRadius != outerCornerRadius) BackgroundPlate.CornerRadius = outerCornerRadius;
+        if (CustomBackgroundClipHost.CornerRadius != outerCornerRadius) CustomBackgroundClipHost.CornerRadius = outerCornerRadius;
+        if (CustomBackgroundColorLayer.CornerRadius != outerCornerRadius) CustomBackgroundColorLayer.CornerRadius = outerCornerRadius;
+        if (CustomBackgroundScrim.CornerRadius != outerCornerRadius) CustomBackgroundScrim.CornerRadius = outerCornerRadius;
+        if (ShellOutlineBorder.CornerRadius != outerCornerRadius) ShellOutlineBorder.CornerRadius = outerCornerRadius;
+        if (GroupDropPreview is { IsShowing: true }) GroupDropPreview.SetCornerRadius(outerCornerRadius);
 
         SyncContentCornerClip();
         SyncMaterialBackdropCornerRadius();

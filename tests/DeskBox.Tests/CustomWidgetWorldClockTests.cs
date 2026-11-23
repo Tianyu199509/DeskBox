@@ -55,7 +55,7 @@ public sealed class CustomWidgetWorldClockTests
         CustomWidgetManifest m = parsed.Manifest!;
         Assert.Equal("deskbox.world-clock", m.Id);
         Assert.Equal("🌍", m.Icon);
-        Assert.Equal("3.0.0", m.Version);
+        Assert.Equal("1.0.0", m.Version);
         Assert.Equal(332, m.DefaultSize.Width);
         Assert.Equal(368, m.DefaultSize.Height);
         Assert.Equal(276, m.MinSize.Width);
@@ -645,19 +645,22 @@ public sealed class CustomWidgetWorldClockTests
                     CultureName = "zh-CN",
                     I18n = zhManifest.I18n["zh-CN"],
                     ClockZones = ["local", "America/Los_Angeles", "Europe/London", "Asia/Tokyo", "America/New_York"],
+                    Settings = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["city1"] = "America/Los_Angeles",
+                        ["city2"] = "Europe/London",
+                        ["city3"] = "Asia/Tokyo",
+                        ["city4"] = "America/New_York",
+                        ["hourFormat"] = "24h"
+                    },
                     State = new Dictionary<string, string>(StringComparer.Ordinal) { ["scrubHours"] = "2" },
                     Args = new Dictionary<string, string>(StringComparer.Ordinal)
                     {
                         ["localLabel"] = "本机",
-                        ["localTime"] = "06-01 22:00",
                         ["c1Label"] = "旧金山",
-                        ["c1Time"] = "07:00",
                         ["c2Label"] = "伦敦",
-                        ["c2Time"] = "15:00",
                         ["c3Label"] = "东京",
-                        ["c3Time"] = "23:00",
                         ["c4Label"] = "纽约",
-                        ["c4Time"] = "10:00",
                         ["hasC4"] = "true"
                     }
                 });

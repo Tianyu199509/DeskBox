@@ -36,13 +36,13 @@
             <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
         </Style>
         <Style x:Key="QuickCaptureSharedAttachmentActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-            <Setter Property="Width" Value="24" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="MinWidth" Value="24" />
-            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="MinHeight" Value="26" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
+            <Setter Property="CornerRadius" Value="5" />
         </Style>
     </UserControl.Resources>
 
@@ -60,7 +60,7 @@
             <ColumnDefinition x:Name="DetailColumn" Width="0" />
         </Grid.ColumnDefinitions>
 
-        <Grid x:Name="ListPage" Grid.Column="0" RowSpacing="5">
+        <Grid x:Name="ListPage" Grid.Column="0" RowSpacing="0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -68,7 +68,7 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid ColumnSpacing="5">
+            <Grid Margin="0,0,0,6" ColumnSpacing="5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -83,11 +83,19 @@
                     SelectionChanged="QuickCaptureViewSegmented_SelectionChanged"
                     SizeChanged="QuickCaptureViewSegmented_SizeChanged"
                     Visibility="Collapsed">
-                    <toolkit:SegmentedItem AllowDrop="True" DragOver="QuickCaptureTab_DragOver" Drop="QuickCaptureTab_Drop" Tag="Records" Visibility="{Binding RecordsTabVisibility}">
-                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding RecordsTabText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <toolkit:SegmentedItem AllowDrop="True" DragOver="QuickCaptureTab_DragOver" Drop="QuickCaptureTab_Drop" Tag="Records" ToolTipService.ToolTip="{Binding RecordsTabText}" Visibility="{Binding RecordsTabVisibility}">
+                        <Grid HorizontalAlignment="Center">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding RecordsTabLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding RecordCount}" VerticalAlignment="Center" Visibility="{Binding RecordsTabCountVisibility}" />
+                        </Grid>
                     </toolkit:SegmentedItem>
-                    <toolkit:SegmentedItem AllowDrop="True" DragOver="QuickCaptureTab_DragOver" Drop="QuickCaptureTab_Drop" Tag="Pinned" Visibility="{Binding PinnedTabVisibility}">
-                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding PinnedTabText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <toolkit:SegmentedItem AllowDrop="True" DragOver="QuickCaptureTab_DragOver" Drop="QuickCaptureTab_Drop" Tag="Pinned" ToolTipService.ToolTip="{Binding PinnedTabText}" Visibility="{Binding PinnedTabVisibility}">
+                        <Grid HorizontalAlignment="Center">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding PinnedTabLabelText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Margin="3,0,0,0" FontSize="{Binding SegmentCountTextSize}" MaxLines="1" Opacity="0.72" Text="{Binding PinnedCount}" VerticalAlignment="Center" Visibility="{Binding PinnedTabCountVisibility}" />
+                        </Grid>
                     </toolkit:SegmentedItem>
                 </toolkit:Segmented>
                 <Button
@@ -133,6 +141,7 @@
             <ScrollViewer
                 x:Name="FilterChipScrollViewer"
                 Grid.Row="1"
+                Margin="0,0,0,6"
                 HorizontalScrollBarVisibility="Hidden"
                 HorizontalScrollMode="Enabled"
                 VerticalScrollBarVisibility="Disabled"
@@ -144,12 +153,12 @@
                     Spacing="4" />
             </ScrollViewer>
 
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="2" Margin="0,0,0,2" Visibility="{Binding InputAreaVisibility}">
                 <Grid x:Name="AddNoteButtonHost">
                     <Button
                         x:Name="AddNoteCardButton"
-                        MinHeight="42"
-                        Padding="8,5"
+                        MinHeight="44"
+                        Padding="10,6"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -157,13 +166,14 @@
                         BorderThickness="0"
                         Click="AddNoteCardButton_Click"
                         CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                        Style="{StaticResource WidgetQuickAddCardButtonStyle}"
                         Visibility="{Binding InputAreaVisibility}">
-                        <Grid ColumnSpacing="6">
+                        <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="26" />
+                                <ColumnDefinition Width="16" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <FontIcon HorizontalAlignment="Center" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE710;" />
+                            <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE710;" />
                             <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{Binding TextSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding AddNoteText}" />
                         </Grid>
                     </Button>
@@ -171,13 +181,13 @@
 
                 <Border
                     x:Name="InlineComposerCard"
-                    Padding="8,6"
+                    Padding="10,8,10,6"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                     Visibility="Collapsed">
-                    <Grid RowSpacing="4">
+                    <Grid RowSpacing="6">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -185,17 +195,32 @@
                         </Grid.RowDefinitions>
                         <TextBox
                             x:Name="InlineComposerTextBox"
-                            MinHeight="62"
+                            MinHeight="60"
                             MaxHeight="200"
-                            Padding="4,2"
+                            Padding="2,2,2,4"
+                            VerticalContentAlignment="Top"
                             AcceptsReturn="True"
                             Background="Transparent"
+                            BorderBrush="Transparent"
                             BorderThickness="0"
                             FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
                             PreviewKeyDown="InlineComposerTextBox_PreviewKeyDown"
                             Paste="InlineComposerTextBox_Paste"
                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                            TextWrapping="Wrap" />
+                            Style="{StaticResource WidgetBorderlessInputTextBoxStyle}"
+                            TextChanged="InlineComposerTextBox_TextChanged"
+                            TextWrapping="Wrap">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
                         <controls:AttachmentTileStrip
                             x:Name="InlineComposerAttachmentStrip"
                             Grid.Row="1"
@@ -204,7 +229,6 @@
                             Visibility="Collapsed" />
                         <Grid Grid.Row="2" ColumnSpacing="4">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
@@ -213,25 +237,16 @@
                                     x:Name="InlineComposerAttachButton"
                                     Click="InlineComposerAttachButton_Click"
                                     Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
-                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE723;" />
+                                    <FontIcon FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE723;" />
                                 </Button>
                                 <Button
                                     x:Name="InlineComposerExpandButton"
                                     Click="InlineComposerExpandButton_Click"
                                     Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
-                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8A7;" />
+                                    <FontIcon FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8A7;" />
                                 </Button>
                             </StackPanel>
-                            <TextBlock
-                                x:Name="InlineComposerHintText"
-                                Grid.Column="1"
-                                Margin="2,0"
-                                VerticalAlignment="Center"
-                                FontSize="11"
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                MaxLines="1"
-                                TextTrimming="CharacterEllipsis" />
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
                                 <Button
                                     x:Name="InlineComposerCancelButton"
                                     Click="InlineComposerCancelButton_Click"
@@ -241,8 +256,11 @@
                                 <Button
                                     x:Name="InlineComposerSaveButton"
                                     Click="InlineComposerSaveButton_Click"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    IsEnabled="False"
+                                    Opacity="0.38"
                                     Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
-                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Glyph="&#xE73E;" />
+                                    <FontIcon FontSize="12" Glyph="&#xE73E;" />
                                 </Button>
                             </StackPanel>
                         </Grid>
@@ -253,6 +271,8 @@
             <Grid Grid.Row="3">
                 <ListView
                     x:Name="ItemsList"
+                    Margin="0,0,-6,0"
+                    Padding="0,0,6,0"
                     AllowDrop="True"
                     Background="Transparent"
                     CanDragItems="True"
@@ -301,7 +321,7 @@
                                 PointerPressed="QuickCaptureItem_PointerPressed"
                                 PointerReleased="QuickCaptureItem_PointerReleased"
                                 RightTapped="QuickCaptureItem_RightTapped">
-                                <Grid MinHeight="50" Padding="8,6" ColumnSpacing="8">
+                                <Grid MinHeight="50" Padding="10,6" ColumnSpacing="0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -312,13 +332,14 @@
                                     <Border
                                         x:Name="QuickCaptureItemHoverBackground"
                                         Grid.ColumnSpan="2"
-                                        Margin="-8,-6"
+                                        Margin="-10,-6"
                                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                         CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                                         IsHitTestVisible="False"
                                         Opacity="0" />
                                     <ContentControl
                                         Grid.Column="0"
+                                        Margin="0,0,8,0"
                                         HorizontalContentAlignment="Stretch"
                                         VerticalContentAlignment="Stretch"
                                         Content="{Binding PrimaryImageAttachment}"
@@ -418,11 +439,13 @@
                                     <Border
                                         Grid.ColumnSpan="2"
                                         x:Name="QuickCaptureItemActionButtons"
-                                        Padding="1"
+                                        Padding="2,1"
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource WidgetOverlaySurfaceBrush}"
-                                        CornerRadius="4"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
                                         IsHitTestVisible="False"
                                         Opacity="0"
                                         Canvas.ZIndex="2">
@@ -474,8 +497,8 @@
                                             </Button>
                                         </StackPanel>
                                     </Border>
-                                    <Border x:Name="QuickCaptureItemSelectionWash" Grid.ColumnSpan="2" Margin="-8,-6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
-                                    <Border x:Name="QuickCaptureItemSelectionAccentBar" Grid.ColumnSpan="2" Width="2" Margin="-8,-6" HorizontalAlignment="Left" Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border x:Name="QuickCaptureItemSelectionWash" Grid.ColumnSpan="2" Margin="-10,-6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border x:Name="QuickCaptureItemSelectionAccentBar" Grid.ColumnSpan="2" Width="2" Margin="-10,-6" HorizontalAlignment="Left" Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>

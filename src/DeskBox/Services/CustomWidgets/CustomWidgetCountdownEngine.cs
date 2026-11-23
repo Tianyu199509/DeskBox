@@ -63,7 +63,7 @@ public sealed record CustomWidgetTimeProgressSnapshot(
     string WeekTitle,
     string WeekSummary);
 
-/// <summary>Workday phases for the "today's work hours" progress scope (v3.0).</summary>
+/// <summary>Workday phases for the "today's work hours" progress scope.</summary>
 public enum CustomWidgetWorkdayPhase
 {
     BeforeWork,
@@ -79,7 +79,7 @@ public sealed record CustomWidgetWorkdayProgressSnapshot(
     string RangeText,
     string Summary);
 
-/// <summary>Built-in "next statutory holiday" countdown view (v3.0, shared holiday table).</summary>
+/// <summary>Built-in "next statutory holiday" countdown view (shared holiday table).</summary>
 public sealed record CustomWidgetCountdownHolidayView(
     string Title,
     DateOnly StartDate,
@@ -122,7 +122,7 @@ public static class CustomWidgetCountdownEngine
     public const string RepeatYearly = "yearly";
     public const string RepeatWeekly = "weekly";
 
-    /// <summary>Monthly payday rules for dates landing on Sat/Sun (v3.0): keep / move to Friday / move to Monday.</summary>
+    /// <summary>Monthly payday rules for dates landing on Sat/Sun: keep / move to Friday / move to Monday.</summary>
     public const string WeekendRuleNone = "none";
     public const string WeekendRuleFriday = "friday";
     public const string WeekendRuleMonday = "monday";
@@ -1051,8 +1051,7 @@ public static class CustomWidgetCountdownEngine
     /// <summary>
     /// Applies a payday weekend rule to a candidate date: Saturday moves to the preceding
     /// Friday (<paramref name="weekendRule"/> == <c>friday</c>, 1-2 days earlier) or the
-    /// following Monday (<c>monday</c>, 1-2 days later). Weekday dates pass through unchanged,
-    /// so the historical default (<c>none</c>) keeps byte-identical v2.1 behavior.
+    /// following Monday (<c>monday</c>, 1-2 days later). Weekday dates pass through unchanged.
     /// </summary>
     public static DateOnly AdjustForWeekendRule(DateOnly candidate, string? weekendRule)
     {
@@ -1487,7 +1486,7 @@ public static class CustomWidgetCountdownEngine
                 targetYmd);
             heroBaseSubtitle = heroSubtitle;
 
-            // v3.0: count-up focus cards append the next milestone hint
+            // Count-up focus cards append the next milestone hint
             // (e.g. "距 300 天还有 11 天" / "距 2 周年还有 76 天").
             if (!isArchived &&
                 TryComputeNextMilestone(resolvedTarget, today, out bool isAnniv, out int milestoneNumber, out int milestoneDays))
@@ -1536,7 +1535,7 @@ public static class CustomWidgetCountdownEngine
             heroBaseSubtitle = heroSubtitle;
         }
 
-        // v3.0: base subtitle kept separate from the milestone hint so the hero can warm the
+        // Base subtitle kept separate from the milestone hint so the hero can warm the
         // hint up to the shared amber "approaching" semantic inside the urgentDays window.
         bool isMilestoneImminent =
             milestoneDaysRemaining > 0 &&
@@ -1871,7 +1870,7 @@ public static class CustomWidgetCountdownEngine
                 int dayCur = Math.Min(baseD, DateTime.DaysInMonth(today.Year, today.Month));
                 DateOnly curMonthDate = new(today.Year, today.Month, dayCur);
 
-                // v3.0 payday weekend rule (solar monthly only; lunar keeps v2.1 behavior).
+                // Payday weekend rule applies to solar monthly recurrences only.
                 bool applyWeekendRule = !isLunar && NormalizeWeekendRule(weekendRule) != WeekendRuleNone;
                 if (applyWeekendRule)
                 {

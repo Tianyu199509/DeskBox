@@ -204,31 +204,6 @@ function buildDefaultTiles(ctx) {
   ];
 }
 
-function normalizeLegacyRecords(ctx, items) {
-  let changed = false;
-  const legacyGroups = ['git', 'npm', 'docker', 'dotnet'];
-  const normalized = items.map((item) => {
-    const rawGroup = String(item.group || 'daily').trim();
-    const mappedGroup = legacyGroups.includes(rawGroup) ? 'dev' : rawGroup;
-    if (!item.icon || !item.subtitle || !item.kind || !item.tone || mappedGroup !== rawGroup) {
-      changed = true;
-      const bodyStr = String(item.body || '');
-      const flat = bodyStr.replace(/\s+/g, ' ');
-      return {
-        ...item,
-        group: mappedGroup,
-        kind: item.kind || 'copy',
-        icon: item.icon || '⌨️',
-        subtitle: item.subtitle || (flat.length > 22 ? flat.slice(0, 21) + '…' : flat),
-        tag: item.tag || ctx.t('tagCopy'),
-        tone: item.tone || 'cyan',
-      };
-    }
-    return item;
-  });
-  return { normalized, changed };
-}
-
 function syncComputed(ctx) {
   const items = ctx.collections.get('snippets') || [];
   const activeGroup = String((ctx.state && ctx.state.group) || 'daily').trim() || 'daily';
@@ -242,14 +217,9 @@ export function onInit(ctx) {
   if (existing.length === 0 && ctx.state.seeded !== true && ctx.state.seeded !== 'true') {
     ctx.collections.set('snippets', buildDefaultTiles(ctx));
     ctx.state.seeded = true;
-  } else if (existing.length > 0) {
-    const check = normalizeLegacyRecords(ctx, existing);
-    if (check.changed) {
-      ctx.collections.set('snippets', check.normalized);
-    }
   }
   const curGroup = String((ctx.state && ctx.state.group) || '');
-  if (!curGroup || ['git', 'npm', 'docker', 'dotnet'].includes(curGroup)) {
+  if (!['daily', 'phrases', 'dev'].includes(curGroup)) {
     ctx.state.group = 'daily';
   }
   if (!ctx.state.draftKind) {
@@ -297,7 +267,7 @@ export function addSnippet(ctx) {
 
   if (editingId !== '') {
     const items = ctx.collections.get('snippets') || [];
-    const idx = items.findIndex((item) => String(item.id || item.body) === editingId);
+    const idx = items.findIndex((item) => String(item.id) === editingId);
     if (idx >= 0) {
       const next = items.slice();
       next[idx] = { ...next[idx], ...record };
@@ -320,7 +290,7 @@ export function addSnippet(ctx) {
 export function removeSnippet(ctx) {
   const target = String((ctx.args && ctx.args.id) || (ctx.event && ctx.event.arg) || '').trim();
   if (!target) return;
-  ctx.collections.remove('snippets', (item) => String(item.id || item.body) === target);
+  ctx.collections.remove('snippets', (item) => String(item.id) === target);
   syncComputed(ctx);
 }
 

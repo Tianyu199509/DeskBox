@@ -292,6 +292,41 @@ public sealed partial class ContentWidgetWindow
         _cachedGroupContentOrder.Clear();
     }
 
+    internal int EvictDisownedCachedGroupContents(IReadOnlyCollection<string>? retainedMemberIds = null)
+    {
+        HashSet<string>? retained = retainedMemberIds is { Count: > 0 }
+            ? new HashSet<string>(retainedMemberIds, StringComparer.Ordinal)
+            : null;
+        int evictedCount = 0;
+        foreach ((string memberId, IWidgetContent content) in _cachedGroupContents.ToArray())
+        {
+            if (retained is not null && retained.Contains(memberId))
+            {
+                continue;
+            }
+
+            _cachedGroupContents.Remove(memberId);
+            RemoveCachedGroupContentOrderEntry(memberId);
+            evictedCount++;
+            if (content is IWidgetGroupContentCacheable { HasActiveOutboundDrag: true } activeDragContent)
+            {
+                void DisposeWhenDragCompletes(object? sender, EventArgs e)
+                {
+                    activeDragContent.OutboundDragCompleted -= DisposeWhenDragCompletes;
+                    DisposeCachedGroupContent(content);
+                }
+
+                activeDragContent.OutboundDragCompleted += DisposeWhenDragCompletes;
+            }
+            else
+            {
+                DisposeCachedGroupContent(content);
+            }
+        }
+
+        return evictedCount;
+    }
+
     internal bool HasMaterializedCachedGroupContentViews =>
         _cachedGroupContents.Values.Any(static content =>
             content is not WidgetContentAdapterBase adapter || adapter.HasMaterializedView);

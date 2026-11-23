@@ -29,4 +29,12 @@ internal static class InteractionBackdropSimplificationPolicy
 
         return BitOperations.PopCount((ulong)recentOverrunMask) >= MinimumRecentOverrunTicks;
     }
+
+    public static bool ShouldSimplifyControllerAcrylic(
+        long recentOverrunMask,
+        bool isSoftwareOrRemoteGraphics)
+    {
+        return isSoftwareOrRemoteGraphics ||
+               BitOperations.PopCount((ulong)recentOverrunMask) >= MinimumRecentOverrunTicks;
+    }
 }

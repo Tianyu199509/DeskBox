@@ -4,7 +4,7 @@
   "name": "${$i18n.widgetName}",
   "description": "${$i18n.widgetDescription}",
   "icon": "✨",
-  "version": "4.1.0",
+  "version": "1.0.0",
   "author": "DeskBox",
   "origin": "official",
   "minSize": {

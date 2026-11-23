@@ -104,10 +104,6 @@ public sealed partial class SearchResultRowControl : UserControl
             typeof(SearchResultRowControl),
             new PropertyMetadata(false, OnIsSelectedChanged));
 
-    internal event Action<SearchResultRowControl, SearchResultItem>? PrimaryActionRequested;
-    internal event Action<SearchResultRowControl, SearchResultItem>? OpenLocationRequested;
-    internal event Action<SearchResultRowControl, SearchResultItem, FrameworkElement>? MoreActionsRequested;
-
     public SearchResultRowControl()
     {
         InitializeComponent();
@@ -185,16 +181,11 @@ public sealed partial class SearchResultRowControl : UserControl
         RefreshQuickActionsVisibility();
     }
 
-    internal void ConfigureRowPresentation(
-        string? highlightQuery,
-        string? openTooltip = null,
-        string? openLocationTooltip = null,
-        string? moreTooltip = null)
+    internal void ConfigureRowPresentation(string? highlightQuery)
     {
         _highlightQuery = highlightQuery ?? string.Empty;
         ApplyTitleTypography(Item);
         ApplyQueryHighlight(_highlightQuery);
-        ConfigureQuickActionTooltipsAndButtons(Item, openTooltip, openLocationTooltip, moreTooltip);
         RefreshQuickActionsVisibility();
     }
 
@@ -258,64 +249,6 @@ public sealed partial class SearchResultRowControl : UserControl
         }
     }
 
-    internal bool IsElementInsideActionButtons(DependencyObject? source)
-    {
-        DependencyObject? current = source;
-        while (current is not null && !ReferenceEquals(current, this))
-        {
-            if (ReferenceEquals(current, QuickActionsPanel))
-            {
-                return true;
-            }
-
-            current = VisualTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
-
-    private void ConfigureQuickActionTooltipsAndButtons(
-        SearchResultItem? item,
-        string? openTooltip,
-        string? openLocationTooltip,
-        string? moreTooltip)
-    {
-        bool isFileOrFolder = item?.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-                              !string.IsNullOrWhiteSpace(item.DetailPath);
-        if (isFileOrFolder)
-        {
-            // File/folder rows show Open Location + More Actions (double-click/Enter opens).
-            QuickOpenLocationButton.Visibility = Visibility.Visible;
-            QuickPrimaryButton.Visibility = Visibility.Collapsed;
-            QuickMoreButton.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            // Non-file rows only have a single primary action (Copy or Open), so suppress the redundant '...' menu.
-            QuickOpenLocationButton.Visibility = Visibility.Collapsed;
-            QuickPrimaryButton.Visibility = Visibility.Visible;
-            QuickMoreButton.Visibility = Visibility.Collapsed;
-        }
-
-        bool isCopyResult = item?.Kind == SearchResultKind.Clipboard ||
-                            (item?.Kind == SearchResultKind.Action &&
-                             item.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
-        QuickPrimaryGlyph.Glyph = isCopyResult ? "\uE8C8" : "\uE8A7";
-
-        if (!string.IsNullOrWhiteSpace(openLocationTooltip))
-        {
-            ToolTipService.SetToolTip(QuickOpenLocationButton, openLocationTooltip);
-        }
-        if (!string.IsNullOrWhiteSpace(openTooltip))
-        {
-            ToolTipService.SetToolTip(QuickPrimaryButton, openTooltip);
-        }
-        if (!string.IsNullOrWhiteSpace(moreTooltip))
-        {
-            ToolTipService.SetToolTip(QuickMoreButton, moreTooltip);
-        }
-    }
-
     private static string GetCleanDisplayTitle(SearchResultItem? item)
     {
         if (item is null)
@@ -339,36 +272,9 @@ public sealed partial class SearchResultRowControl : UserControl
 
     private void RefreshQuickActionsVisibility()
     {
-        // Keep single-line rows clutter-free (CmdPal pattern); contextual actions live in
-        // the bottom CommandBar and Ctrl+K searchable action menu.
-        QuickActionsPanel.Visibility = Visibility.Collapsed;
         if (_fileColumnsVisible)
         {
             DateText.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void QuickOpenLocationButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (Item is { } item)
-        {
-            OpenLocationRequested?.Invoke(this, item);
-        }
-    }
-
-    private void QuickPrimaryButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (Item is { } item)
-        {
-            PrimaryActionRequested?.Invoke(this, item);
-        }
-    }
-
-    private void QuickMoreButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (Item is { } item)
-        {
-            MoreActionsRequested?.Invoke(this, item, QuickMoreButton);
         }
     }
 
@@ -403,8 +309,7 @@ public sealed partial class SearchResultRowControl : UserControl
 
     private void OnRowPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed ||
-            IsElementInsideActionButtons(e.OriginalSource as DependencyObject))
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             return;
         }
@@ -468,6 +373,7 @@ public sealed partial class SearchResultRowControl : UserControl
         FileIcon.Source = item?.Icon;
         FileIcon.Visibility = hasIcon ? Visibility.Visible : Visibility.Collapsed;
         GlyphBlock.Visibility = hasIcon ? Visibility.Collapsed : Visibility.Visible;
+        TypeText.Text = item?.TypeDisplay;
         SizeText.Text = item?.SizeDisplay;
         DateText.Text = item?.DateDisplay;
         UpdateSubtitlePresentation();
@@ -502,7 +408,9 @@ public sealed partial class SearchResultRowControl : UserControl
         SubtitleText.Visibility = hasSubtitle
             ? Visibility.Visible
             : Visibility.Collapsed;
-        TitleText.MaxWidth = hasSubtitle ? 276 : double.PositiveInfinity;
+        TitleText.MaxWidth = hasSubtitle
+            ? (_fileColumnsVisible ? 196 : 276)
+            : double.PositiveInfinity;
     }
 
     internal static string ComposeCompactFileSubtitle(

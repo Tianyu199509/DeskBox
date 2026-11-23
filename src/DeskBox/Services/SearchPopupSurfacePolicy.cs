@@ -27,7 +27,8 @@ internal readonly record struct SearchPopupLayoutState(
     bool ShowAllHiddenRecommendationsHint,
     bool ShowNoResults,
     bool ShowFooter,
-    bool ShowDetailsPane = false);
+    bool ShowDetailsPane = false,
+    int PopupWidthLogical = SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
 
 internal readonly record struct SearchPopupHeightSpringStep(
     double Height,
@@ -64,28 +65,81 @@ internal static class SearchPopupSurfacePolicy
     public const double InputCapsuleCornerRadius = 12.0;
     public const double ResultRowCornerRadius = 10.0;
 
-    public const int DefaultPopupWidthLogical = 660;
-    public const int ExpandedWithDetailsWidthLogical = 780;
-    public const int MinPopupWidthLogical = 400;
-    public const int DetailsPaneTargetWidthLogical = 312;
-    public const int DetailsPaneContentWidthLogical = 266;
-    public const int ResultsWithDetailsColumnWidthLogical = ExpandedWithDetailsWidthLogical - DetailsPaneTargetWidthLogical;
+    public const int DefaultPopupWidthLogical = 760;
+    public const int MinPopupWidthLogical = 520;
+    public const int DetailsPaneMinPopupWidthLogical = 640;
+    public const int FullTableColumnsWithDetailsMinWidthLogical = 880;
+    public const double MaxPopupWidthWorkAreaFraction = 0.85;
     public const int CapsuleOnlyHeightLogical = 56;
     public const int EverythingBannerHeightLogical = 56;
     public const int FilterBarHeightLogical = 36;
     public const int SortHeaderHeightLogical = 30;
     public const int ResultRowStrideLogical = 46;
-    public const int ResultsVerticalPaddingLogical = 12;
-    public const int DetailsPaneMinBodyHeightLogical = 286;
+    public const int ResultsVerticalPaddingLogical = 15;
+    public const int DetailsPaneMinBodyHeightLogical = 312;
     public const int FooterHeightLogical = 42;
     public const int NoResultsBodyHeightLogical = 136;
-    public const int RecommendationColumnsEstimate = 6;
+    public const int RecommendationHorizontalPaddingLogical = 24;
+    public const int RecommendationTileMinWidthLogical = 98;
+    public const int RecommendationColumnSpacingLogical = 6;
     public const int RecommendationRowStrideLogical = 98;
     public const int RecommendationVerticalPaddingLogical = 18;
     public const int MaxPopupHeightLogicalCap = 540;
     public const double MaxWorkAreaHeightFraction = 0.62;
     public const double DefaultTopAnchorFraction = 0.22;
     public const double TransparentTintThreshold = 0.25;
+
+    public static int ComputeMaxLogicalWidth(int workAreaLogicalWidth)
+    {
+        if (workAreaLogicalWidth <= 0)
+        {
+            return DefaultPopupWidthLogical;
+        }
+
+        int paddedWorkBound = Math.Max(320, workAreaLogicalWidth - 24);
+        int fractionBound = (int)Math.Round(workAreaLogicalWidth * MaxPopupWidthWorkAreaFraction);
+        return Math.Min(paddedWorkBound, Math.Max(MinPopupWidthLogical, fractionBound));
+    }
+
+    public static int ResolveEffectiveLogicalWidth(
+        int? customLogicalWidth,
+        int workAreaLogicalWidth)
+    {
+        int maxLogicalWidth = ComputeMaxLogicalWidth(workAreaLogicalWidth);
+        int minLogicalWidth = Math.Min(MinPopupWidthLogical, maxLogicalWidth);
+        int preferred = customLogicalWidth is int cw && cw > 0
+            ? cw
+            : DefaultPopupWidthLogical;
+        return Math.Clamp(preferred, minLogicalWidth, maxLogicalWidth);
+    }
+
+    public static bool ShouldShowDetailsPaneForWidth(
+        bool userPrefersDetailsPane,
+        double popupWidthLogical) =>
+        userPrefersDetailsPane &&
+        double.IsFinite(popupWidthLogical) &&
+        popupWidthLogical >= DetailsPaneMinPopupWidthLogical;
+
+    public static bool ShouldShowFullFileColumns(
+        bool showSortHeader,
+        bool detailsPaneVisible,
+        double popupWidthLogical) =>
+        showSortHeader &&
+        (!detailsPaneVisible ||
+         (double.IsFinite(popupWidthLogical) &&
+          popupWidthLogical >= FullTableColumnsWithDetailsMinWidthLogical));
+
+    public static int EstimateRecommendationColumns(int popupWidthLogical)
+    {
+        int effectiveWidth = popupWidthLogical > 0 ? popupWidthLogical : DefaultPopupWidthLogical;
+        int available = Math.Max(
+            RecommendationTileMinWidthLogical,
+            effectiveWidth - RecommendationHorizontalPaddingLogical);
+        return Math.Max(
+            1,
+            (available + RecommendationColumnSpacingLogical) /
+            (RecommendationTileMinWidthLogical + RecommendationColumnSpacingLogical));
+    }
 
     /// <summary>
     /// Resolves the inner search input header visuals:
@@ -185,9 +239,9 @@ internal static class SearchPopupSurfacePolicy
             {
                 if (state.RecommendationEntryCount > 0)
                 {
+                    int cols = EstimateRecommendationColumns(state.PopupWidthLogical);
                     int rows = Math.Clamp(
-                        (state.RecommendationEntryCount + RecommendationColumnsEstimate - 1) /
-                        RecommendationColumnsEstimate,
+                        (state.RecommendationEntryCount + cols - 1) / cols,
                         1,
                         3);
                     height += RecommendationVerticalPaddingLogical + (rows * RecommendationRowStrideLogical);
@@ -211,18 +265,14 @@ internal static class SearchPopupSurfacePolicy
             height += FilterBarHeightLogical;
         }
 
-        if (state.ShowSortHeader)
-        {
-            height += SortHeaderHeightLogical;
-        }
-
         if (state.ResultCount > 0)
         {
-            int bodyHeight = ResultsVerticalPaddingLogical + (state.ResultCount * ResultRowStrideLogical);
-            if (state.ShowDetailsPane)
-            {
-                bodyHeight = Math.Max(bodyHeight, DetailsPaneMinBodyHeightLogical);
-            }
+            int leftColumnHeight = (state.ShowSortHeader ? SortHeaderHeightLogical : 0) +
+                                   ResultsVerticalPaddingLogical +
+                                   (state.ResultCount * ResultRowStrideLogical);
+            int bodyHeight = state.ShowDetailsPane
+                ? Math.Max(leftColumnHeight, DetailsPaneMinBodyHeightLogical)
+                : leftColumnHeight;
 
             height += bodyHeight;
             if (state.ShowFooter)
@@ -237,6 +287,10 @@ internal static class SearchPopupSurfacePolicy
             {
                 height += FooterHeightLogical;
             }
+        }
+        else if (state.ShowSortHeader)
+        {
+            height += SortHeaderHeightLogical;
         }
 
         return Math.Clamp(height, CapsuleOnlyHeightLogical, maxLogicalHeight);
@@ -337,7 +391,7 @@ internal static class SearchPopupSurfacePolicy
 
     /// <summary>
     /// Advances a velocity-preserving, gently under-damped spring for smooth, organic
-    /// horizontal width transitions when the Details sidebar opens or closes.
+    /// horizontal width transitions (e.g. resetting custom width back to default).
     /// </summary>
     public static SearchPopupWidthSpringStep StepWidthSpring(
         double currentWidth,
@@ -356,39 +410,6 @@ internal static class SearchPopupSurfacePolicy
             maxUndershootBelowTarget: 6.0,
             minFloor: MinPopupWidthLogical);
         return new SearchPopupWidthSpringStep(value, velocity, isSettled);
-    }
-
-    public static double ComputeDetailsColumnWidthLogical(double currentPopupWidthLogical)
-    {
-        if (!double.IsFinite(currentPopupWidthLogical) ||
-            currentPopupWidthLogical <= DefaultPopupWidthLogical)
-        {
-            return 0.0;
-        }
-
-        if (currentPopupWidthLogical >= ExpandedWithDetailsWidthLogical)
-        {
-            return Math.Round(currentPopupWidthLogical - ResultsWithDetailsColumnWidthLogical, 1);
-        }
-
-        double t = (currentPopupWidthLogical - DefaultPopupWidthLogical) /
-                   (ExpandedWithDetailsWidthLogical - DefaultPopupWidthLogical);
-        return Math.Round(DetailsPaneTargetWidthLogical * t, 1);
-    }
-
-    public static double ComputeDetailsCardProgress(double currentPopupWidthLogical)
-    {
-        if (!double.IsFinite(currentPopupWidthLogical) ||
-            currentPopupWidthLogical <= DefaultPopupWidthLogical)
-        {
-            return 0.0;
-        }
-
-        return Math.Clamp(
-            (currentPopupWidthLogical - DefaultPopupWidthLogical) /
-            (ExpandedWithDetailsWidthLogical - DefaultPopupWidthLogical),
-            0.0,
-            1.0);
     }
 
     /// <summary>

@@ -292,7 +292,10 @@ public abstract partial class WidgetWindowBase
         // Buttons that open an editor focus it programmatically after their
         // click event. That focus request is also an explicit text-entry action.
         _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
-        WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        if (CallbackDepth.Depth == 0)
+        {
+            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        }
         DeferDesktopPinnedActivation("keyboard-focus");
     }
 
@@ -1172,7 +1175,10 @@ public abstract partial class WidgetWindowBase
         }
 
         _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
-        WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        if (CallbackDepth.Depth == 0)
+        {
+            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        }
         DeferDesktopPinnedActivation("popup-keyboard-focus");
     }
 

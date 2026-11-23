@@ -5764,7 +5764,8 @@ public partial class App : Application
                 initialStep,
                 widgetManager: WidgetManager,
                 desktopShortcutService: ManagedStorageDesktopShortcutService,
-                showDesktopOrganization: () => ShowDesktopOrganizationWindow());
+                showDesktopOrganization: () => ShowDesktopOrganizationWindow(),
+                searchHotkeyProvider: () => SearchHotkeyService);
             _onboardingWindow = onboarding;
             SubscribeWindowClosedOnce(onboarding, () =>
             {

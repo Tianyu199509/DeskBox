@@ -115,6 +115,28 @@ public sealed partial class WidgetManager
         {
             await SeedQuickCaptureGuideAsync();
         }
+        else if (WidgetGroupSettings.FindByMember(_settingsService.Settings, config.Id) is { } qcGroup)
+        {
+            if (reveal)
+            {
+                await ShowWidgetAsync(config.Id, reveal: true, autoRestoreOnReveal: false);
+            }
+            else if (qcGroup.IsVisible && GetLoadedWindow(qcGroup.ActiveMemberId) is null)
+            {
+                _ = await ShowGroupActiveWindowAsync(qcGroup);
+            }
+
+            if (GetLoadedWindow(qcGroup.ActiveMemberId) is ContentWidgetWindow groupWindow)
+            {
+                if (focusNewInput &&
+                    string.Equals(qcGroup.ActiveMemberId, config.Id, StringComparison.Ordinal))
+                {
+                    groupWindow.TriggerAddAction();
+                }
+
+                return groupWindow;
+            }
+        }
 
         var window = await CreateContentWidgetFromConfigAsync(config);
         if (reveal)
@@ -137,7 +159,7 @@ public sealed partial class WidgetManager
         CustomWidgetHostSnapshotService.RegisterTodoLiveMutationBridge(CreateTodoLiveMutationBridge());
 
         // Single-instance: show existing Todo if one exists
-        var existingConfig = _settingsService.Settings.Widgets
+        var existingConfig = _settingsService.Settings.WidgetLayout.Widgets
             .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !IsDeleted(w.Id));
         if (existingConfig is not null)
         {
@@ -151,6 +173,12 @@ public sealed partial class WidgetManager
                 }
 
                 return existing;
+            }
+
+            if (WidgetGroupSettings.FindByMember(_settingsService.Settings, existingConfig.Id) is { } todoGroup &&
+                GetLoadedWindow(todoGroup.ActiveMemberId) is ContentWidgetWindow groupedTodoWindow)
+            {
+                return groupedTodoWindow;
             }
         }
 
@@ -540,7 +568,7 @@ public sealed partial class WidgetManager
 
         await CommitFeatureWidgetStateAsync(kind, true);
 
-        var existingConfig = _settingsService.Settings.Widgets
+        var existingConfig = _settingsService.Settings.WidgetLayout.Widgets
             .FirstOrDefault(w => w.WidgetKind == kind && !IsDeleted(w.Id));
         if (existingConfig is not null)
         {
@@ -548,6 +576,12 @@ public sealed partial class WidgetManager
             if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
             {
                 return existing;
+            }
+
+            if (WidgetGroupSettings.FindByMember(_settingsService.Settings, existingConfig.Id) is { } singletonGroup &&
+                GetLoadedWindow(singletonGroup.ActiveMemberId) is ContentWidgetWindow groupedSingletonWindow)
+            {
+                return groupedSingletonWindow;
             }
         }
 

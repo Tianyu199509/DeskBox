@@ -614,7 +614,7 @@ public sealed class CustomWidgetDevToolboxTests
         Assert.Equal("false", CustomWidgetExpressionEvaluator.Interpolate("${$computed.showClipBanner}", ctx));
         Assert.Equal("UUID v7", CustomWidgetExpressionEvaluator.Interpolate(manifest.Capsule!.Badge, ctx));
         Assert.Equal("空闲 · 生成并复制 UUID v7", CustomWidgetExpressionEvaluator.Interpolate(manifest.Capsule.Summary, ctx));
-        Assert.Equal(string.Empty, CustomWidgetExpressionEvaluator.Interpolate("${$computed.effectiveInput}", ctx));
+        Assert.Equal("false", CustomWidgetExpressionEvaluator.Interpolate("${$computed.hasDraft}", ctx));
 
         // 5. jsonIndent=4 and uuidCase=upper govern quick transforms
         state["draft"] = "{\"a\":{\"b\":1}}";

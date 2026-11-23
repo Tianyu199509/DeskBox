@@ -281,10 +281,9 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         RefreshDragDropPermissionDiagnostic();
 // The managed-storage editor shows the quick-access card; project the initial
 // unknown state now and let the async refresh push the live pin state.
+// Weather nearby-city / WindowsLocation lookup is deferred until the user
+// actually opens WeatherSettings so SettingsHost startup never probes Geo-IP.
 PushQuickAccessPresentation();
-// The weather editor's suggestion list starts with the nearby popular
-// cities so the search box's dropdown is populated on first focus.
-_ = PopulateWeatherNearbyCitiesAsync();
 _ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged += OnSettingsChanged;
         _quickCaptureSettings.Changed += OnQuickCaptureSettingsChanged;

@@ -50,14 +50,11 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         ThrowIfStopped();
         string normalized = NormalizeDropAction(action);
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
-        string currentDrop = NormalizeDropAction(fileWidget.ManagedDropAction);
-        string currentDragOut = NormalizeDropAction(fileWidget.ManagedDragOutAction);
-        bool keepLinked = string.Equals(currentDrop, currentDragOut, StringComparison.Ordinal);
         bool dropSame = string.Equals(
             fileWidget.ManagedDropAction,
             normalized,
             StringComparison.Ordinal);
-        bool dragOutSame = !keepLinked || string.Equals(
+        bool dragOutSame = string.Equals(
             fileWidget.ManagedDragOutAction,
             normalized,
             StringComparison.Ordinal);
@@ -67,11 +64,7 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         }
 
         fileWidget.ManagedDropAction = normalized;
-        if (keepLinked)
-        {
-            fileWidget.ManagedDragOutAction = normalized;
-        }
-
+        fileWidget.ManagedDragOutAction = normalized;
         _settings.SaveDebounced();
         return true;
     }
@@ -104,6 +97,11 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         }
 
         fileWidget.DragOutModifierTipEnabled = enabled;
+        if (enabled)
+        {
+            DesktopToastHudService.ClearDismissedHints(_settings.DataDirectoryPath);
+        }
+
         _settings.SaveDebounced();
         return true;
     }
@@ -118,6 +116,11 @@ public sealed class ManagedStorageSettingsCoordinator : IManagedStorageSettings
         }
 
         fileWidget.DragOutResultHintEnabled = enabled;
+        if (enabled)
+        {
+            DesktopToastHudService.ClearDismissedHints(_settings.DataDirectoryPath);
+        }
+
         _settings.SaveDebounced();
         return true;
     }

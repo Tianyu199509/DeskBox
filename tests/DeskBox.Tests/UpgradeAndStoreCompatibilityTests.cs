@@ -415,31 +415,31 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
     }
 
     [Fact]
-    public async Task DesktopToastHud_SwitchActions_UpdateDropAndDragOutIndependently()
+    public async Task DesktopToastHud_SwitchActions_KeepDropAndDragOutUnifiedWithSingleSettingsDropdown()
     {
-        string hudDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "HudActionIndependence")).FullName;
+        string hudDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "HudActionUnified")).FullName;
         var settings = new SettingsService(hudDir);
         await settings.LoadAsync();
 
-        // Fresh install defaults to Move/Move (Plan A2).
+        // Fresh install defaults to Move/Move.
         Assert.Equal(SettingsService.ManagedDropActionMove, settings.Settings.FileWidget.ManagedDropAction);
         Assert.Equal(SettingsService.ManagedDragOutActionMove, settings.Settings.FileWidget.ManagedDragOutAction);
 
-        // Clicking "Use Windows default" on Win10 drag-out rejection HUD updates ONLY ManagedDragOutAction.
+        // Clicking "Use Windows default" on Win10 drag-out rejection HUD updates both fields so the single Settings dropdown reflects it.
         await DesktopToastHudService.SwitchDragOutActionAsync(
             settings,
             SettingsService.ManagedDragOutActionFollowWindows);
-        Assert.Equal(SettingsService.ManagedDropActionMove, settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(SettingsService.ManagedDropActionFollowWindows, settings.Settings.FileWidget.ManagedDropAction);
         Assert.Equal(SettingsService.ManagedDragOutActionFollowWindows, settings.Settings.FileWidget.ManagedDragOutAction);
 
-        // Clicking inbound cross-volume "Default to Move" HUD updates ONLY ManagedDropAction without overwriting Copy drag-out.
+        // Clicking inbound cross-volume "Default to Move" HUD updates both fields in lockstep.
         settings.Settings.FileWidget.ManagedDropAction = SettingsService.ManagedDropActionFollowWindows;
         settings.Settings.FileWidget.ManagedDragOutAction = SettingsService.ManagedDragOutActionCopy;
         await DesktopToastHudService.SwitchDropActionAsync(
             settings,
             SettingsService.ManagedDropActionMove);
         Assert.Equal(SettingsService.ManagedDropActionMove, settings.Settings.FileWidget.ManagedDropAction);
-        Assert.Equal(SettingsService.ManagedDragOutActionCopy, settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(SettingsService.ManagedDragOutActionMove, settings.Settings.FileWidget.ManagedDragOutAction);
     }
 
     [Fact]

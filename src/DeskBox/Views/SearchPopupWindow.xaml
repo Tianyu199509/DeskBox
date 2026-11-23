@@ -21,6 +21,7 @@
           VerticalAlignment="Top"
           PreviewKeyDown="RootGrid_PreviewKeyDown"
           KeyDown="RootGrid_KeyDown"
+          CharacterReceived="RootGrid_CharacterReceived"
           RenderTransformOrigin="0.5,0">
         <Grid.RenderTransform>
             <TransformGroup>
@@ -201,15 +202,64 @@
                 </Setter>
             </Style>
 
-            <!-- Lightweight Win11 Fluent 2 category capsule pill (28px, CornerRadius=14). -->
+            <!-- Fluent 2 subtle/ghost command-bar action button (transparent at rest, hover fill only). -->
+            <Style x:Key="CmdBarGhostButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="CornerRadius" Value="6"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="MinHeight" Value="28"/>
+                <Setter Property="Height" Value="28"/>
+                <Setter Property="Padding" Value="8,0"/>
+                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="IsTabStop" Value="False"/>
+                <Setter Property="AllowFocusOnInteraction" Value="False"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="GhostSurface"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Padding="{TemplateBinding Padding}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="GhostSurface.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="GhostSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Lightweight Win11 Fluent 2 category Filter Chip pill (28px, CornerRadius=14). -->
             <Style x:Key="TabPillItemStyle" TargetType="ListViewItem">
                 <Setter Property="HorizontalAlignment" Value="Left"/>
-                <Setter Property="Margin" Value="0,0,6,4"/>
+                <Setter Property="Margin" Value="0"/>
                 <Setter Property="Height" Value="28"/>
                 <Setter Property="MinHeight" Value="28"/>
                 <Setter Property="MinWidth" Value="0"/>
                 <Setter Property="Padding" Value="12,0"/>
                 <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <Setter Property="IsTabStop" Value="False"/>
                 <Setter Property="HorizontalContentAlignment" Value="Left"/>
                 <Setter Property="VerticalContentAlignment" Value="Stretch"/>
@@ -221,48 +271,40 @@
                                     <VisualStateGroup x:Name="CommonStates">
                                         <VisualState x:Name="Normal"/>
                                         <VisualState x:Name="PointerOver">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
+                                            <VisualState.Setters>
+                                                <Setter Target="TabSurface.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                                <Setter Target="TabContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                            </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
+                                            <VisualState.Setters>
+                                                <Setter Target="TabSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                                <Setter Target="TabContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                            </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Selected">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="BorderBrush">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
+                                            <VisualState.Setters>
+                                                <Setter Target="TabSurface.Background" Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                                                <Setter Target="TabSurface.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                                                <Setter Target="TabContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                                <Setter Target="TabContent.FontWeight" Value="SemiBold"/>
+                                            </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="PointerOverSelected">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="BorderBrush">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
+                                            <VisualState.Setters>
+                                                <Setter Target="TabSurface.Background" Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
+                                                <Setter Target="TabSurface.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                                                <Setter Target="TabContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                                <Setter Target="TabContent.FontWeight" Value="SemiBold"/>
+                                            </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="PressedSelected">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="BorderBrush">
-                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
+                                            <VisualState.Setters>
+                                                <Setter Target="TabSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                                <Setter Target="TabSurface.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                                                <Setter Target="TabContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                                <Setter Target="TabContent.FontWeight" Value="SemiBold"/>
+                                            </VisualState.Setters>
                                         </VisualState>
                                     </VisualStateGroup>
                                 </VisualStateManager.VisualStateGroups>
@@ -272,8 +314,11 @@
                                         BorderThickness="1"
                                         CornerRadius="14"
                                         Padding="{TemplateBinding Padding}">
-                                    <ContentPresenter Content="{TemplateBinding Content}"
+                                    <ContentPresenter x:Name="TabContent"
+                                                      Content="{TemplateBinding Content}"
                                                       ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                      Foreground="{TemplateBinding Foreground}"
+                                                      FontWeight="Normal"
                                                       HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                       VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
                                 </Border>
@@ -286,17 +331,8 @@
             <!-- Counts are intentionally omitted: Everything pages continuously, so a
                  loaded-row count would look like a total-result cap. -->
             <DataTemplate x:Key="TabPillTemplate" x:DataType="models:SearchTabItem">
-                <Grid VerticalAlignment="Stretch">
-                    <TextBlock Text="{x:Bind DisplayName, Mode=OneTime}" FontSize="12"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                               VerticalAlignment="Center" Margin="0,0,0,1"/>
-                    <Border Height="2" Width="12"
-                            CornerRadius="1"
-                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                            HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                            Margin="0,0,0,2"
-                            Visibility="{x:Bind SelectionIndicatorVisibility, Mode=OneWay}"/>
-                </Grid>
+                <TextBlock Text="{x:Bind DisplayName, Mode=OneTime}" FontSize="12"
+                           VerticalAlignment="Center"/>
             </DataTemplate>
 
             <!--
@@ -388,8 +424,9 @@
             <Border x:Name="SearchBoxBorder" Grid.Column="0" CornerRadius="12" Height="40" Margin="0"
                     Background="Transparent"
                     BorderBrush="Transparent"
-                    BorderThickness="1">
-                <Grid Padding="11,0,8,0">
+                    BorderThickness="1"
+                    PointerPressed="SearchBoxBorder_PointerPressed">
+                <Grid Padding="8,0,8,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
@@ -398,11 +435,11 @@
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                         <Grid x:Name="DefaultSearchIconGrid" Width="20" Height="20" Margin="0,0,10,0" VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xE721;" FontSize="15.5"
+                            <FontIcon Glyph="&#xE721;" FontSize="16"
                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
-                        <StackPanel x:Name="ScopeHeaderCluster" Orientation="Horizontal" Spacing="6" Margin="-3,0,10,0"
+                        <StackPanel x:Name="ScopeHeaderCluster" Orientation="Horizontal" Spacing="6" Margin="-2,0,10,0"
                                     VerticalAlignment="Center" Visibility="Collapsed">
                             <Button svc:Localized.AutomationNameKey="Search.Scope.Back"
                                     x:Name="ScopeBackButton"
@@ -410,7 +447,7 @@
                                     Width="28" Height="28"
                                     Click="ScopeBackButton_Click"
                                     svc:Localized.ToolTipKey="Search.Scope.Back">
-                                <FontIcon Glyph="&#xE76B;" FontSize="11.5"/>
+                                <FontIcon Glyph="&#xE76B;" FontSize="12"/>
                             </Button>
                             <Border Width="22" Height="22" CornerRadius="5"
                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -418,7 +455,7 @@
                                     BorderThickness="1"
                                     VerticalAlignment="Center">
                                 <Grid>
-                                    <FontIcon x:Name="ScopeHeaderIcon" Glyph="&#xE71D;" FontSize="12.5"
+                                    <FontIcon x:Name="ScopeHeaderIcon" Glyph="&#xE71D;" FontSize="12"
                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     <Image x:Name="ScopeHeaderImage" Width="15" Height="15" Stretch="Uniform"
@@ -428,7 +465,7 @@
                             </Border>
                         </StackPanel>
                         <Border x:Name="ScopePrefixBadge" Visibility="Collapsed"
-                                Padding="7,2,7,3" CornerRadius="6" Margin="0,0,8,0"
+                                Padding="8,2,8,3" CornerRadius="6" Margin="0,0,8,0"
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 BorderThickness="1"
                                 BorderBrush="Transparent"
@@ -436,7 +473,7 @@
                             <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
                                 <Image x:Name="ScopePrefixBadgeIcon" Width="13" Height="13" Stretch="Uniform"
                                        Visibility="Collapsed" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="ScopePrefixBadgeText" FontSize="11.5" FontWeight="SemiBold"
+                                <TextBlock x:Name="ScopePrefixBadgeText" FontSize="12" FontWeight="SemiBold"
                                            Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
                                            VerticalAlignment="Center"/>
                             </StackPanel>
@@ -475,7 +512,7 @@
                                 Style="{StaticResource ClearInputButtonStyle}"
                                 Visibility="Collapsed"
                                 Click="ClearQueryButton_Click">
-                            <FontIcon Glyph="&#xE711;" FontSize="10.5"/>
+                            <FontIcon Glyph="&#xE711;" FontSize="11"/>
                         </Button>
                         <Border x:Name="HotkeyHintBadge" Padding="6,2,6,3" CornerRadius="5"
                                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -489,15 +526,6 @@
                     </StackPanel>
                 </Grid>
             </Border>
-
-            <Button svc:Localized.AutomationNameKey="Common.Close" x:Name="ClosePopupButton" Grid.Column="1" Visibility="Collapsed"
-                    Width="32" Height="32" Padding="0"
-                    HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Background="Transparent" BorderThickness="0"
-                    Click="ClosePopupButton_Click"
-                    svc:Localized.ToolTipKey="Common.Close">
-                <FontIcon Glyph="&#xE8BB;" FontSize="16"/>
-            </Button>
 
             <ProgressBar x:Name="SearchProgressBar" Height="2"
                          Grid.Column="0"
@@ -556,26 +584,113 @@
             </Grid>
         </Border>
 
-        <!-- ── Row 2: smart lightweight category capsule bar ── -->
-        <Grid x:Name="TabsAndFilterRow" Grid.Row="2" Margin="8,0,8,0" Visibility="Collapsed">
-            <ListView x:Name="TabsList"
-                      SelectionMode="Single" IsTabStop="False"
-                      AllowFocusOnInteraction="False"
-                      ScrollViewer.HorizontalScrollMode="Disabled"
-                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                      ScrollViewer.VerticalScrollMode="Disabled"
-                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                      Margin="0,2,0,4"
-                      ItemContainerStyle="{StaticResource TabPillItemStyle}"
-                      ItemTemplate="{StaticResource TabPillTemplate}"
-                      SelectionChanged="TabsList_SelectionChanged">
-                <ListView.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <toolkit:WrapPanel Orientation="Horizontal"
-                                           HorizontalSpacing="0" VerticalSpacing="0"/>
-                    </ItemsPanelTemplate>
-                </ListView.ItemsPanel>
-            </ListView>
+        <!-- ── Row 2: single-line scrollable category filter chip bar + pinned rightmost manage button ── -->
+        <Grid x:Name="TabsAndFilterRow" Grid.Row="2" Margin="8,8,8,0" Height="28" ColumnSpacing="6" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer x:Name="TabsScrollViewer" Grid.Column="0"
+                          HorizontalScrollMode="Auto"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollMode="Disabled"
+                          VerticalScrollBarVisibility="Disabled"
+                          IsTabStop="False"
+                          PointerWheelChanged="TabsScrollViewer_PointerWheelChanged">
+                <ListView x:Name="TabsList"
+                          SelectionMode="Single" IsTabStop="False"
+                          AllowFocusOnInteraction="False"
+                          ScrollViewer.HorizontalScrollMode="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ScrollViewer.VerticalScrollMode="Disabled"
+                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                          Margin="0"
+                          ItemContainerStyle="{StaticResource TabPillItemStyle}"
+                          ItemTemplate="{StaticResource TabPillTemplate}"
+                          SelectionChanged="TabsList_SelectionChanged">
+                    <ListView.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="6"/>
+                        </ItemsPanelTemplate>
+                    </ListView.ItemsPanel>
+                </ListView>
+            </ScrollViewer>
+
+            <Button svc:Localized.AutomationNameKey="Search.Tab.Manage"
+                    x:Name="ManageTabsButton"
+                    Grid.Column="1"
+                    Style="{StaticResource ClearInputButtonStyle}"
+                    Width="28" Height="28"
+                    CornerRadius="14">
+                <Button.Flyout>
+                    <Flyout x:Name="ManageTabsFlyout"
+                            Placement="BottomEdgeAlignedRight"
+                            Opening="ManageTabsFlyout_Opening"
+                            Opened="ManageTabsFlyout_Opened"
+                            Closed="ManageTabsFlyout_Closed">
+                        <Flyout.FlyoutPresenterStyle>
+                            <Style TargetType="FlyoutPresenter">
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="CornerRadius" Value="10"/>
+                                <Setter Property="MinWidth" Value="314"/>
+                                <Setter Property="MaxWidth" Value="334"/>
+                                <Setter Property="Background" Value="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"/>
+                                <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeColorFlyoutBrush}"/>
+                                <Setter Property="BorderThickness" Value="1"/>
+                            </Style>
+                        </Flyout.FlyoutPresenterStyle>
+                        <Grid Width="320">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="1"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Padding="12,8,8,6" ColumnSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="ManageTabsFlyoutTitle" Grid.Column="0"
+                                           FontSize="12.5" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <Button svc:Localized.AutomationNameKey="Settings.Clipboard.TabLayout.Reset"
+                                        x:Name="ManageTabsResetButton" Grid.Column="1"
+                                        Style="{StaticResource CmdBarGhostButtonStyle}"
+                                        Height="24" MinHeight="24" Padding="6,0"
+                                        Click="ManageTabsResetButton_Click">
+                                    <TextBlock x:Name="ManageTabsResetLabel" FontSize="11.5"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </Button>
+                                <Button svc:Localized.AutomationNameKey="Search.Action.OpenSettings"
+                                        x:Name="ManageTabsOpenSettingsButton" Grid.Column="2"
+                                        Style="{StaticResource ClearInputButtonStyle}"
+                                        Width="24" Height="24"
+                                        Click="ManageTabsOpenSettingsButton_Click">
+                                    <FontIcon Glyph="&#xE713;" FontSize="12"/>
+                                </Button>
+                            </Grid>
+                            <Border Grid.Row="1" Height="1"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                            <ListView x:Name="ManageTabsListView" Grid.Row="2"
+                                      MaxHeight="264" Padding="6,4,6,6"
+                                      SelectionMode="None"
+                                      IsItemClickEnabled="False"
+                                      AllowFocusOnInteraction="False"
+                                      IsTabStop="False"
+                                      AllowDrop="True"
+                                      CanDragItems="True"
+                                      CanReorderItems="True"
+                                      ReorderMode="Enabled"
+                                      DragItemsCompleted="ManageTabsListView_DragItemsCompleted"/>
+                        </Grid>
+                    </Flyout>
+                </Button.Flyout>
+                <FontIcon Glyph="&#xE71C;" FontSize="12.5"/>
+            </Button>
         </Grid>
 
         <!-- ── Row 3: results area (optional sort header + list + empty states) ── -->
@@ -586,89 +701,6 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!--
-                Optional sortable column headers (hidden by default; configurable in Settings).
-                Column structure mirrors SearchResultRowControl (33, *, 72, 84, 104) with exact
-                left-edge alignment (50px for Name/Title, +6px inside fixed metadata columns).
-            -->
-            <Grid x:Name="SortHeaderRow" Grid.Row="1" Visibility="Collapsed"
-                  Height="28" Margin="8,0,8,2" Padding="9,0,9,1"
-                  Background="Transparent"
-                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                  BorderThickness="0,0,0,1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="33"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="72"/>
-                    <ColumnDefinition Width="84"/>
-                    <ColumnDefinition Width="104"/>
-                </Grid.ColumnDefinitions>
-
-                <Button svc:Localized.AutomationNameKey="Search.Sort.Name" x:Name="SortNameHeader" Grid.Column="1"
-                        Margin="-6,0,2,0" Padding="6,0,8,0" HorizontalContentAlignment="Left"
-                        Style="{StaticResource SortHeaderButtonStyle}" Click="SortNameHeader_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="SortNameLabel" FontSize="11.5"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                        <FontIcon x:Name="SortNameDirection" Glyph="&#xE74A;" FontSize="8.5"
-                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                  Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-
-                <Button svc:Localized.AutomationNameKey="Search.Sort.Type" x:Name="SortTypeHeader" Grid.Column="2"
-                        Padding="6,0" HorizontalContentAlignment="Left"
-                        Style="{StaticResource SortHeaderButtonStyle}" Click="SortTypeHeader_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="SortTypeLabel" FontSize="11.5"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                        <FontIcon x:Name="SortTypeDirection" Glyph="&#xE74B;" FontSize="8.5"
-                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                  Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-
-                <Button svc:Localized.AutomationNameKey="Search.Sort.Size" x:Name="SortSizeHeader" Grid.Column="3"
-                        Padding="6,0" HorizontalContentAlignment="Left"
-                        Style="{StaticResource SortHeaderButtonStyle}" Click="SortSizeHeader_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="SortSizeLabel" FontSize="11.5"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                        <FontIcon x:Name="SortSizeDirection" Glyph="&#xE74B;" FontSize="8.5"
-                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                  Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-
-                <Button svc:Localized.AutomationNameKey="Search.Sort.Date" x:Name="SortDateHeader" Grid.Column="4"
-                        Margin="0" Padding="6,0" HorizontalContentAlignment="Left"
-                        Style="{StaticResource SortHeaderButtonStyle}" Click="SortDateHeader_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="SortDateLabel" FontSize="11.5"
-                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                        <FontIcon x:Name="SortDateDirection" Glyph="&#xE74B;" FontSize="8.5"
-                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                  Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-
-                <Border x:Name="SortTypeDivider" Grid.Column="2"
-                        Width="1" Height="12" HorizontalAlignment="Left"
-                        VerticalAlignment="Center" IsHitTestVisible="False"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        Opacity="0.18"/>
-                <Border x:Name="SortSizeDivider" Grid.Column="3"
-                        Width="1" Height="12" HorizontalAlignment="Left"
-                        VerticalAlignment="Center" IsHitTestVisible="False"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        Opacity="0.18"/>
-                <Border x:Name="SortDateDivider" Grid.Column="4"
-                        Width="1" Height="12" HorizontalAlignment="Left"
-                        VerticalAlignment="Center" IsHitTestVisible="False"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                        Opacity="0.18"/>
-            </Grid>
-
             <!-- Split body: left compact single-line result list (3*) + right CmdPal-style Details sidebar card (2*) -->
             <Grid x:Name="ResultsSplitGrid" Grid.Row="2">
                 <Grid.ColumnDefinitions>
@@ -676,40 +708,131 @@
                     <ColumnDefinition x:Name="DetailsPaneColumn" Width="0"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Result rows (SearchResultRowControl owns hover/selection visuals) -->
-                <ScrollViewer x:Name="ResultsPanel" Grid.Column="0" Visibility="Collapsed"
-                              VerticalScrollBarVisibility="Auto" Padding="8,6,8,8"
-                              Background="Transparent"
-                              ViewChanged="ResultsPanel_ViewChanged"
-                              SizeChanged="ResultsPanel_SizeChanged"
-                              KeyDown="ResultsPanel_KeyDown"
-                              PointerPressed="ResultsPanel_PointerPressed"
-                              PointerMoved="ResultsPanel_PointerMoved"
-                              PointerReleased="ResultsPanel_PointerReleased"
-                              PointerCaptureLost="ResultsPanel_PointerCaptureLost"
-                              DoubleTapped="ResultsPanel_DoubleTapped"
-                              RightTapped="ResultsPanel_RightTapped">
-                    <ScrollViewer.RenderTransform>
-                        <TranslateTransform x:Name="ResultsTranslateTransform"/>
-                    </ScrollViewer.RenderTransform>
-                    <Grid x:Name="ResultsSurface" Background="Transparent">
-                        <ItemsRepeater x:Name="ResultsRepeater">
-                            <ItemsRepeater.ItemTemplate>
-                                <DataTemplate>
-                                    <controls:SearchResultRowControl/>
-                                </DataTemplate>
-                            </ItemsRepeater.ItemTemplate>
-                        </ItemsRepeater>
-                        <Rectangle x:Name="RubberBandRect" Fill="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                   Opacity="0.9" Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
-                                   RadiusX="2" RadiusY="2" StrokeThickness="1" Visibility="Collapsed" IsHitTestVisible="False"
-                                   HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                    </Grid>
-                </ScrollViewer>
+                <!-- Left column: optional sortable header bar + result list aligned 1:1 -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
 
-                <!-- Right-side Details Sidebar Card (PowerToys Command Palette style) -->
+                    <!--
+                        Optional sortable column headers (hidden by default; configurable in Settings or Ctrl+K).
+                        Lives inside the left column so column dividers align 1:1 with SearchResultRowControl
+                        whether DetailsPaneCard is open or closed.
+                    -->
+                    <Grid x:Name="SortHeaderRow" Grid.Row="0" Visibility="Collapsed"
+                          Height="28" Margin="8,0,8,2" Padding="9,0,9,1"
+                          Background="Transparent"
+                          BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                          BorderThickness="0,0,0,1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition x:Name="SortHeaderTypeCol" Width="72"/>
+                            <ColumnDefinition x:Name="SortHeaderSizeCol" Width="84"/>
+                            <ColumnDefinition x:Name="SortHeaderDateCol" Width="106"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Button svc:Localized.AutomationNameKey="Search.Sort.Name" x:Name="SortNameHeader" Grid.Column="1"
+                                Margin="-6,0,2,0" Padding="6,0,8,0" HorizontalContentAlignment="Left"
+                                Style="{StaticResource SortHeaderButtonStyle}" Click="SortNameHeader_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="SortNameLabel" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <FontIcon x:Name="SortNameDirection" Glyph="&#xE74A;" FontSize="8.5"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button svc:Localized.AutomationNameKey="Search.Sort.Type" x:Name="SortTypeHeader" Grid.Column="2"
+                                Padding="6,0" HorizontalContentAlignment="Left"
+                                Style="{StaticResource SortHeaderButtonStyle}" Click="SortTypeHeader_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="SortTypeLabel" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <FontIcon x:Name="SortTypeDirection" Glyph="&#xE74B;" FontSize="8.5"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button svc:Localized.AutomationNameKey="Search.Sort.Size" x:Name="SortSizeHeader" Grid.Column="3"
+                                Padding="6,0" HorizontalContentAlignment="Left"
+                                Style="{StaticResource SortHeaderButtonStyle}" Click="SortSizeHeader_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="SortSizeLabel" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <FontIcon x:Name="SortSizeDirection" Glyph="&#xE74B;" FontSize="8.5"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button svc:Localized.AutomationNameKey="Search.Sort.Date" x:Name="SortDateHeader" Grid.Column="4"
+                                Margin="0,0,2,0" Padding="6,0" HorizontalContentAlignment="Left"
+                                Style="{StaticResource SortHeaderButtonStyle}" Click="SortDateHeader_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="SortDateLabel" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                <FontIcon x:Name="SortDateDirection" Glyph="&#xE74B;" FontSize="8.5"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          Margin="4,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Border x:Name="SortTypeDivider" Grid.Column="2"
+                                Width="1" Height="12" HorizontalAlignment="Left"
+                                VerticalAlignment="Center" IsHitTestVisible="False"
+                                Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                Opacity="0.18"/>
+                        <Border x:Name="SortSizeDivider" Grid.Column="3"
+                                Width="1" Height="12" HorizontalAlignment="Left"
+                                VerticalAlignment="Center" IsHitTestVisible="False"
+                                Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                Opacity="0.18"/>
+                        <Border x:Name="SortDateDivider" Grid.Column="4"
+                                Width="1" Height="12" HorizontalAlignment="Left"
+                                VerticalAlignment="Center" IsHitTestVisible="False"
+                                Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                Opacity="0.18"/>
+                    </Grid>
+
+                    <!-- Result rows (SearchResultRowControl owns hover/selection visuals; 7px top + 1px row margin = 8px top alignment with DetailsPaneCard) -->
+                    <ScrollViewer x:Name="ResultsPanel" Grid.Row="1" Visibility="Collapsed"
+                                  VerticalScrollBarVisibility="Auto" Padding="8,7,8,8"
+                                  Background="Transparent"
+                                  ViewChanged="ResultsPanel_ViewChanged"
+                                  SizeChanged="ResultsPanel_SizeChanged"
+                                  KeyDown="ResultsPanel_KeyDown"
+                                  PointerPressed="ResultsPanel_PointerPressed"
+                                  PointerMoved="ResultsPanel_PointerMoved"
+                                  PointerReleased="ResultsPanel_PointerReleased"
+                                  PointerCaptureLost="ResultsPanel_PointerCaptureLost"
+                                  DoubleTapped="ResultsPanel_DoubleTapped"
+                                  RightTapped="ResultsPanel_RightTapped">
+                        <ScrollViewer.RenderTransform>
+                            <TranslateTransform x:Name="ResultsTranslateTransform"/>
+                        </ScrollViewer.RenderTransform>
+                        <Grid x:Name="ResultsSurface" Background="Transparent">
+                            <ItemsRepeater x:Name="ResultsRepeater">
+                                <ItemsRepeater.ItemTemplate>
+                                    <DataTemplate>
+                                        <controls:SearchResultRowControl/>
+                                    </DataTemplate>
+                                </ItemsRepeater.ItemTemplate>
+                            </ItemsRepeater>
+                            <Rectangle x:Name="RubberBandRect" Fill="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                       Opacity="0.9" Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                       RadiusX="2" RadiusY="2" StrokeThickness="1" Visibility="Collapsed" IsHitTestVisible="False"
+                                       HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- Right-side Details Sidebar Card (Fluent 2 / Command Palette responsive layout) -->
                 <Border x:Name="DetailsPaneCard" Grid.Column="1" Visibility="Collapsed"
-                        Margin="0,6,8,8" CornerRadius="10"
+                        Margin="0,8,8,8" CornerRadius="10"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                         BorderThickness="1">
@@ -719,12 +842,12 @@
                     <ScrollViewer HorizontalScrollMode="Disabled"
                                   HorizontalScrollBarVisibility="Disabled"
                                   VerticalScrollBarVisibility="Auto"
-                                  Padding="18,18,18,16"
+                                  Padding="16,16,16,16"
                                   IsTabStop="False">
-                        <StackPanel Width="266" HorizontalAlignment="Left" Spacing="14">
-                            <!-- Hero Icon (56x56) -->
+                        <StackPanel HorizontalAlignment="Stretch" Spacing="12">
+                            <!-- Hero Icon (56x56; auto-hidden whenever a visual image/video/PDF preview is shown) -->
                             <Grid x:Name="DetailsHeroIconHost" Width="56" Height="56" HorizontalAlignment="Left">
-                                <Border x:Name="DetailsHeroGlyphPlate" Width="56" Height="56" CornerRadius="12"
+                                <Border x:Name="DetailsHeroGlyphPlate" Width="56" Height="56" CornerRadius="8"
                                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                         BorderThickness="1">
@@ -732,7 +855,7 @@
                                               Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
-                                <Border x:Name="DetailsHeroImagePlate" Width="56" Height="56" CornerRadius="12"
+                                <Border x:Name="DetailsHeroImagePlate" Width="56" Height="56" CornerRadius="8"
                                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                         Visibility="Collapsed">
                                     <Image x:Name="DetailsHeroImage" Width="44" Height="44"
@@ -740,18 +863,20 @@
                                 </Border>
                             </Grid>
 
-                            <!-- Optional Rich Image / Video / PDF Thumbnail Preview -->
+                            <!-- Rich Visual Preview Hero (Images, Video Posters, PDF Page-1, Shell Thumbnails) -->
                             <Border x:Name="DetailsImagePreviewBorder" Visibility="Collapsed"
-                                    CornerRadius="8" Padding="4" MaxHeight="152"
+                                    CornerRadius="6" Padding="4" MaxHeight="192"
                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                     BorderThickness="1">
                                 <Grid>
-                                    <Image x:Name="DetailsImagePreview" MaxHeight="142" Stretch="Uniform"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Border CornerRadius="4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Image x:Name="DetailsImagePreview" MaxHeight="184" Stretch="Uniform"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
                                     <Border x:Name="DetailsVideoBadge" Visibility="Collapsed"
                                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                            Margin="4" Width="24" Height="24" CornerRadius="12"
+                                            Margin="6" Width="24" Height="24" CornerRadius="12"
                                             Background="#B8000000" IsHitTestVisible="False">
                                         <FontIcon Glyph="&#xE768;" FontSize="10" Foreground="White"
                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -761,30 +886,34 @@
                             </Border>
 
                             <!-- Hero Title -->
-                            <TextBlock x:Name="DetailsTitleText" FontSize="17" FontWeight="SemiBold"
+                            <TextBlock x:Name="DetailsTitleText" FontSize="16" FontWeight="SemiBold"
                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                        TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"
                                        IsTextSelectionEnabled="True"/>
 
                             <!-- Optional Multi-line Text / Document / Code / Expression Preview -->
                             <Border x:Name="DetailsBodyPreviewBorder" Visibility="Collapsed"
-                                    Padding="10,8" CornerRadius="8"
+                                    Padding="12,10" CornerRadius="6"
                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                     BorderThickness="1">
-                                <TextBlock x:Name="DetailsBodyPreviewText" FontSize="12.5"
+                                <TextBlock x:Name="DetailsBodyPreviewText" FontSize="13"
                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                            TextWrapping="Wrap" MaxLines="9" TextTrimming="CharacterEllipsis"
                                            IsTextSelectionEnabled="True"/>
                             </Border>
 
+                            <Border x:Name="DetailsMetadataDivider" Height="1"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                    Opacity="0.7" IsHitTestVisible="False"/>
+
                             <!-- Metadata Rows -->
-                            <StackPanel Spacing="12" Margin="0,2,0,0">
+                            <StackPanel Spacing="12">
                                 <!-- Type Badge -->
                                 <StackPanel x:Name="DetailsTypeSection" Spacing="4">
                                     <TextBlock x:Name="DetailsTypeLabel" FontSize="12"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <Border HorizontalAlignment="Left" Padding="7,2,7,3" CornerRadius="4"
+                                    <Border HorizontalAlignment="Left" Padding="8,2,8,3" CornerRadius="4"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                             BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                                             BorderThickness="1">
@@ -794,10 +923,10 @@
                                 </StackPanel>
 
                                 <!-- Path / Target -->
-                                <StackPanel x:Name="DetailsPathSection" Spacing="3" Visibility="Collapsed">
+                                <StackPanel x:Name="DetailsPathSection" Spacing="4" Visibility="Collapsed">
                                     <TextBlock x:Name="DetailsPathLabel" FontSize="12"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock x:Name="DetailsPathValue" FontSize="12.5"
+                                    <TextBlock x:Name="DetailsPathValue" FontSize="13"
                                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                                TextWrapping="Wrap" MaxLines="5" TextTrimming="CharacterEllipsis"
                                                IsTextSelectionEnabled="True"/>
@@ -812,14 +941,14 @@
                                     <StackPanel x:Name="DetailsMeta1Section" Grid.Column="0" Spacing="2" Visibility="Collapsed">
                                         <TextBlock x:Name="DetailsMeta1Label" FontSize="12"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                        <TextBlock x:Name="DetailsMeta1Value" FontSize="12.5"
+                                        <TextBlock x:Name="DetailsMeta1Value" FontSize="13"
                                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" MaxLines="1"/>
                                     </StackPanel>
                                     <StackPanel x:Name="DetailsMeta2Section" Grid.Column="1" Spacing="2" Visibility="Collapsed">
                                         <TextBlock x:Name="DetailsMeta2Label" FontSize="12"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                        <TextBlock x:Name="DetailsMeta2Value" FontSize="12.5"
+                                        <TextBlock x:Name="DetailsMeta2Value" FontSize="13"
                                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" MaxLines="1"/>
                                     </StackPanel>
@@ -834,7 +963,7 @@
             <StackPanel x:Name="EmptyTabHintPanel" Grid.Row="2" Visibility="Collapsed"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         Padding="0,20">
-                <FontIcon Glyph="&#xE8B7;" FontSize="26"
+                <FontIcon x:Name="EmptyTabHintIcon" Glyph="&#xE8B7;" FontSize="26"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                           HorizontalAlignment="Center"/>
                 <TextBlock x:Name="EmptyTabHintText" FontSize="12.5"
@@ -890,7 +1019,7 @@
             </StackPanel>
 
             <searchControls:RecommendedAppsGridControl x:Name="RecommendedAppsGrid" Grid.Row="2"
-                                                       MaxWidth="660" HorizontalAlignment="Stretch"/>
+                                                       HorizontalAlignment="Stretch"/>
         </Grid>
 
         <!-- Persistent footer: contextual result actions on the left, settings on the right. -->
@@ -911,34 +1040,6 @@
             <toolkit:WrapPanel x:Name="SelectionActionBar" Grid.Column="0"
                                Orientation="Horizontal" HorizontalSpacing="6"
                                VerticalSpacing="6" Visibility="Collapsed">
-                <Button svc:Localized.AutomationNameKey="Search.Menu.Open" x:Name="OpenSelectedButton" Padding="10,5"
-                        Click="OpenSelectedButton_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE8E5;" FontSize="16"/>
-                        <TextBlock x:Name="OpenSelectedLabel"/>
-                    </StackPanel>
-                </Button>
-                <Button svc:Localized.AutomationNameKey="Search.Menu.OpenLocation" x:Name="OpenLocationButton" Padding="10,5"
-                        Click="OpenLocationButton_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE838;" FontSize="16"/>
-                        <TextBlock x:Name="OpenLocationLabel"/>
-                    </StackPanel>
-                </Button>
-                <Button svc:Localized.AutomationNameKey="Search.Menu.AttachToTodo" x:Name="AttachSelectedButton" Padding="10,5"
-                        Click="AttachSelectedButton_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE723;" FontSize="16"/>
-                        <TextBlock x:Name="AttachSelectedLabel"/>
-                    </StackPanel>
-                </Button>
-                <Button svc:Localized.AutomationNameKey="Search.Menu.SaveToNote" x:Name="SaveSelectedButton" Padding="10,5"
-                        Click="SaveSelectedButton_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE70B;" FontSize="16"/>
-                        <TextBlock x:Name="SaveSelectedLabel"/>
-                    </StackPanel>
-                </Button>
                 <Button svc:Localized.AutomationNameKey="Common.Copy" x:Name="CopySelectedButton" Padding="10,5"
                         Click="CopySelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -1026,7 +1127,7 @@
                     </Button>
                 </StackPanel>
 
-                <!-- CmdPal-style single-result CommandBar: scope label on left, keycap-badged actions + Ctrl+K flyout on right -->
+                <!-- CmdPal-style single-result CommandBar: subtle ghost actions + high-contrast keycaps -->
                 <Grid x:Name="CmdPalResultFooterGrid" Grid.ColumnSpan="2" Visibility="Collapsed"
                       VerticalAlignment="Center" MinHeight="28">
                     <Grid.ColumnDefinitions>
@@ -1035,59 +1136,62 @@
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <TextBlock x:Name="CmdBarContextTitle" FontSize="12.5"
+                        <TextBlock x:Name="CmdBarContextTitle" FontSize="12"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxLines="1"/>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2"
                                 HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Button svc:Localized.AutomationNameKey="Search.Menu.Open"
                                 x:Name="CmdBarPrimaryButton"
-                                Style="{StaticResource QuickButtonStyle}"
-                                AllowFocusOnInteraction="False" IsTabStop="False"
-                                MinHeight="28" Padding="8,0"
+                                Style="{StaticResource CmdBarGhostButtonStyle}"
                                 Click="CmdBarPrimaryButton_Click">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock x:Name="CmdBarPrimaryLabel" FontSize="12.5" VerticalAlignment="Center"/>
-                                <Border Padding="5,1,5,2" CornerRadius="4"
+                                <TextBlock x:Name="CmdBarPrimaryLabel" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                                <Border MinWidth="20" Height="20" Padding="5,0" CornerRadius="4"
                                         Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                         BorderThickness="1" VerticalAlignment="Center">
                                     <TextBlock Text="&#x21B5;" FontSize="11"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.85"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>
                             </StackPanel>
                         </Button>
 
                         <Border x:Name="CmdBarPrimaryDivider" Width="1" Height="14" Margin="2,0"
                                 Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                Opacity="0.6" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                                Opacity="0.65" VerticalAlignment="Center" IsHitTestVisible="False"/>
 
                         <Button svc:Localized.AutomationNameKey="Search.Menu.OpenLocation"
                                 x:Name="CmdBarSecondaryButton"
-                                Style="{StaticResource QuickButtonStyle}"
-                                AllowFocusOnInteraction="False" IsTabStop="False"
-                                MinHeight="28" Padding="8,0"
+                                Style="{StaticResource CmdBarGhostButtonStyle}"
                                 Visibility="Collapsed"
                                 Click="CmdBarSecondaryButton_Click">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock x:Name="CmdBarSecondaryLabel" FontSize="12.5" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="CmdBarSecondaryLabel" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           VerticalAlignment="Center"/>
                                 <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
-                                    <Border Padding="5,1,5,2" CornerRadius="4"
+                                    <Border MinWidth="20" Height="20" Padding="5,0" CornerRadius="4"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
-                                        <TextBlock Text="Ctrl" FontSize="10.5"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" VerticalAlignment="Center">
+                                        <TextBlock Text="Ctrl" FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.85"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border Padding="5,1,5,2" CornerRadius="4"
+                                    <Border MinWidth="20" Height="20" Padding="5,0" CornerRadius="4"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" VerticalAlignment="Center">
                                         <TextBlock Text="&#x21B5;" FontSize="11"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.85"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
                                 </StackPanel>
                             </StackPanel>
@@ -1095,9 +1199,7 @@
 
                         <Button svc:Localized.AutomationNameKey="Search.CmdBar.More"
                                 x:Name="CmdBarMoreButton"
-                                Style="{StaticResource QuickButtonStyle}"
-                                AllowFocusOnInteraction="False" IsTabStop="False"
-                                MinHeight="28" Padding="8,0">
+                                Style="{StaticResource CmdBarGhostButtonStyle}">
                             <Button.Flyout>
                                 <Flyout x:Name="CmdBarActionsFlyout"
                                         Placement="TopEdgeAlignedRight"
@@ -1140,12 +1242,12 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <FontIcon Grid.Column="0" Glyph="&#xE721;" FontSize="12.5"
+                                            <FontIcon Grid.Column="0" Glyph="&#xE721;" FontSize="12"
                                                       Margin="0,0,8,0" VerticalAlignment="Center"
                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                                             <TextBox svc:Localized.AutomationNameKey="Search.Actions.FilterPlaceholder"
                                                      x:Name="CmdBarActionsFilterBox" Grid.Column="1"
-                                                     FontSize="12.5" Padding="0" MinHeight="24"
+                                                     FontSize="12" Padding="0" MinHeight="24"
                                                      BorderThickness="0" Background="Transparent"
                                                      VerticalAlignment="Center"
                                                      TextChanged="CmdBarActionsFilterBox_TextChanged"
@@ -1166,32 +1268,40 @@
                                 </Flyout>
                             </Button.Flyout>
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock x:Name="CmdBarMoreLabel" FontSize="12.5" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="CmdBarMoreLabel" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           VerticalAlignment="Center"/>
                                 <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
-                                    <Border Padding="5,1,5,2" CornerRadius="4"
+                                    <Border MinWidth="20" Height="20" Padding="5,0" CornerRadius="4"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
-                                        <TextBlock Text="Ctrl" FontSize="10.5"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" VerticalAlignment="Center">
+                                        <TextBlock Text="Ctrl" FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.85"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border Padding="5,1,5,2" CornerRadius="4"
+                                    <Border MinWidth="20" Height="20" Padding="5,0" CornerRadius="4"
                                             Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
-                                        <TextBlock Text="K" FontSize="10.5"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" VerticalAlignment="Center">
+                                        <TextBlock Text="K" FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.85"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
                                 </StackPanel>
                             </StackPanel>
                         </Button>
 
+                        <Border Width="1" Height="14" Margin="2,0"
+                                Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                Opacity="0.65" VerticalAlignment="Center" IsHitTestVisible="False"/>
+
                         <Button svc:Localized.AutomationNameKey="Search.Details.ToggleHide"
                                 x:Name="ToggleDetailsPaneButton"
                                 Style="{StaticResource ClearInputButtonStyle}"
-                                Width="28" Height="28" Margin="2,0,0,0"
+                                Width="28" Height="28"
                                 Click="ToggleDetailsPaneButton_Click">
-                            <FontIcon x:Name="ToggleDetailsPaneIcon" Glyph="&#xE8A0;" FontSize="13.5"/>
+                            <FontIcon x:Name="ToggleDetailsPaneIcon" Glyph="&#xE8A0;" FontSize="14"/>
                         </Button>
                     </StackPanel>
                 </Grid>
@@ -1223,6 +1333,7 @@
         -->
         <Grid x:Name="TopDragHotZone" Grid.Row="0"
               HorizontalAlignment="Stretch" VerticalAlignment="Top" Height="10"
+              Margin="6,0,6,0"
               Background="Transparent"
               PointerEntered="TopDragHotZone_PointerEntered"
               PointerExited="TopDragHotZone_PointerExited"
@@ -1232,26 +1343,15 @@
               PointerCaptureLost="WindowInteraction_PointerCaptureLost"
               DoubleTapped="TopDragHotZone_DoubleTapped"/>
 
-        <Grid x:Name="ResizeGrid" Grid.RowSpan="5" Canvas.ZIndex="20" Visibility="Collapsed" IsHitTestVisible="False">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="5"/>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="7"/>
-            </Grid.RowDefinitions>
+        <Grid x:Name="ResizeGrid" Grid.RowSpan="5" Canvas.ZIndex="20" Visibility="Visible" IsHitTestVisible="True">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="7"/>
+                <ColumnDefinition Width="6"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="7"/>
+                <ColumnDefinition Width="6"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Row="0" Grid.Column="0" Background="Transparent" Tag="TopLeft" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="0" Grid.Column="1" Background="Transparent" Tag="Top" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="0" Grid.Column="2" Background="Transparent" Tag="TopRight" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="1" Grid.Column="0" Background="Transparent" Tag="Left" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="1" Grid.Column="2" Background="Transparent" Tag="Right" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="2" Grid.Column="0" Background="Transparent" Tag="BottomLeft" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="2" Grid.Column="1" Background="Transparent" Tag="Bottom" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
-            <Border Grid.Row="2" Grid.Column="2" Background="Transparent" Tag="BottomRight" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
+            <Border Grid.Column="0" Background="Transparent" Tag="Left" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
+            <Border Grid.Column="2" Background="Transparent" Tag="Right" PointerEntered="ResizeBorder_PointerEntered" PointerPressed="ResizeBorder_PointerPressed" PointerMoved="WindowInteraction_PointerMoved" PointerReleased="WindowInteraction_PointerReleased" PointerCaptureLost="WindowInteraction_PointerCaptureLost"/>
         </Grid>
     </Grid>
 </Window>

@@ -869,6 +869,9 @@ public sealed class AppSettings
     /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateShowHud"/>
     public bool SearchQuickCreateShowHud { get => Search.SearchQuickCreateShowHud; set => Search.SearchQuickCreateShowHud = value; }
 
+    /// <inheritdoc cref="SearchSettingsSlice.SearchCategoryLayout"/>
+    public string SearchCategoryLayout { get => Search.SearchCategoryLayout; set => Search.SearchCategoryLayout = value; }
+
     // ─── Cloud Backup (roadmap §10 — non-secret provider config only) ───
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupProvider"/>

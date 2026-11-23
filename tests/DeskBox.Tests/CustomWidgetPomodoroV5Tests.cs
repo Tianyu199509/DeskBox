@@ -48,7 +48,7 @@ public sealed class CustomWidgetPomodoroV5Tests
 
         CustomWidgetManifest manifest = parsed.Manifest!;
         Assert.Equal("deskbox.pomodoro", manifest.Id);
-        Assert.Equal("8.0.0", manifest.Version);
+        Assert.Equal("1.0.0", manifest.Version);
         Assert.Equal("${$i18n.widgetName}", manifest.Name);
         Assert.Equal("专注时段", manifest.ResolveLocalizedName("zh-CN"));
 

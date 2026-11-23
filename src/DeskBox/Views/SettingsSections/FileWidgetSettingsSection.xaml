@@ -143,20 +143,7 @@
                     controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DropAction, Mode=TwoWay}" />
                 <toolkit:SettingsExpander.Items>
                     <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.DragOutAction.Description"
-                        svc:Localized.HeaderKey="Settings.DragOutAction.Title"
-                        svc:InfoTip.TitleKey="Settings.DragOutAction.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.DragOutAction.InfoTip.Description">
-                        <ComboBox
-                            svc:Localized.AutomationNameKey="Settings.DragOutAction.Title"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            ItemsSource="{x:Bind ManagedStorage.AvailableDragOutBehaviorOptionItems, Mode=OneWay}"
-                            controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DragOutAction, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
+                        x:Name="DragOutModifierTipCard"
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.DragOutTips.Modifier.Description"
                         svc:Localized.HeaderKey="Settings.DragOutTips.Modifier.Title">

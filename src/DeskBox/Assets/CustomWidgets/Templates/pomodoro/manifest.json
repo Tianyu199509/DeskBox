@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "deskbox.pomodoro",
   "name": "${$i18n.widgetName}",
-  "version": "8.0.0",
+  "version": "1.0.0",
   "author": "DeskBox",
   "origin": "official",
   "description": "${$i18n.widgetDescription}",
@@ -261,8 +261,7 @@
   "state": {
     "currentTask": "",
     "linkedTodoId": "",
-    "soundVolume": 35,
-    "seeded": false
+    "soundVolume": 35
   },
   "collections": {
     "sessions": {

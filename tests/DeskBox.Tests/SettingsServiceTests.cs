@@ -1408,7 +1408,7 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Null(newUserDefaults.LegacyWidgetCapsuleModeEnabled);
         Assert.Null(restoredDefaults.LegacyWidgetCapsuleModeEnabled);
         Assert.True(newUserDefaults.WidgetGroupsEnabled);
-        Assert.False(newUserDefaults.SearchHotkeyEnabled);
+        Assert.True(newUserDefaults.SearchHotkeyEnabled);
         Assert.Equal(newUserDefaults.SearchHotkeyEnabled, restoredDefaults.SearchHotkeyEnabled);
         Assert.Equal(SettingsService.WidgetCompactWidthModeAligned, newUserDefaults.WidgetCompactWidthMode);
         Assert.Equal(newUserDefaults.WidgetCompactWidthMode, restoredDefaults.WidgetCompactWidthMode);

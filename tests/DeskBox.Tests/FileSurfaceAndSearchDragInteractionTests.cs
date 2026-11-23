@@ -158,6 +158,15 @@ public sealed class FileSurfaceAndSearchDragInteractionTests
             [],
             shiftPressed: true);
         Assert.Single(anchorlessShift, itemH);
+
+        // 3 items selected + plain press on unselected 4th item snapshots [unselected] so Items_DragStarting clears stale 3-item selection
+        var itemC = new WidgetItem { Name = "c.txt", Path = @"C:\Demo\c.txt" };
+        WidgetItem[] unselectedWhenThreeSelected = FileSurfaceContent.ResolvePendingPointerDragItemsOnPress(
+            itemH,
+            [itemA, itemB, itemC],
+            shiftPressed: false,
+            controlPressed: false);
+        Assert.Single(unselectedWhenThreeSelected, itemH);
     }
 
     [Fact]

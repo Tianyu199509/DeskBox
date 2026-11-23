@@ -451,74 +451,61 @@ export function copyMeetingTimes(ctx) {
   const offsetTag = scrub > 0 ? ' (+' + scrubText + 'h)' : '';
 
   const parts = [];
-  const hasExplicitTimes = Boolean(args.localTime || args.c1Time || args.c2Time || args.c3Time || args.c4Time);
-  if (hasExplicitTimes) {
-    if (args.localLabel && args.localTime) {
-      parts.push(args.localLabel + ' ' + args.localTime);
-    }
-    if (args.c1Label && args.c1Time) parts.push(args.c1Label + ' ' + args.c1Time);
-    if (args.c2Label && args.c2Time) parts.push(args.c2Label + ' ' + args.c2Time);
-    if (args.c3Label && args.c3Time) parts.push(args.c3Label + ' ' + args.c3Time);
-    if (String(args.hasC4) === 'true' && args.c4Label && args.c4Time) {
-      parts.push(args.c4Label + ' ' + args.c4Time);
-    }
-  } else {
-    const hour12 = String(settings.hourFormat || '').toLowerCase() === '12h';
-    const scrubMins = Math.round(scrub * 60);
-    const hasNowMs = Number.isFinite(env.nowMs) && env.nowMs > 0;
-    const scrubUtcMs = hasNowMs ? Number(env.nowMs) + scrub * 3600000 : null;
+  const hour12 = String(settings.hourFormat || '').toLowerCase() === '12h';
+  const scrubMins = Math.round(scrub * 60);
+  const hasNowMs = Number.isFinite(env.nowMs) && env.nowMs > 0;
+  const scrubUtcMs = hasNowMs ? Number(env.nowMs) + scrub * 3600000 : null;
 
-    const localMeta = clockZones.local || {};
-    const localHourFloat = Number.isFinite(localMeta.hourFloat) ? localMeta.hourFloat : 0;
-    const localDstShift = (Number.isFinite(localMeta.scrubbedOffsetMinutes) && Number.isFinite(localMeta.offsetMinutes))
-      ? (localMeta.scrubbedOffsetMinutes - localMeta.offsetMinutes)
+  const localMeta = clockZones.local || {};
+  const localHourFloat = Number.isFinite(localMeta.hourFloat) ? localMeta.hourFloat : 0;
+  const localDstShift = (Number.isFinite(localMeta.scrubbedOffsetMinutes) && Number.isFinite(localMeta.offsetMinutes))
+    ? (localMeta.scrubbedOffsetMinutes - localMeta.offsetMinutes)
+    : 0;
+  const localTotalMins = Math.floor(localHourFloat * 60 + 1e-6) + scrubMins + localDstShift;
+  const localBaseDay = parseIsoDayNumber(localMeta.isoDate || env.isoDate);
+  let localScrubDay = null;
+  if (scrubUtcMs !== null && Number.isFinite(localMeta.scrubbedOffsetMinutes)) {
+    localScrubDay = Math.floor((scrubUtcMs + localMeta.scrubbedOffsetMinutes * 60000) / 86400000);
+  } else if (localBaseDay !== null) {
+    localScrubDay = localBaseDay + Math.floor(localTotalMins / 1440);
+  }
+  const localDatePrefix = localScrubDay !== null ? formatMonthDayFromDayNum(localScrubDay) + ' ' : '';
+  const localFormatted = hour12
+    ? (localMeta.scrubbedFormatted12h || formatClockTime(localTotalMins, true))
+    : (localMeta.scrubbedFormatted24h || formatClockTime(localTotalMins, false));
+  const localLabel = args.localLabel || ctx.t('localNow');
+  parts.push(localLabel + ' ' + localDatePrefix + localFormatted);
+
+  const labelKeys = ['c1Label', 'c2Label', 'c3Label', 'c4Label'];
+  for (let i = 0; i < SLOT_KEYS.length; i++) {
+    const slot = SLOT_KEYS[i];
+    const zone = String(settings[slot] || '').trim();
+    if (!zone || zone.toLowerCase() === 'none') continue;
+    const zMeta = clockZones[zone];
+    if (!zMeta || (!Number.isFinite(zMeta.hourFloat) && !zMeta.scrubbedFormatted24h && !zMeta.scrubbedFormatted12h)) continue;
+    const zHourFloat = Number.isFinite(zMeta.hourFloat) ? zMeta.hourFloat : 0;
+    const zDstShift = (Number.isFinite(zMeta.scrubbedOffsetMinutes) && Number.isFinite(zMeta.offsetMinutes))
+      ? (zMeta.scrubbedOffsetMinutes - zMeta.offsetMinutes)
       : 0;
-    const localTotalMins = Math.floor(localHourFloat * 60 + 1e-6) + scrubMins + localDstShift;
-    const localBaseDay = parseIsoDayNumber(localMeta.isoDate || env.isoDate);
-    let localScrubDay = null;
-    if (scrubUtcMs !== null && Number.isFinite(localMeta.scrubbedOffsetMinutes)) {
-      localScrubDay = Math.floor((scrubUtcMs + localMeta.scrubbedOffsetMinutes * 60000) / 86400000);
-    } else if (localBaseDay !== null) {
-      localScrubDay = localBaseDay + Math.floor(localTotalMins / 1440);
+    const zTotalMins = Math.floor(zHourFloat * 60 + 1e-6) + scrubMins + zDstShift;
+    const zBaseDay = parseIsoDayNumber(zMeta.isoDate);
+    let zScrubDay = null;
+    if (scrubUtcMs !== null && Number.isFinite(zMeta.scrubbedOffsetMinutes)) {
+      zScrubDay = Math.floor((scrubUtcMs + zMeta.scrubbedOffsetMinutes * 60000) / 86400000);
+    } else if (zBaseDay !== null) {
+      zScrubDay = zBaseDay + Math.floor(zTotalMins / 1440);
     }
-    const localDatePrefix = localScrubDay !== null ? formatMonthDayFromDayNum(localScrubDay) + ' ' : '';
-    const localFormatted = hour12
-      ? (localMeta.scrubbedFormatted12h || formatClockTime(localTotalMins, true))
-      : (localMeta.scrubbedFormatted24h || formatClockTime(localTotalMins, false));
-    const localLabel = args.localLabel || ctx.t('localNow');
-    parts.push(localLabel + ' ' + localDatePrefix + localFormatted);
-
-    const labelKeys = ['c1Label', 'c2Label', 'c3Label', 'c4Label'];
-    for (let i = 0; i < SLOT_KEYS.length; i++) {
-      const slot = SLOT_KEYS[i];
-      const zone = String(settings[slot] || '').trim();
-      if (!zone || zone.toLowerCase() === 'none') continue;
-      const zMeta = clockZones[zone];
-      if (!zMeta || (!Number.isFinite(zMeta.hourFloat) && !zMeta.scrubbedFormatted24h && !zMeta.scrubbedFormatted12h)) continue;
-      const zHourFloat = Number.isFinite(zMeta.hourFloat) ? zMeta.hourFloat : 0;
-      const zDstShift = (Number.isFinite(zMeta.scrubbedOffsetMinutes) && Number.isFinite(zMeta.offsetMinutes))
-        ? (zMeta.scrubbedOffsetMinutes - zMeta.offsetMinutes)
-        : 0;
-      const zTotalMins = Math.floor(zHourFloat * 60 + 1e-6) + scrubMins + zDstShift;
-      const zBaseDay = parseIsoDayNumber(zMeta.isoDate);
-      let zScrubDay = null;
-      if (scrubUtcMs !== null && Number.isFinite(zMeta.scrubbedOffsetMinutes)) {
-        zScrubDay = Math.floor((scrubUtcMs + zMeta.scrubbedOffsetMinutes * 60000) / 86400000);
-      } else if (zBaseDay !== null) {
-        zScrubDay = zBaseDay + Math.floor(zTotalMins / 1440);
-      }
-      let dayTag = '';
-      if (zScrubDay !== null && localScrubDay !== null) {
-        const diffDays = zScrubDay - localScrubDay;
-        if (diffDays > 0) dayTag = ' (+' + diffDays + 'd)';
-        else if (diffDays < 0) dayTag = ' (' + diffDays + 'd)';
-      }
-      const zFormatted = hour12
-        ? (zMeta.scrubbedFormatted12h || formatClockTime(zTotalMins, true))
-        : (zMeta.scrubbedFormatted24h || formatClockTime(zTotalMins, false));
-      const cityLabel = args[labelKeys[i]] || zone.split('/').pop().replace(/_/g, ' ');
-      parts.push(cityLabel + ' ' + zFormatted + dayTag);
+    let dayTag = '';
+    if (zScrubDay !== null && localScrubDay !== null) {
+      const diffDays = zScrubDay - localScrubDay;
+      if (diffDays > 0) dayTag = ' (+' + diffDays + 'd)';
+      else if (diffDays < 0) dayTag = ' (' + diffDays + 'd)';
     }
+    const zFormatted = hour12
+      ? (zMeta.scrubbedFormatted12h || formatClockTime(zTotalMins, true))
+      : (zMeta.scrubbedFormatted24h || formatClockTime(zTotalMins, false));
+    const cityLabel = args[labelKeys[i]] || zone.split('/').pop().replace(/_/g, ' ');
+    parts.push(cityLabel + ' ' + zFormatted + dayTag);
   }
 
   const summary = ctx.t('meetingAt') + offsetTag + ': ' + parts.join(' · ');

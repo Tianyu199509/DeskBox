@@ -26,8 +26,6 @@ function t(ctx, key, fallback) {
     const res = ctx.t(key, fallback || '');
     if (res) return String(res);
   }
-  const dict = ctx && ctx.i18n ? ctx.i18n : null;
-  if (dict && typeof dict[key] === 'string' && dict[key]) return dict[key];
   return fallback || '';
 }
 
@@ -242,7 +240,7 @@ function getSampleSpec(ctx, idx) {
 function loadDisplayArticles(ctx, query) {
   const raw = (ctx.collections && typeof ctx.collections.get === 'function')
     ? (ctx.collections.get('articles') || [])
-    : (Array.isArray(ctx.collections && ctx.collections.articles) ? ctx.collections.articles : []);
+    : [];
 
   const status = String((ctx.state && ctx.state.sourceStatus) || 'idle').trim().toLowerCase();
   const env = ctx.env || {};
@@ -391,7 +389,7 @@ function syncSettingsAndProject(ctx) {
 
   if (ctx.state) {
     const curKey = String(ctx.state.activeChannelKey || '').trim().toLowerCase();
-    if (!curKey || curKey === 'auto' || (!lastSig && (curKey === 'sspai' || curKey === 'news') && !isZh && presetSetting === 'auto')) {
+    if (!curKey || curKey === 'auto') {
       const presetCh = resolvePresetChannel(ctx.settings);
       ctx.state.activeChannelKey = presetCh ? presetCh.id : defaultKey;
     }

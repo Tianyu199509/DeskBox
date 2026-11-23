@@ -756,6 +756,38 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public string CompletedFilterText => FormatFilterText("Todo.Filter.Completed", CompletedCount);
 
+    public string AllFilterLabelText => _localizationService.T("Todo.Filter.All");
+
+    public string ActiveFilterLabelText => _localizationService.T("Todo.Filter.Active");
+
+    public string TodayFilterLabelText => _localizationService.T("Todo.Filter.Today");
+
+    public string OverdueFilterLabelText => _localizationService.T("Todo.Filter.Overdue");
+
+    public string ThisWeekFilterLabelText => _localizationService.T("Todo.Filter.ThisWeek");
+
+    public string ThisMonthFilterLabelText => _localizationService.T("Todo.Filter.ThisMonth");
+
+    public string ImportantFilterLabelText => _localizationService.T("Todo.Filter.Important");
+
+    public string CompletedFilterLabelText => _localizationService.T("Todo.Filter.Completed");
+
+    public Visibility AllFilterCountVisibility => AllFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ActiveFilterCountVisibility => ActiveCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility TodayFilterCountVisibility => TodayFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility OverdueFilterCountVisibility => OverdueFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ThisWeekFilterCountVisibility => ThisWeekFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ThisMonthFilterCountVisibility => ThisMonthFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ImportantFilterCountVisibility => ImportantFilterCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility CompletedFilterCountVisibility => CompletedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
     public string ListHeaderText => _localizationService.Format("Todo.List.Header", VisibleItems.Count);
 
     public string DetailBackText => _localizationService.T("Todo.Detail.Back");
@@ -1030,6 +1062,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(TitleTextSize));
                 OnPropertyChanged(nameof(FilterTextSize));
                 OnPropertyChanged(nameof(SegmentTextSize));
+                OnPropertyChanged(nameof(SegmentCountTextSize));
                 OnPropertyChanged(nameof(SegmentHeight));
                 OnPropertyChanged(nameof(SegmentPadding));
                 OnPropertyChanged(nameof(InputHeight));
@@ -1098,6 +1131,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public double SegmentTextSize => WidgetSegmentedMetrics.Create(TextSize).TextSize;
 
+    public double SegmentCountTextSize => Math.Max(10, SegmentTextSize - 1.5);
+
     public double SegmentHeight => WidgetSegmentedMetrics.Create(TextSize).Height;
 
     public Thickness SegmentPadding => WidgetSegmentedMetrics.Create(TextSize).Padding;
@@ -1110,7 +1145,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public Thickness InputPadding => WidgetInputMetrics.Create(TextSize).Padding;
 
-    public Thickness RootPadding => UniformThickness(Lerp(6, 10, LayoutDensityScale));
+    public Thickness RootPadding => new(
+        Math.Round(Lerp(8, 12, LayoutDensityScale)),
+        Math.Round(Lerp(6, 10, LayoutDensityScale)),
+        Math.Round(Lerp(8, 12, LayoutDensityScale)),
+        Math.Round(Lerp(6, 10, LayoutDensityScale)));
 
     public Thickness DetailPageMargin => new(0, 6 - RootPadding.Top, 0, 0);
 

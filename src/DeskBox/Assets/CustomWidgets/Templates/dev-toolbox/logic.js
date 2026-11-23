@@ -1,4 +1,4 @@
-// DeskBox Official Template: Developer Toolbox (v3.0.0)
+// DeskBox Official Template: Developer Toolbox (v1.0.0)
 // Pure ES2023 runtime logic for QuickJS (zero external dependencies)
 
 let _uuidSeq = 0;
@@ -1062,7 +1062,6 @@ function executeOpOnCurrent(ctx, op, rawInput, triggerAutoCopy) {
   }
 
   state.draft = nextText;
-  state.output = nextText;
   state.editing = 'false';
   state.stepLabel = opStepLabel(ctx, op);
   state.jwtMode = nextJwtMode;
@@ -1204,14 +1203,7 @@ function projectComputed(ctx) {
     c.resultSummaryText = ctx.t('resultIdleHint');
   }
 
-  // 7. Backward-compatible computed hints (for regression contracts)
-  const effectiveInput = hasDraft ? draft : (snifferOn && clipHasValidText(clipRaw) ? clipRaw : '');
-  const detectedKind = classifyText(effectiveInput);
-  const indentFmt = String(settings.jsonIndent || '2') === '4' ? 'jsonPretty4' : 'jsonPretty';
-  c.effectiveInput = effectiveInput;
-  c.primaryActionFormat = detectedKind === 'json' ? indentFmt : kindToPrimaryOp(detectedKind);
-
-  // 8. Dual-mode Desktop Capsule
+  // 7. Dual-mode Desktop Capsule
   if (hasError) {
     c.capsuleBadge = 'ERR';
     c.capsuleBadgeWarning = 'true';
@@ -1241,10 +1233,6 @@ function projectComputed(ctx) {
     c.capsuleSummary = ctx.t('capsuleIdleUuid');
     c.capsuleActionTooltip = ctx.t('capsuleGenUuidTip');
   }
-}
-
-function clipHasValidText(raw) {
-  return Boolean(raw && String(raw).trim().length > 0);
 }
 
 // =========================================================================

@@ -18,7 +18,7 @@
             <ResourceDictionary.ThemeDictionaries>
                                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#6B6B6B" />
-                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#FBFCFD" />
+                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#F9F9F9" />
                     <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#24000000" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#70FFFFFF" />
@@ -55,7 +55,7 @@
                 </ResourceDictionary>
                                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#D6D6D6" />
-                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#2A3038" />
+                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#2C2C2C" />
                     <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="#222830" />
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
@@ -88,7 +88,7 @@
                      system-owned contrast mapping. -->
                                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#D6D6D6" />
-                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#2A3038" />
+                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#2C2C2C" />
                     <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="#222830" />
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
@@ -393,6 +393,66 @@
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="5" />
+            </Style>
+
+            <Style x:Key="WidgetQuickAddCardButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid
+                                x:Name="RootGrid"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                                <Border
+                                    x:Name="HoverWash"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    IsHitTestVisible="False"
+                                    Opacity="0" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    AutomationProperties.AccessibilityView="Raw"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}" />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverWash.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverWash.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                                <Setter Target="HoverWash.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.45" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <Style x:Key="WidgetInlineRenameTextBoxStyle" TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">

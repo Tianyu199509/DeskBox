@@ -144,6 +144,16 @@ public partial class SettingsViewModel
     }
 
     /// <summary>
+    /// Lazily populates nearby popular cities the first time the Weather settings
+    /// section is opened, avoiding unnecessary GPS / Geo-IP requests on every
+    /// SettingsHost cold start.
+    /// </summary>
+    internal Task EnsureWeatherNearbyCitiesInitializedAsync() =>
+        _locationInitialized
+            ? Task.CompletedTask
+            : PopulateWeatherNearbyCitiesAsync();
+
+    /// <summary>
     /// Populates the editor's suggestions with nearby popular cities based
     /// on user location. Falls back to global popular cities if location is
     /// unavailable.

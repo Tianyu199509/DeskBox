@@ -134,6 +134,8 @@ public sealed class CustomWidgetOfficialTemplateCleanlinessTests
             Assert.NotNull(parsed.Manifest);
             Assert.Equal(1, parsed.Manifest!.SchemaVersion);
             Assert.Equal($"deskbox.{templateId}", parsed.Manifest.Id);
+            Assert.Equal("1.0.0", parsed.Manifest.Version);
+            Assert.Equal("DeskBox", parsed.Manifest.Author);
             IReadOnlyList<CustomWidgetValidationDiagnostic> smokeFindings =
                 StudioBehavioralSmokeVerifier.Verify(parsed.Manifest, bundle.ManifestJson, bundle.LogicJs, bundle.Locales, null);
             Assert.DoesNotContain(smokeFindings, static d => d.IsError);

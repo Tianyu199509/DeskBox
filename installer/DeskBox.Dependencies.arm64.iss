@@ -237,7 +237,7 @@ begin
     begin
       DependencyDownloadPage.Msg1Label.Caption := ExpandConstant('{cm:DownloadingWinAppRuntime}');
       if not DownloadDependencyWithProgress(
-        'Windows App Runtime 2.6 ARM64',
+        'Windows App Runtime 2.7 ARM64',
         WindowsAppRuntimeUrl,
         WindowsAppRuntimeFallbackUrl,
         WindowsAppRuntimeInstallerName,
@@ -344,7 +344,7 @@ begin
     begin
       Step := Step + 1;
       if not InstallDownloadedDependency(
-        'Windows App Runtime 2.6 ARM64',
+        'Windows App Runtime 2.7 ARM64',
         WindowsAppRuntimeInstallerName,
         '--quiet',
         Step,

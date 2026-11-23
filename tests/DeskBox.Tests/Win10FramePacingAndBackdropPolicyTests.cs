@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -140,5 +141,60 @@ public sealed class Win10FramePacingAndBackdropPolicyTests
         int expectedState)
     {
         Assert.Equal(expectedState, Win32Helper.ResolveAccentState(enabled, blurEnabled, opacity));
+    }
+
+    [Fact]
+    public void ControllerAcrylicSimplification_StaysFrostedOnHardwareGpuUntilOverrunsOrSoftwareSession()
+    {
+        Assert.False(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+            recentOverrunMask: 0,
+            isSoftwareOrRemoteGraphics: false));
+        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+            recentOverrunMask: 0,
+            isSoftwareOrRemoteGraphics: true));
+        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+            recentOverrunMask: (1L << 24) - 1,
+            isSoftwareOrRemoteGraphics: false));
+    }
+
+    [Theory]
+    [InlineData(0x1414u, 0x008Cu, 0u, true)]
+    [InlineData(0x1414u, 0x5353u, 0u, true)]
+    [InlineData(0x8086u, 0x9A49u, 0x2u, true)]
+    [InlineData(0x8086u, 0x9A49u, 0u, false)]
+    [InlineData(0x10DEu, 0x2684u, 0u, false)]
+    [InlineData(0x1002u, 0x744Cu, 0u, false)]
+    public void IsSoftwareOrSyntheticDxgiAdapter_IdentifiesWarpAndHyperVSyntheticWithoutHardwareFalsePositives(
+        uint vendorId,
+        uint deviceId,
+        uint flags,
+        bool expectedSoftware)
+    {
+        Assert.Equal(
+            expectedSoftware,
+            CustomWidgetNativeMetrics.IsSoftwareOrSyntheticDxgiAdapter(vendorId, deviceId, flags));
+    }
+
+    [Fact]
+    public void BuildInteractionSimplifiedAcrylicColor_PreservesTintRgbAndHitTestableAlpha()
+    {
+        var tint = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x24, 0x2C);
+
+        Windows.UI.Color zeroOpacity = WidgetMaterialVisualCalculator.BuildInteractionSimplifiedAcrylicColor(
+            tint,
+            useBase: false,
+            surfaceOpacity: 0.0,
+            materialIntensity: 0.0);
+        Windows.UI.Color normalOpacity = WidgetMaterialVisualCalculator.BuildInteractionSimplifiedAcrylicColor(
+            tint,
+            useBase: true,
+            surfaceOpacity: 0.8,
+            materialIntensity: 0.65);
+
+        Assert.Equal(tint.R, zeroOpacity.R);
+        Assert.Equal(tint.G, zeroOpacity.G);
+        Assert.Equal(tint.B, zeroOpacity.B);
+        Assert.True(zeroOpacity.A >= 1);
+        Assert.True(normalOpacity.A > zeroOpacity.A);
     }
 }

@@ -448,6 +448,28 @@ public sealed class OnboardingExperienceTests
     }
 
     [Fact]
+    public void SummonStep_SurfacesLiveGlobalSearchHotkeyCardWithoutAddingSteps()
+    {
+        string root = FindRepositoryRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml"));
+        string steps = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string code = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
+
+        Assert.Contains("private const int StepCount = 5;", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"Step3SearchHotkeyCard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"Step3SearchHotkeyBadgeButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"Step3SearchHotkeyBadgeText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"Step3SearchHotkeyToggle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.Key=\"Onboarding.Step3.SearchTitle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.Key=\"Onboarding.Step3.SearchBody\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("_settingsService.Settings.Search.SearchHotkeyActivationKind", steps, StringComparison.Ordinal);
+        Assert.Contains("_settingsService.Settings.Search.SearchHotkeyEnabled", steps, StringComparison.Ordinal);
+        Assert.Contains("hotkeyService.SetEnabled(requested)", steps, StringComparison.Ordinal);
+        Assert.Contains("Step3SearchHotkeyWarningIcon", xaml, StringComparison.Ordinal);
+        Assert.Contains("OpenSettingsSection(\"SearchSettings\")", steps, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Onboarding_NeverReferencesSettingsKeysTheResidentHostFiltersOut()
     {
         // The main process drops pure settings-UI strings to save memory; the

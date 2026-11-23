@@ -3,8 +3,6 @@ function t(ctx, key, fallback) {
     const res = ctx.t(key, fallback || '');
     if (res) return String(res);
   }
-  const dict = ctx && ctx.i18n ? ctx.i18n : null;
-  if (dict && typeof dict[key] === 'string' && dict[key]) return dict[key];
   return fallback || '';
 }
 
@@ -46,9 +44,6 @@ function getTodosCollection(ctx) {
     const list = ctx.collections.get('todos');
     if (Array.isArray(list)) return list;
   }
-  if (ctx && ctx.collections && Array.isArray(ctx.collections.todos)) {
-    return ctx.collections.todos;
-  }
   return [];
 }
 
@@ -81,7 +76,7 @@ function project(ctx) {
     phase = 'focus';
   }
 
-  const pomoRunning = readFlag(state, 'pomo.running') && String(state['pomo.phase'] || '') !== 'sedentary';
+  const pomoRunning = readFlag(state, 'pomo.running');
   const rawCompleted = clampInt(state['pomo.todayCompleted'], 0, 0, 100);
   const rawMinutes = clampInt(state['pomo.todayMinutes'], 0, 0, 1440);
   const rawCycle = clampInt(state['pomo.cycle'], 1, 1, 4);

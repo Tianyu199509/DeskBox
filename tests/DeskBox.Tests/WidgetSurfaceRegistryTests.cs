@@ -708,6 +708,37 @@ public sealed class WidgetSurfaceRegistryTests
         Assert.False(registry.TryGet("surface", out _));
     }
 
+    [Fact]
+    public void InactiveMemberDetach_ReleasingClaimBeforeStandaloneRegisterSucceedsAndSupportsInPlaceRollback()
+    {
+        var registry = new WidgetSurfaceRegistry<object>();
+        var survivingHost = new object();
+        var detachedInactiveHost = new object();
+
+        WidgetSurfaceDefinition twoMemberGroup = CreateDefinition("surface", "a", "a", "b");
+        registry.RegisterActive(twoMemberGroup, survivingHost);
+
+        // Transition surviving host to standalone active member BEFORE registering detached member 'b'.
+        Assert.True(registry.RemoveSurface("surface"));
+        registry.RegisterActive(new WidgetSurfaceDefinition("a", null, ["a"], "a"), survivingHost);
+        WidgetSurfaceSession<object> standaloneB = registry.RegisterActive(
+            new WidgetSurfaceDefinition("b", null, ["b"], "b"),
+            detachedInactiveHost);
+
+        Assert.Same(detachedInactiveHost, standaloneB.Host);
+        Assert.True(registry.TryGetByMember("a", out var ownerA) && ReferenceEquals(survivingHost, ownerA!.Host));
+        Assert.True(registry.TryGetByMember("b", out var ownerB) && ReferenceEquals(detachedInactiveHost, ownerB!.Host));
+
+        // Simulate rollback when replacement fails first-frame validation: survivingHost restores in place.
+        Assert.Equal(1, registry.UnregisterHost(detachedInactiveHost));
+        Assert.Equal(1, registry.UnregisterHost(survivingHost));
+        WidgetSurfaceSession<object> restoredGroup = registry.CommitActive(twoMemberGroup, survivingHost);
+
+        Assert.Equal(1, registry.Count);
+        Assert.Same(survivingHost, restoredGroup.Host);
+        Assert.Equal(new[] { "a", "b" }, restoredGroup.MemberIds);
+    }
+
     private static WidgetSurfaceDefinition CreateDefinition(
         string surfaceId,
         string activeMemberId,

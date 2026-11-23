@@ -11,30 +11,32 @@
     <Grid>
         <Button
             x:Name="AddTaskCardButton"
-            MinHeight="42"
-            Padding="8,5"
+            MinHeight="44"
+            Padding="8,6"
             HorizontalAlignment="Stretch"
             HorizontalContentAlignment="Stretch"
             AutomationProperties.Name="{x:Bind PlaceholderText, Mode=OneWay}"
-            Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="Transparent"
             BorderThickness="0"
             Click="AddTaskCardButton_Click"
             CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+            Style="{StaticResource WidgetQuickAddCardButtonStyle}"
             Visibility="{x:Bind CollapsedButtonVisibility, Mode=OneWay}">
-            <Grid ColumnSpacing="6">
+            <Grid ColumnSpacing="0">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="26" />
+                    <ColumnDefinition Width="32" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <FontIcon
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    FontSize="14"
+                    FontSize="13.5"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Glyph="&#xE710;" />
                 <TextBlock
                     Grid.Column="1"
+                    Margin="2,0,0,0"
                     VerticalAlignment="Center"
                     FontSize="{x:Bind InputFontSize, Mode=OneWay}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -46,13 +48,13 @@
 
         <Border
             x:Name="InlineComposerCard"
-            Padding="8,6"
-            Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
-            BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
+            Padding="10,8,10,6"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
             Visibility="{x:Bind ExpandedCardVisibility, Mode=OneWay}">
-            <Grid RowSpacing="4">
+            <Grid RowSpacing="6">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -61,9 +63,10 @@
                 <TextBox
                     x:Name="InlineComposerTextBox"
                     Grid.Row="0"
-                    MinHeight="62"
-                    MaxHeight="132"
-                    Padding="4,2"
+                    MinHeight="60"
+                    MaxHeight="136"
+                    Padding="2,2,2,4"
+                    VerticalContentAlignment="Top"
                     AcceptsReturn="True"
                     AutomationProperties.Name="{x:Bind PlaceholderText, Mode=OneWay}"
                     Background="Transparent"
@@ -76,38 +79,41 @@
                     PointerPressed="InlineComposerTextBox_PointerPressed"
                     PreviewKeyDown="InlineComposerTextBox_PreviewKeyDown"
                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                    Style="{StaticResource WidgetBorderlessInputTextBoxStyle}"
                     Text="{x:Bind InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                     TextWrapping="Wrap">
                     <TextBox.Resources>
-                        <SolidColorBrush x:Key="TextBoxBackground" Color="Transparent" />
-                        <SolidColorBrush x:Key="TextBoxBackgroundPointerOver" Color="Transparent" />
-                        <SolidColorBrush x:Key="TextBoxBackgroundFocused" Color="Transparent" />
-                        <SolidColorBrush x:Key="TextBoxBorderBrush" Color="Transparent" />
-                        <SolidColorBrush x:Key="TextBoxBorderBrushPointerOver" Color="Transparent" />
-                        <SolidColorBrush x:Key="TextBoxBorderBrushFocused" Color="Transparent" />
-                        <Thickness x:Key="TextBoxBorderThemeThickness">0</Thickness>
-                        <Thickness x:Key="TextBoxBorderThemeThicknessFocused">0</Thickness>
+                        <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                        <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                        <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
                     </TextBox.Resources>
                 </TextBox>
 
                 <Grid Grid.Row="1" ColumnSpacing="4">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <StackPanel Orientation="Horizontal" Spacing="2">
-                        <Border
-                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                            CornerRadius="4">
+                        <Grid>
+                            <Border
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="5"
+                                IsHitTestVisible="False"
+                                Visibility="{x:Bind DueDateChipVisibility, Mode=OneWay}" />
                             <StackPanel Orientation="Horizontal" Spacing="0">
                                 <Button
                                     x:Name="QuickDueDateButton"
-                                    MinWidth="24"
-                                    Height="24"
-                                    MinHeight="24"
-                                    Padding="4,0"
+                                    MinWidth="26"
+                                    Height="26"
+                                    MinHeight="26"
+                                    Padding="5,0"
                                     AutomationProperties.Name="{x:Bind DueDateTooltipText, Mode=OneWay}"
                                     Click="QuickDueDateButton_Click"
                                     IsTabStop="False"
@@ -115,7 +121,7 @@
                                     ToolTipService.ToolTip="{x:Bind DueDateTooltipText, Mode=OneWay}">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <FontIcon
-                                            FontSize="11.5"
+                                            FontSize="12"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                             Glyph="&#xE787;" />
                                         <TextBlock
@@ -129,10 +135,10 @@
                                 </Button>
                                 <Button
                                     x:Name="ClearDraftDueDateButton"
-                                    Width="18"
-                                    Height="24"
-                                    MinWidth="18"
-                                    MinHeight="24"
+                                    Width="20"
+                                    Height="26"
+                                    MinWidth="20"
+                                    MinHeight="26"
                                     Padding="0"
                                     AutomationProperties.Name="{x:Bind ClearChipTooltipText, Mode=OneWay}"
                                     Click="ClearDraftDueDateButton_Click"
@@ -146,18 +152,21 @@
                                         Glyph="&#xE711;" />
                                 </Button>
                             </StackPanel>
-                        </Border>
+                        </Grid>
 
-                        <Border
-                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                            CornerRadius="4">
+                        <Grid>
+                            <Border
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="5"
+                                IsHitTestVisible="False"
+                                Visibility="{x:Bind RecurrenceChipVisibility, Mode=OneWay}" />
                             <StackPanel Orientation="Horizontal" Spacing="0">
                                 <Button
                                     x:Name="QuickRecurrenceButton"
-                                    MinWidth="24"
-                                    Height="24"
-                                    MinHeight="24"
-                                    Padding="4,0"
+                                    MinWidth="26"
+                                    Height="26"
+                                    MinHeight="26"
+                                    Padding="5,0"
                                     AutomationProperties.Name="{x:Bind RecurrenceTooltipText, Mode=OneWay}"
                                     Click="QuickRecurrenceButton_Click"
                                     IsTabStop="False"
@@ -165,7 +174,7 @@
                                     ToolTipService.ToolTip="{x:Bind RecurrenceTooltipText, Mode=OneWay}">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <FontIcon
-                                            FontSize="11.5"
+                                            FontSize="12"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                             Glyph="&#xE823;" />
                                         <TextBlock
@@ -179,10 +188,10 @@
                                 </Button>
                                 <Button
                                     x:Name="ClearDraftRecurrenceButton"
-                                    Width="18"
-                                    Height="24"
-                                    MinWidth="18"
-                                    MinHeight="24"
+                                    Width="20"
+                                    Height="26"
+                                    MinWidth="20"
+                                    MinHeight="26"
                                     Padding="0"
                                     AutomationProperties.Name="{x:Bind ClearChipTooltipText, Mode=OneWay}"
                                     Click="ClearDraftRecurrenceButton_Click"
@@ -196,32 +205,40 @@
                                         Glyph="&#xE711;" />
                                 </Button>
                             </StackPanel>
-                        </Border>
+                        </Grid>
 
                         <Button
                             x:Name="QuickImportantButton"
-                            Width="24"
-                            Height="24"
-                            MinWidth="24"
-                            MinHeight="24"
+                            Width="26"
+                            Height="26"
+                            MinWidth="26"
+                            MinHeight="26"
                             Padding="0"
                             AutomationProperties.Name="{x:Bind ImportantTooltipText, Mode=OneWay}"
                             Click="QuickImportantButton_Click"
                             IsTabStop="False"
                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                             ToolTipService.ToolTip="{x:Bind ImportantTooltipText, Mode=OneWay}">
-                            <FontIcon
-                                FontSize="11.5"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Glyph="{x:Bind ImportantGlyph, Mode=OneWay}" />
+                            <Grid>
+                                <FontIcon
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Glyph="&#xE734;"
+                                    Visibility="{x:Bind ImportantInactiveVisibility, Mode=OneWay}" />
+                                <FontIcon
+                                    FontSize="12"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    Glyph="&#xE735;"
+                                    Visibility="{x:Bind ImportantActiveVisibility, Mode=OneWay}" />
+                            </Grid>
                         </Button>
 
                         <Button
                             x:Name="ExpandToDetailButton"
-                            Width="24"
-                            Height="24"
-                            MinWidth="24"
-                            MinHeight="24"
+                            Width="26"
+                            Height="26"
+                            MinWidth="26"
+                            MinHeight="26"
                             Padding="0"
                             AutomationProperties.Name="{x:Bind ExpandTooltipText, Mode=OneWay}"
                             Click="ExpandToDetailButton_Click"
@@ -229,30 +246,19 @@
                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                             ToolTipService.ToolTip="{x:Bind ExpandTooltipText, Mode=OneWay}">
                             <FontIcon
-                                FontSize="11.5"
+                                FontSize="12"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Glyph="&#xE8A7;" />
                         </Button>
                     </StackPanel>
 
-                    <TextBlock
-                        x:Name="InlineComposerHintText"
-                        Grid.Column="1"
-                        Margin="2,0"
-                        VerticalAlignment="Center"
-                        FontSize="11"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        MaxLines="1"
-                        Text="{x:Bind HintText, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis" />
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
                         <Button
                             x:Name="InlineComposerCancelButton"
-                            Width="24"
-                            Height="24"
-                            MinWidth="24"
-                            MinHeight="24"
+                            Width="26"
+                            Height="26"
+                            MinWidth="26"
+                            MinHeight="26"
                             Padding="0"
                             AutomationProperties.Name="{x:Bind CancelTooltipText, Mode=OneWay}"
                             Click="InlineComposerCancelButton_Click"
@@ -267,20 +273,21 @@
 
                         <Button
                             x:Name="InlineComposerSaveButton"
-                            Width="24"
-                            Height="24"
-                            MinWidth="24"
-                            MinHeight="24"
+                            Width="26"
+                            Height="26"
+                            MinWidth="26"
+                            MinHeight="26"
                             Padding="0"
                             AutomationProperties.Name="{x:Bind SaveTooltipText, Mode=OneWay}"
                             Click="InlineComposerSaveButton_Click"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                             IsEnabled="{x:Bind CanSaveDraft, Mode=OneWay}"
                             IsTabStop="False"
+                            Opacity="{x:Bind SaveButtonOpacity, Mode=OneWay}"
                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                             ToolTipService.ToolTip="{x:Bind SaveTooltipText, Mode=OneWay}">
                             <FontIcon
-                                FontSize="11.5"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                FontSize="12"
                                 Glyph="&#xE73E;" />
                         </Button>
                     </StackPanel>

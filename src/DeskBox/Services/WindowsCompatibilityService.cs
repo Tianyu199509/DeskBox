@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -97,6 +98,10 @@ public static class WindowsCompatibilityService
         IsSupported(() => DesktopAcrylicController.IsSupported());
 
     public static bool UsesLegacyWindowAcrylic => !IsWindows11OrLater;
+
+    public static bool IsSoftwareOrRemoteGraphicsSession =>
+        Win32Helper.GetSystemMetrics(Win32Helper.SM_REMOTESESSION) != 0 ||
+        CustomWidgetNativeMetrics.IsPrimaryAdapterSoftwareOrSynthetic();
 
     public static string ResolveWidgetMaterialType(string? requestedMaterialType)
     {

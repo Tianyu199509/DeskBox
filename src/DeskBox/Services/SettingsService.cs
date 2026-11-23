@@ -704,7 +704,7 @@ settings.WeatherShowHumidity = true;
 settings.WeatherShowWind = true;
 settings.WeatherShowPressure = false;
 settings.WeatherRefreshIntervalMinutes = 60;
-        settings.SearchHotkeyEnabled = false;
+        settings.SearchHotkeyEnabled = true;
         settings.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
         settings.SearchHotkeyKey = 0x44;
         settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
@@ -735,6 +735,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.Search.SearchQuickCreateDisplayMode = "always";
         settings.Search.SearchQuickCreateDefaultTarget = "todo";
         settings.Search.SearchQuickCreateShowHud = true;
+        settings.Search.SearchCategoryLayout = SearchSettingsSlice.DefaultCategoryLayout;
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
@@ -4311,12 +4312,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        string normalized = settings.SearchDefaultTab?.Trim().ToLowerInvariant() ?? "all";
-        if (normalized is not ("all" or "app" or "file" or "deskbox"))
+        string normalizedLayout = SearchSettingsSlice.NormalizeCategoryLayout(
+            settings.Search.SearchCategoryLayout);
+        if (!string.Equals(settings.Search.SearchCategoryLayout, normalizedLayout, StringComparison.Ordinal))
         {
-            normalized = "all";
+            settings.Search.SearchCategoryLayout = normalizedLayout;
+            changed = true;
         }
 
+        string normalized = SearchSettingsSlice.NormalizeDefaultTabId(settings.SearchDefaultTab);
         if (!string.Equals(settings.SearchDefaultTab, normalized, StringComparison.Ordinal))
         {
             settings.SearchDefaultTab = normalized;

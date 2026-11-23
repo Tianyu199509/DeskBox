@@ -383,12 +383,36 @@ public sealed partial class SettingsWindow
             XamlRoot = SettingsRoot.XamlRoot,
             RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = T("Feedback.My.Title"),
+            SecondaryButtonText = T("Common.Refresh"),
             CloseButtonText = T("Common.Close"),
             MinWidth = 520,
         };
 
+        using var dialogCts = new CancellationTokenSource();
+        bool dialogClosed = false;
+        int loadGeneration = 0;
+
+        dialog.Closed += (_, _) =>
+        {
+            dialogClosed = true;
+            try
+            {
+                dialogCts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        };
+
         async Task LoadAsync()
         {
+            if (dialogClosed)
+            {
+                return;
+            }
+
+            int generation = ++loadGeneration;
+            dialog.IsSecondaryButtonEnabled = false;
             dialog.Content = new StackPanel
             {
                 Spacing = 12,
@@ -404,7 +428,28 @@ public sealed partial class SettingsWindow
                 },
             };
 
-            DeskBoxFeedbackMineResult result = await FeedbackService.GetMyFeedbackAsync();
+            DeskBoxFeedbackMineResult result;
+            try
+            {
+                result = await FeedbackService.GetMyFeedbackAsync(dialogCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[Feedback] Load my feedback failed unexpectedly: {ex}");
+                result = DeskBoxFeedbackMineResult.Failure();
+            }
+
+            if (dialogClosed || generation != loadGeneration)
+            {
+                return;
+            }
+
+            dialog.IsSecondaryButtonEnabled = true;
+
             if (!result.Ok)
             {
                 var retryButton = new Button { Content = T("Feedback.My.Retry") };
@@ -435,7 +480,7 @@ public sealed partial class SettingsWindow
             var listPanel = new StackPanel { Spacing = 12, Padding = new Thickness(0, 0, 8, 0) };
             foreach (DeskBoxFeedbackItem item in result.Items)
             {
-                listPanel.Children.Add(BuildMyFeedbackCard(item));
+                listPanel.Children.Add(BuildMyFeedbackCard(item, dialogCts.Token, () => dialogClosed));
             }
 
             dialog.Content = new ScrollViewer
@@ -446,11 +491,20 @@ public sealed partial class SettingsWindow
             };
         }
 
+        dialog.SecondaryButtonClick += (sender, args) =>
+        {
+            args.Cancel = true;
+            _ = LoadAsync();
+        };
+
         _ = LoadAsync();
         await dialog.ShowAsync();
     }
 
-    private UIElement BuildMyFeedbackCard(DeskBoxFeedbackItem item)
+    private UIElement BuildMyFeedbackCard(
+        DeskBoxFeedbackItem item,
+        CancellationToken dialogToken,
+        Func<bool> isDialogClosed)
     {
         string T(string key) => _localizationService.T(key);
         string F(string key, object arg) => _localizationService.Format(key, arg);
@@ -515,8 +569,10 @@ public sealed partial class SettingsWindow
             TextWrapping = TextWrapping.Wrap,
             MaxLength = 2000,
             MinHeight = 68,
+            MaxHeight = 140,
             PlaceholderText = T("Feedback.My.ReplyPlaceholder"),
         };
+        ScrollViewer.SetVerticalScrollBarVisibility(replyBox, ScrollBarVisibility.Auto);
 
         var replyErrorText = new TextBlock
         {
@@ -595,7 +651,7 @@ public sealed partial class SettingsWindow
 
         sendReplyButton.Click += async (_, _) =>
         {
-            if (sendingReply)
+            if (sendingReply || isDialogClosed())
             {
                 return;
             }
@@ -610,7 +666,13 @@ public sealed partial class SettingsWindow
             {
                 DeskBoxFeedbackReplyResult replyResult = await FeedbackService.PostReplyAsync(
                     item.Id,
-                    replyBox.Text);
+                    replyBox.Text,
+                    dialogToken);
+                if (isDialogClosed())
+                {
+                    return;
+                }
+
                 if (replyResult.Ok && replyResult.Message is { } createdMessage)
                 {
                     messagesPanel.Children.Add(BuildFeedbackMessageBubble(createdMessage));
@@ -635,18 +697,28 @@ public sealed partial class SettingsWindow
                     replyErrorText.Visibility = Visibility.Visible;
                 }
             }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
             catch (Exception ex)
             {
                 App.Log($"[Feedback] Reply submit failed unexpectedly: {ex}");
-                replyErrorText.Text = T("Feedback.Dialog.NetworkError");
-                replyErrorText.Visibility = Visibility.Visible;
+                if (!isDialogClosed())
+                {
+                    replyErrorText.Text = T("Feedback.Dialog.NetworkError");
+                    replyErrorText.Visibility = Visibility.Visible;
+                }
             }
             finally
             {
                 sendingReply = false;
-                replyBox.IsEnabled = true;
-                cancelReplyButton.IsEnabled = true;
-                RefreshReplyButtonState();
+                if (!isDialogClosed())
+                {
+                    replyBox.IsEnabled = true;
+                    cancelReplyButton.IsEnabled = true;
+                    RefreshReplyButtonState();
+                }
             }
         };
 

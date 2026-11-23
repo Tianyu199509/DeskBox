@@ -778,6 +778,20 @@ public static class WidgetLayerService
         }
 
         Win32Helper.SetForegroundWindow(activeHandle);
+        if (orderedHandles.Count > 1 &&
+            Win32Helper.GetForegroundWindow() == activeHandle)
+        {
+            // When DeskBox entered BringGroupTemporarilyToFront as a background
+            // process, the pre-activation HWND_TOP batch was clamped below the
+            // prior foreground window while SetForegroundWindow lifted only
+            // activeHandle above it. Re-applying the peer order now lifts the
+            // rest of the band immediately instead of leaving it split for 220ms.
+            ApplyWindowOrderHighestToLowest(
+                orderedHandles,
+                Win32Helper.HWND_TOP,
+                "group-raise-post-activate");
+            Win32Helper.BringWindowToFront(activeHandle);
+        }
     }
 
     /// <summary>

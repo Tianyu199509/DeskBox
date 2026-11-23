@@ -18,9 +18,12 @@ namespace DeskBox.Helpers;
 /// </summary>
 internal static class TransientInputFocusGuard
 {
+    private const uint GwHwndNext = 2;
     private const uint GwChild = 5;
     private const uint GaRoot = 2;
     private const long HwndClassificationCacheTtlMs = 1500;
+    private const string ContentBridgeWindowClass = "Microsoft.UI.Content.DesktopChildSiteBridge";
+    private const string CompositionBackdropBridgeWindowClass = "Windows.UI.Composition.DesktopWindowContentBridge";
 
     private struct CachedHwndClassification
     {
@@ -74,9 +77,43 @@ internal static class TransientInputFocusGuard
             return;
         }
 
-        IntPtr child = GetWindow(windowHandle, GwChild);
+        IntPtr child = ResolveContentIslandChild(windowHandle);
         _ = SetFocus(child != IntPtr.Zero ? child : windowHandle);
     }
+
+    internal static IntPtr ResolveContentIslandChild(IntPtr windowHandle)
+    {
+        IntPtr fallback = IntPtr.Zero;
+        Span<char> classBuf = stackalloc char[96];
+        for (IntPtr cur = GetWindow(windowHandle, GwChild);
+             cur != IntPtr.Zero;
+             cur = GetWindow(cur, GwHwndNext))
+        {
+            int length = Win32Helper.GetClassName(cur, classBuf);
+            ReadOnlySpan<char> className = length > 0 ? classBuf[..length] : ReadOnlySpan<char>.Empty;
+            if (IsPreferredContentIslandClass(className))
+            {
+                return cur;
+            }
+
+            if (fallback == IntPtr.Zero && !IsCompositionBackdropBridgeClass(className))
+            {
+                fallback = cur;
+            }
+        }
+
+        return fallback;
+    }
+
+    internal static bool IsPreferredContentIslandClass(ReadOnlySpan<char> className) =>
+        className.Equals(ContentBridgeWindowClass, StringComparison.OrdinalIgnoreCase) ||
+        className.EndsWith(".Content.DesktopChildSiteBridge", StringComparison.OrdinalIgnoreCase) ||
+        className.Equals("DesktopWindowXamlSource", StringComparison.OrdinalIgnoreCase) ||
+        className.Equals("InputSiteWindowClass", StringComparison.OrdinalIgnoreCase) ||
+        className.EndsWith(".InputSite.WindowClass", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsCompositionBackdropBridgeClass(ReadOnlySpan<char> className) =>
+        className.Equals(CompositionBackdropBridgeWindowClass, StringComparison.OrdinalIgnoreCase);
 
     public static void FocusContentIslandIfForeground(IntPtr windowHandle)
     {

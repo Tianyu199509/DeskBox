@@ -35,8 +35,6 @@ public sealed partial class SearchPopupWindow
     private SearchResultItem? _loadedAsyncPreviewItem;
     private bool _hasShownDetailsInQuerySession;
     private bool _hasExpandedResultsInQuerySession;
-    private bool _isDetailsPaneClosing;
-    private bool _isDetailsPaneToggleMorph;
     private Storyboard? _detailsEntranceStoryboard;
     private bool _isCmdBarFlyoutOpen;
     private readonly List<CommandPaletteActionEntry> _allCmdBarActions = [];
@@ -71,9 +69,16 @@ public sealed partial class SearchPopupWindow
     {
         SearchInlineScope.Apps => "app:",
         SearchInlineScope.Files => "file:",
+        SearchInlineScope.Folders => "folder:",
+        SearchInlineScope.Images => "img:",
+        SearchInlineScope.Documents => "doc:",
+        SearchInlineScope.Videos => "video:",
+        SearchInlineScope.Music => "music:",
+        SearchInlineScope.Archives => "archive:",
         SearchInlineScope.Clipboard => "clip:",
         SearchInlineScope.Todos => "todo:",
         SearchInlineScope.Notes => "note:",
+        SearchInlineScope.Widgets => "widget:",
         SearchInlineScope.Settings => "set:",
         SearchInlineScope.Commands => ">",
         _ => string.Empty
@@ -268,10 +273,17 @@ public sealed partial class SearchPopupWindow
     private static string GetScopeGlyph(SearchInlineScope scope) => scope switch
     {
         SearchInlineScope.Apps => "\uE71D",
-        SearchInlineScope.Files => "\uE8B7",
+        SearchInlineScope.Files => "\uE8E5",
+        SearchInlineScope.Folders => "\uE8B7",
+        SearchInlineScope.Images => "\uE8B9",
+        SearchInlineScope.Documents => "\uE8A5",
+        SearchInlineScope.Videos => "\uE714",
+        SearchInlineScope.Music => "\uE8D6",
+        SearchInlineScope.Archives => "\uF012",
         SearchInlineScope.Clipboard => "\uE77F",
         SearchInlineScope.Todos => "\uE9D5",
         SearchInlineScope.Notes => "\uE70F",
+        SearchInlineScope.Widgets => "\uE71D",
         SearchInlineScope.Settings => "\uE713",
         SearchInlineScope.Commands => "\uE756",
         _ => "\uE721"
@@ -281,9 +293,16 @@ public sealed partial class SearchPopupWindow
     {
         SearchInlineScope.Apps => _localizationService.T("Search.Scope.Placeholder.Apps"),
         SearchInlineScope.Files => _localizationService.T("Search.Scope.Placeholder.Files"),
+        SearchInlineScope.Folders => _localizationService.T("Search.Tab.Folder"),
+        SearchInlineScope.Images => _localizationService.T("Search.Tab.Image"),
+        SearchInlineScope.Documents => _localizationService.T("Search.Tab.Document"),
+        SearchInlineScope.Videos => _localizationService.T("Search.Tab.Video"),
+        SearchInlineScope.Music => _localizationService.T("Search.Tab.Music"),
+        SearchInlineScope.Archives => _localizationService.T("Search.Tab.Archive"),
         SearchInlineScope.Clipboard => _localizationService.T("Search.Scope.Placeholder.Clipboard"),
         SearchInlineScope.Todos => _localizationService.T("Search.Scope.Placeholder.Todos"),
         SearchInlineScope.Notes => _localizationService.T("Search.Scope.Placeholder.Notes"),
+        SearchInlineScope.Widgets => _localizationService.T("Search.Tab.Widget"),
         SearchInlineScope.Settings => _localizationService.T("Search.Scope.Placeholder.Settings"),
         SearchInlineScope.Commands => _localizationService.T("Search.Scope.Placeholder.Commands"),
         _ => _localizationService.T("Search.Placeholder")
@@ -293,9 +312,16 @@ public sealed partial class SearchPopupWindow
     {
         SearchInlineScope.Apps => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Apps")),
         SearchInlineScope.Files => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Files")),
+        SearchInlineScope.Folders => _localizationService.T("Search.Tab.Folder"),
+        SearchInlineScope.Images => _localizationService.T("Search.Tab.Image"),
+        SearchInlineScope.Documents => _localizationService.T("Search.Tab.Document"),
+        SearchInlineScope.Videos => _localizationService.T("Search.Tab.Video"),
+        SearchInlineScope.Music => _localizationService.T("Search.Tab.Music"),
+        SearchInlineScope.Archives => _localizationService.T("Search.Tab.Archive"),
         SearchInlineScope.Clipboard => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Clipboard")),
         SearchInlineScope.Todos => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Todos")),
         SearchInlineScope.Notes => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Notes")),
+        SearchInlineScope.Widgets => _localizationService.T("Search.Tab.Widget"),
         SearchInlineScope.Settings => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Settings")),
         SearchInlineScope.Commands => TrimEllipsis(_localizationService.T("Search.Scope.Placeholder.Commands")),
         _ => _localizationService.T("Search.Scope.GlobalTitle")
@@ -313,7 +339,7 @@ public sealed partial class SearchPopupWindow
         ToolTipService.SetToolTip(ScopeBackButton, _localizationService.T("Search.Scope.GlobalTitle"));
         SyncDetailsToggleTooltip();
         SyncScopeHeaderVisuals(SearchTextBox?.Text);
-        if (DetailsPaneCard?.Visibility == Visibility.Visible && !_isDetailsPaneClosing)
+        if (DetailsPaneCard?.Visibility == Visibility.Visible)
         {
             PopulateDetailsPane(_viewModel.SelectedItem, immediate: true);
         }
@@ -323,18 +349,21 @@ public sealed partial class SearchPopupWindow
     private void SyncDetailsToggleTooltip()
     {
         bool detailsEnabled = _settingsService.Settings.Search.SearchShowDetailsPane;
+        bool widthAllowsDetails = SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(
+            userPrefersDetailsPane: true,
+            GetCurrentPopupLogicalWidth());
         string tip = _localizationService.T(
             detailsEnabled ? "Search.Details.ToggleHide" : "Search.Details.ToggleShow");
         ToolTipService.SetToolTip(ToggleDetailsPaneButton, tip);
-        ToggleDetailsPaneIcon.Opacity = detailsEnabled ? 1.0 : 0.62;
+        ToggleDetailsPaneIcon.Opacity = detailsEnabled && widthAllowsDetails
+            ? 1.0
+            : (detailsEnabled ? 0.50 : 0.62);
     }
 
     private void ResetSearchSessionVisualFlags()
     {
         _hasShownDetailsInQuerySession = false;
         _hasExpandedResultsInQuerySession = false;
-        _isDetailsPaneClosing = false;
-        _isDetailsPaneToggleMorph = false;
         CancelPendingDetailsFilePreview();
         _loadedAsyncPreviewItem = null;
     }
@@ -362,13 +391,26 @@ public sealed partial class SearchPopupWindow
         bool next = !_settingsService.Settings.Search.SearchShowDetailsPane;
         _settingsService.Settings.Search.SearchShowDetailsPane = next;
         _settingsService.SaveDebounced(notifySubscribers: false);
-        _isDetailsPaneToggleMorph = ResultsPanel.Visibility == Visibility.Visible;
         if (next)
         {
             _hasShownDetailsInQuerySession = false;
         }
         SyncDetailsToggleTooltip();
         UpdatePanelVisibility();
+    }
+
+    private void ToggleSortHeaderPreference()
+    {
+        bool next = !_settingsService.Settings.Search.SearchShowSortHeader;
+        _settingsService.Settings.Search.SearchShowSortHeader = next;
+        _settingsService.SaveDebounced(notifySubscribers: false);
+        if (!next)
+        {
+            _viewModel.ApplyDefaultSortFromSettings();
+        }
+        UpdatePanelVisibility();
+        SyncSortHeaderAndRowColumns(forceRefreshRows: true);
+        UpdateSortHeaders();
     }
 
     private void ToggleDetailsPaneButton_Click(object sender, RoutedEventArgs e)
@@ -381,119 +423,17 @@ public sealed partial class SearchPopupWindow
     {
         ResultsSplitGrid.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
         bool showDetails = showResults &&
-                           _settingsService.Settings.Search.SearchShowDetailsPane &&
+                           SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(
+                               _settingsService.Settings.Search.SearchShowDetailsPane,
+                               GetCurrentPopupLogicalWidth()) &&
                            _viewModel.SelectedItem is not null;
 
         bool wasCollapsed = DetailsPaneCard.Visibility != Visibility.Visible;
         if (showDetails)
         {
-            _isDetailsPaneClosing = false;
             DetailsPaneCard.IsHitTestVisible = true;
             DetailsPaneCard.Visibility = Visibility.Visible;
             PopulateDetailsPane(_viewModel.SelectedItem, immediate: true);
-            double currentWidth = double.IsFinite(RootGrid.Width) && RootGrid.Width > 0
-                ? RootGrid.Width
-                : SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
-            bool willSpringWidth = IsPopupVisible &&
-                                   AreSystemAnimationsEnabled() &&
-                                   !RecommendationOverlays.IsAnyOverlayOpen &&
-                                   (IsMorphSpringRunning ||
-                                    Math.Abs(currentWidth - SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical) > 1.0);
-            if (willSpringWidth)
-            {
-                _hasShownDetailsInQuerySession = true;
-                ApplyDetailsSplitWidthForPopupWidth(currentWidth, isSettled: false);
-            }
-            else
-            {
-                _isDetailsPaneToggleMorph = false;
-                _detailsEntranceStoryboard?.Stop();
-                ResultsListColumn.Width = new GridLength(3, GridUnitType.Star);
-                DetailsPaneColumn.Width = new GridLength(2, GridUnitType.Star);
-                if (wasCollapsed &&
-                    !_hasShownDetailsInQuerySession &&
-                    AreSystemAnimationsEnabled() &&
-                    !_viewModel.IsApplyingBackgroundResultRefresh)
-                {
-                    _hasShownDetailsInQuerySession = true;
-                    AnimateDetailsPaneEntrance();
-                }
-                else
-                {
-                    _hasShownDetailsInQuerySession = true;
-                    DetailsPaneCard.Opacity = 1.0;
-                    DetailsTranslateTransform.X = 0;
-                }
-            }
-        }
-        else
-        {
-            _detailsUpdateCoalesceTimer?.Stop();
-            CancelPendingDetailsFilePreview();
-            _loadedAsyncPreviewItem = null;
-            bool shouldAnimateClose = showResults &&
-                                      IsPopupVisible &&
-                                      AreSystemAnimationsEnabled() &&
-                                      !RecommendationOverlays.IsAnyOverlayOpen &&
-                                      DetailsPaneCard.Visibility == Visibility.Visible &&
-                                      double.IsFinite(RootGrid.Width) &&
-                                      RootGrid.Width > SearchPopupSurfacePolicy.DefaultPopupWidthLogical + 1.0;
-            if (shouldAnimateClose)
-            {
-                _isDetailsPaneClosing = true;
-                _isDetailsPaneToggleMorph = true;
-                DetailsPaneCard.IsHitTestVisible = false;
-                ApplyDetailsSplitWidthForPopupWidth(RootGrid.Width, isSettled: false);
-            }
-            else
-            {
-                CompleteDetailsPaneClose();
-            }
-        }
-
-        SyncDetailsToggleTooltip();
-    }
-
-    private void CompleteDetailsPaneClose()
-    {
-        _isDetailsPaneClosing = false;
-        _isDetailsPaneToggleMorph = false;
-        _detailsEntranceStoryboard?.Stop();
-        _detailsUpdateCoalesceTimer?.Stop();
-        CancelPendingDetailsFilePreview();
-        _displayedDetailsItem = null;
-        _loadedAsyncPreviewItem = null;
-        DetailsImagePreview.Source = null;
-        DetailsImagePreviewBorder.Visibility = Visibility.Collapsed;
-        DetailsVideoBadge.Visibility = Visibility.Collapsed;
-        DetailsHeroImage.Source = null;
-        DetailsBodyPreviewText.Text = string.Empty;
-        DetailsBodyPreviewBorder.Visibility = Visibility.Collapsed;
-        DetailsPaneCard.Visibility = Visibility.Collapsed;
-        DetailsPaneCard.IsHitTestVisible = true;
-        DetailsPaneCard.Opacity = 1.0;
-        DetailsTranslateTransform.X = 0;
-        ResultsListColumn.Width = new GridLength(1, GridUnitType.Star);
-        DetailsPaneColumn.Width = new GridLength(0);
-    }
-
-    private void ApplyDetailsSplitWidthForPopupWidth(double currentPopupWidthLogical, bool isSettled)
-    {
-        if (isSettled)
-        {
-            _isDetailsPaneToggleMorph = false;
-            if (_isDetailsPaneClosing ||
-                DetailsPaneCard.Visibility != Visibility.Visible ||
-                currentPopupWidthLogical <= SearchPopupSurfacePolicy.DefaultPopupWidthLogical + 1.0)
-            {
-                if (DetailsPaneCard.Visibility == Visibility.Visible || _isDetailsPaneClosing)
-                {
-                    CompleteDetailsPaneClose();
-                }
-
-                return;
-            }
-
             _detailsEntranceStoryboard?.Stop();
             if (!ResultsListColumn.Width.IsStar || ResultsListColumn.Width.Value != 3.0)
             {
@@ -505,45 +445,51 @@ public sealed partial class SearchPopupWindow
                 DetailsPaneColumn.Width = new GridLength(2, GridUnitType.Star);
             }
 
-            DetailsPaneCard.IsHitTestVisible = true;
-            DetailsPaneCard.Opacity = 1.0;
-            DetailsTranslateTransform.X = 0;
-            return;
-        }
-
-        if (DetailsPaneCard.Visibility != Visibility.Visible)
-        {
-            return;
-        }
-
-        _detailsEntranceStoryboard?.Stop();
-        double progress = SearchPopupSurfacePolicy.ComputeDetailsCardProgress(currentPopupWidthLogical);
-        if (_isDetailsPaneToggleMorph || _isDetailsPaneClosing)
-        {
-            double colWidth = SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(currentPopupWidthLogical);
-            if (!ResultsListColumn.Width.IsStar || ResultsListColumn.Width.Value != 1.0)
+            if (wasCollapsed &&
+                !_isWindowResizing &&
+                !_hasShownDetailsInQuerySession &&
+                AreSystemAnimationsEnabled() &&
+                !_viewModel.IsApplyingBackgroundResultRefresh)
             {
-                ResultsListColumn.Width = new GridLength(1, GridUnitType.Star);
+                _hasShownDetailsInQuerySession = true;
+                AnimateDetailsPaneEntrance();
             }
-
-            DetailsPaneColumn.Width = new GridLength(colWidth, GridUnitType.Pixel);
+            else
+            {
+                _hasShownDetailsInQuerySession = true;
+                DetailsPaneCard.Opacity = 1.0;
+                DetailsTranslateTransform.X = 0;
+            }
         }
         else
         {
-            const double targetListWidth = SearchPopupSurfacePolicy.ResultsWithDetailsColumnWidthLogical;
-            if (!ResultsListColumn.Width.IsAbsolute || Math.Abs(ResultsListColumn.Width.Value - targetListWidth) > 0.1)
-            {
-                ResultsListColumn.Width = new GridLength(targetListWidth, GridUnitType.Pixel);
-            }
-
-            if (!DetailsPaneColumn.Width.IsStar || DetailsPaneColumn.Width.Value != 1.0)
-            {
-                DetailsPaneColumn.Width = new GridLength(1, GridUnitType.Star);
-            }
+            CompleteDetailsPaneClose();
         }
 
-        DetailsPaneCard.Opacity = progress <= 0.02 ? 0.0 : progress;
-        DetailsTranslateTransform.X = (1.0 - progress) * 10.0;
+        SyncDetailsToggleTooltip();
+        SyncSortHeaderAndRowColumns();
+    }
+
+    private void CompleteDetailsPaneClose()
+    {
+        _detailsEntranceStoryboard?.Stop();
+        _detailsUpdateCoalesceTimer?.Stop();
+        CancelPendingDetailsFilePreview();
+        _displayedDetailsItem = null;
+        _loadedAsyncPreviewItem = null;
+        DetailsImagePreview.Source = null;
+        DetailsImagePreviewBorder.Visibility = Visibility.Collapsed;
+        DetailsVideoBadge.Visibility = Visibility.Collapsed;
+        DetailsHeroImage.Source = null;
+        DetailsHeroIconHost.Visibility = Visibility.Visible;
+        DetailsBodyPreviewText.Text = string.Empty;
+        DetailsBodyPreviewBorder.Visibility = Visibility.Collapsed;
+        DetailsPaneCard.Visibility = Visibility.Collapsed;
+        DetailsPaneCard.IsHitTestVisible = true;
+        DetailsPaneCard.Opacity = 1.0;
+        DetailsTranslateTransform.X = 0;
+        ResultsListColumn.Width = new GridLength(1, GridUnitType.Star);
+        DetailsPaneColumn.Width = new GridLength(0);
     }
 
     private void AnimateDetailsPaneEntrance()
@@ -583,10 +529,12 @@ public sealed partial class SearchPopupWindow
     {
         UpdateCommandBarForSelectedItem();
 
-        if (DetailsPaneCard.Visibility != Visibility.Visible || _isDetailsPaneClosing)
+        if (DetailsPaneCard.Visibility != Visibility.Visible)
         {
             if (ResultsPanel.Visibility == Visibility.Visible &&
-                _settingsService.Settings.Search.SearchShowDetailsPane &&
+                SearchPopupSurfacePolicy.ShouldShowDetailsPaneForWidth(
+                    _settingsService.Settings.Search.SearchShowDetailsPane,
+                    GetCurrentPopupLogicalWidth()) &&
                 _viewModel.SelectedItem is not null)
             {
                 UpdateDetailsSplitLayout(showResults: true);
@@ -611,8 +559,7 @@ public sealed partial class SearchPopupWindow
             _detailsUpdateCoalesceTimer.Tick += (_, _) =>
             {
                 if (!_isWindowClosed &&
-                    DetailsPaneCard.Visibility == Visibility.Visible &&
-                    !_isDetailsPaneClosing)
+                    DetailsPaneCard.Visibility == Visibility.Visible)
                 {
                     PopulateDetailsPane(_viewModel.SelectedItem, immediate: true);
                 }
@@ -634,7 +581,7 @@ public sealed partial class SearchPopupWindow
         _lastDetailsPopulateTickMs = Environment.TickCount64;
         _displayedDetailsItem = item;
 
-        // 1. Hero Icon
+        // 1. Hero Icon (prepared as fallback; hidden whenever a rich visual preview image is expected/loaded)
         ImageSource? heroIcon = item.Icon ?? Controls.SearchResultRowControl.ResolveNativeWidgetSvgIcon(item);
         if (heroIcon is not null)
         {
@@ -648,6 +595,20 @@ public sealed partial class SearchPopupWindow
             DetailsHeroImagePlate.Visibility = Visibility.Collapsed;
             DetailsHeroGlyphPlate.Visibility = Visibility.Visible;
             DetailsHeroGlyph.Glyph = item.DisplayGlyph;
+        }
+
+        bool expectsVisualPreview = SearchDetailsPreviewLoader.ExpectsVisualImagePreview(item);
+        if (expectsVisualPreview)
+        {
+            bool previewLoadedForItem = ReferenceEquals(_loadedAsyncPreviewItem, item);
+            bool previewUnavailable = previewLoadedForItem && DetailsImagePreview.Source is null;
+            DetailsHeroIconHost.Visibility = previewUnavailable
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        else
+        {
+            DetailsHeroIconHost.Visibility = Visibility.Visible;
         }
 
         // Kick off lazy shell metadata enrichment if needed for file/folder items.
@@ -789,7 +750,6 @@ public sealed partial class SearchPopupWindow
             {
                 if (!_isWindowClosed &&
                     DetailsPaneCard.Visibility == Visibility.Visible &&
-                    !_isDetailsPaneClosing &&
                     _displayedDetailsItem is { } target)
                 {
                     _lastAsyncPreviewStartTickMs = Environment.TickCount64;
@@ -834,6 +794,7 @@ public sealed partial class SearchPopupWindow
             {
                 DetailsImagePreview.Source = loaded.Image;
                 DetailsImagePreviewBorder.Visibility = Visibility.Visible;
+                DetailsHeroIconHost.Visibility = Visibility.Collapsed;
                 DetailsVideoBadge.Visibility = loaded.IsVideoPoster
                     ? Visibility.Visible
                     : Visibility.Collapsed;
@@ -843,6 +804,7 @@ public sealed partial class SearchPopupWindow
                 DetailsImagePreview.Source = null;
                 DetailsImagePreviewBorder.Visibility = Visibility.Collapsed;
                 DetailsVideoBadge.Visibility = Visibility.Collapsed;
+                DetailsHeroIconHost.Visibility = Visibility.Visible;
             }
 
             if (!string.IsNullOrWhiteSpace(loaded.TextSnippet) &&
@@ -859,6 +821,7 @@ public sealed partial class SearchPopupWindow
                 DetailsImagePreview.Source = null;
                 DetailsImagePreviewBorder.Visibility = Visibility.Collapsed;
                 DetailsVideoBadge.Visibility = Visibility.Collapsed;
+                DetailsHeroIconHost.Visibility = Visibility.Visible;
             }
         }
     }
@@ -1357,7 +1320,7 @@ public sealed partial class SearchPopupWindow
     private void CmdBarActionsFlyout_Closed(object sender, object e)
     {
         _isCmdBarFlyoutOpen = false;
-        if (IsPopupVisible && !_isWindowClosed)
+        if (IsPopupVisible && !_isWindowClosed && _isPopupInputActive)
         {
             SearchTextBox.Focus(FocusState.Programmatic);
         }
@@ -1613,6 +1576,23 @@ public sealed partial class SearchPopupWindow
                 ToggleDetailsPanePreference();
                 return Task.FromResult(true);
             }));
+
+        if (_viewModel.SelectedTab?.SupportsFileSort == true)
+        {
+            bool sortHeaderVisible = _settingsService.Settings.Search.SearchShowSortHeader;
+            _allCmdBarActions.Add(new CommandPaletteActionEntry(
+                Id: "toggle-sort-header",
+                Title: _localizationService.T(
+                    sortHeaderVisible ? "Search.Actions.ToggleSortHeaderHide" : "Search.Actions.ToggleSortHeaderShow"),
+                Glyph: "\uE8FD",
+                ShortcutDisplay: null,
+                Keywords: "sort column header table bar 排序 表头 列表 排序栏",
+                ExecuteAsync: () =>
+                {
+                    ToggleSortHeaderPreference();
+                    return Task.FromResult(true);
+                }));
+        }
 
         _allCmdBarActions.Add(new CommandPaletteActionEntry(
             Id: "open-search-settings",

@@ -151,11 +151,14 @@ public sealed class FileSettingsEditorTests : IDisposable
         Assert.True(storage.IsDragOutCustomized);
         Assert.Equal(1, notified);
 
-        // Once diverged, editing DropAction updates only ManagedDropAction without overwriting DragOutAction.
+        // Editing the unified DropAction selector always re-synchronizes BOTH
+        // ManagedDropAction and ManagedDragOutAction so no hidden split state remains
+        // now that the redundant inner DragOut dropdown card has been removed.
         storage.DropAction = ManagedDropActions.FollowWindows;
         Assert.Equal(ManagedDropActions.FollowWindows, settings.Settings.FileWidget.ManagedDropAction);
-        Assert.Equal(ManagedDropActions.Copy, settings.Settings.FileWidget.ManagedDragOutAction);
-        Assert.Equal(ManagedDropActions.Copy, storage.DragOutAction);
+        Assert.Equal(ManagedDropActions.FollowWindows, settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(ManagedDropActions.FollowWindows, storage.DragOutAction);
+        Assert.False(storage.IsDragOutCustomized);
         Assert.Equal(2, notified);
 
         // Unknown DragOutAction values normalize to canonical Move without clobbering DropAction.
