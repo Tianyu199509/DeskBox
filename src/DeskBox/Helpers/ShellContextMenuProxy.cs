@@ -86,6 +86,7 @@ internal static class ShellContextMenuProxy
     private static readonly object s_pendingGate = new();
     private static PendingRequest? s_pendingRequest;
     private static int s_menuInFlight;
+    private static long s_lastMenuCompletedTick;
     private static int s_serverGeneration;
     private static ProxyServer? s_server;
     private static readonly object s_idleTimerGate = new();
@@ -106,6 +107,32 @@ internal static class ShellContextMenuProxy
     /// is process-global on purpose: only one native menu may be open at a time.
     /// </summary>
     internal static bool IsMenuRoundInFlight => Volatile.Read(ref s_menuInFlight) != 0;
+
+    /// <summary>
+    /// True within a short grace window after a native menu round finishes so
+    /// deferred keyboard-input activation (e.g. host-owned custom rename or
+    /// one-shot fallback exit) is not dropped as an unsolicited foreground move.
+    /// </summary>
+    internal static bool WasMenuRoundRecentlyActive(int graceWindowMs = 500) =>
+        IsMenuRoundInFlight ||
+        IsWithinPostMenuGraceWindow(
+            Volatile.Read(ref s_lastMenuCompletedTick),
+            Environment.TickCount64,
+            graceWindowMs);
+
+    internal static bool IsWithinPostMenuGraceWindow(
+        long lastCompletedTick,
+        long nowTick,
+        int graceWindowMs = 500)
+    {
+        if (lastCompletedTick == 0 || graceWindowMs <= 0)
+        {
+            return false;
+        }
+
+        long elapsed = nowTick - lastCompletedTick;
+        return elapsed >= 0 && elapsed <= graceWindowMs;
+    }
 
     /// <param name="renameLabel">
     /// Localized label for the host-owned rename entry the proxy appends to
@@ -178,6 +205,7 @@ internal static class ShellContextMenuProxy
         }
         finally
         {
+            Volatile.Write(ref s_lastMenuCompletedTick, Environment.TickCount64);
             Interlocked.Exchange(ref s_menuInFlight, 0);
             if (s_server is { HasExited: false })
             {

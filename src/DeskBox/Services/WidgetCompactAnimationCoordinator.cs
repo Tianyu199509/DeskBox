@@ -6,6 +6,7 @@ using DeskBox.Models;
 using DeskBox.Platform;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 using Windows.Graphics;
 
 namespace DeskBox.Services;
@@ -48,6 +49,13 @@ internal static class WidgetCompactAnimationCoordinator
     private static DispatcherQueue? s_windows10FrameDispatcher;
     private static DispatcherQueueTimer? s_windows10FrameTimer;
     private static Windows10ClockRun? s_windows10ClockRun;
+
+    private const double Win11StallWatchdogIntervalMs = 120;
+    private const double Win11StallFallbackFrameIntervalMs = 16;
+    private static DispatcherQueueTimer? s_win11StallWatchdogTimer;
+    private static long s_lastWin11RenderingTickTimestamp;
+    private static bool s_win11StallLoggedForCurrentRun;
+    private static bool s_win11StallFallbackPacingActive;
 
     // Session-level tick health, sampled on the UI thread from every frame
     // dispatch. The recent overrun bitmask feeds the interaction-time backdrop
@@ -265,6 +273,8 @@ internal static class WidgetCompactAnimationCoordinator
             // Idle pre-arm ticks already return before RecordFrameTickCadence,
             // so keep s_recentOverrunMask intact for backdrop simplification.
             s_lastFrameTickTimestamp = 0;
+            s_lastWin11RenderingTickTimestamp = Stopwatch.GetTimestamp();
+            s_win11StallLoggedForCurrentRun = false;
         }
 
         // Real registrations now own the clock; the last unregister tears it
@@ -272,11 +282,30 @@ internal static class WidgetCompactAnimationCoordinator
         s_isClockPreArmed = false;
         s_preArmLingerTimer?.Stop();
 
+        EnsureWin11StallWatchdogRunning();
+
         return new Registration(registrationId);
+    }
+
+    private static void EnsureWin11StallWatchdogRunning()
+    {
+        if (s_win11StallWatchdogTimer is not null)
+        {
+            return;
+        }
+
+        if (s_lastWin11RenderingTickTimestamp == 0)
+        {
+            s_lastWin11RenderingTickTimestamp = Stopwatch.GetTimestamp();
+        }
+
+        StartWin11StallWatchdog();
     }
 
     private static void StartFrameClock()
     {
+        s_lastWin11RenderingTickTimestamp = Stopwatch.GetTimestamp();
+        s_win11StallLoggedForCurrentRun = false;
         if (WindowsCompatibilityService.IsWindows11OrLater)
         {
             s_windows10ClockSource = Windows10FrameClockSource.None;
@@ -513,6 +542,7 @@ internal static class WidgetCompactAnimationCoordinator
     }
 
     private static bool s_deferredCallbackEscapePending;
+    private static bool s_deferredEscapeFromRealClock;
 
     private static void OnRendering(object? sender, object args)
     {
@@ -522,13 +552,20 @@ internal static class WidgetCompactAnimationCoordinator
         if (FrameCallbacks.Count == 0) return;
         if (CallbackDepth.Depth > 0)
         {
+            if (!ReferenceEquals(sender, s_win11StallWatchdogTimer))
+            {
+                s_deferredEscapeFromRealClock = true;
+            }
+
             if (!s_deferredCallbackEscapePending)
             {
                 s_deferredCallbackEscapePending = true;
                 UiDispatch.PostAfterCallback(() =>
                 {
+                    bool fromRealClock = s_deferredEscapeFromRealClock;
+                    s_deferredEscapeFromRealClock = false;
                     s_deferredCallbackEscapePending = false;
-                    OnRendering(null, EventArgs.Empty);
+                    OnRendering(fromRealClock ? null : s_win11StallWatchdogTimer, EventArgs.Empty);
                 });
             }
 
@@ -536,6 +573,18 @@ internal static class WidgetCompactAnimationCoordinator
         }
 
         RefreshFrameBudgets();
+        if (!ReferenceEquals(sender, s_win11StallWatchdogTimer))
+        {
+            s_lastWin11RenderingTickTimestamp = Stopwatch.GetTimestamp();
+            if (s_win11StallFallbackPacingActive)
+            {
+                s_win11StallFallbackPacingActive = false;
+                if (s_win11StallWatchdogTimer is not null)
+                {
+                    s_win11StallWatchdogTimer.Interval = TimeSpan.FromMilliseconds(Win11StallWatchdogIntervalMs);
+                }
+            }
+        }
         RecordFrameTickCadence();
         PendingBoundsMoves.Clear();
         s_isDispatchingFrame = true;
@@ -734,7 +783,74 @@ internal static class WidgetCompactAnimationCoordinator
                 break;
         }
 
+        StopWin11StallWatchdog();
         s_windows10ClockSource = Windows10FrameClockSource.None;
+    }
+
+    private static void StartWin11StallWatchdog()
+    {
+        StopWin11StallWatchdog();
+        DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
+        if (queue is null)
+        {
+            return;
+        }
+
+        DispatcherQueueTimer timer = queue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(Win11StallWatchdogIntervalMs);
+        timer.IsRepeating = true;
+        timer.Tick += OnWin11StallWatchdogTick;
+        s_win11StallWatchdogTimer = timer;
+        timer.Start();
+    }
+
+    private static void StopWin11StallWatchdog()
+    {
+        if (s_win11StallWatchdogTimer is not null)
+        {
+            s_win11StallWatchdogTimer.Stop();
+            s_win11StallWatchdogTimer.Tick -= OnWin11StallWatchdogTick;
+            s_win11StallWatchdogTimer = null;
+        }
+
+        s_lastWin11RenderingTickTimestamp = 0;
+        s_win11StallLoggedForCurrentRun = false;
+        s_win11StallFallbackPacingActive = false;
+    }
+
+    private static void OnWin11StallWatchdogTick(DispatcherQueueTimer sender, object args)
+    {
+        if (!ReferenceEquals(sender, s_win11StallWatchdogTimer) ||
+            !s_isRenderingSubscribed ||
+            FrameCallbacks.Count == 0 ||
+            s_isDispatchingFrame ||
+            s_lastWin11RenderingTickTimestamp == 0)
+        {
+            return;
+        }
+
+        double elapsedMs = Stopwatch.GetElapsedTime(s_lastWin11RenderingTickTimestamp).TotalMilliseconds;
+        if (elapsedMs < Win11StallWatchdogIntervalMs * 0.85)
+        {
+            return;
+        }
+
+        if (!s_win11StallFallbackPacingActive)
+        {
+            s_win11StallFallbackPacingActive = true;
+            sender.Interval = TimeSpan.FromMilliseconds(Win11StallFallbackFrameIntervalMs);
+        }
+
+        if (!s_win11StallLoggedForCurrentRun)
+        {
+            s_win11StallLoggedForCurrentRun = true;
+            App.Log(
+                $"[AnimationClock] Win11 CompositionTarget.Rendering stalled {elapsedMs:F0}ms " +
+                $"(callbacks={FrameCallbacks.Count}); pumping fallback tick");
+            InteractionBreadcrumbRecorder.Record("anim-clock-stall", $"{elapsedMs:F0}ms");
+        }
+
+        OnRendering(sender, args);
     }
 
     private static void StopWindows10RefreshTimer()
@@ -745,6 +861,71 @@ internal static class WidgetCompactAnimationCoordinator
             s_windows10FrameTimer.Tick -= OnWindows10FrameTimerTick;
             s_windows10FrameTimer = null;
         }
+    }
+
+    internal static IDisposable ScheduleDeadline(TimeSpan timeout, Action onExpired)
+    {
+        DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
+        if (queue is null)
+        {
+            return EmptyDisposable.Instance;
+        }
+
+        int cancelled = 0;
+        DispatcherQueueTimer timer = queue.CreateTimer();
+        timer.Interval = timeout;
+        timer.IsRepeating = false;
+        TypedEventHandler<DispatcherQueueTimer, object>? handler = null;
+        handler = (sender, _) =>
+        {
+            sender.Tick -= handler;
+            if (Volatile.Read(ref cancelled) != 0)
+            {
+                return;
+            }
+
+            if (CallbackDepth.Depth > 0)
+            {
+                UiDispatch.PostAfterCallback(() =>
+                {
+                    if (Volatile.Read(ref cancelled) == 0)
+                    {
+                        onExpired();
+                    }
+                });
+                return;
+            }
+
+            onExpired();
+        };
+        timer.Tick += handler;
+        timer.Start();
+        return new DeadlineRegistration(timer, handler, () => Interlocked.Exchange(ref cancelled, 1));
+    }
+
+    private sealed class DeadlineRegistration(
+        DispatcherQueueTimer timer,
+        TypedEventHandler<DispatcherQueueTimer, object> handler,
+        Action onDisposed) : IDisposable
+    {
+        private DispatcherQueueTimer? _timer = timer;
+
+        public void Dispose()
+        {
+            DispatcherQueueTimer? current = Interlocked.Exchange(ref _timer, null);
+            if (current is not null)
+            {
+                onDisposed();
+                current.Stop();
+                current.Tick -= handler;
+            }
+        }
+    }
+
+    private sealed class EmptyDisposable : IDisposable
+    {
+        public static readonly EmptyDisposable Instance = new();
+        public void Dispose() { }
     }
 
     private sealed class Registration(long registrationId) : IDisposable

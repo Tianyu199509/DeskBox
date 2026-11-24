@@ -198,6 +198,7 @@ public sealed partial class FileService
                     operations,
                     outcome.CompletedResults,
                     move);
+            NotifyCompletedMoveShellViews(operations, completedResults, move);
 
             App.Log(
                 $"[FileTransfer] Windows shell transfer returned " +
@@ -283,6 +284,55 @@ public sealed partial class FileService
         return hresult < 0 && hresult != ErrorCancelledHResult
             ? Marshal.GetExceptionForHR(hresult)
             : null;
+    }
+
+    internal static void NotifyCompletedMoveShellViews(
+        IReadOnlyList<TransferOperation> plannedOperations,
+        IReadOnlyList<FileTransferResult> completedResults,
+        bool move,
+        bool notifyShellDirectories = true)
+    {
+        if (!move || completedResults.Count == 0)
+        {
+            return;
+        }
+
+        var plannedBySource = new Dictionary<string, TransferOperation>(
+            plannedOperations.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (TransferOperation op in plannedOperations)
+        {
+            plannedBySource.TryAdd(op.SourcePath, op);
+        }
+
+        var completedOps = new List<TransferOperation>(completedResults.Count);
+        var desktopCandidates = new List<(string SourcePath, string DestinationPath, bool WasDirectory)>(
+            completedResults.Count);
+        foreach (FileTransferResult result in completedResults)
+        {
+            if (File.Exists(result.SourcePath) || Directory.Exists(result.SourcePath))
+            {
+                continue;
+            }
+
+            bool wasDirectory = plannedBySource.TryGetValue(result.SourcePath, out TransferOperation? planned)
+                ? planned.SourceIsDirectory
+                : Directory.Exists(result.DestinationPath);
+            completedOps.Add(new TransferOperation(result.SourcePath, result.DestinationPath, wasDirectory));
+            desktopCandidates.Add((result.SourcePath, result.DestinationPath, wasDirectory));
+        }
+
+        if (completedOps.Count == 0)
+        {
+            return;
+        }
+
+        if (notifyShellDirectories)
+        {
+            NotifyShellDirectoriesUpdated(completedOps, move: true);
+        }
+
+        DesktopIconPositionInterop.NotifyMovedOffRealDesktopIfNeeded(desktopCandidates);
     }
 
     internal static IReadOnlyList<FileTransferResult>

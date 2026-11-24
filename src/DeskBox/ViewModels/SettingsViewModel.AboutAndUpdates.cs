@@ -52,6 +52,19 @@ public partial class SettingsViewModel
     public Visibility UpdateToastNotificationVisibility =>
         IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     private bool _isOnAboutPage;
+    private readonly ServiceDownloadEventOrderGate _serviceDownloadEventGate = new();
+
+    internal sealed class ServiceDownloadEventOrderGate
+    {
+        private long _completedGeneration;
+
+        public long CaptureProgressGeneration() => Volatile.Read(ref _completedGeneration);
+
+        public bool IsCurrent(long capturedGeneration) =>
+            Volatile.Read(ref _completedGeneration) == capturedGeneration;
+
+        public void MarkCompleted() => Interlocked.Increment(ref _completedGeneration);
+    }
 
     public string DistributionChannelAndArchText =>
         $"{DistributionChannelText} · {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}";
@@ -120,17 +133,23 @@ public partial class SettingsViewModel
 
     private void OnServiceDownloadProgress(AppUpdateDownloadProgress progress)
     {
-        // Background auto-downloads raise progress from a thread-pool thread
-        // (their Progress<T> captures no UI context); mutating observable
-        // state from there reaches WinRT bindings off-thread and dies with
-        // RPC_E_WRONG_THREAD, so marshal to the VM's UI thread first.
+        long generation = _serviceDownloadEventGate.CaptureProgressGeneration();
+        // Background auto-downloads raise progress from a thread-pool thread;
+        // mutating observable state from there reaches WinRT bindings
+        // off-thread and dies with RPC_E_WRONG_THREAD, so marshal to the
+        // VM's UI thread first.
         if (_uiDispatcherQueue is { } queue && !queue.HasThreadAccess)
         {
-            queue.TryEnqueue(() => OnServiceDownloadProgress(progress));
+            queue.TryEnqueue(() => ApplyServiceDownloadProgress(progress, generation));
             return;
         }
 
-        if (_isVmDownloadInFlight)
+        ApplyServiceDownloadProgress(progress, generation);
+    }
+
+    private void ApplyServiceDownloadProgress(AppUpdateDownloadProgress progress, long generation)
+    {
+        if (_isVmDownloadInFlight || !_serviceDownloadEventGate.IsCurrent(generation))
         {
             return;
         }
@@ -160,14 +179,20 @@ public partial class SettingsViewModel
 
     private void OnServiceDownloadCompleted(AppUpdateDownloadResult result)
     {
+        _serviceDownloadEventGate.MarkCompleted();
         // Same marshal as the progress handler: the completion event can
         // arrive from the background download's thread.
         if (_uiDispatcherQueue is { } queue && !queue.HasThreadAccess)
         {
-            queue.TryEnqueue(() => OnServiceDownloadCompleted(result));
+            queue.TryEnqueue(() => ApplyServiceDownloadCompleted(result));
             return;
         }
 
+        ApplyServiceDownloadCompleted(result);
+    }
+
+    private void ApplyServiceDownloadCompleted(AppUpdateDownloadResult result)
+    {
         if (_isVmDownloadInFlight)
         {
             return;
@@ -454,8 +479,14 @@ public partial class SettingsViewModel
             : _localizationService.T("Settings.Update.Detail.Downloading");
         NotifyUpdateActionPropertiesChanged();
 
+        bool downloadActive = true;
         var progress = new Progress<AppUpdateDownloadProgress>(downloadProgress =>
         {
+            if (!downloadActive)
+            {
+                return;
+            }
+
             _updateBytesReceived = downloadProgress.BytesReceived;
             _updateTotalBytes = downloadProgress.TotalBytes;
             UpdateProgressValue = downloadProgress.Percent;
@@ -505,6 +536,7 @@ public partial class SettingsViewModel
         }
         finally
         {
+            downloadActive = false;
             _isVmDownloadInFlight = false;
             IsDownloadingUpdate = false;
             NotifyUpdateActionPropertiesChanged();
@@ -516,6 +548,11 @@ public partial class SettingsViewModel
         string? installerPath = _appUpdateService.LastDownloadedInstallerPath;
         if (!CanInstallUpdate || string.IsNullOrWhiteSpace(installerPath))
         {
+            App.Log(
+                $"[Update] StartDownloadedUpdateInstall blocked: canInstall={CanInstallUpdate} " +
+                $"direct={IsDirectInstallerUpdateDelivery} checking={IsCheckingForUpdates} " +
+                $"downloading={IsDownloadingUpdate} hasPath={!string.IsNullOrWhiteSpace(installerPath)} " +
+                $"fileExists={!string.IsNullOrWhiteSpace(installerPath) && File.Exists(installerPath)}");
             _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
             NotifyUpdateActionPropertiesChanged();
             return AppUpdateInstallResult.Failed(_localizationService.T("Settings.Update.Detail.DownloadMissing"));
@@ -532,6 +569,7 @@ public partial class SettingsViewModel
         }
         else
         {
+            App.Log($"[Update] StartDownloadedUpdateInstall failed: {result.ErrorMessage ?? "unknown"}");
             _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
         }
 

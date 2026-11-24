@@ -3048,18 +3048,15 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private void SchedulePopoverDismissIfDeactivated()
     {
-        if (_stackPopoverHostWindow is not { } host)
-        {
-            return;
-        }
-
+        if (_stackPopoverHostWindow is not { } host) return;
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            if (_stackPopoverPopupOpen &&
-                !_stackPopoverContextMenuOpen &&
-                !_stackPopoverSystemContextMenuOpen &&
-                !_stackPopoverDragActive &&
-                Win32Helper.GetForegroundWindow() != host.WindowHandle)
+            if (!_stackPopoverPopupOpen || _stackPopoverContextMenuOpen || _stackPopoverSystemContextMenuOpen ||
+                _stackPopoverDragActive || _pendingMenuRenameHandoffDepth > 0) return;
+            IntPtr fg = Win32Helper.GetForegroundWindow();
+            if (Win32Helper.GetForegroundWindow() != host.WindowHandle && fg != host.WindowHandle &&
+                !DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) &&
+                !DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg))
             {
                 StackPopoverHost_DeactivatedByOutsideClick();
             }

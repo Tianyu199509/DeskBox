@@ -38,6 +38,12 @@ internal static partial class ClipboardPlatformInterop
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_MENU = 0x12;
     private const ushort VK_V = 0x56;
+    private const ushort VK_LWIN = 0x5B;
+    private const ushort VK_RWIN = 0x5C;
+    private const ushort VK_LSHIFT = 0xA0;
+    private const ushort VK_RSHIFT = 0xA1;
+    private const ushort VK_LMENU = 0xA4;
+    private const ushort VK_RMENU = 0xA5;
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint GA_ROOTOWNER = 3;
@@ -627,6 +633,15 @@ internal static partial class ClipboardPlatformInterop
     internal static unsafe ClipboardPasteOutcome TryPasteToActiveOrLastWindow(IntPtr lastExternalHwnd)
     {
         IntPtr targetHwnd = GetForegroundWindow();
+        if (IsEligibleExternalPasteTarget(lastExternalHwnd) && targetHwnd != lastExternalHwnd)
+        {
+            if (SetForegroundWindow(lastExternalHwnd))
+            {
+                Thread.Sleep(24);
+                targetHwnd = GetForegroundWindow();
+            }
+        }
+
         if (!IsEligibleExternalPasteTarget(targetHwnd))
         {
             if (!IsEligibleExternalPasteTarget(lastExternalHwnd))
@@ -647,29 +662,36 @@ internal static partial class ClipboardPlatformInterop
             }
         }
 
-        // Release Shift/Alt logically if physically held so Ctrl+V is interpreted cleanly
-        // as standard paste (we already stripped formatting in clipboard payload when Shift was used).
-        bool shiftDown = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+        // Release both left/right physical and generic Shift/Alt/Win keys if held
+        // (e.g. user still releasing Alt+V or Shift+Enter) so win32k on Win10/11
+        // delivers clean Ctrl+V rather than Ctrl+Alt+V or Ctrl+Shift+V.
+        ReadOnlySpan<ushort> modifiersToClear =
+        [
+            VK_LSHIFT,
+            VK_RSHIFT,
+            VK_SHIFT,
+            VK_LMENU,
+            VK_RMENU,
+            VK_MENU,
+            VK_LWIN,
+            VK_RWIN
+        ];
 
-        int count = 4 + (shiftDown ? 1 : 0) + (altDown ? 1 : 0);
-        INPUT* inputs = stackalloc INPUT[8];
+        INPUT* inputs = stackalloc INPUT[16];
         int idx = 0;
-
-        if (shiftDown)
+        foreach (ushort vk in modifiersToClear)
         {
-            inputs[idx++] = CreateKeyInput(VK_SHIFT, KEYEVENTF_KEYUP);
-        }
-
-        if (altDown)
-        {
-            inputs[idx++] = CreateKeyInput(VK_MENU, KEYEVENTF_KEYUP);
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0)
+            {
+                inputs[idx++] = CreateKeyInput(vk, KEYEVENTF_KEYUP);
+            }
         }
 
         inputs[idx++] = CreateKeyInput(VK_CONTROL, 0);
         inputs[idx++] = CreateKeyInput(VK_V, 0);
         inputs[idx++] = CreateKeyInput(VK_V, KEYEVENTF_KEYUP);
         inputs[idx++] = CreateKeyInput(VK_CONTROL, KEYEVENTF_KEYUP);
+        int count = idx;
 
         uint sent = SendInput((uint)count, inputs, sizeof(INPUT));
         if (sent == (uint)count)

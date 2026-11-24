@@ -5664,10 +5664,11 @@ public sealed partial class WidgetShell : UserControl
         Canvas.SetZIndex(ShellContentPresenter, 1);
         double cornerHorizontalInset = _currentOuterSurfaceCornerRadius >= 16 ? 2 : 0;
         bool hasRightActions = RightActionButtonsHost.Visibility == Visibility.Visible;
-        TitleBarGrid.HorizontalAlignment = usesOverlay ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        bool collapseOverlayHeader = usesOverlay && !isEditingTitle;
+        TitleBarGrid.HorizontalAlignment = collapseOverlayHeader ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
         TitleBarGrid.VerticalAlignment = usesOverlay ? VerticalAlignment.Top : VerticalAlignment.Stretch;
-        TitleBarGrid.Margin = usesOverlay ? new Thickness(0, -2, 6 + cornerHorizontalInset, 0) : new Thickness(0);
-        TitleBarGrid.Padding = usesOverlay
+        TitleBarGrid.Margin = collapseOverlayHeader ? new Thickness(0, -2, 6 + cornerHorizontalInset, 0) : new Thickness(0);
+        TitleBarGrid.Padding = collapseOverlayHeader
             ? new Thickness(2, 0, 0, 0)
             : usesGroupTabs
                 ? new Thickness(
@@ -6948,6 +6949,7 @@ public sealed partial class WidgetShell : UserControl
         bool isEditingTitle = TitleEditorContent is not null;
         TitleEditorPresenter.Visibility = isEditingTitle ? Visibility.Visible : Visibility.Collapsed;
         TitleText.Visibility = isEditingTitle ? Visibility.Collapsed : Visibility.Visible;
+        UpdateTitleBarContentVisibility();
         ApplyChromeMode();
     }
 

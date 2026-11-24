@@ -473,8 +473,7 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW")]
     public static partial int GetWindowLong(IntPtr hWnd, int nIndex);
 
-    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongW")]
-    public static partial int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    // Tracked SetWindowLong wrapper lives in Win32Helper.InteropModernization.cs.
 
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     public static partial IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -2853,46 +2852,19 @@ public static partial class Win32Helper
         // access from lower-integrity processes.
         // TEMP-DIAG removed: null-SD experiment proved the descriptor was
         // NOT the WaitForConnection failure — the pipe mode constant was.
-        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                $"D:(A;;GWGR;;;{sid})S:(ML;;NW;;;ME)",
-                1,
-                out IntPtr descriptor,
-                IntPtr.Zero))
+        if (TryCreateSettingsIpcPipeCore(pipeName, bufferSize, $"D:(A;;GWGR;;;{sid})S:(ML;;NW;;;ME)", out var handle, out int primaryError))
         {
-            return null;
-        }
-
-        try
-        {
-            var attributes = new SecurityAttributes
-            {
-                Length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<SecurityAttributes>(),
-                SecurityDescriptor = descriptor,
-                InheritHandle = 0,
-            };
-            Microsoft.Win32.SafeHandles.SafePipeHandle handle = CreateNamedPipeW(
-                pipeName,
-                PipeAccessDuplex | FileFlagOverlapped,
-                PipeModeByteWaiting | 0x00000008u, // PIPE_REJECT_REMOTE_CLIENTS
-                maxInstances: 1,
-                outBufferSize: (uint)bufferSize,
-                inBufferSize: (uint)bufferSize,
-                defaultTimeOut: 0,
-                ref attributes);
-            if (handle.IsInvalid)
-            {
-                int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                handle.Dispose();
-                throw new InvalidOperationException(
-                    $"CreateNamedPipeW failed with win32 error {error} for {pipeName}");
-            }
-
             return handle;
         }
-        finally
+
+        App.Log($"[SettingsIpc] Mandatory-label pipe SDDL failed (error={primaryError}); retrying with user-SID DACL");
+        if (TryCreateSettingsIpcPipeCore(pipeName, bufferSize, $"D:(A;;GWGR;;;{sid})", out handle, out int fallbackError))
         {
-            LocalFree(descriptor);
+            return handle;
         }
+
+        throw new InvalidOperationException(
+            $"CreateNamedPipeW failed with win32 error {fallbackError} (primary={primaryError}) for {pipeName}");
     }
 
 

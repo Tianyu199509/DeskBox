@@ -1084,6 +1084,8 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="{x:Bind ActionOverlayVerticalAlignment, Mode=OneWay}"
                                     Background="{ThemeResource WidgetOverlaySurfaceBrush}"
+                                    BorderBrush="{ThemeResource WidgetOverlayStrokeBrush}"
+                                    BorderThickness="1"
                                     Canvas.ZIndex="2"
                                     CornerRadius="4"
                                     IsHitTestVisible="False"
@@ -1101,7 +1103,7 @@
                                             Tag="{x:Bind}"
                                             ToolTipService.ToolTip="{x:Bind QuickActionTooltip, Mode=OneWay}"
                                             Visibility="{x:Bind QuickActionVisibility, Mode=OneWay}">
-                                            <FontIcon FontSize="10.5" Glyph="{x:Bind QuickActionGlyph, Mode=OneWay}" Opacity="0.86" />
+                                            <FontIcon FontSize="10.5" Glyph="{x:Bind QuickActionGlyph, Mode=OneWay}" />
                                         </Button>
                                         <Button
                                             Width="22"
@@ -1114,7 +1116,7 @@
                                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                                             Tag="{x:Bind}"
                                             ToolTipService.ToolTip="{x:Bind PeekEditTooltip, Mode=OneWay}">
-                                            <FontIcon FontSize="10.5" Glyph="&#xE70F;" Opacity="0.84" />
+                                            <FontIcon FontSize="10.5" Glyph="&#xE70F;" />
                                         </Button>
                                         <Button
                                             Width="22"
@@ -1127,7 +1129,7 @@
                                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                                             Tag="{x:Bind}"
                                             ToolTipService.ToolTip="{x:Bind CopyTooltip, Mode=OneWay}">
-                                            <FontIcon FontSize="10.5" Glyph="{x:Bind CopyButtonGlyph, Mode=OneWay}" Opacity="0.86" />
+                                            <FontIcon FontSize="10.5" Glyph="{x:Bind CopyButtonGlyph, Mode=OneWay}" />
                                         </Button>
                                         <Button
                                             Width="22"
@@ -1140,7 +1142,7 @@
                                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                                             Tag="{x:Bind}"
                                             ToolTipService.ToolTip="{x:Bind PinTooltip, Mode=OneWay}">
-                                            <controls:PinStateIcon Width="12" Height="12" IsPinned="{x:Bind IsPinned, Mode=OneWay}" Opacity="0.84" />
+                                            <controls:PinStateIcon Width="12" Height="12" IsPinned="{x:Bind IsPinned, Mode=OneWay}" />
                                         </Button>
                                         <Button
                                             Width="22"
@@ -1153,7 +1155,7 @@
                                             Style="{StaticResource WidgetCompactIconButtonStyle}"
                                             Tag="{x:Bind}"
                                             ToolTipService.ToolTip="{x:Bind DeleteTooltip, Mode=OneWay}">
-                                            <FontIcon FontSize="10.5" Glyph="&#xE74D;" Opacity="0.84" />
+                                            <FontIcon FontSize="10.5" Glyph="&#xE74D;" />
                                         </Button>
                                     </StackPanel>
                                 </Border>

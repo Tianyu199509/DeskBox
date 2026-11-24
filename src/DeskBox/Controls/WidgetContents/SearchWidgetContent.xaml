@@ -1,0 +1,832 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.SearchWidgetContent"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+    mc:Ignorable="d"
+    PointerEntered="UserControl_PointerEntered"
+    PointerExited="UserControl_PointerExited"
+    SizeChanged="UserControl_SizeChanged">
+
+    <UserControl.Resources>
+        <Style
+            x:Key="SearchSubtleIconButtonStyle"
+            BasedOn="{StaticResource SubtleButtonStyle}"
+            TargetType="Button">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+        </Style>
+
+        <Style
+            x:Key="SearchModePillButtonStyle"
+            TargetType="Button">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="9,0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border
+                            x:Name="PillSurface"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="PillSurface.Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="PillSurface.Background" Value="{ThemeResource ControlFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter
+                                HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style
+            x:Key="SearchSubmitButtonStyle"
+            TargetType="Button">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border
+                            x:Name="SubmitSurface"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="SubmitSurface.Background" Value="{ThemeResource ControlFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="SubmitSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter
+                                HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style
+            x:Key="SearchListRowButtonStyle"
+            TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border
+                            x:Name="RowSurface"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RowSurface.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RowSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter
+                                HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style
+            x:Key="SearchPlainRowButtonStyle"
+            TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <ContentPresenter
+                                HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style
+            x:Key="SearchFooterLinkButtonStyle"
+            TargetType="Button">
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border
+                            x:Name="FooterSurface"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="FooterSurface.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="FooterContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="FooterSurface.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Target="FooterContent.Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter
+                                x:Name="FooterContent"
+                                HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}"
+                                Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid x:Name="RootGrid">
+        <!-- L1: MicroTile (W < 190 || (W < 230 && H >= 85)) -->
+        <Button
+            x:Name="MicroTileButton"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Padding="10,8"
+            HorizontalContentAlignment="Center"
+            VerticalContentAlignment="Center"
+            Background="Transparent"
+            BorderBrush="Transparent"
+            BorderThickness="0"
+            CornerRadius="{StaticResource WidgetCornerRadiusMedium}"
+            Click="MicroTileButton_Click"
+            Visibility="Collapsed">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                <Border
+                    Width="34"
+                    Height="34"
+                    HorizontalAlignment="Center"
+                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                    CornerRadius="10">
+                    <FontIcon
+                        FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                        FontSize="16"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        Glyph="&#xE721;" />
+                </Border>
+                <TextBlock
+                    x:Name="MicroTitleText"
+                    HorizontalAlignment="Center"
+                    FontSize="12.5"
+                    FontWeight="Normal"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    TextTrimming="CharacterEllipsis" />
+                <Border
+                    x:Name="MicroHotkeyBadge"
+                    Padding="6,2"
+                    HorizontalAlignment="Center"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderThickness="0"
+                    CornerRadius="4">
+                    <TextBlock
+                        x:Name="MicroHotkeyText"
+                        FontSize="10.5"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Border>
+            </StackPanel>
+        </Button>
+
+        <!-- L2 / L3W / L3 / L4 Expanded Shell -->
+        <Grid
+            x:Name="ExpandedRootGrid"
+            Padding="10,14,10,8"
+            RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Row 0: Native Fluent 2 Search Input Box -->
+            <Border
+                x:Name="SearchInputContainer"
+                Grid.Row="0"
+                MinHeight="36"
+                Background="{ThemeResource ControlFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid
+                        Grid.Row="0"
+                        Padding="10,2,5,2"
+                        ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left Icon + Latched Mode Pill -->
+                        <StackPanel
+                            Grid.Column="0"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            VerticalAlignment="Center">
+                            <FontIcon
+                                x:Name="SearchBoxGlyphIcon"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="14"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE721;" />
+                            <Border
+                                x:Name="LatchedModeBadge"
+                                Padding="7,2,3,2"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                BorderThickness="0"
+                                CornerRadius="5"
+                                Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock
+                                        x:Name="LatchedModeLabel"
+                                        VerticalAlignment="Center"
+                                        FontSize="11.5"
+                                        FontWeight="Normal"
+                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                    <Button
+                                        x:Name="ClearLatchedModeButton"
+                                        Width="16"
+                                        Height="16"
+                                        MinWidth="16"
+                                        MinHeight="16"
+                                        Padding="0"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        CornerRadius="4"
+                                        Click="ClearLatchedModeButton_Click">
+                                        <FontIcon
+                                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                            FontSize="9"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="&#xE711;" />
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- TextBox -->
+                        <TextBox
+                            x:Name="SearchInputBox"
+                            Grid.Column="1"
+                            MinHeight="30"
+                            Padding="0,5,0,4"
+                            VerticalAlignment="Center"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Loaded="SearchInputBox_Loaded"
+                            GotFocus="SearchInputBox_GotFocus"
+                            LostFocus="SearchInputBox_LostFocus"
+                            PointerPressed="SearchInputBox_PointerPressed"
+                            PreviewKeyDown="SearchInputBox_PreviewKeyDown"
+                            TextChanged="SearchInputBox_TextChanged">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
+
+                        <!-- Right Cluster: Calc Result, Hover Micro Actions (L2), Hotkey, Clear, Submit -->
+                        <StackPanel
+                            Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            VerticalAlignment="Center">
+                            <Button
+                                x:Name="CalcResultButton"
+                                Height="24"
+                                MinHeight="24"
+                                Padding="8,0"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                BorderThickness="0"
+                                CornerRadius="6"
+                                Click="CalcResultButton_Click"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="CalcResultButtonText"
+                                    FontSize="12"
+                                    FontWeight="Normal"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            </Button>
+
+                            <!-- L2 CompactBar hover-only quick triggers (+, ;, >) when empty and W >= 260 -->
+                            <StackPanel
+                                x:Name="CompactHoverQuickPanel"
+                                Orientation="Horizontal"
+                                Spacing="2"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed">
+                                <Button
+                                    x:Name="CompactQuickTodoButton"
+                                    Style="{StaticResource SearchSubtleIconButtonStyle}"
+                                    Click="QuickTodoButton_Click">
+                                    <TextBlock FontSize="12" FontWeight="Normal" Text="+" />
+                                </Button>
+                                <Button
+                                    x:Name="CompactQuickNoteButton"
+                                    Style="{StaticResource SearchSubtleIconButtonStyle}"
+                                    Click="QuickNoteButton_Click">
+                                    <TextBlock FontSize="12" FontWeight="Normal" Text=";" />
+                                </Button>
+                                <Button
+                                    x:Name="CompactQuickCommandButton"
+                                    Style="{StaticResource SearchSubtleIconButtonStyle}"
+                                    Click="QuickCommandButton_Click">
+                                    <TextBlock FontSize="12" FontWeight="Normal" Text="&gt;" />
+                                </Button>
+                            </StackPanel>
+
+                            <Border
+                                x:Name="InputHotkeyBadge"
+                                Padding="6,2"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                BorderThickness="0"
+                                CornerRadius="4"
+                                Opacity="0.72">
+                                <TextBlock
+                                    x:Name="InputHotkeyText"
+                                    FontSize="10.5"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Border>
+
+                            <Button
+                                x:Name="ClearInputButton"
+                                Style="{StaticResource SearchSubtleIconButtonStyle}"
+                                Click="ClearInputButton_Click"
+                                Visibility="Collapsed">
+                                <FontIcon
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                    FontSize="10"
+                                    Glyph="&#xE711;" />
+                            </Button>
+
+                            <Button
+                                x:Name="SubmitButton"
+                                Style="{StaticResource SearchSubmitButtonStyle}"
+                                Click="SubmitButton_Click"
+                                Visibility="Collapsed">
+                                <FontIcon
+                                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    Glyph="&#xE72A;" />
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Soft bottom focus hint -->
+                    <Border
+                        x:Name="SearchInputFocusUnderline"
+                        Grid.Row="1"
+                        Height="1.5"
+                        Margin="10,0"
+                        Opacity="0.55"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                        CornerRadius="1"
+                        Visibility="Collapsed" />
+                </Grid>
+            </Border>
+
+            <!-- Row 1: Quick-Mode Pills [+ 待办] [; 随记] [> 命令] (+ WideStrip horizontal queries in L3W) -->
+            <Grid
+                x:Name="PillsAndStripRow"
+                Grid.Row="1"
+                ColumnSpacing="6"
+                Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel
+                    Grid.Row="0"
+                    Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    VerticalAlignment="Center">
+                    <Button
+                        x:Name="QuickTodoButton"
+                        Style="{StaticResource SearchModePillButtonStyle}"
+                        Click="QuickTodoButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="QuickTodoPrefix"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <TextBlock
+                                x:Name="QuickTodoLabel"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="QuickNoteButton"
+                        Style="{StaticResource SearchModePillButtonStyle}"
+                        Click="QuickNoteButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="QuickNotePrefix"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <TextBlock
+                                x:Name="QuickNoteLabel"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="QuickCommandButton"
+                        Style="{StaticResource SearchModePillButtonStyle}"
+                        Click="QuickCommandButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="QuickCommandPrefix"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                            <TextBlock
+                                x:Name="QuickCommandLabel"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- L3W horizontal strip of pinned + recent queries -->
+                <ScrollViewer
+                    x:Name="WideStripScroller"
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    HorizontalScrollBarVisibility="Hidden"
+                    HorizontalScrollMode="Auto"
+                    VerticalScrollBarVisibility="Disabled"
+                    VerticalScrollMode="Disabled"
+                    Visibility="Collapsed">
+                    <StackPanel
+                        x:Name="WideStripChipsPanel"
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        VerticalAlignment="Center" />
+                </ScrollViewer>
+
+                <!-- L3W Everything status indicator -->
+                <Ellipse
+                    x:Name="WideStripStatusDot"
+                    Grid.Row="0"
+                    Grid.Column="2"
+                    Width="6"
+                    Height="6"
+                    Margin="2,0"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed" />
+            </Grid>
+
+            <!-- Row 2: Body (L3 single card / L4 7:5 split) -->
+            <Grid
+                x:Name="BodyGrid"
+                Grid.Row="2"
+                ColumnSpacing="10"
+                Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="HistoryColumnDef" Width="7*" />
+                    <ColumnDefinition x:Name="RecentOpenedColumnDef" Width="5*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Card: Pinned + Recent Queries -->
+                <Border
+                    x:Name="HistoryCard"
+                    Grid.Column="0"
+                    Padding="10,8"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderThickness="0"
+                    CornerRadius="8">
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0">
+                            <TextBlock
+                                x:Name="HistorySectionHeaderText"
+                                VerticalAlignment="Center"
+                                FontSize="11.5"
+                                FontWeight="Normal"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <Button
+                                x:Name="ClearHistoryButton"
+                                HorizontalAlignment="Right"
+                                Style="{StaticResource SearchFooterLinkButtonStyle}"
+                                Click="ClearHistoryButton_Click">
+                                <TextBlock x:Name="ClearHistoryLabel" />
+                            </Button>
+                        </Grid>
+
+                        <ScrollViewer
+                            Grid.Row="1"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled"
+                            HorizontalScrollMode="Disabled">
+                            <StackPanel Spacing="8">
+                                <!-- Pinned Queries (explicit Unpin 'x' + right-click menu on every pill) -->
+                                <controls:WrapFlowPanel
+                                    x:Name="PinnedQueriesWrap"
+                                    HorizontalSpacing="6"
+                                    VerticalSpacing="6"
+                                    Visibility="Collapsed" />
+
+                                <TextBlock
+                                    x:Name="RecentSubHeaderText"
+                                    FontSize="11"
+                                    FontWeight="Normal"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Visibility="Collapsed" />
+
+                                <!-- Recent Queries List -->
+                                <StackPanel
+                                    x:Name="RecentQueriesPanel"
+                                    Spacing="2"
+                                    Visibility="Collapsed" />
+
+                                <!-- Empty History State -->
+                                <TextBlock
+                                    x:Name="EmptyHistoryText"
+                                    Margin="0,8,0,4"
+                                    HorizontalAlignment="Center"
+                                    FontSize="11.5"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <!-- Right Card (L4): Continue Work / Recent Opened -->
+                <Border
+                    x:Name="RecentOpenedCard"
+                    Grid.Column="1"
+                    Padding="10,8"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderThickness="0"
+                    CornerRadius="8"
+                    Visibility="Collapsed">
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock
+                            x:Name="RecentOpenedHeaderText"
+                            Grid.Row="0"
+                            FontSize="11.5"
+                            FontWeight="Normal"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <ScrollViewer
+                            Grid.Row="1"
+                            VerticalScrollBarVisibility="Auto"
+                            HorizontalScrollBarVisibility="Disabled"
+                            HorizontalScrollMode="Disabled">
+                            <StackPanel Spacing="2">
+                                <StackPanel x:Name="RecentOpenedPanel" Spacing="2" />
+                                <TextBlock
+                                    x:Name="EmptyRecentOpenedText"
+                                    Margin="0,8,0,4"
+                                    HorizontalAlignment="Center"
+                                    FontSize="11.5"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Row 3: 1-line Minimal Footer (L3 & L4 only) -->
+            <Grid
+                x:Name="FooterGrid"
+                Grid.Row="3"
+                Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel
+                    Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    VerticalAlignment="Center">
+                    <Ellipse
+                        x:Name="FooterStatusDot"
+                        Width="6"
+                        Height="6"
+                        VerticalAlignment="Center" />
+                    <TextBlock
+                        x:Name="FooterStatusText"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    VerticalAlignment="Center">
+                    <Button
+                        x:Name="PrivacyMaskButton"
+                        Style="{StaticResource SearchFooterLinkButtonStyle}"
+                        Click="PrivacyMaskButton_Click"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <FontIcon
+                                x:Name="PrivacyMaskIcon"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="11"
+                                Glyph="&#xE890;" />
+                            <TextBlock x:Name="PrivacyMaskLabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="ExpandPopupButton"
+                        Style="{StaticResource SearchFooterLinkButtonStyle}"
+                        Click="ExpandPopupButton_Click"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock x:Name="ExpandPopupLabel" />
+                            <FontIcon
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="10"
+                                Glyph="&#xE8A7;" />
+                        </StackPanel>
+                    </Button>
+                    <Button
+                        x:Name="OpenSettingsButton"
+                        Style="{StaticResource SearchFooterLinkButtonStyle}"
+                        Click="OpenSettingsButton_Click"
+                        Visibility="Collapsed">
+                        <TextBlock x:Name="OpenSettingsLabel" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

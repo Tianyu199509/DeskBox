@@ -557,19 +557,20 @@ public abstract partial class WidgetWindowBase
             _materialCornerHooked = false;
         }
 
-        if (_materialBackdropBridge is null)
+        ElementBackdropTargetBridge? bridge = _materialBackdropBridge;
+        if (bridge is null)
         {
             return;
         }
 
-        if (ReferenceEquals(WidgetShellControl.MaterialSurface.SystemBackdrop, _materialBackdropBridge))
-        {
-            WidgetShellControl.MaterialSurface.SystemBackdrop = null;
-        }
-
-        _materialBackdropBridge.Dispose();
         _materialBackdropBridge = null;
         BackdropTarget = null;
+
+        // SystemBackdropElement targets wrap thread-affine native links. Keep
+        // MaterialSurface.SystemBackdrop rooted until XAML disconnects the element
+        // during visual-tree teardown so OnTargetDisconnected closes the native link
+        // on the UI thread instead of leaving it to the GC finalizer thread.
+        bridge.Dispose();
     }
 
     private bool ApplyTransparentHostBackdrop()
@@ -955,12 +956,12 @@ public abstract partial class WidgetWindowBase
 
         _isInteractionBackdropDowngraded = false;
         _interactionSimplifiedAcrylicController = false;
-        ClearSolidColorBackdrop();
-        DisposeMaterialBackdropBridge();
-        _lastAppliedBackdropSignature = null;
-        RoundedBackdropMaskService.TrimIdle();
         DetachAcrylicControllerTarget();
         DetachMicaControllerTarget();
+        _materialBackdropBridge?.Suspend();
+        ClearSolidColorBackdrop();
+        _lastAppliedBackdropSignature = null;
+        RoundedBackdropMaskService.TrimIdle();
     }
 
     protected void DetachMicaControllerTarget()

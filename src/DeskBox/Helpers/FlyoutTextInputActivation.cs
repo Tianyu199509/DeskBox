@@ -41,6 +41,12 @@ internal static class FlyoutTextInputActivation
                 return false;
             }
 
+            if (CallbackDepth.Depth > 0)
+            {
+                UiDispatch.PostAfterCallback(() => _ = ActivateVisibleBridges(logScope, originalSource));
+                return false;
+            }
+
             IReadOnlyList<IntPtr> bridges = Win32Helper.GetVisiblePopupBridgeWindows();
             if (bridges.Count == 0)
             {
@@ -56,8 +62,8 @@ internal static class FlyoutTextInputActivation
                 if (bridges[i] == foregroundBefore)
                 {
                     ClearNoActivate(foregroundBefore);
-                    IntPtr activeIsland = GetWindow(foregroundBefore, GwChild);
-                    if (activeIsland != IntPtr.Zero)
+                    IntPtr activeIsland = TransientInputFocusGuard.ResolveContentIslandChild(foregroundBefore);
+                    if (activeIsland != IntPtr.Zero && !TransientInputFocusGuard.IsFocusInsideContentIsland(foregroundBefore))
                     {
                         _ = SetFocus(activeIsland);
                     }
@@ -68,10 +74,10 @@ internal static class FlyoutTextInputActivation
             IntPtr targetBridge = SelectTargetBridge(bridges);
             ClearNoActivate(targetBridge);
             _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
-            _ = SetForegroundWindow(targetBridge);
+            _ = Win32Helper.SetForegroundWindow(targetBridge);
             _ = SetActiveWindow(targetBridge);
-            IntPtr island = GetWindow(targetBridge, GwChild);
-            if (island != IntPtr.Zero)
+            IntPtr island = TransientInputFocusGuard.ResolveContentIslandChild(targetBridge);
+            if (island != IntPtr.Zero && !TransientInputFocusGuard.IsFocusInsideContentIsland(targetBridge))
             {
                 _ = SetFocus(island);
             }

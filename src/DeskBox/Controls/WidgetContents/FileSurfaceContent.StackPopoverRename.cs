@@ -44,6 +44,11 @@ public sealed partial class FileSurfaceContent
         }
 
         Canvas.SetZIndex(editor, 40);
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(editor);
+        if (_stackPopoverTitleEditor is { } titleEditor)
+        {
+            DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(titleEditor);
+        }
         editor.KeyDown += StackPopoverItemRenameEditor_KeyDown;
         editor.LostFocus += StackPopoverItemRenameEditor_LostFocus;
         AutomationProperties.SetName(editor, T("Common.Rename"));
@@ -72,6 +77,7 @@ public sealed partial class FileSurfaceContent
         {
             if (ReferenceEquals(_stackPopoverItemRenameTarget, item))
             {
+                ActivateStackPopoverInput();
                 SelectItemNameForRename(editor, item.IsFolder);
             }
             return;

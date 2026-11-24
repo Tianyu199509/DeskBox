@@ -212,7 +212,11 @@ public sealed partial class QuickCaptureSurfaceContent
             PlayExpandEntranceAnimation(InlineComposerCard);
         }
 
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-inline-composer");
+        InteractionBreadcrumbRecorder.Record("qc-inline-open", $"dual={_isDualPane}");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "quick-capture-inline-composer",
+            expectTextInput: true);
         DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(InlineComposerTextBox);
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -222,6 +226,81 @@ public sealed partial class QuickCaptureSurfaceContent
                 InlineComposerTextBox.SelectionStart = InlineComposerTextBox.Text.Length;
             }
         });
+    }
+
+    internal static bool ShouldApplyPendingFocusOnActivation(
+        string? pendingFocusTarget,
+        bool isInlineComposerOpen,
+        bool isDetailEditing,
+        bool isSearchExpanded)
+    {
+        if (string.IsNullOrEmpty(pendingFocusTarget))
+        {
+            return false;
+        }
+
+        if (isInlineComposerOpen || isDetailEditing || isSearchExpanded)
+        {
+            return pendingFocusTarget is "InlineComposer" or "DetailEditor" or "Search";
+        }
+
+        return true;
+    }
+
+    internal static string ResolveFocusTargetName(
+        bool isInsideInlineComposer,
+        bool isInsideDetailEditor,
+        bool isInsideSearchBox,
+        bool isItemsList)
+    {
+        if (isInsideInlineComposer)
+        {
+            return "InlineComposer";
+        }
+
+        if (isInsideDetailEditor)
+        {
+            return "DetailEditor";
+        }
+
+        if (isInsideSearchBox)
+        {
+            return "Search";
+        }
+
+        if (isItemsList)
+        {
+            return "Items";
+        }
+
+        return "Root";
+    }
+
+    private static bool IsVisualDescendantOrSelf(DependencyObject? candidate, DependencyObject? ancestor)
+    {
+        for (DependencyObject? current = candidate;
+             current is not null && ancestor is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsTextInputSessionActiveOrFocused()
+    {
+        if (_isInlineComposerOpen || _isDetailEditing || ViewModel.IsSearchExpanded)
+        {
+            return true;
+        }
+
+        return XamlRoot is not null &&
+               FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused &&
+               TransientInputFocusGuard.IsInsideTextInputControl(focused);
     }
 
     private void RestoreInlineComposerTransientState(
@@ -577,10 +656,9 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
+            IntPtr owner = ResolveHostOwnerWindowHandle();
             IReadOnlyList<string> files = await FileOpenPickerService.PickMultipleFilesAsync(
-                owner == IntPtr.Zero ? foreground : owner,
+                owner,
                 [],
                 PickerLocationId.Desktop);
             foreach (string path in files.Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p)))

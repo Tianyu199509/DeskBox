@@ -23,6 +23,8 @@ namespace DeskBox.Views;
 
 public sealed partial class ContentWidgetWindow
 {
+    bool IDesktopWidgetWindow.IsHideAnimationRunning => IsHideAnimationRunning;
+
     public WidgetTrayAnimationProfile GetPlannedTrayAnimationProfile(bool isShowing) =>
         GetTrayAnimationProfile(isShowing);
 
@@ -146,11 +148,51 @@ public sealed partial class ContentWidgetWindow
             failed: NotifyVisibleContentRevealCompleted);
     }
 
-    private void PlayTrayRaiseAnimationAfterFirstFrame()
+    private void StartTrayRaiseAnimationAfterVisualCommit(bool activateOnReveal)
     {
-        if (Visible)
+        _ = PlayTrayRaiseAnimationAfterVisualCommitCoreAsync(activateOnReveal);
+    }
+
+    private async Task PlayTrayRaiseAnimationAfterVisualCommitCoreAsync(bool activateOnReveal)
+    {
+        try
         {
-            TrayAnimation.PlayAfterContentReady(PlayTrayRaiseAnimation);
+            if (!Visible || IsClosing)
+            {
+                TrayAnimation.RevealWindowForTrayShow();
+                return;
+            }
+
+            long preparedGeneration = TrayAnimation.Generation;
+            try
+            {
+                if (TrayAnimation.IsWindowCloakedForTrayShow)
+                {
+                    await TrayAnimation.WaitForVisualCommitAsync();
+                }
+            }
+            finally
+            {
+                TrayAnimation.RevealWindowForTrayShow();
+            }
+
+            if (!Visible || IsClosing || TrayAnimation.Generation != preparedGeneration)
+            {
+                return;
+            }
+
+            if (activateOnReveal)
+            {
+                ActivateRaisedFromTrayBatch();
+            }
+
+            PlayTrayRaiseAnimation();
+        }
+        catch (Exception ex)
+        {
+            try { TrayAnimation.RevealWindowForTrayShow(); }
+            catch { }
+            LogTrayWindow($"PlayTrayRaiseAnimationAfterVisualCommit failed: {ex.Message}");
         }
     }
 

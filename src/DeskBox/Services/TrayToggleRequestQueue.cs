@@ -40,6 +40,7 @@ internal sealed class TrayToggleRequestQueue
     private readonly Queue<Request> _pending = new();
     private readonly Func<string, Task> _toggleAsync;
     private readonly TimeSpan _trayIconDoubleClickWindow;
+    private readonly Action? _onAcceptedWhileBusy;
     private bool _workerRunning;
     private long _totalRequests;
     private long _effectiveToggles;
@@ -51,10 +52,12 @@ internal sealed class TrayToggleRequestQueue
 
     public TrayToggleRequestQueue(
         Func<string, Task> toggleAsync,
-        TimeSpan? trayIconDoubleClickWindow = null)
+        TimeSpan? trayIconDoubleClickWindow = null,
+        Action? onAcceptedWhileBusy = null)
     {
         _toggleAsync = toggleAsync ?? throw new ArgumentNullException(nameof(toggleAsync));
         _trayIconDoubleClickWindow = trayIconDoubleClickWindow ?? DefaultTrayIconDoubleClickWindow;
+        _onAcceptedWhileBusy = onAcceptedWhileBusy;
     }
 
     public Task EnqueueAsync(string source)
@@ -62,6 +65,7 @@ internal sealed class TrayToggleRequestQueue
         var completion = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         bool startWorker;
+        bool notifyBusy;
         int pendingCount;
 
         lock (_sync)
@@ -89,12 +93,24 @@ internal sealed class TrayToggleRequestQueue
             _pending.Enqueue(new Request(source, completion));
             pendingCount = _pending.Count;
             startWorker = !_workerRunning;
+            notifyBusy = !startWorker && _onAcceptedWhileBusy is not null;
             _workerRunning = true;
         }
 
         App.LogVerbose(
             $"[TrayToggle] queued source={source} pending={pendingCount} " +
             $"startWorker={startWorker}");
+
+        if (notifyBusy)
+        {
+            try
+            {
+                _onAcceptedWhileBusy!();
+            }
+            catch
+            {
+            }
+        }
 
         if (startWorker)
         {

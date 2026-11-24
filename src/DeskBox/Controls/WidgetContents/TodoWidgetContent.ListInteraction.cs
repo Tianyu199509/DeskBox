@@ -357,7 +357,10 @@ public sealed partial class TodoWidgetContent
         }
 
         _copyTapGeneration++;
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-list-background");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "todo-list-background",
+            expectTextInput: false);
         TodoListView.Focus(FocusState.Programmatic);
         _selectionPointerPressed = true;
         _isBoxSelecting = false;
@@ -509,7 +512,10 @@ public sealed partial class TodoWidgetContent
 
         bool isCtrl = Win32Helper.IsKeyPressed(VirtualKey.Control);
         bool isShift = Win32Helper.IsKeyPressed(VirtualKey.Shift);
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-list-select");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "todo-list-select",
+            expectTextInput: false);
         ClearTodoListContainerSelection();
 
         if (isShift)

@@ -482,8 +482,7 @@ public sealed partial class TodoWidgetContent
         ConfigureCustomDueTimeState(dueDate, includeTime);
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
-        CustomDueDateOverlay!.Visibility = Visibility.Visible;
-        CustomDueDatePicker?.Focus(FocusState.Programmatic);
+        ShowAndFocusCustomDueDateOverlay();
         return Task.CompletedTask;
     }
 }

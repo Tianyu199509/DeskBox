@@ -256,6 +256,8 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         UpdateStorageLocationDisplay(normalizedRoot);
     }
 
+    private int _storageAssessmentGeneration;
+
     private void UpdateStorageLocationDisplay(string storageRootPath)
     {
         StoragePathText.Text = storageRootPath;
@@ -264,6 +266,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             LocationsButton,
             T("DesktopOrganization.Layout.Locations") + "\n" + storageRootPath);
 
+        int generation = Interlocked.Increment(ref _storageAssessmentGeneration);
         if (string.IsNullOrWhiteSpace(storageRootPath))
         {
             StorageFreeSpaceText.Visibility = Visibility.Collapsed;
@@ -271,7 +274,27 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             return;
         }
 
-        if (ManagedStoragePathService.OverlapsDesktop(storageRootPath))
+        _ = RefreshStorageLocationAssessmentAsync(storageRootPath, generation);
+    }
+
+    private async Task RefreshStorageLocationAssessmentAsync(string storageRootPath, int generation)
+    {
+        (bool overlapsDesktop, ManagedStoragePathAssessment? assessment) = await Task.Run(() =>
+        {
+            if (ManagedStoragePathService.OverlapsDesktop(storageRootPath))
+            {
+                return (true, (ManagedStoragePathAssessment?)null);
+            }
+
+            return (false, (ManagedStoragePathAssessment?)ManagedStoragePathService.AssessPath(storageRootPath));
+        });
+
+        if (!IsLoaded || generation != Volatile.Read(ref _storageAssessmentGeneration))
+        {
+            return;
+        }
+
+        if (overlapsDesktop)
         {
             StorageFreeSpaceText.Visibility = Visibility.Collapsed;
             StorageWarningInfo.Severity = InfoBarSeverity.Error;
@@ -280,8 +303,12 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             return;
         }
 
-        ManagedStoragePathAssessment assessment = ManagedStoragePathService.AssessPath(storageRootPath);
-        if (assessment.AvailableFreeSpace is { } freeBytes && freeBytes >= 0)
+        if (assessment is not { } resolved)
+        {
+            return;
+        }
+
+        if (resolved.AvailableFreeSpace is { } freeBytes && freeBytes >= 0)
         {
             StorageFreeSpaceText.Text = Format(
                 "DesktopOrganization.Layout.FreeSpaceAvailable",
@@ -293,19 +320,19 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             StorageFreeSpaceText.Visibility = Visibility.Collapsed;
         }
 
-        if (assessment.DriveType == DriveType.Removable || assessment.IsTransientBusDrive)
+        if (resolved.DriveType == DriveType.Removable || resolved.IsTransientBusDrive)
         {
             StorageWarningInfo.Severity = InfoBarSeverity.Warning;
             StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.Removable");
             StorageWarningInfo.IsOpen = true;
         }
-        else if (assessment.DriveType == DriveType.Network)
+        else if (resolved.DriveType == DriveType.Network)
         {
             StorageWarningInfo.Severity = InfoBarSeverity.Warning;
             StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.Network");
             StorageWarningInfo.IsOpen = true;
         }
-        else if (assessment.IsCloudSynced)
+        else if (resolved.IsCloudSynced)
         {
             StorageWarningInfo.Severity = InfoBarSeverity.Informational;
             StorageWarningInfo.Message = T("Settings.ManagedPath.Warning.CloudSync");

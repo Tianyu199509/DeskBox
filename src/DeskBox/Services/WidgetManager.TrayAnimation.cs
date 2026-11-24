@@ -27,6 +27,17 @@ public sealed partial class WidgetManager
     // lockstep instead of staggering per-window (the "wave" effect).
     private readonly WidgetTrayBatchAnimationDriver _trayBatchAnimationDriver = new(App.LogVerbose);
 
+    private void CancelStalledHideBatchForQueuedToggle()
+    {
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (_trayBatchAnimationDriver.IsHiding)
+            {
+                _trayBatchAnimationDriver.Cancel();
+            }
+        });
+    }
+
     /// <summary>
     /// Bring desktop widgets to the front of the normal Z-order from the tray.
     /// </summary>
@@ -34,6 +45,11 @@ public sealed partial class WidgetManager
     {
         return RunOnUiThreadAsync(async () =>
         {
+            if (_trayBatchAnimationDriver.IsHiding)
+            {
+                _trayBatchAnimationDriver.Cancel();
+            }
+
             bool? result = null;
             await ExecuteTrayVisibilityOperationAsync(
                 "raise-from-tray",
@@ -125,23 +141,28 @@ public sealed partial class WidgetManager
                     }
                     else
                     {
-                        window.ShowPreparedRaisedFromTray(persistVisibility: false);
+                        window.ShowPreparedRaisedFromTray(
+                            persistVisibility: false,
+                            deferRevealUntilAnimationReady: true);
                     }
 
                     shownWindows.Add(window);
                 }
                 catch (Exception ex)
                 {
+                    try { window.RevealPreparedTrayShow(); }
+                    catch { }
                     App.Log($"[WidgetManager] Failed to show prepared widget from tray {FormatHostWindow(window)}: {ex}");
                 }
             }
+
+            await CommitAndRevealPreparedTrayShowWindowsAsync(shownWindows);
 
             // Keep the foreground that originated the request. Capturing after
             // showing the windows observes DeskBox's own temporary activation
             // instead of the desktop/application the user actually invoked it from.
             _foregroundAtRaiseTime = sourceForeground;
             _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(160);
-            PlayPreparedTrayShowAnimations(windowsToAnimate);
             SetWidgetsRaisedFromTray(shownWindows.Count > 0);
             // Release the raised group once the foreground leaves DeskBox (e.g. the
             // user clicks another app window). Without the monitor the widgets stay
@@ -175,6 +196,7 @@ public sealed partial class WidgetManager
                 ActivateIdleHighestWindow(shownWindows);
                 QueueTrayRaiseTopMostConfirmation(shownWindows);
             }
+            PlayPreparedTrayShowAnimations(windowsToAnimate);
             await _trayBatchAnimationDriver.WaitForIdleAsync();
             SaveBatchVisibilityState();
             if (!WidgetLayerService.UsesQuickRevealMode() &&
@@ -312,6 +334,8 @@ public sealed partial class WidgetManager
                 }
                 catch (Exception ex)
                 {
+                    try { window.RevealPreparedTrayShow(); }
+                    catch { }
                     App.Log($"[WidgetManager] Failed to play widget show animation {window}: {ex}");
                 }
             }
@@ -321,13 +345,54 @@ public sealed partial class WidgetManager
                 options.ShowDurationMs,
                 options.EasingIntensity,
                 isShowing: true,
-                startDelayFrames: 1);
+                startDelayFrames: 0);
             _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
+            RevealPreparedTrayShowWindows(windows);
             App.Log($"[TrayBatch] Error during batch animation: {ex}");
         }
+    }
+
+    private async Task CommitAndRevealPreparedTrayShowWindowsAsync(
+        IReadOnlyList<IDesktopWidgetWindow> shownWindows)
+    {
+        try
+        {
+            IDesktopWidgetWindow? cloakedWindow = null;
+            for (int index = 0; index < shownWindows.Count; index++)
+            {
+                if (shownWindows[index].IsTrayShowWindowCloaked)
+                {
+                    cloakedWindow = shownWindows[index];
+                    break;
+                }
+            }
+
+            if (cloakedWindow is not null)
+            {
+                await cloakedWindow.WaitForPreparedTrayShowCommitAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TrayBatch] Prepared show visual commit wait failed: {ex}");
+        }
+        finally
+        {
+            RevealPreparedTrayShowWindows(shownWindows);
+        }
+    }
+
+    private void RevealPreparedTrayShowWindows(
+        IReadOnlyList<IDesktopWidgetWindow> windows)
+    {
+        WidgetTrayAnimationPreparation.RevealAllSafely(
+            windows,
+            static window => window.RevealPreparedTrayShow(),
+            (window, ex) => App.Log(
+                $"[TrayBatch] Failed to reveal prepared widget {FormatHostWindow(window)}: {ex}"));
     }
 
     private void PrepareTrayShowAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)

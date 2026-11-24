@@ -6,8 +6,12 @@ using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -39,6 +43,9 @@ public sealed partial class ClipboardQuickPasteWindow : Window
     private long _sessionId;
     private bool _isVisible;
     private bool _isClosed;
+    private bool _isHeaderDragging;
+    private Win32Helper.POINT _dragStartCursor;
+    private PointInt32 _dragStartWindowPos;
 
     public ClipboardQuickPasteWindow(
         ClipboardHistoryService clipboardService,
@@ -59,6 +66,8 @@ public sealed partial class ClipboardQuickPasteWindow : Window
 
         Title = _localizationService.T("Window.ClipboardQuickPaste.Title");
         InitializeComponent();
+        ApplyLocalizedChrome();
+        _themeService?.TrackWindow(this);
         WindowsCompatibilityService.ApplySafeBackdrop(this);
 
         _hwnd = WindowNative.GetWindowHandle(this);
@@ -115,8 +124,8 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         _content.DismissRequested += OnContentDismissRequested;
         ContentHost.Content = _content;
 
-        _themeService?.TrackWindow(this);
         _localizationService.LanguageChanged += OnLanguageChanged;
+        WindowsCompatibilityService.HighContrastChanged += OnHighContrastChanged;
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
     }
@@ -178,6 +187,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             return;
         }
 
+        WindowsCompatibilityService.ApplySafeBackdrop(this);
         _appWindow.MoveAndResize(targetBounds);
         _isVisible = true;
         _content.OnWindowVisibilityChanged(true);
@@ -207,6 +217,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         }
 
         _sessionId++;
+        _isHeaderDragging = false;
         _isVisible = false;
         _content.OnWindowVisibilityChanged(false);
 
@@ -297,7 +308,9 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             return;
         }
 
-        if (_content.IsModalDialogOpen || _content.IsPeekPopoverOpen)
+        if (_content.IsModalDialogOpen ||
+            _content.IsPeekPopoverOpen ||
+            WidgetEditorPopoverWindow.HasOpenPopoverForOwner(_hwnd))
         {
             ArmColdHiddenCleanupTimer();
             return;
@@ -309,14 +322,31 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         Close();
     }
 
+    private void TransferForegroundBeforePasteHide()
+    {
+        IntPtr targetHwnd = _clipboardService.LastExternalForegroundWindow;
+        if (targetHwnd != IntPtr.Zero &&
+            targetHwnd != _hwnd &&
+            Win32Helper.IsWindow(targetHwnd) &&
+            Win32Helper.IsWindowVisible(targetHwnd))
+        {
+            _ = Win32Helper.SetForegroundWindow(targetHwnd);
+        }
+    }
+
     private async Task ExecuteQuickPasteAndHideAsync(ClipboardItemViewModel item, bool preferPlainText)
     {
-        // Hide popup first so SetForegroundWindow returns focus cleanly to the target window,
-        // then inject Ctrl+V and release popup visual assets afterward.
+        // Transfer foreground to the target external window BEFORE hiding our
+        // popup so DeskBox exercises its live Win32 foreground lock cleanly.
+        TransferForegroundBeforePasteHide();
         HidePopupCore(detachViewAssets: false);
         try
         {
-            await _viewModel.PasteItemAsync(item, preferPlainText);
+            (bool copied, bool pasted) = await _viewModel.PasteItemAsync(item, preferPlainText);
+            if (copied && !pasted)
+            {
+                App.Log("[Clipboard] Quick-paste fell back to clipboard copy (UIPI or target unavailable)");
+            }
         }
         finally
         {
@@ -329,10 +359,15 @@ public sealed partial class ClipboardQuickPasteWindow : Window
 
     private async Task ExecuteQuickPasteQueueNextAndHideAsync(bool preferPlainText)
     {
+        TransferForegroundBeforePasteHide();
         HidePopupCore(detachViewAssets: false);
         try
         {
-            await _viewModel.PasteNextQueueItemAsync(preferPlainText);
+            (bool copied, bool pasted) = await _viewModel.PasteNextQueueItemAsync(preferPlainText);
+            if (copied && !pasted)
+            {
+                App.Log("[Clipboard] Quick-paste queue next fell back to clipboard copy (UIPI or target unavailable)");
+            }
         }
         finally
         {
@@ -412,12 +447,145 @@ public sealed partial class ClipboardQuickPasteWindow : Window
                 _hwnd,
                 Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
                 ref cornerPreference);
+            Win32Helper.SetWindowBorderColor(_hwnd, unchecked((int)0xFFFFFFFE));
         }
 
         int exStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
         exStyle |= Win32Helper.WS_EX_TOOLWINDOW | Win32Helper.WS_EX_TOPMOST;
         exStyle &= ~Win32Helper.WS_EX_NOACTIVATE;
         _ = Win32Helper.SetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE, exStyle);
+        _ = Win32Helper.SetWindowPos(
+            _hwnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            Win32Helper.SWP_NOMOVE |
+            Win32Helper.SWP_NOSIZE |
+            Win32Helper.SWP_NOZORDER |
+            Win32Helper.SWP_NOACTIVATE |
+            Win32Helper.SWP_FRAMECHANGED);
+    }
+
+    private void ApplyLocalizedChrome()
+    {
+        string title = _localizationService.T("Window.ClipboardQuickPaste.Title");
+        Title = title;
+        PopupTitleText.Text = title;
+        string closeLabel = _localizationService.T("Common.Close");
+        AutomationProperties.SetName(ClosePopupButton, closeLabel);
+        ToolTipService.SetToolTip(ClosePopupButton, closeLabel);
+    }
+
+    private void ClosePopupButton_Click(object sender, RoutedEventArgs e) => HidePopup();
+
+    private void PopupHeaderGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isClosed || IsClickFromCloseButton(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        PointerPoint point = e.GetCurrentPoint(PopupHeaderGrid);
+        if (!point.Properties.IsLeftButtonPressed ||
+            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        {
+            return;
+        }
+
+        _isHeaderDragging = true;
+        _dragStartCursor = cursor;
+        _dragStartWindowPos = _appWindow.Position;
+        PopupHeaderGrid.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void PopupHeaderGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isHeaderDragging || _isClosed)
+        {
+            return;
+        }
+
+        PointerPoint point = e.GetCurrentPoint(PopupHeaderGrid);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            EndHeaderDrag(e.Pointer);
+            return;
+        }
+
+        if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        {
+            int targetX = _dragStartWindowPos.X + (cursor.X - _dragStartCursor.X);
+            int targetY = _dragStartWindowPos.Y + (cursor.Y - _dragStartCursor.Y);
+            // Move only with SWP_NOSIZE during pointer drag so WinUI 3's
+            // WM_DPICHANGED handler scales once when the HWND crosses monitors
+            // instead of compounding pre-resized bounds by 2.25x.
+            WindowShellState.MoveWindowInteractive(_appWindow, _hwnd, targetX, targetY);
+            e.Handled = true;
+        }
+    }
+
+    private void PopupHeaderGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndHeaderDrag(e.Pointer);
+    }
+
+    private void EndHeaderDrag(Pointer pointer)
+    {
+        if (!_isHeaderDragging)
+        {
+            return;
+        }
+
+        _isHeaderDragging = false;
+        try
+        {
+            PopupHeaderGrid.ReleasePointerCapture(pointer);
+        }
+        catch
+        {
+        }
+
+        if (!_isClosed && _isVisible && _hwnd != IntPtr.Zero)
+        {
+            double hwndScale = Win32Helper.GetDpiScaleForWindow(_hwnd, RootGrid.XamlRoot);
+            int expectedWidthPx = Math.Max(280, (int)Math.Round(DesiredWidthDip * hwndScale));
+            int expectedHeightPx = Math.Max(320, (int)Math.Round(DesiredHeightDip * hwndScale));
+            if (Math.Abs(_appWindow.Size.Width - expectedWidthPx) > 1 ||
+                Math.Abs(_appWindow.Size.Height - expectedHeightPx) > 1)
+            {
+                PointInt32 pos = _appWindow.Position;
+                WindowShellState.ResizeWindowInteractive(
+                    _appWindow,
+                    _hwnd,
+                    pos.X,
+                    pos.Y,
+                    expectedWidthPx,
+                    expectedHeightPx);
+            }
+        }
+    }
+
+    private bool IsClickFromCloseButton(DependencyObject? source)
+    {
+        for (DependencyObject? current = source;
+             current is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ClosePopupButton))
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(current, PopupHeaderGrid))
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
@@ -431,6 +599,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
 
         if (_content.IsModalDialogOpen ||
             _content.IsPeekPopoverOpen ||
+            WidgetEditorPopoverWindow.HasOpenPopoverForOwner(_hwnd) ||
             (RootGrid.XamlRoot is { } xamlRoot &&
              VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0))
         {
@@ -446,7 +615,8 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             }
 
             if (_content.IsModalDialogOpen ||
-            _content.IsPeekPopoverOpen ||
+                _content.IsPeekPopoverOpen ||
+                WidgetEditorPopoverWindow.HasOpenPopoverForOwner(_hwnd) ||
                 (RootGrid.XamlRoot is { } currentRoot &&
                  VisualTreeHelper.GetOpenPopupsForXamlRoot(currentRoot).Count > 0))
             {
@@ -470,7 +640,8 @@ public sealed partial class ClipboardQuickPasteWindow : Window
                     {
                         if (!_isClosed && _isVisible && session == _sessionId &&
                             !_content.IsModalDialogOpen &&
-                            !_content.IsPeekPopoverOpen)
+                            !_content.IsPeekPopoverOpen &&
+                            !WidgetEditorPopoverWindow.HasOpenPopoverForOwner(_hwnd))
                         {
                             HidePopup();
                         }
@@ -480,6 +651,28 @@ public sealed partial class ClipboardQuickPasteWindow : Window
 
             HidePopup();
         });
+    }
+
+    private void OnHighContrastChanged()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (DispatcherQueue is { HasThreadAccess: false } dq)
+        {
+            dq.TryEnqueue(() =>
+            {
+                if (!_isClosed)
+                {
+                    WindowsCompatibilityService.ApplySafeBackdrop(this);
+                }
+            });
+            return;
+        }
+
+        WindowsCompatibilityService.ApplySafeBackdrop(this);
     }
 
     private void OnLanguageChanged()
@@ -495,7 +688,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             return;
         }
 
-        Title = _localizationService.T("Window.ClipboardQuickPaste.Title");
+        ApplyLocalizedChrome();
     }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
@@ -506,10 +699,12 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         }
 
         _isClosed = true;
+        _isHeaderDragging = false;
         _isVisible = false;
         DisposeColdHiddenCleanupTimer();
         SystemBackdrop = null;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+        WindowsCompatibilityService.HighContrastChanged -= OnHighContrastChanged;
         Activated -= OnWindowActivated;
         Closed -= OnWindowClosed;
         _content.DismissRequested -= OnContentDismissRequested;

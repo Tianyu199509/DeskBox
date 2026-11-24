@@ -670,6 +670,26 @@ public partial class App
         }
 
         DrainLogQueue();
+        if (UiDispatcherQueue is { } dispatcher &&
+            dispatcher.TryEnqueue(() =>
+            {
+                try
+                {
+                    Exit();
+                    if (_studioHostWindow is null)
+                    {
+                        Platform.Win32Helper.PostQuitMessage(0);
+                    }
+                }
+                catch
+                {
+                    Environment.Exit(0);
+                }
+            }))
+        {
+            return;
+        }
+
         Environment.Exit(0);
     }
 }

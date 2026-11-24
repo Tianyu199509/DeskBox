@@ -51,7 +51,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var storeContext = GetStoreContext();
+            var storeContext = Windows.Services.Store.StoreContext.GetDefault();
             var updates = await storeContext.GetAppAndOptionalStorePackageUpdatesAsync()
                 .AsTask(cancellationToken);
 
@@ -125,8 +125,16 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                 }
             }
 
-            var storeContext = GetStoreContext();
-            EnsureStoreContextOwnerInitialized(storeContext);
+            IntPtr ownerWindow = GetSettingsWindowHandle();
+            if (ownerWindow == IntPtr.Zero || !Platform.Win32Helper.IsWindow(ownerWindow))
+            {
+                return AppUpdateDownloadResult.Failed(
+                    AppUpdateDownloadFailureKind.Cancelled,
+                    StoreCanceledError);
+            }
+
+            var storeContext = StoreContext.GetDefault();
+            EnsureStoreContextOwnerInitialized(storeContext, ownerWindow);
             var result = await storeContext
                 .RequestDownloadAndInstallStorePackageUpdatesAsync(_pendingUpdates)
                 .AsTask(
@@ -200,9 +208,13 @@ public sealed class StoreAppUpdateService : IAppUpdateService
         return storeContext;
     }
 
-    private static void EnsureStoreContextOwnerInitialized(StoreContext storeContext)
+    private static void EnsureStoreContextOwnerInitialized(StoreContext storeContext, IntPtr windowHandle = default)
     {
-        IntPtr windowHandle = GetSettingsWindowHandle();
+        if (windowHandle == IntPtr.Zero)
+        {
+            windowHandle = GetSettingsWindowHandle();
+        }
+
         if (windowHandle == IntPtr.Zero)
         {
             return;

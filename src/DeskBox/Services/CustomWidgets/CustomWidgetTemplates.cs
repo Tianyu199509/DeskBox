@@ -1001,6 +1001,7 @@ public static class CustomWidgetTemplates
                 WidgetKind.Glance => "Glance.Title",
                 WidgetKind.Custom => "CustomWidget.Title",
                 WidgetKind.Clipboard => "Clipboard.Title",
+                WidgetKind.Search => "Search.Title",
                 WidgetKind.SystemMonitor => "SystemMonitor.Title",
                 _ => string.Empty
             };

@@ -25,7 +25,7 @@ public sealed class FeatureWidgetEntryFactory
     {
         return _contentFactory
             .GetFeatureWidgetEntryDescriptors()
-            .Where(static descriptor => descriptor.WidgetKind != WidgetKind.Custom)
+            .Where(static descriptor => descriptor.WidgetKind is not (WidgetKind.Custom or WidgetKind.Search))
             .Select(CreateEntry)
             .ToArray();
     }

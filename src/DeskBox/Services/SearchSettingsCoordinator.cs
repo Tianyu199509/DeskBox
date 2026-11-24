@@ -52,6 +52,9 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
 
     public event Action? StateChanged;
 
+    /// <summary>Raised when search preferences (including desktop widget preferences) change.</summary>
+    public event Action? PreferencesChanged;
+
     private bool FeatureEnabled => !_disposed && !_stopping && !_runtimeStopping;
 
     public EverythingConnectionSnapshot Connection => FeatureEnabled
@@ -74,7 +77,8 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
                 activation.Gesture, GlobalHotkeyService.FormatActivation(activation, _localization), activation.Kind),
             TodoFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryTodo),
             QuickCaptureFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryNote),
-            ClipboardFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryClipboard));
+            ClipboardFeatureEnabled: SearchSettingsSlice.IsCategoryFeatureEnabled(appSettings, SearchSettingsSlice.CategoryClipboard),
+            DesktopEntryEnabled: FeatureWidgetSettings.IsEnabled(appSettings, WidgetKind.Search));
     }
 
     private SearchPreferences ReadPreferences()
@@ -91,7 +95,11 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
             search.SearchQuickCreateTodoEnabled, search.SearchQuickCreateNoteEnabled,
             search.SearchQuickCreateDisplayMode, search.SearchQuickCreateDefaultTarget,
             search.SearchQuickCreateShowHud,
-            SearchSettingsSlice.NormalizeCategoryLayout(search.SearchCategoryLayout));
+            SearchSettingsSlice.NormalizeCategoryLayout(search.SearchCategoryLayout),
+            SearchSettingsSlice.NormalizeDesktopHandoffMode(search.SearchDesktopHandoffMode),
+            search.SearchDesktopShowHistory,
+            search.SearchDesktopShowRecentOpened,
+            search.SearchDesktopPrivacyMask);
     }
 
     private async Task DrainRequestsAsync(bool forShutdown = false)
@@ -189,11 +197,20 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
                 search.SearchDefaultTab = SearchSettingsSlice.CategoryAll;
             }
         }
+        if (change.DesktopHandoffMode is { } handoffMode)
+        {
+            search.SearchDesktopHandoffMode = SearchSettingsSlice.NormalizeDesktopHandoffMode(handoffMode);
+        }
+        if (change.DesktopShowHistory is { } showHistory) search.SearchDesktopShowHistory = showHistory;
+        if (change.DesktopShowRecentOpened is { } showRecentOpened) search.SearchDesktopShowRecentOpened = showRecentOpened;
+        if (change.DesktopPrivacyMask is { } privacyMask) search.SearchDesktopPrivacyMask = privacyMask;
         SearchPreferences after = ReadPreferences();
         if (before == after) return;
         _settings.SaveDebounced();
         if (before.IncludeDeskBoxContent != after.IncludeDeskBoxContent)
             _setContentSearchEnabled(after.IncludeDeskBoxContent);
+        PreferencesChanged?.Invoke();
+        StateChanged?.Invoke();
     }
 
     public SearchHotkeyUpdateResult SetHotkeyEnabled(bool enabled)
@@ -239,8 +256,7 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
     public bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation)
     {
         AppSettings settings = _settings.Settings;
-        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) ||
-            !settings.Clipboard.ClipboardHotkeyEnabled)
+        if (!settings.Clipboard.ClipboardHotkeyEnabled)
         {
             return false;
         }
@@ -358,6 +374,7 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, IDisposable
         _tryEnqueue(() =>
         {
             if (_disposed || _stopping) return;
+            PreferencesChanged?.Invoke();
             StateChanged?.Invoke();
         });
     }

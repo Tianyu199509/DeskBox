@@ -162,6 +162,7 @@ public sealed class CallbackDeferralContractTests : IDisposable
         Assert.False(Win32Helper.ShowWindow(IntPtr.Zero, 0));
         Assert.False(Win32Helper.SetForegroundWindow(IntPtr.Zero));
         Assert.False(Win32Helper.EndDeferWindowPos(IntPtr.Zero));
+        _ = Win32Helper.SetWindowLong(IntPtr.Zero, -20, 0);
         _ = Win32Helper.SetWindowLongPtr(IntPtr.Zero, -20, IntPtr.Zero);
         Assert.False(Win32Helper.IsWindowInCurrentProcess(IntPtr.Zero));
         _ = Win32Helper.GetForegroundWindow();

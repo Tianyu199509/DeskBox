@@ -25,6 +25,18 @@ public abstract partial class WidgetWindowBase
 {
     private bool _desktopPinnedInputActivationInProgress;
     private bool _hasDeferredDesktopPinnedRestoreForTextInput;
+    private bool _desktopPinnedActivationQueued;
+    private string _desktopPinnedQueuedReason = string.Empty;
+    private bool _desktopPinnedQueuedIsKeyboard;
+    private bool _desktopPinnedQueuedExpectTextInput;
+    private IntPtr _desktopPinnedQueuedForegroundAtEnqueue;
+    private bool _pendingExplicitKeyboardInput;
+    private bool _pendingExplicitExpectTextInput;
+    private bool _activeDesktopPinnedRequestIsKeyboard;
+    private bool _activeDesktopPinnedRequestExpectTextInput;
+    private bool _dynamicKeyboardActivationQueued;
+    private string _dynamicKeyboardQueuedReason = string.Empty;
+    private IntPtr _dynamicKeyboardQueuedForegroundAtEnqueue;
     private IntPtr _lastCornerPreferenceHwnd;
     private int _lastAppliedWindowCornerPreference = -1;
 
@@ -242,7 +254,6 @@ public abstract partial class WidgetWindowBase
         if (isKeyboardInput)
         {
             _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
-            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
             allowActivation = true;
             reason = "routed-keyboard-input";
         }
@@ -289,13 +300,20 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
+        if (IsAlreadyDesktopPinnedKeyboardActive())
+        {
+            _hasDeferredDesktopPinnedRestoreForTextInput = true;
+            return;
+        }
+
         // Buttons that open an editor focus it programmatically after their
         // click event. That focus request is also an explicit text-entry action.
-        _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
         if (CallbackDepth.Depth == 0)
         {
             WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
         }
+
         DeferDesktopPinnedActivation("keyboard-focus");
     }
 
@@ -322,11 +340,39 @@ public abstract partial class WidgetWindowBase
         return false;
     }
 
+    private bool IsAlreadyDesktopPinnedKeyboardActive() =>
+        HWnd != IntPtr.Zero &&
+        Win32Helper.GetForegroundWindow() == HWnd &&
+        TransientInputFocusGuard.IsFocusInsideContentIsland(HWnd) &&
+        (Win32Helper.GetWindowLong(HWnd, Win32Helper.GWL_EXSTYLE) & Win32Helper.WS_EX_NOACTIVATE) == 0;
+
+    protected virtual bool HasBlockingInlineOverlayOpen() => false;
+
+    internal bool IsHoldingDesktopPinnedInputOrPopupFocus() =>
+        _hasDeferredDesktopPinnedRestoreForTextInput &&
+        ShouldDeferDesktopPinnedRestoreForFocusedTextInput();
+
     private bool ShouldDeferDesktopPinnedRestoreForFocusedTextInput()
     {
         if (HWnd == IntPtr.Zero || RootElement?.XamlRoot is not { } xamlRoot)
         {
             return false;
+        }
+
+        IntPtr fg = Win32Helper.GetForegroundWindow();
+        bool ownsOrSharesTransientForeground =
+            fg == HWnd ||
+            TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) ||
+            TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg);
+        if (!ownsOrSharesTransientForeground)
+        {
+            return false;
+        }
+
+        if (TransientInputFocusGuard.HasOpenPopupsInXamlRoot(xamlRoot) ||
+            HasBlockingInlineOverlayOpen())
+        {
+            return true;
         }
 
         DependencyObject? focused;
@@ -339,15 +385,7 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        if (focused is null || !IsKeyboardInputTarget(focused))
-        {
-            return false;
-        }
-
-        IntPtr fg = Win32Helper.GetForegroundWindow();
-        return fg == HWnd ||
-               TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) ||
-               TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg);
+        return focused is not null && IsKeyboardInputTarget(focused);
     }
 
     private void RootElement_LostFocusForDesktopPinnedLayer(
@@ -387,7 +425,15 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        bool isKeyboardReason = IsDesktopPinnedKeyboardActivationReason(reason);
+        bool isKeyboardReason =
+            _activeDesktopPinnedRequestIsKeyboard ||
+            IsDesktopPinnedKeyboardActivationReason(reason);
+        bool deferRestoreForTextInput =
+            _activeDesktopPinnedRequestExpectTextInput ||
+            IsDesktopPinnedKeyboardActivationReason(reason);
+        InteractionBreadcrumbRecorder.Record(
+            "dp-activate",
+            $"{reason}:kb={isKeyboardReason}:text={deferRestoreForTextInput}");
         _desktopPinnedInputActivationInProgress = true;
         try
         {
@@ -415,6 +461,7 @@ public abstract partial class WidgetWindowBase
                     // Activation is retained for keyboard-oriented controls, but
                     // the HWND is returned to the desktop bottom before this input
                     // dispatch completes, so activation never creates a layer lease.
+                    WidgetLayerService.RecordWidgetMouseActivate();
                     base.Activate();
                     _ = Win32Helper.SetForegroundWindow(HWnd);
                     if (isKeyboardReason)
@@ -425,32 +472,30 @@ public abstract partial class WidgetWindowBase
             }
             else if (isKeyboardReason)
             {
+                WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
                 TransientInputFocusGuard.FocusContentIsland(HWnd);
             }
+
+            if (deferRestoreForTextInput || ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+            {
+                _hasDeferredDesktopPinnedRestoreForTextInput = true;
+            }
+            else
+            {
+                _hasDeferredDesktopPinnedRestoreForTextInput = false;
+                RestoreDesktopPinnedBottomState(reason);
+            }
+
+            // The deliberate activation promoted the whole DefView owner band;
+            // drop the siblings back under covering applications in this same
+            // cycle so only the interacting window stays up (#574).
+            App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
+                HWnd,
+                $"{reason}-siblings");
         }
         finally
         {
             _desktopPinnedInputActivationInProgress = false;
-        }
-
-        if (isKeyboardReason || ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
-        {
-            _hasDeferredDesktopPinnedRestoreForTextInput = true;
-        }
-        else
-        {
-            _hasDeferredDesktopPinnedRestoreForTextInput = false;
-            RestoreDesktopPinnedBottomState(reason);
-        }
-        // The deliberate activation promoted the whole DefView owner band;
-        // drop the siblings back under covering applications in this same
-        // cycle so only the interacting window stays up (#574).
-        App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
-            HWnd,
-            $"{reason}-siblings");
-        if (isKeyboardReason)
-        {
-            TransientInputFocusGuard.FocusContentIslandIfForeground(HWnd);
         }
     }
 
@@ -498,8 +543,12 @@ public abstract partial class WidgetWindowBase
                 return;
             }
 
-            if (state is WindowActivationState.CodeActivated or WindowActivationState.PointerActivated &&
-                ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+            bool isActivating = state is WindowActivationState.CodeActivated or WindowActivationState.PointerActivated;
+            if (ShouldDeferDesktopPinnedRestoreOnActivation(
+                    isActivating,
+                    _hasDeferredDesktopPinnedRestoreForTextInput,
+                    Environment.TickCount64 - _lastDesktopPinnedKeyboardRequestTick,
+                    ShouldDeferDesktopPinnedRestoreForFocusedTextInput()))
             {
                 _hasDeferredDesktopPinnedRestoreForTextInput = true;
             }
@@ -531,9 +580,48 @@ public abstract partial class WidgetWindowBase
     /// </summary>
     private void DeferDesktopPinnedActivation(string reason)
     {
+        bool isKeyboard =
+            _pendingExplicitKeyboardInput ||
+            IsDesktopPinnedKeyboardActivationReason(reason);
+        bool expectTextInput =
+            _pendingExplicitExpectTextInput ||
+            IsDesktopPinnedKeyboardActivationReason(reason);
+        _pendingExplicitKeyboardInput = false;
+        _pendingExplicitExpectTextInput = false;
+
         IntPtr foregroundAtEnqueue = Win32Helper.GetForegroundWindow();
+        if (_desktopPinnedActivationQueued)
+        {
+            if (isKeyboard || !_desktopPinnedQueuedIsKeyboard)
+            {
+                _desktopPinnedQueuedReason = reason;
+                _desktopPinnedQueuedForegroundAtEnqueue = foregroundAtEnqueue;
+            }
+
+            _desktopPinnedQueuedIsKeyboard |= isKeyboard;
+            _desktopPinnedQueuedExpectTextInput |= expectTextInput;
+            return;
+        }
+
+        _desktopPinnedActivationQueued = true;
+        _desktopPinnedQueuedReason = reason;
+        _desktopPinnedQueuedIsKeyboard = isKeyboard;
+        _desktopPinnedQueuedExpectTextInput = expectTextInput;
+        _desktopPinnedQueuedForegroundAtEnqueue = foregroundAtEnqueue;
+
         UiDispatch.PostAfterCallback(() =>
         {
+            string queuedReason = _desktopPinnedQueuedReason;
+            bool queuedIsKeyboard = _desktopPinnedQueuedIsKeyboard;
+            bool queuedExpectTextInput = _desktopPinnedQueuedExpectTextInput;
+            IntPtr queuedForegroundAtEnqueue = _desktopPinnedQueuedForegroundAtEnqueue;
+
+            _desktopPinnedActivationQueued = false;
+            _desktopPinnedQueuedReason = string.Empty;
+            _desktopPinnedQueuedIsKeyboard = false;
+            _desktopPinnedQueuedExpectTextInput = false;
+            _desktopPinnedQueuedForegroundAtEnqueue = IntPtr.Zero;
+
             if (!Win32Helper.IsWindowInCurrentProcess(HWnd) ||
                 (IsDragging && HasMovedTitleBarDrag))
             {
@@ -542,17 +630,33 @@ public abstract partial class WidgetWindowBase
 
             IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
             if (foregroundNow != HWnd &&
-                foregroundNow != foregroundAtEnqueue &&
-                !CanProceedAfterTransientMenuForegroundChange(reason, foregroundAtEnqueue, foregroundNow))
+                foregroundNow != queuedForegroundAtEnqueue &&
+                !CanProceedAfterTransientMenuForegroundChange(
+                    HWnd,
+                    queuedReason,
+                    queuedIsKeyboard,
+                    queuedForegroundAtEnqueue,
+                    foregroundNow))
             {
                 App.LogVerbose(
                     $"[ZOrder] {LogPrefix} deferred activation dropped " +
-                    $"reason={reason} foreground moved on " +
+                    $"reason={queuedReason} foreground moved on " +
                     $"hwnd=0x{HWnd.ToInt64():X}");
                 return;
             }
 
-            ActivateDesktopPinnedWindow(reason);
+            reason = queuedReason;
+            _activeDesktopPinnedRequestIsKeyboard = queuedIsKeyboard;
+            _activeDesktopPinnedRequestExpectTextInput = queuedExpectTextInput;
+            try
+            {
+                ActivateDesktopPinnedWindow(reason);
+            }
+            finally
+            {
+                _activeDesktopPinnedRequestIsKeyboard = false;
+                _activeDesktopPinnedRequestExpectTextInput = false;
+            }
         });
     }
 
@@ -623,6 +727,7 @@ public abstract partial class WidgetWindowBase
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
         TopMostSafetyTimer?.Stop();
+        InteractionBreadcrumbRecorder.Record("dp-restore", reason);
         App.LogVerbose(
             $"[ZOrder] {LogPrefix} fixed-layer bottom reasserted reason={reason} " +
             $"hwnd=0x{HWnd.ToInt64():X}");
@@ -636,6 +741,12 @@ public abstract partial class WidgetWindowBase
         UIntPtr subclassId,
         UIntPtr referenceData)
     {
+        if (message == Win32Helper.WM_MOUSEACTIVATE &&
+            (IsTrayHideInputSuppressed || IsHideAnimationRunning))
+        {
+            return new IntPtr(Win32Helper.MA_NOACTIVATEANDEAT);
+        }
+
         if (message == Win32Helper.WM_MOUSEACTIVATE &&
             WidgetLayerService.ShouldSuppressPointerActivation(hWnd))
         {
@@ -678,22 +789,48 @@ public abstract partial class WidgetWindowBase
         }
 
         if (message == Win32Helper.WM_WINDOWPOSCHANGING &&
-            Win32Helper.TryReadWindowPos(lParam, out Win32Helper.WINDOWPOS windowPos) &&
-            WidgetLayerService.ShouldSuppressUnsolicitedZOrderChange(
-                hWnd,
-                windowPos.hwndInsertAfter,
-                windowPos.flags,
-                IsAtDesktopLayer,
-                _expandedWidgetLayerLeaseGeneration != 0,
-                IsDragging || IsResizing || IsBoundsTransitionActive,
-                App.Current?.WidgetManager?.WidgetsRaisedFromTray == true,
-                _lastDirectMouseActivateTick,
-                out bool mayBeDynamicDesktopClick))
+            Win32Helper.TryReadWindowPos(lParam, out Win32Helper.WINDOWPOS windowPos))
         {
-            Win32Helper.SuppressWindowPosZOrder(lParam, windowPos);
-            if (mayBeDynamicDesktopClick && Win32Helper.GetCursorPos(out Win32Helper.POINT clickPt))
+            if (WidgetLayerService.ShouldSuppressUnsolicitedZOrderChange(
+                    hWnd,
+                    windowPos.hwndInsertAfter,
+                    windowPos.flags,
+                    IsAtDesktopLayer,
+                    _expandedWidgetLayerLeaseGeneration != 0,
+                    IsDragging || IsResizing || IsBoundsTransitionActive,
+                    App.Current?.WidgetManager?.WidgetsRaisedFromTray == true,
+                    _lastDirectMouseActivateTick,
+                    out bool mayBeDynamicDesktopClick))
             {
-                App.Current?.WidgetManager?.NotifyPotentialDynamicDesktopClick(clickPt);
+                Win32Helper.SuppressWindowPosZOrder(lParam, windowPos);
+                if (mayBeDynamicDesktopClick && Win32Helper.GetCursorPos(out Win32Helper.POINT clickPt))
+                {
+                    App.Current?.WidgetManager?.NotifyPotentialDynamicDesktopClick(clickPt);
+                }
+            }
+            else if ((windowPos.flags & Win32Helper.SWP_NOZORDER) == 0 &&
+                     IsAtDesktopLayer &&
+                     !WidgetLayerService.UsesDesktopPinnedMode() &&
+                     !WidgetLayerService.UsesQuickRevealMode() &&
+                     Win32Helper.IsWindowTopMost(hWnd) &&
+                     WidgetLayerService.TryArmShowDesktopDemoteRebed(hWnd))
+            {
+                // 2nd Win+D demotes the desktop host out of topmost (hwndInsertAfter
+                // for owned widgets #2..N is a concrete predecessor HWND rather than
+                // HWND_NOTOPMOST); re-bed resting Dynamic widgets once demotion settles.
+                UiDispatch.PostAfterCallback(() =>
+                {
+                    WidgetLayerService.ClearShowDesktopDemoteRebed(hWnd);
+                    if (Win32Helper.IsWindowInCurrentProcess(hWnd) &&
+                        IsAtDesktopLayer &&
+                        !WidgetLayerService.UsesDesktopPinnedMode() &&
+                        !WidgetLayerService.UsesQuickRevealMode() &&
+                        !Win32Helper.IsWindowTopMost(hWnd) &&
+                        !WidgetLayerService.IsDesktopHostTopMost(hWnd))
+                    {
+                        _ = WidgetLayerService.MoveToDesktopBottom(hWnd, showWindow: false);
+                    }
+                });
             }
         }
 
@@ -1098,7 +1235,8 @@ public abstract partial class WidgetWindowBase
 
     internal static void TryActivateOwnerForKeyboardInput(
         DependencyObject? element,
-        string reason = "explicit-keyboard-input")
+        string reason = "explicit-keyboard-input",
+        bool expectTextInput = true)
     {
         if (element is FrameworkElement fe)
         {
@@ -1106,9 +1244,52 @@ public abstract partial class WidgetWindowBase
             if (ownerHwnd != IntPtr.Zero &&
                 App.Current?.WidgetManager?.FindWidgetWindowByHandle(ownerHwnd) is WidgetWindowBase widgetWindow)
             {
-                widgetWindow.ActivateForKeyboardInput(reason);
+                widgetWindow.ActivateForKeyboardInput(reason, expectTextInput);
             }
         }
+    }
+
+    internal static void TryRequestOwnerDesktopPinnedRestoreIfIdle(
+        DependencyObject? element,
+        string reason)
+    {
+        if (element is FrameworkElement fe)
+        {
+            IntPtr ownerHwnd = WidgetEditorPopoverWindow.ResolveOwnerWindowHandle(fe);
+            if (ownerHwnd != IntPtr.Zero &&
+                App.Current?.WidgetManager?.FindWidgetWindowByHandle(ownerHwnd) is WidgetWindowBase widgetWindow)
+            {
+                widgetWindow.RequestDesktopPinnedRestoreIfIdle(reason);
+            }
+        }
+    }
+
+    internal void RequestDesktopPinnedRestoreIfIdle(string reason)
+    {
+        if (!WidgetLayerService.UsesDesktopPinnedMode() ||
+            !_hasDeferredDesktopPinnedRestoreForTextInput)
+        {
+            return;
+        }
+
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (!_hasDeferredDesktopPinnedRestoreForTextInput ||
+                !Win32Helper.IsWindowInCurrentProcess(HWnd) ||
+                !WidgetLayerService.UsesDesktopPinnedMode() ||
+                (IsDragging && HasMovedTitleBarDrag))
+            {
+                return;
+            }
+
+            if (ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+            {
+                return;
+            }
+
+            _hasDeferredDesktopPinnedRestoreForTextInput = false;
+            RestoreDesktopPinnedBottomState(reason);
+        });
     }
 
     internal static bool IsOwnerWindowKeyboardFocused(DependencyObject? element)
@@ -1137,10 +1318,12 @@ public abstract partial class WidgetWindowBase
             return true;
         }
 
-        return Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOTOWNER) == ownerHwnd;
+        return WidgetLayerService.IsWindowOrOwnedByWidget(foreground, ownerHwnd);
     }
 
-    internal void ActivateForKeyboardInput(string reason = "explicit-keyboard-input")
+    internal void ActivateForKeyboardInput(
+        string reason = "explicit-keyboard-input",
+        bool expectTextInput = true)
     {
         if (HWnd == IntPtr.Zero || !Win32Helper.IsWindow(HWnd))
         {
@@ -1151,12 +1334,76 @@ public abstract partial class WidgetWindowBase
         _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
-            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+            InteractionBreadcrumbRecorder.Record("dp-kb-req", $"{reason}:text={expectTextInput}");
+            _pendingExplicitKeyboardInput = true;
+            _pendingExplicitExpectTextInput = expectTextInput;
             DeferDesktopPinnedActivation(reason);
             return;
         }
 
-        TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, HWnd, clearNoActivate: false);
+        if (!IsAtDesktopLayer &&
+            Win32Helper.GetForegroundWindow() == HWnd &&
+            TransientInputFocusGuard.IsFocusInsideContentIsland(HWnd))
+        {
+            return;
+        }
+
+        InteractionBreadcrumbRecorder.Record("dyn-kb-req", $"{reason}:text={expectTextInput}");
+        DeferDynamicKeyboardActivation(reason);
+    }
+
+    private void DeferDynamicKeyboardActivation(string reason)
+    {
+        IntPtr foregroundAtEnqueue = Win32Helper.GetForegroundWindow();
+        if (_dynamicKeyboardActivationQueued)
+        {
+            _dynamicKeyboardQueuedReason = reason;
+            _dynamicKeyboardQueuedForegroundAtEnqueue = foregroundAtEnqueue;
+            return;
+        }
+
+        _dynamicKeyboardActivationQueued = true;
+        _dynamicKeyboardQueuedReason = reason;
+        _dynamicKeyboardQueuedForegroundAtEnqueue = foregroundAtEnqueue;
+
+        UiDispatch.PostAfterCallback(() =>
+        {
+            string queuedReason = _dynamicKeyboardQueuedReason;
+            IntPtr queuedForegroundAtEnqueue = _dynamicKeyboardQueuedForegroundAtEnqueue;
+            _dynamicKeyboardActivationQueued = false;
+            _dynamicKeyboardQueuedReason = string.Empty;
+            _dynamicKeyboardQueuedForegroundAtEnqueue = IntPtr.Zero;
+
+            if (!Win32Helper.IsWindowInCurrentProcess(HWnd) ||
+                WidgetLayerService.UsesDesktopPinnedMode() ||
+                (IsDragging && HasMovedTitleBarDrag))
+            {
+                return;
+            }
+
+            IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
+            if (foregroundNow != HWnd &&
+                foregroundNow != queuedForegroundAtEnqueue &&
+                !CanProceedAfterTransientMenuForegroundChange(
+                    HWnd,
+                    queuedReason,
+                    isKeyboardInput: true,
+                    queuedForegroundAtEnqueue,
+                    foregroundNow))
+            {
+                return;
+            }
+
+            // Detach from explorer's SHELLDLL_DefView owner before running foreground/focus
+            // activation so we never synchronously pump activation across a shared win32k input queue (#1253).
+            if (IsAtDesktopLayer && !WidgetLayerService.UsesQuickRevealMode())
+            {
+                WidgetLayerService.DetachSingleDynamicWidgetForInteraction(HWnd);
+                IsAtDesktopLayer = false;
+            }
+
+            TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, HWnd, clearNoActivate: false);
+        });
     }
 
     private void FocusManager_GotFocusForDesktopPinnedLayer(
@@ -1175,11 +1422,58 @@ public abstract partial class WidgetWindowBase
         }
 
         _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
-        if (CallbackDepth.Depth == 0)
+        if (!IsVisualDescendantOf(focusedElement, RootElement))
         {
-            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+            // Unconstrained Flyout/Popup controls live in a separate PopupWindowSiteBridge
+            // HWND while sharing RootElement.XamlRoot. Claim that popup bridge instead of
+            // pulling foreground back to HWnd (which would light-dismiss the flyout).
+            _hasDeferredDesktopPinnedRestoreForTextInput = true;
+            UiDispatch.PostAfterCallback(() =>
+            {
+                if (Win32Helper.IsWindowInCurrentProcess(HWnd))
+                {
+                    _ = FlyoutTextInputActivation.ActivateVisibleBridges(
+                        "DesktopPinnedPopupFocus",
+                        focusedElement);
+                }
+            });
+            return;
         }
+
+        if (IsAlreadyDesktopPinnedKeyboardActive())
+        {
+            _hasDeferredDesktopPinnedRestoreForTextInput = true;
+            return;
+        }
+
         DeferDesktopPinnedActivation("popup-keyboard-focus");
+    }
+
+    private static bool IsVisualDescendantOf(DependencyObject? element, DependencyObject? ancestor)
+    {
+        if (element is null || ancestor is null)
+        {
+            return false;
+        }
+
+        for (DependencyObject? cur = element; cur is not null;)
+        {
+            if (ReferenceEquals(cur, ancestor))
+            {
+                return true;
+            }
+
+            try
+            {
+                cur = VisualTreeHelper.GetParent(cur);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private void WidgetWindowBase_ActivatedForCompactFocusSync(
@@ -1198,36 +1492,93 @@ public abstract partial class WidgetWindowBase
         }
     }
 
-    private static bool IsDesktopPinnedKeyboardActivationReason(string reason) =>
+    internal static bool ShouldDeferDesktopPinnedRestoreOnActivation(
+        bool isActivating,
+        bool hasDeferredRestoreForTextInput,
+        long elapsedSinceKeyboardRequestMs,
+        bool hasFocusedTextInputWithTransientForeground)
+    {
+        if (hasFocusedTextInputWithTransientForeground)
+        {
+            return true;
+        }
+
+        return isActivating &&
+               hasDeferredRestoreForTextInput &&
+               elapsedSinceKeyboardRequestMs >= 0 &&
+               elapsedSinceKeyboardRequestMs < 150;
+    }
+
+    internal static bool IsDesktopPinnedKeyboardActivationReason(string reason) =>
         string.Equals(reason, "routed-keyboard-input", StringComparison.Ordinal) ||
         string.Equals(reason, "keyboard-focus", StringComparison.Ordinal) ||
         string.Equals(reason, "popup-keyboard-focus", StringComparison.Ordinal) ||
-        string.Equals(reason, "explicit-keyboard-input", StringComparison.Ordinal);
+        string.Equals(reason, "explicit-keyboard-input", StringComparison.Ordinal) ||
+        string.Equals(reason, "quick-capture-inline-composer", StringComparison.Ordinal) ||
+        string.Equals(reason, "quick-capture-new-detail", StringComparison.Ordinal) ||
+        string.Equals(reason, "quick-capture-detail-edit", StringComparison.Ordinal) ||
+        string.Equals(reason, "quick-capture-search", StringComparison.Ordinal) ||
+        string.Equals(reason, "search-widget-input", StringComparison.Ordinal) ||
+        string.Equals(reason, "search-widget-focus", StringComparison.Ordinal) ||
+        string.Equals(reason, "markdown-editor-proportional-focus", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-quick-add", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-detail-add", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-detail-draft", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-detail-editor", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-detail-notes", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-detail-title", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-inline-rename", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-custom-due", StringComparison.Ordinal) ||
+        string.Equals(reason, "todo-search", StringComparison.Ordinal) ||
+        string.Equals(reason, "widget-title-rename", StringComparison.Ordinal) ||
+        string.Equals(reason, "file-inline-rename", StringComparison.Ordinal);
 
     private static bool CanProceedAfterTransientMenuForegroundChange(
+        IntPtr targetWidgetHwnd,
         string reason,
+        bool isKeyboardInput,
         IntPtr foregroundAtEnqueue,
         IntPtr foregroundNow)
     {
-        if (!IsDesktopPinnedKeyboardActivationReason(reason))
+        if (!isKeyboardInput && !IsDesktopPinnedKeyboardActivationReason(reason))
         {
             return false;
         }
 
-        bool enqueueWasTransientOrDeskBox =
+        // Never steal foreground away from another DeskBox top-level window
+        // (SearchPopupWindow, ClipboardQuickPasteWindow, WidgetEditorPopoverWindow,
+        // SettingsWindow, or a sibling widget that just claimed focus).
+        if (foregroundNow != IntPtr.Zero &&
+            foregroundNow != targetWidgetHwnd &&
+            App.Current?.IsDeskBoxWindow(foregroundNow) == true &&
+            !TransientInputFocusGuard.IsCurrentProcessPopupBridge(foregroundNow))
+        {
+            return false;
+        }
+
+        bool enqueueWasTransientMenuOrIme =
             foregroundAtEnqueue == IntPtr.Zero ||
             !Win32Helper.IsWindow(foregroundAtEnqueue) ||
             !Win32Helper.IsWindowVisible(foregroundAtEnqueue) ||
-            App.Current?.IsDeskBoxOrTextInputExperienceWindow(foregroundAtEnqueue) == true ||
-            ShellContextMenuProxy.IsMenuRoundInFlight;
-        if (!enqueueWasTransientOrDeskBox)
+            IsDesktopShellRootWindow(foregroundAtEnqueue) ||
+            TransientInputFocusGuard.IsCurrentProcessPopupBridge(foregroundAtEnqueue) ||
+            TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(foregroundAtEnqueue) ||
+            ShellContextMenuProxy.IsMenuRoundInFlight ||
+            ShellContextMenuProxy.WasMenuRoundRecentlyActive();
+        if (!enqueueWasTransientMenuOrIme)
         {
             return false;
+        }
+
+        if (!Win32Helper.IsAnyMouseButtonDown())
+        {
+            return true;
         }
 
         return foregroundNow == IntPtr.Zero ||
                IsDesktopShellRootWindow(foregroundNow) ||
-               App.Current?.IsDeskBoxOrTextInputExperienceWindow(foregroundNow) == true;
+               TransientInputFocusGuard.IsCurrentProcessPopupBridge(foregroundNow) ||
+               TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(foregroundNow);
     }
 
     // ── Backdrop preference ────────────────────────────────────

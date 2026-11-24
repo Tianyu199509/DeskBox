@@ -99,7 +99,9 @@ public sealed class TodoWidgetStore
                 currentVersion: 4,
                 raw => JsonSerializer.Deserialize(raw, TodoJsonContext.Default.StoreData),
                 static d => d.Version,
-                Normalize,
+                parsed => Normalize(
+                    parsed,
+                    forceDowngradeDueTimeRecovery: parsed is { Version: >= 4 } && !HasPersistedHasDueTimeProperty(json)),
                 static ver => new TodoWidgetData { Version = ver },
                 out unparseableFuture),
             () => Normalize(new TodoWidgetData()),
@@ -143,9 +145,50 @@ public sealed class TodoWidgetStore
         StoreChanged?.Invoke(_storePath, _widgetId);
     }
 
-    private static TodoWidgetData Normalize(TodoWidgetData? data)
+    private static bool HasPersistedHasDueTimeProperty(string json)
     {
-        bool migrateLegacyDueTime = data is not null && data.Version < 4;
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("items", out JsonElement items) ||
+                items.ValueKind != JsonValueKind.Array)
+            {
+                return true;
+            }
+
+            bool hasAnyDueDateItem = false;
+            foreach (JsonElement item in items.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (item.TryGetProperty("hasDueTime", out _))
+                {
+                    return true;
+                }
+
+                if (item.TryGetProperty("dueDate", out JsonElement dueDate) &&
+                    dueDate.ValueKind == JsonValueKind.String)
+                {
+                    hasAnyDueDateItem = true;
+                }
+            }
+
+            return !hasAnyDueDateItem;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static TodoWidgetData Normalize(TodoWidgetData? data, bool forceDowngradeDueTimeRecovery = false)
+    {
+        bool migrateLegacyDueTime = (data is not null && data.Version < 4) || forceDowngradeDueTimeRecovery;
+        bool treatMidnightAsAllDay = forceDowngradeDueTimeRecovery && data is { Version: >= 4 };
         data ??= new TodoWidgetData();
         data.Version = Math.Max(4, data.Version);
         data.Items ??= [];
@@ -187,7 +230,7 @@ public sealed class TodoWidgetStore
 
             item.Text = item.Text?.Trim() ?? string.Empty;
             item.ColorMarker = TodoItem.NormalizeColorMarker(item.ColorMarker);
-            NormalizeItemDueDateAndTimeFlag(item, migrateLegacyDueTime);
+            NormalizeItemDueDateAndTimeFlag(item, migrateLegacyDueTime, treatMidnightAsAllDay);
             item.Recurrence = TodoRecurrence.Normalize(item.Recurrence, item.DueDate);
             if (!item.HasDueTime && item.Recurrence?.AnchorDueDate is { } allDayAnchor)
             {
@@ -361,7 +404,10 @@ public sealed class TodoWidgetStore
         }
     }
 
-    private static void NormalizeItemDueDateAndTimeFlag(TodoItem item, bool migrateLegacyDueTime)
+    private static void NormalizeItemDueDateAndTimeFlag(
+        TodoItem item,
+        bool migrateLegacyDueTime,
+        bool treatMidnightAsAllDay = false)
     {
         if (item.DueDate is not { } dueDate)
         {
@@ -372,7 +418,10 @@ public sealed class TodoWidgetStore
         if (migrateLegacyDueTime)
         {
             DateTimeOffset localDue = dueDate.ToLocalTime();
-            if (localDue.Hour == 23 && localDue.Minute == 59 && localDue.Second == 0)
+            bool isLegacyEndOfDay = localDue.Hour == 23 && localDue.Minute == 59 && localDue.Second == 0;
+            bool isDowngradedMidnightAllDay = treatMidnightAsAllDay &&
+                localDue.Hour == 0 && localDue.Minute == 0 && localDue.Second == 0;
+            if (isLegacyEndOfDay || isDowngradedMidnightAllDay)
             {
                 DateTimeOffset legacyDueDate = dueDate;
                 DateTimeOffset normalizedDueDate = NormalizeAllDayDueDate(localDue);
@@ -386,7 +435,8 @@ public sealed class TodoWidgetStore
                 if (item.Recurrence?.AnchorDueDate is { } legacyAnchor)
                 {
                     DateTimeOffset localAnchor = legacyAnchor.ToLocalTime();
-                    if (localAnchor.Hour == 23 && localAnchor.Minute == 59 && localAnchor.Second == 0)
+                    if ((localAnchor.Hour == 23 && localAnchor.Minute == 59 && localAnchor.Second == 0) ||
+                        (treatMidnightAsAllDay && localAnchor.Hour == 0 && localAnchor.Minute == 0 && localAnchor.Second == 0))
                     {
                         item.Recurrence.AnchorDueDate = NormalizeAllDayDueDate(localAnchor);
                     }

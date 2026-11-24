@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using DeskBox.Platform;
 
 namespace DeskBox.Helpers;
@@ -492,16 +493,24 @@ public static class ShortcutHelper
         App.Log(message);
     }
 
-    private static ShortcutInfo? ResolveInternetShortcut(string shortcutPath)
+    internal static ShortcutInfo? ResolveInternetShortcut(string shortcutPath)
     {
         try
         {
+            string? content = ReadInternetShortcutText(shortcutPath);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return null;
+            }
+
             string target = string.Empty;
             string iconLocation = string.Empty;
             int iconIndex = 0;
             bool inInternetShortcutSection = false;
 
-            foreach (string rawLine in File.ReadLines(shortcutPath))
+            using var reader = new StringReader(content);
+            string? rawLine;
+            while ((rawLine = reader.ReadLine()) is not null)
             {
                 string line = rawLine.Trim();
                 if (line.Length >= 2 && line[0] == '[' && line[^1] == ']')
@@ -531,7 +540,9 @@ public static class ShortcutHelper
                 }
                 else if (key.Equals("IconFile", StringComparison.OrdinalIgnoreCase))
                 {
-                    iconLocation = value;
+                    iconLocation = !value.Contains("://", StringComparison.Ordinal)
+                        ? value.Replace('/', '\\')
+                        : value;
                 }
                 else if (key.Equals("IconIndex", StringComparison.OrdinalIgnoreCase))
                 {
@@ -552,6 +563,65 @@ public static class ShortcutHelper
         catch
         {
             return null;
+        }
+    }
+
+    private static string? ReadInternetShortcutText(string shortcutPath)
+    {
+        const int MaxInternetShortcutBytes = 256 * 1024;
+        string targetPath = File.Exists(shortcutPath)
+            ? shortcutPath
+            : StorageMigrationNativeMethods.Extended(shortcutPath);
+        using var stream = new FileStream(
+            targetPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length is <= 0 or > MaxInternetShortcutBytes)
+        {
+            return null;
+        }
+
+        byte[] bytes = new byte[(int)stream.Length];
+        int totalRead = 0;
+        while (totalRead < bytes.Length)
+        {
+            int read = stream.Read(bytes, totalRead, bytes.Length - totalRead);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            totalRead += read;
+        }
+
+        ReadOnlySpan<byte> span = bytes.AsSpan(0, totalRead);
+        if (span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF)
+        {
+            return Encoding.UTF8.GetString(span[3..]);
+        }
+
+        if (span.Length >= 2 && span[0] == 0xFF && span[1] == 0xFE)
+        {
+            return Encoding.Unicode.GetString(span[2..]);
+        }
+
+        if (span.Length >= 2 && span[0] == 0xFE && span[1] == 0xFF)
+        {
+            return Encoding.BigEndianUnicode.GetString(span[2..]);
+        }
+
+        try
+        {
+            var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+            return strictUtf8.GetString(span);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Windows WritePrivateProfileString writes non-BOM .url files in the
+            // active ANSI code page (e.g. GBK on zh-CN when Steam sits under a
+            // Chinese folder name). Decode via CP_ACP (0) without codepage tables.
+            return Kernel32NativeMethods.DecodeActiveCodePageString(span);
         }
     }
 

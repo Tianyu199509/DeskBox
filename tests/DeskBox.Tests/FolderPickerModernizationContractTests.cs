@@ -19,8 +19,7 @@ public sealed class FolderPickerModernizationContractTests
         // STA thread with a same-thread owner HWND and logs every outcome.
         string source = ReadSource("src/DeskBox/Services/FolderPickerService.cs");
 
-        Assert.Contains("NativeFileOpenDialog.RunOnDedicatedStaAsync(", source, StringComparison.Ordinal);
-        Assert.Contains("NativeFileOpenDialog.ShowPickFolder(", source, StringComparison.Ordinal);
+        Assert.Contains("NativeFileOpenDialog.PickFolderOutOfProcessAsync(", source, StringComparison.Ordinal);
         Assert.Contains(
             "public static Task<FolderPickResult> PickFolderWithOutcomeAsync(",
             source,
@@ -164,8 +163,10 @@ public sealed class FolderPickerModernizationContractTests
             "public static async Task<IReadOnlyList<string>> PickMultipleFilesAsync(",
             service,
             StringComparison.Ordinal);
-        Assert.Contains("await picker.PickSingleFileAsync()", service, StringComparison.Ordinal);
-        Assert.Contains("await picker.PickMultipleFilesAsync()", service, StringComparison.Ordinal);
+        Assert.Contains("PickFilteredFilesOutOfProcessCoreAsync(", service, StringComparison.Ordinal);
+        Assert.Contains("NativeFileOpenDialog.PickFilesOutOfProcessAsync(", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("new FileOpenPicker(", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Win32Interop.GetWindowIdFromWindow", service, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -229,7 +230,7 @@ public sealed class FolderPickerModernizationContractTests
             string source = ReadSource(path);
             int callCount = Regex.Matches(
                 source,
-                @"await\s+FolderPickerService\.PickFolderAsync\s*\(").Count;
+                @"await\s+FolderPickerService\.(?:PickFolderAsync|PickFolderWithOutcomeAsync)\s*\(").Count;
 
             Assert.Equal(expectedCount, callCount);
             Assert.DoesNotContain("FolderPickerService.PickFolder(", source, StringComparison.Ordinal);

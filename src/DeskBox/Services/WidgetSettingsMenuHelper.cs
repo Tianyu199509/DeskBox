@@ -28,6 +28,7 @@ internal static class WidgetSettingsMenuHelper
         WidgetKind.Glance => "GlanceSettings",
         WidgetKind.Custom => "CustomWidgetSettings",
         WidgetKind.Clipboard => "ClipboardSettings",
+        WidgetKind.Search => "SearchSettings",
         _ => null
     };
 
@@ -45,6 +46,7 @@ internal static class WidgetSettingsMenuHelper
         WidgetKind.Glance => "Widget.Settings.Glance",
         WidgetKind.Custom => "Widget.Settings.CustomWidget",
         WidgetKind.Clipboard => "Widget.Settings.Clipboard",
+        WidgetKind.Search => "Widget.Settings.Search",
         _ => "Common.Configure"
     };
 

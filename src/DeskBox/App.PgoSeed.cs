@@ -208,6 +208,18 @@ internal static class PgoProfileSeedRunner
                     Height = 240,
                     BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
                     IsVisible = true
+                },
+                new WidgetConfig
+                {
+                    Id = "pgo-search",
+                    WidgetKind = WidgetKind.Search,
+                    Name = "Search",
+                    X = 740,
+                    Y = 560,
+                    Width = 420,
+                    Height = 240,
+                    BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+                    IsVisible = true
                 }
             ]
         };

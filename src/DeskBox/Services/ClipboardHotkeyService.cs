@@ -116,7 +116,6 @@ public sealed class ClipboardHotkeyService : IDisposable, IHookHealthProbeTarget
         }
 
         if (_windowHandle == IntPtr.Zero ||
-            !FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Clipboard) ||
             !_settingsService.Settings.Clipboard.ClipboardHotkeyEnabled)
         {
             RemoveSubclass();
@@ -317,7 +316,6 @@ public sealed class ClipboardHotkeyService : IDisposable, IHookHealthProbeTarget
             previousVirtualKey);
         bool isCurrentActivation = activation.Equals(previousActivation);
         bool shouldBeActive = _windowHandle != IntPtr.Zero &&
-                              FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) &&
                               clipboard.ClipboardHotkeyEnabled;
 
         if (isCurrentActivation)
@@ -408,7 +406,6 @@ public sealed class ClipboardHotkeyService : IDisposable, IHookHealthProbeTarget
     bool IHookRegistrationMaintenanceTarget.RegistrationMaintenanceWanted =>
         !_suspendedForRecording &&
         _windowHandle != IntPtr.Zero &&
-        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Clipboard) &&
         _settingsService.Settings.Clipboard.ClipboardHotkeyEnabled &&
         GlobalHotkeyService.UsesRegisterHotKeyChord(CurrentActivation);
 

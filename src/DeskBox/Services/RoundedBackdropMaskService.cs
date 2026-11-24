@@ -121,6 +121,14 @@ internal static unsafe class RoundedBackdropMaskService
         {
             if (_entries.TryGetValue(key, out entry))
             {
+                if (!IsNineGridBrushAlive(entry.NineGridBrush))
+                {
+                    _entries.Remove(key);
+                    entry.DisposeResources();
+                    entry = null;
+                    return false;
+                }
+
                 entry.LastUsedSequence = ++_sequence;
                 return true;
             }
@@ -265,12 +273,13 @@ internal static unsafe class RoundedBackdropMaskService
         MaskKey desiredKey = BuildKey(radiusDip, rasterizationScale);
         if (existingLease is not null &&
             existingLease.Key == desiredKey &&
-            ReferenceEquals(existingLease.Compositor, compositor))
+            ReferenceEquals(existingLease.Compositor, compositor) &&
+            IsLeaseAlive(existingLease))
         {
             return existingLease;
         }
 
-        existingLease?.Dispose();
+        try { existingLease?.Dispose(); } catch { }
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
@@ -444,6 +453,31 @@ internal static unsafe class RoundedBackdropMaskService
         double.IsFinite(scale) && scale > 0.0
             ? Math.Clamp(scale, 0.5, 4.0)
             : 1.0;
+
+    private static bool IsLeaseAlive(MaskLease lease)
+    {
+        try
+        {
+            return IsNineGridBrushAlive(lease.NineGridBrush);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsNineGridBrushAlive(Windows.UI.Composition.CompositionNineGridBrush brush)
+    {
+        try
+        {
+            _ = brush.Source;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static bool EnsureD3d11Device()
     {
@@ -749,27 +783,42 @@ internal sealed partial class MaskedBackdropTargetProxy :
             return true;
         }
 
+        // Prefer DeskBox's own UI-thread Windows.UI.Composition.Compositor rather than
+        // _sourceBrush.Compositor: Win10 interaction simplification detaches all widget
+        // targets from the shared DesktopAcrylicController right after applying this
+        // override, and removing the last target closes the controller's internal
+        // Compositor along with any brushes created on it.
         Windows.UI.Composition.Compositor? compositor =
-            _sourceBrush?.Compositor ??
-            _overrideBrush?.Compositor ??
+            SolidTintSystemBackdrop.TryEnsureThreadCompositor() ??
+            TryGetBrushCompositor(_overrideBrush) ??
+            TryGetBrushCompositor(_sourceBrush) ??
             _maskCompositor;
         if (compositor is null)
         {
             return false;
         }
 
-        if (_overrideBrush is not null && !ReferenceEquals(_overrideBrush.Compositor, compositor))
+        if (_overrideBrush is not null &&
+            !ReferenceEquals(TryGetBrushCompositor(_overrideBrush), compositor))
         {
             DisposeOverrideBrush();
         }
 
-        if (_overrideBrush is null)
+        try
         {
-            _overrideBrush = compositor.CreateColorBrush(color.Value);
+            if (_overrideBrush is null)
+            {
+                _overrideBrush = compositor.CreateColorBrush(color.Value);
+            }
+            else
+            {
+                _overrideBrush.Color = color.Value;
+            }
         }
-        else
+        catch
         {
-            _overrideBrush.Color = color.Value;
+            DisposeOverrideBrush();
+            return false;
         }
 
         SyncTargetBrush();
@@ -799,6 +848,19 @@ internal sealed partial class MaskedBackdropTargetProxy :
         }
     }
 
+    internal void ReleaseSuspendedResources()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _sourceBrush = null;
+        ApplyBrushToRealTarget(null);
+        DisposeOverrideBrush();
+        ReleaseMaskResources();
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -815,23 +877,55 @@ internal sealed partial class MaskedBackdropTargetProxy :
 
     private void DisposeOverrideBrush()
     {
-        if (_overrideBrush is null)
+        Windows.UI.Composition.CompositionColorBrush? overrideBrush = _overrideBrush;
+        if (overrideBrush is null)
         {
             return;
         }
 
-        if (_maskBrush is not null && ReferenceEquals(_maskBrush.Source, _overrideBrush))
+        _overrideBrush = null;
+
+        if (_maskBrush is { } maskBrush)
         {
-            try { _maskBrush.Source = null; } catch { }
+            try
+            {
+                if (ReferenceEquals(maskBrush.Source, overrideBrush))
+                {
+                    maskBrush.Source = null;
+                }
+            }
+            catch
+            {
+                // The mask brush's owning Compositor was already closed; purge
+                // the dead mask brush and lease so future operations self-heal.
+                ReleaseMaskResources();
+            }
         }
 
-        if (ReferenceEquals(_appliedTargetBrush, _overrideBrush))
+        if (ReferenceEquals(_appliedTargetBrush, overrideBrush))
         {
             ApplyBrushToRealTarget(null);
         }
 
-        try { _overrideBrush.Dispose(); } catch { }
-        _overrideBrush = null;
+        try { overrideBrush.Dispose(); } catch { }
+    }
+
+    private static Windows.UI.Composition.Compositor? TryGetBrushCompositor(
+        Windows.UI.Composition.CompositionBrush? brush)
+    {
+        if (brush is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return brush.Compositor;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void SyncTargetBrush()
@@ -844,7 +938,8 @@ internal sealed partial class MaskedBackdropTargetProxy :
                 ApplyBrushToRealTarget(null);
                 if (_maskBrush is not null)
                 {
-                    _maskBrush.Source = null;
+                    try { _maskBrush.Source = null; }
+                    catch { ReleaseMaskResources(); }
                 }
 
                 return;
@@ -888,6 +983,7 @@ internal sealed partial class MaskedBackdropTargetProxy :
         catch (Exception ex)
         {
             App.LogVerbose($"[MaskedBackdropProxy] Falling back to raw backdrop brush: {ex.Message}");
+            ReleaseMaskResources();
             ApplyBrushToRealTarget(_overrideBrush ?? _sourceBrush);
         }
     }
@@ -912,18 +1008,18 @@ internal sealed partial class MaskedBackdropTargetProxy :
 
     private void ReleaseMaskResources()
     {
-        if (_maskBrush is not null)
+        if (_maskBrush is { } maskBrush)
         {
-            try { _maskBrush.Source = null; } catch { }
-            try { _maskBrush.Mask = null; } catch { }
-            try { _maskBrush.Dispose(); } catch { }
             _maskBrush = null;
+            try { maskBrush.Source = null; } catch { }
+            try { maskBrush.Mask = null; } catch { }
+            try { maskBrush.Dispose(); } catch { }
         }
 
-        if (_maskLease is not null)
+        if (_maskLease is { } maskLease)
         {
-            _maskLease.Dispose();
             _maskLease = null;
+            try { maskLease.Dispose(); } catch { }
         }
 
         _maskCompositor = null;

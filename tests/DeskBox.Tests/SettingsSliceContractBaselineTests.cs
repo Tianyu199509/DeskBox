@@ -258,6 +258,10 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("todo", s.SearchQuickCreateDefaultTarget);
         Assert.True(s.SearchQuickCreateShowHud);
         Assert.Equal(SearchSettingsSlice.DefaultCategoryLayout, s.SearchCategoryLayout);
+        Assert.Equal(SearchSettingsSlice.DefaultDesktopHandoffMode, s.SearchDesktopHandoffMode);
+        Assert.True(s.SearchDesktopShowHistory);
+        Assert.True(s.SearchDesktopShowRecentOpened);
+        Assert.False(s.SearchDesktopPrivacyMask);
         Assert.Equal("none", s.CloudBackupProvider);
         Assert.Equal("", s.CloudBackupServerUrl);
         Assert.Equal("DeskBox/backups", s.CloudBackupRemotePath);
@@ -565,6 +569,10 @@ public sealed class SettingsSliceContractBaselineTests
         "searchQuickCreateDefaultTarget",
         "searchQuickCreateShowHud",
         "searchCategoryLayout",
+        "searchDesktopHandoffMode",
+        "searchDesktopShowHistory",
+        "searchDesktopShowRecentOpened",
+        "searchDesktopPrivacyMask",
         "cloudBackupProvider",
         "cloudBackupServerUrl",
         "cloudBackupRemotePath",

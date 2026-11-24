@@ -318,6 +318,7 @@ public static class CustomWidgetSemanticIcons
 
         return mapped switch
         {
+            "\uF012" => "\uE7B8", // Win11 Fluent ZipFolder -> Win10 MDL2 Package fallback
             "\uED1A" => "\uE890", // Win11 Fluent Hide -> Win10 MDL2 View fallback
             "\uE7C2" => "\uE8AB", // Win11 Fluent Move -> Win10 MDL2 Switch fallback
             "\uF8AC" => "\uE892", // Win11 BackSolidBold -> Win10 MDL2 Previous

@@ -526,7 +526,7 @@ public sealed class WidgetVisualActivityContractTests
     {
         string show = ExtractSection(
             Read("src/DeskBox/Views/ContentWidgetWindow.xaml.cs"),
-            "public void ShowPreparedRaisedFromTray(bool persistVisibility = true)",
+            "public void ShowPreparedRaisedFromTray(",
             "public void PlayTrayShowAnimation()");
         int resumeIndex = show.IndexOf(
             "ShowWithoutActivation(persistVisibility);",

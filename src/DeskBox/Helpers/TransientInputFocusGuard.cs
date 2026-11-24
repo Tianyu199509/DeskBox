@@ -52,10 +52,14 @@ internal static class TransientInputFocusGuard
             ClearNoActivateStyle(windowHandle);
         }
 
-        _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
-        _ = SetForegroundWindow(windowHandle);
-        _ = SetActiveWindow(windowHandle);
-        window?.Activate();
+        if (Win32Helper.GetForegroundWindow() != windowHandle)
+        {
+            _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
+            _ = Win32Helper.SetForegroundWindow(windowHandle);
+            _ = SetActiveWindow(windowHandle);
+            window?.Activate();
+        }
+
         FocusContentIsland(windowHandle);
     }
 
@@ -72,7 +76,9 @@ internal static class TransientInputFocusGuard
 
     public static void FocusContentIsland(IntPtr windowHandle)
     {
-        if (windowHandle == IntPtr.Zero || !Win32Helper.IsWindow(windowHandle))
+        if (windowHandle == IntPtr.Zero ||
+            !Win32Helper.IsWindow(windowHandle) ||
+            IsFocusInsideContentIsland(windowHandle))
         {
             return;
         }
@@ -81,18 +87,67 @@ internal static class TransientInputFocusGuard
         _ = SetFocus(child != IntPtr.Zero ? child : windowHandle);
     }
 
+    public static bool IsFocusInsideContentIsland(IntPtr windowHandle)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr focused = GetFocus();
+        if (focused == IntPtr.Zero || focused == windowHandle)
+        {
+            return false;
+        }
+
+        if (IsChild(windowHandle, focused) == 0)
+        {
+            IntPtr focusedRoot = Win32Helper.GetAncestor(focused, GaRoot);
+            if (focusedRoot == IntPtr.Zero ||
+                focused == focusedRoot ||
+                !IsCurrentProcessPopupBridge(focusedRoot) ||
+                GetWindow(focusedRoot, (uint)Win32Helper.GW_OWNER) != windowHandle)
+            {
+                return false;
+            }
+        }
+
+        Span<char> classBuf = stackalloc char[96];
+        int length = Win32Helper.GetClassName(focused, classBuf);
+        ReadOnlySpan<char> className = length > 0 ? classBuf[..length] : ReadOnlySpan<char>.Empty;
+        return !IsCompositionBackdropBridgeClass(className);
+    }
+
     internal static IntPtr ResolveContentIslandChild(IntPtr windowHandle)
     {
         IntPtr fallback = IntPtr.Zero;
         Span<char> classBuf = stackalloc char[96];
+        Span<char> nestedBuf = stackalloc char[96];
         for (IntPtr cur = GetWindow(windowHandle, GwChild);
              cur != IntPtr.Zero;
              cur = GetWindow(cur, GwHwndNext))
         {
             int length = Win32Helper.GetClassName(cur, classBuf);
             ReadOnlySpan<char> className = length > 0 ? classBuf[..length] : ReadOnlySpan<char>.Empty;
+            if (IsInputSiteWindowClass(className))
+            {
+                return cur;
+            }
+
             if (IsPreferredContentIslandClass(className))
             {
+                for (IntPtr nested = GetWindow(cur, GwChild);
+                     nested != IntPtr.Zero;
+                     nested = GetWindow(nested, GwHwndNext))
+                {
+                    int nestedLen = Win32Helper.GetClassName(nested, nestedBuf);
+                    ReadOnlySpan<char> nestedClass = nestedLen > 0 ? nestedBuf[..nestedLen] : ReadOnlySpan<char>.Empty;
+                    if (IsInputSiteWindowClass(nestedClass))
+                    {
+                        return nested;
+                    }
+                }
+
                 return cur;
             }
 
@@ -105,12 +160,15 @@ internal static class TransientInputFocusGuard
         return fallback;
     }
 
+    internal static bool IsInputSiteWindowClass(ReadOnlySpan<char> className) =>
+        className.Equals("InputSiteWindowClass", StringComparison.OrdinalIgnoreCase) ||
+        className.EndsWith(".InputSite.WindowClass", StringComparison.OrdinalIgnoreCase);
+
     internal static bool IsPreferredContentIslandClass(ReadOnlySpan<char> className) =>
         className.Equals(ContentBridgeWindowClass, StringComparison.OrdinalIgnoreCase) ||
         className.EndsWith(".Content.DesktopChildSiteBridge", StringComparison.OrdinalIgnoreCase) ||
         className.Equals("DesktopWindowXamlSource", StringComparison.OrdinalIgnoreCase) ||
-        className.Equals("InputSiteWindowClass", StringComparison.OrdinalIgnoreCase) ||
-        className.EndsWith(".InputSite.WindowClass", StringComparison.OrdinalIgnoreCase);
+        IsInputSiteWindowClass(className);
 
     internal static bool IsCompositionBackdropBridgeClass(ReadOnlySpan<char> className) =>
         className.Equals(CompositionBackdropBridgeWindowClass, StringComparison.OrdinalIgnoreCase);
@@ -148,6 +206,49 @@ internal static class TransientInputFocusGuard
         return false;
     }
 
+    public static bool IsHostingShellEditingTitle(DependencyObject? source)
+    {
+        for (DependencyObject? cur = source; cur is not null; cur = SafeGetParent(cur))
+        {
+            if (cur is DeskBox.Controls.WidgetShell { TitleEditorContent: not null })
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool HasActiveEditorOrShellTitleRename(FrameworkElement? context)
+    {
+        if (context is null)
+        {
+            return false;
+        }
+
+        if (IsHostingShellEditingTitle(context))
+        {
+            return true;
+        }
+
+        if (context.XamlRoot is { } xamlRoot)
+        {
+            try
+            {
+                if (IsInsideTextInputControl(
+                        Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xamlRoot) as DependencyObject))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
     public static bool HasOpenPopupsInXamlRoot(XamlRoot? xamlRoot)
     {
         if (xamlRoot is null)
@@ -175,28 +276,27 @@ internal static class TransientInputFocusGuard
         IntPtr root = Win32Helper.GetAncestor(hwnd, GaRoot);
         IntPtr candidate = root != IntPtr.Zero ? root : hwnd;
 
-        IReadOnlyList<IntPtr> bridges = Win32Helper.GetVisiblePopupBridgeWindows();
-        for (int i = 0; i < bridges.Count; i++)
-        {
-            IntPtr bridge = bridges[i];
-            if (bridge == candidate || bridge == hwnd)
-            {
-                return true;
-            }
-        }
-
+        // Do not gate on candidate window visibility: during MenuFlyout teardown,
+        // WinUI hides PopupWindowSiteBridge milliseconds before Win32 moves
+        // GetForegroundWindow() away from it. Any PopupWindowSiteBridge / #32768
+        // owned by this process is always a transient popup bridge, never a
+        // competing top-level DeskBox window.
         _ = Win32Helper.GetWindowThreadProcessId(candidate, out uint pid);
-        if (pid == (uint)Environment.ProcessId)
+        if (pid != (uint)Environment.ProcessId)
         {
-            Span<char> classBuffer = stackalloc char[32];
-            int length = Win32Helper.GetClassName(candidate, classBuffer);
-            if (length > 0 && classBuffer[..length].SequenceEqual("#32768"))
-            {
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        Span<char> classBuffer = stackalloc char[64];
+        int length = Win32Helper.GetClassName(candidate, classBuffer);
+        if (length <= 0)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> className = classBuffer[..length];
+        return className.SequenceEqual("Microsoft.UI.Content.PopupWindowSiteBridge") ||
+               className.SequenceEqual("#32768");
     }
 
     public static bool IsWindowsTextInputExperienceWindow(IntPtr hwnd)
@@ -257,13 +357,23 @@ internal static class TransientInputFocusGuard
             return false;
         }
 
-        // Windows 10/11 Modern Emoji / Clipboard / Voice / Candidate host & Touch Keyboard.
+        if (className.Equals("#32770", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Windows 10/11 Modern Emoji / Clipboard / Voice / Candidate host & Touch Keyboard
+        // (including Win10 19044 LTSC InputApp and Win11 24H2 XamlExplorerHostIslandWindow).
         if (string.Equals(processName, "TextInputHost", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(processName, "TabTip", StringComparison.OrdinalIgnoreCase))
+            string.Equals(processName, "TabTip", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(processName, "InputApp", StringComparison.OrdinalIgnoreCase) ||
+            processName.EndsWith(".TextInput.InputApp", StringComparison.OrdinalIgnoreCase))
         {
             return className.Contains("CoreWindow".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
                    className.Contains("InputSite".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
                    className.Contains("ApplicationFrameWindow".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("XamlExplorerHostIslandWindow".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("PopupHost".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
                    className.Contains("IPTip_Main_Window".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
                    className.Contains("IME".AsSpan(), StringComparison.OrdinalIgnoreCase);
         }
@@ -445,8 +555,8 @@ internal static class TransientInputFocusGuard
                 (fg == hostWindowHandle ||
                  (fg == IntPtr.Zero && IsCursorInsideWindow(hostWindowHandle))))
             {
-                _ = editor.Focus(FocusState.Programmatic);
                 FocusContentIsland(hostWindowHandle);
+                _ = editor.Focus(FocusState.Programmatic);
                 return;
             }
 
@@ -493,13 +603,15 @@ internal static class TransientInputFocusGuard
         if (string.Equals(procName, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) &&
             className.Equals("ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase))
         {
-            IntPtr child = GetWindow(hwnd, GwChild);
-            if (child != IntPtr.Zero)
+            for (IntPtr child = GetWindow(hwnd, GwChild);
+                 child != IntPtr.Zero;
+                 child = GetWindow(child, GwHwndNext))
             {
                 _ = Win32Helper.GetWindowThreadProcessId(child, out uint childPid);
                 if (childPid != 0 && childPid != pid)
                 {
                     procName = ProcessImageNameResolver.GetProcessName(childPid);
+                    break;
                 }
             }
         }

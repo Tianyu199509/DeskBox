@@ -22,6 +22,11 @@ internal static class DeskBoxMainProgram
         }
 #endif
 
+        if (App.TryForwardSameChannelSecondaryLaunchBeforeXaml(out int secondaryExitCode))
+        {
+            return secondaryExitCode;
+        }
+
         ComWrappersSupport.InitializeComWrappers();
         Application.Start(_params =>
         {

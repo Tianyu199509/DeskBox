@@ -245,7 +245,13 @@ public sealed partial class QuickCaptureSurfaceContent :
     {
         _isWindowActivated = true;
         UpdateOwnerFocusSelectionVisuals();
-        if (IsLoaded)
+        if (IsLoaded &&
+            !DeskBox.Helpers.TransientInputFocusGuard.IsHostingShellEditingTitle(this) &&
+            ShouldApplyPendingFocusOnActivation(
+                _pendingFocusTarget,
+                _isInlineComposerOpen,
+                _isDetailEditing,
+                ViewModel.IsSearchExpanded))
         {
             ApplyPendingFocus();
         }
@@ -1279,7 +1285,10 @@ public sealed partial class QuickCaptureSurfaceContent :
             return;
         }
 
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-item-click");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "quick-capture-item-click",
+            expectTextInput: false);
         UpdateOwnerFocusSelectionVisuals();
 
         if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) ||
@@ -1369,6 +1378,7 @@ public sealed partial class QuickCaptureSurfaceContent :
             PlaySinglePaneNavigationTransition(enteringDetail: true);
         }
 
+        InteractionBreadcrumbRecorder.Record("qc-detail-new", $"dual={_isDualPane}");
         DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-new-detail");
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -1427,6 +1437,18 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
         ApplyResponsiveLayout();
         RefreshDetailPresentation();
+        if (_isDetailEditing)
+        {
+            InteractionBreadcrumbRecorder.Record("qc-detail-open-edit", $"dual={_isDualPane}");
+            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-detail-edit");
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isDisposed && _isDetailEditing)
+                {
+                    EnsureDetailMarkdownEditorRealized().FocusEditor(moveCaretToEnd: false);
+                }
+            });
+        }
     }
 
     private async Task OpenDetailAfterSavingAsync(QuickCaptureItemViewModel item)
@@ -1606,6 +1628,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         SetDetailEditorText(_detailItem?.Body ?? string.Empty);
         _isDetailEditing = true;
         RefreshDetailPresentation();
+        InteractionBreadcrumbRecorder.Record("qc-detail-edit", $"dual={_isDualPane}");
         DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-detail-edit");
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -1771,6 +1794,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         try
         {
             _isSavingDetail = true;
+            InteractionBreadcrumbRecorder.Record("qc-detail-save", $"complete={completeEditing}");
             bool saved;
             do
             {
@@ -1800,6 +1824,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
         catch (Exception ex)
         {
+            InteractionBreadcrumbRecorder.Record("qc-detail-save-err", ex.GetType().Name);
             App.Log($"[QuickCaptureSurface] Detail save failed id={WidgetId}: {ex}");
             RaiseFeedback(
                 T("Common.OperationFailedRetry"),
@@ -2153,11 +2178,10 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
+            IntPtr owner = ResolveHostOwnerWindowHandle();
             IReadOnlyList<string> files =
                 await FileOpenPickerService.PickMultipleFilesAsync(
-                    owner == IntPtr.Zero ? foreground : owner,
+                    owner,
                     [],
                     PickerLocationId.Desktop);
             DroppedFilePath[] paths = files
@@ -2665,7 +2689,10 @@ public sealed partial class QuickCaptureSurfaceContent :
             e.GetCurrentPoint(ItemsList).Properties.IsLeftButtonPressed;
         if (isLeftButtonPressed && !IsInteractiveQuickCaptureSource(e.OriginalSource))
         {
-            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "quick-capture-list-card");
+            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+                this,
+                "quick-capture-list-card",
+                expectTextInput: false);
             UpdateOwnerFocusSelectionVisuals();
         }
 
@@ -3977,31 +4004,61 @@ public sealed partial class QuickCaptureSurfaceContent :
 
     private string GetCurrentFocusTarget()
     {
-        object? focused = XamlRoot is null
+        DependencyObject? focused = XamlRoot is null
             ? null
-            : FocusManager.GetFocusedElement(XamlRoot);
-        if (ReferenceEquals(focused, SearchTextBox))
-        {
-            return "Search";
-        }
-        if (ReferenceEquals(focused, ItemsList))
-        {
-            return "Items";
-        }
-
-        return "Root";
+            : FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+        return ResolveFocusTargetName(
+            IsVisualDescendantOrSelf(focused, InlineComposerTextBox),
+            DetailMarkdownEditor is not null && IsVisualDescendantOrSelf(focused, DetailMarkdownEditor),
+            IsVisualDescendantOrSelf(focused, SearchTextBox),
+            ReferenceEquals(focused, ItemsList));
     }
 
     private void ApplyPendingFocus()
     {
+        bool hadPendingTarget = _pendingFocusTarget is not null;
         string target = _pendingFocusTarget ?? _lastFocusTarget;
         _pendingFocusTarget = null;
-        FrameworkElement element = target switch
+        if (!hadPendingTarget && IsTextInputSessionActiveOrFocused())
         {
-            "Search" => SearchTextBox,
-            "Items" => ItemsList,
-            _ => ResponsiveContentGrid
-        };
+            return;
+        }
+
+        if (target == "InlineComposer")
+        {
+            if (_isInlineComposerOpen && InlineComposerCard?.Visibility == Visibility.Visible)
+            {
+                InlineComposerTextBox.Focus(FocusState.Programmatic);
+            }
+            return;
+        }
+
+        if (target == "DetailEditor")
+        {
+            if (_isDetailEditing && DetailMarkdownEditor?.Visibility == Visibility.Visible)
+            {
+                DetailMarkdownEditor.FocusEditor(moveCaretToEnd: false);
+            }
+            return;
+        }
+
+        if (target == "Search")
+        {
+            if (ViewModel.IsSearchExpanded && SearchTextBox.Visibility == Visibility.Visible)
+            {
+                SearchTextBox.Focus(FocusState.Programmatic);
+            }
+            return;
+        }
+
+        if (IsTextInputSessionActiveOrFocused())
+        {
+            return;
+        }
+
+        FrameworkElement element = target == "Items" && ListPage.Visibility == Visibility.Visible
+            ? ItemsList
+            : ResponsiveContentGrid;
         element.Focus(FocusState.Programmatic);
     }
 

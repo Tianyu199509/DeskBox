@@ -17,7 +17,7 @@ public sealed class ToggleSwitchAccessibleNameContractTests
     public static TheoryData<string, int> ToggleSwitchHostFiles => new()
     {
         { "src/DeskBox/Views/SettingsWindow.xaml", 35 },
-        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 11 },
+        { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 15 },
         { "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml", 7 },
         { "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 2 },
         { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 11 },

@@ -26,6 +26,7 @@ public sealed partial class SearchSettingsSection : UserControl
     private SearchSettingsViewModel? _viewModel;
     private LocalizationService _localization = null!;
     private ISettingsHotkeyActions _hotkeyActions = null!;
+    private ISettingsWidgetActions? _widgetActions;
     private nint _ownerWindow;
     private bool _hostActive;
     private bool _observingModel;
@@ -45,11 +46,13 @@ public sealed partial class SearchSettingsSection : UserControl
         SearchSettingsViewModel viewModel,
         LocalizationService localization,
         ISettingsHotkeyActions hotkeyActions,
-        nint ownerWindow)
+        nint ownerWindow,
+        ISettingsWidgetActions? widgetActions = null)
     {
         _viewModel = viewModel;
         _localization = localization;
         _hotkeyActions = hotkeyActions;
+        _widgetActions = widgetActions;
         _ownerWindow = ownerWindow;
         RefreshFromSettings();
     }
@@ -276,11 +279,49 @@ public sealed partial class SearchSettingsSection : UserControl
             EverythingDetectButton.IsEnabled = canOperate;
             EverythingBrowseButton.IsEnabled = canOperate;
             EverythingLaunchButton.IsEnabled = canOperate;
+
+            RenderDesktopEntryControls(settings);
         }
         finally
         {
             _isLoading = false;
         }
+    }
+
+    private void RenderDesktopEntryControls(SearchPreferences settings)
+    {
+        bool desktopEnabled = _viewModel?.State.DesktopEntryEnabled
+            ?? (_widgetActions?.IsFeatureWidgetEnabled(WidgetKind.Search) ?? false);
+        SearchDesktopEntryExpander.IsEnabled = _viewModel?.State.FeatureEnabled == true && _widgetActions is not null;
+        SearchDesktopEntryToggle.IsEnabled = _viewModel?.State.FeatureEnabled == true && _widgetActions is not null;
+        SearchDesktopEntryToggle.IsOn = desktopEnabled;
+
+        SearchDesktopHandoffComboBox.SelectedItem = SearchDesktopHandoffComboBox.Items
+            .OfType<ComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(
+                item.Tag as string,
+                settings.DesktopHandoffMode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? SearchDesktopHandoffComboBox.Items.OfType<ComboBoxItem>().FirstOrDefault();
+
+        SearchDesktopShowHistoryToggle.IsOn = settings.DesktopShowHistory;
+        SearchDesktopShowRecentOpenedToggle.IsOn = settings.DesktopShowRecentOpened;
+        SearchDesktopPrivacyMaskToggle.IsOn = settings.DesktopPrivacyMask;
+
+        UpdateDesktopEntrySubOptionsEnabled(desktopEnabled);
+    }
+
+    private void UpdateDesktopEntrySubOptionsEnabled(bool desktopEnabled)
+    {
+        bool subEnabled = (_viewModel?.State.FeatureEnabled ?? false) && desktopEnabled;
+        SearchDesktopHandoffCard.IsEnabled = subEnabled;
+        SearchDesktopHandoffComboBox.IsEnabled = subEnabled;
+        SearchDesktopShowHistoryCard.IsEnabled = subEnabled;
+        SearchDesktopShowHistoryToggle.IsEnabled = subEnabled;
+        SearchDesktopShowRecentOpenedCard.IsEnabled = subEnabled;
+        SearchDesktopShowRecentOpenedToggle.IsEnabled = subEnabled;
+        SearchDesktopPrivacyMaskCard.IsEnabled = subEnabled;
+        SearchDesktopPrivacyMaskToggle.IsEnabled = subEnabled;
     }
 
     private bool IsCategoryFeatureEnabled(string categoryId, SearchSettingsSnapshot state) =>
@@ -769,6 +810,77 @@ public sealed partial class SearchSettingsSection : UserControl
         }
 
         _viewModel?.UpdatePreferences(new(QuickCreateShowHud: SearchQuickCreateHudToggle.IsOn));
+    }
+
+    private async void SearchDesktopEntryToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading || _widgetActions is null)
+        {
+            return;
+        }
+
+        bool desired = SearchDesktopEntryToggle.IsOn;
+        if (desired)
+        {
+            SearchDesktopEntryExpander.IsExpanded = true;
+        }
+
+        UpdateDesktopEntrySubOptionsEnabled(desired);
+        bool applied = await _widgetActions.SetFeatureWidgetEnabled(WidgetKind.Search, desired);
+        if (applied != desired)
+        {
+            _isLoading = true;
+            try
+            {
+                SearchDesktopEntryToggle.IsOn = applied;
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
+            UpdateDesktopEntrySubOptionsEnabled(applied);
+        }
+    }
+
+    private void SearchDesktopHandoffComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoading || SearchDesktopHandoffComboBox.SelectedItem is not ComboBoxItem { Tag: string mode })
+        {
+            return;
+        }
+
+        _viewModel?.UpdatePreferences(new(DesktopHandoffMode: mode));
+    }
+
+    private void SearchDesktopShowHistoryToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _viewModel?.UpdatePreferences(new(DesktopShowHistory: SearchDesktopShowHistoryToggle.IsOn));
+    }
+
+    private void SearchDesktopShowRecentOpenedToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _viewModel?.UpdatePreferences(new(DesktopShowRecentOpened: SearchDesktopShowRecentOpenedToggle.IsOn));
+    }
+
+    private void SearchDesktopPrivacyMaskToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _viewModel?.UpdatePreferences(new(DesktopPrivacyMask: SearchDesktopPrivacyMaskToggle.IsOn));
     }
 
     private void SearchRecommendationsToggle_Toggled(object sender, RoutedEventArgs e)

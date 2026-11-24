@@ -436,6 +436,11 @@ internal static partial class SingleInstanceAndActivationInterop
                 $"D:(A;;GWGR;;;{sid})S:(ML;;NW;;;ME)",
                 1,
                 out IntPtr descriptor,
+                IntPtr.Zero) &&
+            !ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                $"D:(A;;GWGR;;;{sid})",
+                1,
+                out descriptor,
                 IntPtr.Zero))
         {
             return null;

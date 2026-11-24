@@ -3,7 +3,11 @@ namespace DeskBox;
 using System.Diagnostics;
 using System.Threading;
 
+using DeskBox.Contracts;
 using DeskBox.Services;
+using DeskBox.Views;
+using Microsoft.UI.Xaml;
+using WinRT.Interop;
 
 /// <summary>
 /// Main-process side of the settings-host lifecycle (batch 3d): every
@@ -33,16 +37,26 @@ public partial class App
     // reports death, and the old exit must not resume hotkeys the new host
     // just suspended for its own recording.
     private int _settingsHostGeneration;
+    private long _settingsHostSpawnedTickMs;
+    private SettingsWindow? _inProcessFallbackSettingsWindow;
+    private InProcessSettingsHotkeyActions? _inProcessFallbackHotkeyActions;
+    private bool _inProcessFallbackPersistenceSubscribed;
+    private bool _useInProcessSettingsFallback;
+    private (string? SectionTag, string? GlanceWidgetId, bool OneClickUpdate, string? InstallResult) _lastSettingsHostSpawnIntent;
 
     internal bool IsSettingsHostRunning =>
         _settingsHostProcess is { } host && !host.HasExited;
 
+    internal bool HasInProcessFallbackSettingsWindow =>
+        _inProcessFallbackSettingsWindow is not null;
+
     /// <summary>
-    /// True while a settings-host process exists and its window is up. The
-    /// host exits when its window closes, so "process alive" is the
-    /// user-visible state for every IsSettingsOpen consumer.
+    /// True while a settings-host process exists and its window is up, or while
+    /// the in-process fallback settings window is visible.
     /// </summary>
-    internal bool IsSettingsHostVisible => IsSettingsHostRunning;
+    internal bool IsSettingsHostVisible =>
+        IsSettingsHostRunning ||
+        (_inProcessFallbackSettingsWindow is { IsVisibleToUser: true });
 
     /// <summary>
     /// Out-of-process settings lives in a second <c>DeskBox.exe --settings</c> process with its
@@ -114,8 +128,25 @@ public partial class App
             return;
         }
 
+        if (_useInProcessSettingsFallback || _settingsIpcServer is null)
+        {
+            if (!_useInProcessSettingsFallback && _settingsIpcServer is null)
+            {
+                Log("[SettingsHost] Settings IPC server unavailable; using in-process settings fallback");
+                _useInProcessSettingsFallback = true;
+            }
+
+            ShowSettingsInProcessFallback(sectionTag, glanceWidgetId, oneClickUpdate, installResult);
+            return;
+        }
+
         if (!IsSettingsHostRunning)
         {
+            lock (_pendingHostIntentsGate)
+            {
+                _lastSettingsHostSpawnIntent = (sectionTag, glanceWidgetId, oneClickUpdate, installResult);
+            }
+
             StartSettingsHostProcess(BuildSettingsHostArguments(
                 sectionTag,
                 glanceWidgetId,
@@ -314,6 +345,7 @@ public partial class App
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
             };
             foreach (string argument in arguments)
             {
@@ -344,41 +376,76 @@ public partial class App
             }
             Volatile.Write(ref _cachedSettingsHostWindowHandle, IntPtr.Zero);
 
+            Volatile.Write(ref _settingsHostSpawnedTickMs, Environment.TickCount64);
             Process? spawnedHost = Process.Start(startInfo);
             Log("[SettingsHost] Spawned pid=" + (spawnedHost?.Id.ToString() ?? "null"));
-            if (spawnedHost is not null)
+            if (spawnedHost is null)
             {
-                // Initialize start time BEFORE publishing _settingsHostProcess so
-                // SettingsHostPipeClientIdentity never pairs a new pid with a stale StartTime.
-                _settingsHostStartTime = TryGetStartTime(spawnedHost);
-                Volatile.Write(ref _settingsHostProcess, spawnedHost);
-                TryGrantSettingsHostForegroundRight(spawnedHost);
-                int generation = ++_settingsHostGeneration;
-                spawnedHost.EnableRaisingEvents = true;
-                void ExitHandler(object? sender, EventArgs args)
+                ActivateInProcessSettingsFallback("spawn-returned-null");
+                return;
+            }
+
+            // Initialize start time BEFORE publishing _settingsHostProcess so
+            // SettingsHostPipeClientIdentity never pairs a new pid with a stale StartTime.
+            _settingsHostStartTime = TryGetStartTime(spawnedHost);
+            Volatile.Write(ref _settingsHostProcess, spawnedHost);
+            TryGrantSettingsHostForegroundRight(spawnedHost);
+            int generation = ++_settingsHostGeneration;
+            spawnedHost.EnableRaisingEvents = true;
+            void ExitHandler(object? sender, EventArgs args)
+            {
+                if (sender is Process host)
                 {
-                    if (sender is Process host)
+                    host.Exited -= ExitHandler;
+                    int? exitCode = null;
+                    try { exitCode = host.ExitCode; } catch { }
+                    OnSettingsHostProcessExited(generation, exitCode);
+                    if (ReferenceEquals(Interlocked.CompareExchange(ref _settingsHostProcess, null, host), host) ||
+                        ReferenceEquals(Interlocked.CompareExchange(ref _exitingSettingsHost, null, host), host))
                     {
-                        host.Exited -= ExitHandler;
-                        OnSettingsHostProcessExited(generation);
-                        if (ReferenceEquals(Interlocked.CompareExchange(ref _settingsHostProcess, null, host), host) ||
-                            ReferenceEquals(Interlocked.CompareExchange(ref _exitingSettingsHost, null, host), host))
-                        {
-                            try { host.Dispose(); } catch { }
-                        }
-                    }
-                    else
-                    {
-                        OnSettingsHostProcessExited(generation);
+                        try { host.Dispose(); } catch { }
                     }
                 }
-
-                spawnedHost.Exited += ExitHandler;
+                else
+                {
+                    OnSettingsHostProcessExited(generation, null);
+                }
             }
+
+            spawnedHost.Exited += ExitHandler;
+            _ = WatchSettingsHostBootTimeoutAsync(generation);
         }
         catch (Exception ex)
         {
             Log($"[SettingsHost] Spawn failed: {ex.Message}");
+            ActivateInProcessSettingsFallback("spawn-exception");
+        }
+    }
+
+    private async Task WatchSettingsHostBootTimeoutAsync(int generation)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(12)).ConfigureAwait(false);
+            if (IsShuttingDown || _useInProcessSettingsFallback || generation != _settingsHostGeneration)
+            {
+                return;
+            }
+
+            bool confirmed;
+            lock (_pendingHostIntentsGate)
+            {
+                confirmed = _settingsHostBootConfirmed;
+            }
+
+            if (!confirmed)
+            {
+                Log($"[SettingsHost] Boot timed out after 12000ms for generation={generation}; switching to in-process settings fallback");
+                ActivateInProcessSettingsFallback("boot-timeout");
+            }
+        }
+        catch
+        {
         }
     }
 
@@ -389,11 +456,11 @@ public partial class App
     /// Deep review R13 (D5): the guard is era-scoped — when a farewell-era
     /// reopen spawned a replacement before the old process reported death,
     /// the old exit must not resume hotkeys the NEW host suspended for its
-    /// own recording session. A host that crashed mid-boot with intents
-    /// queued loses them (they were queued, not pushed); the next open
-    /// spawns fresh, which is the pre-R13 behavior for every intent.
+    /// own recording session. If the host exited before confirming boot
+    /// (#1254), automatically switch to the in-process settings fallback and
+    /// replay the spawn + queued intents so Settings never stays unreachable.
     /// </summary>
-    private void OnSettingsHostProcessExited(int generation)
+    private void OnSettingsHostProcessExited(int generation, int? exitCode = null)
     {
         try
         {
@@ -402,6 +469,21 @@ public partial class App
                 Log("[SettingsHost] Exit of a superseded host era ignored (a newer host was spawned)");
                 return;
             }
+
+            bool wasBootConfirmed;
+            lock (_pendingHostIntentsGate)
+            {
+                wasBootConfirmed = _settingsHostBootConfirmed;
+            }
+
+            long spawnedTick = Volatile.Read(ref _settingsHostSpawnedTickMs);
+            long elapsedMs = spawnedTick > 0 ? Math.Max(0, Environment.TickCount64 - spawnedTick) : -1;
+            string formattedCode = exitCode is int code
+                ? $"0x{unchecked((uint)code):X8} ({code})"
+                : "unknown";
+            Log(
+                $"[SettingsHost] Process exited generation={generation} " +
+                $"code={formattedCode} bootConfirmed={wasBootConfirmed} elapsedMs={elapsedMs}");
 
             if (GlobalHotkeyService?.IsSuspendedForRecording == true ||
                 _searchHotkeyService?.IsSuspendedForRecording == true ||
@@ -419,12 +501,477 @@ public partial class App
                 });
             }
 
+            if (!wasBootConfirmed && !IsShuttingDown)
+            {
+                ActivateInProcessSettingsFallback($"pre-boot-exit:{formattedCode}");
+                return;
+            }
+
             NotifySettingsHostClosedForMemoryCleanup();
         }
         catch (Exception ex)
         {
             Log($"[SettingsHost] Exit guard failed: {ex.Message}");
         }
+    }
+
+    private void ActivateInProcessSettingsFallback(string reason)
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
+
+        (string? SectionTag, string? GlanceWidgetId, bool OneClickUpdate, string? InstallResult) spawnIntent;
+        List<(string Method, string? Payload)> queuedIntents;
+        lock (_pendingHostIntentsGate)
+        {
+            _useInProcessSettingsFallback = true;
+            _settingsHostGeneration++;
+            spawnIntent = _lastSettingsHostSpawnIntent;
+            _lastSettingsHostSpawnIntent = default;
+            queuedIntents = [.. _pendingHostIntents];
+            _pendingHostIntents.Clear();
+        }
+
+        Process? abandonedHost = Interlocked.Exchange(ref _settingsHostProcess, null);
+        Volatile.Write(ref _cachedSettingsHostWindowHandle, IntPtr.Zero);
+        if (abandonedHost is not null)
+        {
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    if (!abandonedHost.HasExited)
+                    {
+                        abandonedHost.Kill();
+                    }
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    try { abandonedHost.Dispose(); } catch { }
+                }
+            });
+        }
+
+        Log(
+            $"[SettingsHost] Activating in-process settings fallback " +
+            $"(reason={reason}, queuedIntents={queuedIntents.Count})");
+
+        void ReplayOnUi()
+        {
+            if (IsShuttingDown)
+            {
+                return;
+            }
+
+            try
+            {
+                ShowSettingsInProcessFallback(
+                    spawnIntent.SectionTag,
+                    spawnIntent.GlanceWidgetId,
+                    spawnIntent.OneClickUpdate,
+                    spawnIntent.InstallResult);
+                foreach ((string method, string? payload) in queuedIntents)
+                {
+                    ApplyHostIntentToInProcessWindow(method, payload);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[SettingsHost] In-process settings fallback failed: {ex}");
+            }
+        }
+
+        if (UiDispatcherQueue is { HasThreadAccess: true })
+        {
+            ReplayOnUi();
+        }
+        else
+        {
+            UiDispatcherQueue?.TryEnqueue(ReplayOnUi);
+        }
+    }
+
+    private void ShowSettingsInProcessFallback(
+        string? sectionTag,
+        string? glanceWidgetId,
+        bool oneClickUpdate,
+        string? installResult)
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
+
+        CancelBackgroundMemoryCleanup();
+        SettingsWindow window = _inProcessFallbackSettingsWindow ?? CreateInProcessFallbackSettingsWindow();
+        window.ShowWindow();
+        if (!string.IsNullOrEmpty(glanceWidgetId))
+        {
+            window.ShowGlanceSection(glanceWidgetId);
+        }
+        else if (!string.IsNullOrEmpty(sectionTag))
+        {
+            window.ShowSection(sectionTag);
+            if (string.Equals(sectionTag, "About", StringComparison.Ordinal))
+            {
+                window.BringUpdateStatusIntoView();
+            }
+        }
+
+        if (oneClickUpdate)
+        {
+            _ = window.RunOneClickUpdateFlowAsync();
+        }
+
+        if (!string.IsNullOrEmpty(installResult))
+        {
+            window.QueueUpdateInstallResultDialog(installResult);
+        }
+    }
+
+    private void ApplyHostIntentToInProcessWindow(string method, string? payload)
+    {
+        if (_inProcessFallbackSettingsWindow is not { } window)
+        {
+            return;
+        }
+
+        switch (method)
+        {
+            case SettingsIpcMethods.HostShowGlance when !string.IsNullOrEmpty(payload):
+                window.ShowWindow();
+                window.ShowGlanceSection(payload);
+                break;
+            case SettingsIpcMethods.HostShow:
+                window.ShowWindow();
+                if (!string.IsNullOrEmpty(payload))
+                {
+                    window.ShowSection(payload);
+                    if (string.Equals(payload, "About", StringComparison.Ordinal))
+                    {
+                        window.BringUpdateStatusIntoView();
+                    }
+                }
+                break;
+            case SettingsIpcMethods.HostOneClickUpdate:
+                _ = window.RunOneClickUpdateFlowAsync();
+                break;
+            case SettingsIpcMethods.HostQueueUpdateResult when !string.IsNullOrEmpty(payload):
+                window.QueueUpdateInstallResultDialog(payload);
+                break;
+        }
+    }
+
+    private SettingsWindow CreateInProcessFallbackSettingsWindow()
+    {
+        // Retail Direct builds purge pure Settings.* keys from the resident main process
+        // to save memory; re-enable full dictionary loading before constructing the window.
+        LocalizationService.DisableResidentHostKeyFilter();
+        _inProcessFallbackHotkeyActions ??= new InProcessSettingsHotkeyActions(
+            GlobalHotkeyService,
+            SearchHotkeyService,
+            DesktopDoubleClickActivationService,
+            SettingsService,
+            searchHotkeyProvider: () => _searchHotkeyService,
+            clipboardHotkeyProvider: () => _clipboardHotkeyService,
+            onClipboardRuntimeReconcile: ReconcileClipboardFeatureRuntime);
+        if (!_inProcessFallbackPersistenceSubscribed)
+        {
+            _inProcessFallbackPersistenceSubscribed = true;
+            SettingsService.LocalPersistCompleted += _ =>
+                UiDispatcherQueue?.TryEnqueue(() => _inProcessFallbackSettingsWindow?.DismissSaveFailedBanner());
+        }
+
+        var input = new SettingsWindowFactoryInput(
+            SettingsService,
+            ThemeService,
+            LocalizationService,
+            _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
+            _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
+            _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
+            _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
+            _backupRestoreActions ?? throw new InvalidOperationException("Backup restore actions are not initialized."),
+            _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
+            _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."),
+            _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
+            _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
+            _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
+            _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized."),
+            _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
+            _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
+            _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
+            _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized."),
+            _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
+            _inProcessFallbackHotkeyActions,
+            new InProcessSettingsWidgetActions(
+                WidgetManager,
+                SettingsService,
+                FileService,
+                OrganizerService,
+                LocalizationService,
+                applyQuickCaptureEnabled: enabled =>
+                    (_quickCaptureSettings ?? throw new InvalidOperationException(
+                        "Quick Capture is not initialized.")).SetEnabledAsync(enabled, reveal: enabled),
+                applyTodoEnabled: enabled =>
+                    (_todoSettings ?? throw new InvalidOperationException(
+                        "Todo settings are not initialized.")).SetEnabledAsync(enabled),
+                openCustomWidgetStudio: (widgetId, initialIdea) => ShowCustomWidgetStudio(widgetId, initialIdea)),
+            new InProcessSettingsRestoreActions(
+                DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
+                AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
+            new InProcessSettingsAppActions(this, LocalizationService),
+            new InProcessSettingsDataActions(
+                QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
+                LocalizationService,
+                clipboardServiceProvider: () => _clipboardHistoryService),
+            AppUpdateService,
+            action => UiDispatcherQueue.TryEnqueue(() => action()));
+        _inProcessFallbackSettingsWindow = input.CreateWindow();
+        _inProcessFallbackSettingsWindow.Closed += InProcessFallbackSettingsWindow_Closed;
+        return _inProcessFallbackSettingsWindow;
+    }
+
+    private void InProcessFallbackSettingsWindow_Closed(object sender, WindowEventArgs args)
+    {
+        if (sender is SettingsWindow settingsWindow)
+        {
+            settingsWindow.Closed -= InProcessFallbackSettingsWindow_Closed;
+        }
+
+        if (ReferenceEquals(_inProcessFallbackSettingsWindow, sender))
+        {
+            _inProcessFallbackSettingsWindow = null;
+        }
+
+        ScheduleLightMemoryCleanup(completedHeavyOperation: true);
+        ScheduleBackgroundMemoryCleanup("settings-fallback-closed");
+    }
+
+    internal IntPtr TryGetInProcessFallbackSettingsWindowHandle(bool requireVisible)
+    {
+        if (_inProcessFallbackSettingsWindow is not { } window)
+        {
+            return IntPtr.Zero;
+        }
+
+        if (requireVisible && !window.IsVisibleToUser)
+        {
+            return IntPtr.Zero;
+        }
+
+        return WindowNative.GetWindowHandle(window);
+    }
+
+    internal Task StopInProcessFallbackSettingsCloudBackupActionsAsync() =>
+        _inProcessFallbackSettingsWindow?.StopCloudBackupActionsAsync() ?? Task.CompletedTask;
+
+    internal void NotifyInProcessFallbackHotkeyRegistrationChanged() =>
+        _inProcessFallbackHotkeyActions?.NotifyRegistrationChanged();
+
+    internal void CloseInProcessFallbackSettingsWindowForShutdown()
+    {
+        _inProcessFallbackSettingsWindow?.CloseForShutdown();
+        _inProcessFallbackSettingsWindow = null;
+        _inProcessFallbackHotkeyActions = null;
+    }
+
+    private IntPtr GetVisibleSettingsWindowHandleCore()
+    {
+#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
+        IntPtr smokeHwnd = TryGetInProcessSettingsWindowHandleForSmoke();
+        if (smokeHwnd != IntPtr.Zero)
+        {
+            return smokeHwnd;
+        }
+#endif
+        IntPtr fallbackHwnd = TryGetInProcessFallbackSettingsWindowHandle(requireVisible: true);
+        if (fallbackHwnd != IntPtr.Zero)
+        {
+            return fallbackHwnd;
+        }
+
+        if (_settingsHostWindow is { IsVisibleToUser: true } hostWindow)
+        {
+            return WindowNative.GetWindowHandle(hostWindow);
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private IntPtr GetAnySettingsHostWindowHandle()
+    {
+        IntPtr fallbackHwnd = TryGetInProcessFallbackSettingsWindowHandle(requireVisible: false);
+        if (fallbackHwnd != IntPtr.Zero)
+        {
+            return fallbackHwnd;
+        }
+
+        if (_settingsHostWindow is { } hostWindow)
+        {
+            return WindowNative.GetWindowHandle(hostWindow);
+        }
+
+        return IntPtr.Zero;
+    }
+
+#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
+    private bool HasInProcessSettingsWindow => HasInProcessSettingsWindowForSmoke() || HasInProcessFallbackSettingsWindow;
+    private async Task StopInProcessSettingsCloudBackupActionsAsync()
+    {
+        await StopInProcessSettingsCloudBackupActionsForSmokeAsync();
+        await StopInProcessFallbackSettingsCloudBackupActionsAsync();
+    }
+    private void CloseInProcessSettingsWindowForShutdown()
+    {
+        CloseInProcessSettingsWindowForSmokeShutdown();
+        CloseInProcessFallbackSettingsWindowForShutdown();
+    }
+#else
+    private bool HasInProcessSettingsWindow => HasInProcessFallbackSettingsWindow;
+    private Task StopInProcessSettingsCloudBackupActionsAsync() => StopInProcessFallbackSettingsCloudBackupActionsAsync();
+    private void CloseInProcessSettingsWindowForShutdown() => CloseInProcessFallbackSettingsWindowForShutdown();
+#endif
+
+    internal static bool TryForwardSameChannelSecondaryLaunchBeforeXaml(out int exitCode)
+    {
+        exitCode = 0;
+        if (AppDistributionService.Current.IsPackaged)
+        {
+            return false;
+        }
+
+        string[] rawArgs = Environment.GetCommandLineArgs();
+        if (StudioHostLaunch.IsStudioHostLaunch(rawArgs))
+        {
+            return false;
+        }
+
+        if (SettingsHostLaunch.IsSettingsHostLaunch(rawArgs) &&
+            SettingsHostLaunch.TryGetMainProcessId(rawArgs) > 0)
+        {
+            return false;
+        }
+
+        string[] commandLineArgs = SettingsHostLaunch.IsBareSettingsArgumentWithoutPid(rawArgs)
+            ? [.. rawArgs, JumpListService.ArgOpenSettings]
+            : rawArgs;
+
+        if (TryGetAwaitParentExitProcessId(commandLineArgs) is not null ||
+            NativeNotificationActivationBootstrap.IsNotificationLaunch(commandLineArgs) ||
+            IsAutomatedProbeOrSmokeLaunch(commandLineArgs))
+        {
+            return false;
+        }
+
+        DeskBox.Services.Distribution.PrimaryInstanceOwnerInfo? owner =
+            DeskBox.Services.Distribution.ChannelCoexistenceService.TryReadPrimaryInstanceOwner(DeskBoxDataPathService.Current, Log);
+        if (owner is null || owner.Channel != AppDistributionService.Current.CurrentChannel)
+        {
+            return false;
+        }
+
+        bool primaryMutexHeldByAnotherInstance = false;
+        try
+        {
+            if (!Mutex.TryOpenExisting(DeskBoxDataPathService.Current.SingleInstanceMutexName, out Mutex? probeMutex))
+            {
+                return false;
+            }
+
+            try
+            {
+                bool acquired;
+                try
+                {
+                    acquired = probeMutex.WaitOne(0);
+                }
+                catch (AbandonedMutexException)
+                {
+                    acquired = true;
+                }
+
+                if (acquired)
+                {
+                    try { probeMutex.ReleaseMutex(); } catch { }
+                    return false;
+                }
+
+                primaryMutexHeldByAnotherInstance = true;
+            }
+            finally
+            {
+                probeMutex.Dispose();
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // A running higher-integrity primary instance created the mutex
+            // with an admin DACL; treat access denied as an active primary.
+            primaryMutexHeldByAnotherInstance = true;
+        }
+        catch (WaitHandleCannotBeOpenedException)
+        {
+            return false;
+        }
+
+        if (!primaryMutexHeldByAnotherInstance)
+        {
+            return false;
+        }
+
+        if (StartupLaunchPolicy.IsStartupLaunch(commandLineArgs, null, false))
+        {
+            Log("Another instance running; startup launch exiting silently (pre-XAML)");
+            DrainLogQueue();
+            return true;
+        }
+
+        string? jumpListArg = JumpListService.TryGetJumpListArgument(string.Join(' ', commandLineArgs));
+        string activationKind = jumpListArg is not null
+            ? $"jump-list:{jumpListArg}"
+            : "bare";
+        Log(
+            $"[Activation] Secondary instance (pre-XAML) kind={activationKind} " +
+            $"argumentCount={Math.Max(0, rawArgs.Length - 1)} parent=skipped");
+
+        if (jumpListArg is not null)
+        {
+            StorePendingJumpListArgument(jumpListArg);
+        }
+
+        string? protocolUri = DeskBoxProtocolActivationService.TryExtractProtocolUri(commandLineArgs, null);
+        if (!string.IsNullOrWhiteSpace(protocolUri))
+        {
+            DeskBoxProtocolActivationService.StorePendingProtocolUri(protocolUri);
+            Log($"[Protocol] Forwarded deskbox:// URI to running instance uri={protocolUri}");
+        }
+
+        string? pendingUpdateResult = TryGetUpdateInstallOutcome(commandLineArgs);
+        if (!string.IsNullOrWhiteSpace(pendingUpdateResult))
+        {
+            StorePendingUpdateInstallResult(pendingUpdateResult);
+        }
+
+        Log("Another instance running, signaling existing instance (pre-XAML)");
+        try
+        {
+            using EventWaitHandle? activationEvent = Platform.SingleInstanceAndActivationInterop.CreateOrOpenActivationEvent(
+                DeskBoxDataPathService.Current.ActivationEventName,
+                Log);
+            activationEvent?.Set();
+        }
+        catch (Exception ex)
+        {
+            Log($"Failed to signal existing instance: {ex}");
+        }
+
+        DrainLogQueue();
+        return true;
     }
 
     private void NotifySettingsHostClosedForMemoryCleanup()
@@ -574,22 +1121,11 @@ public partial class App
 
     internal IntPtr ResolveStoreUpdateOwnerWindowHandle()
     {
+        // WinRT IInitializeWithWindow::Initialize requires an HWND owned by the calling process.
         IntPtr inProcessVisible = GetVisibleSettingsWindowHandle();
-        if (IsVisibleNonEmptyOwnerWindow(inProcessVisible))
+        if (IsVisibleNonEmptyProcessWindow(inProcessVisible, (uint)Environment.ProcessId))
         {
             return inProcessVisible;
-        }
-
-        IntPtr hostSettingsHwnd = TryGetVisibleSettingsHostProcessWindowHandle();
-        if (hostSettingsHwnd != IntPtr.Zero)
-        {
-            return hostSettingsHwnd;
-        }
-
-        IntPtr studioHwnd = GetStudioHostWindowHandle();
-        if (IsVisibleNonEmptyOwnerWindow(studioHwnd))
-        {
-            return studioHwnd;
         }
 
         IntPtr visibleDeskBoxHwnd = FindVisibleTopLevelWindowForProcess(
@@ -601,21 +1137,18 @@ public partial class App
         }
 
         IntPtr inProcessSettingsAny = GetAnySettingsHostWindowHandle();
-        if (IsVisibleNonEmptyOwnerWindow(inProcessSettingsAny))
+        if (inProcessSettingsAny != IntPtr.Zero &&
+            Platform.Win32Helper.IsWindow(inProcessSettingsAny) &&
+            Platform.Win32Helper.IsWindowInCurrentProcess(inProcessSettingsAny))
         {
             return inProcessSettingsAny;
         }
 
-        IntPtr foreground = Platform.Win32Helper.GetForegroundWindow();
-        if (IsVisibleNonEmptyOwnerWindow(foreground))
+        if (TrayHostWindowHandle != IntPtr.Zero &&
+            Platform.Win32Helper.IsWindow(TrayHostWindowHandle) &&
+            Platform.Win32Helper.IsWindowInCurrentProcess(TrayHostWindowHandle))
         {
-            return foreground;
-        }
-
-        IntPtr shell = Platform.Win32Helper.GetShellWindow();
-        if (shell != IntPtr.Zero && Platform.Win32Helper.IsWindow(shell) && Platform.Win32Helper.IsWindowVisible(shell))
-        {
-            return shell;
+            return TrayHostWindowHandle;
         }
 
         return RecreateFolderPickerHelperWindow();

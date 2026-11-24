@@ -62,11 +62,12 @@ internal static partial class DesktopBlankHitTest
                 return IsDesktopHostWindow(current);
             }
 
-            current = Win32Helper.GetParent(current);
+            current = Win32Helper.GetChildParent(current);
         }
 
         return listView != IntPtr.Zero &&
                IsShellDesktopListView(listView) &&
+               IsVerifiedDesktopShellWindow(listView, allowDefView: true) &&
                IsBlankListViewPoint(listView, screenPoint);
     }
 
@@ -180,15 +181,24 @@ internal static partial class DesktopBlankHitTest
         while (current != IntPtr.Zero)
         {
             string className = GetWindowClass(current);
+            if (string.Equals(className, "SHELLDLL_DefView", StringComparison.Ordinal))
+            {
+                if (!allowDefView)
+                {
+                    return false;
+                }
+
+                current = Win32Helper.GetChildParent(current);
+                continue;
+            }
+
             if (string.Equals(className, "Progman", StringComparison.Ordinal) ||
-                string.Equals(className, "WorkerW", StringComparison.Ordinal) ||
-                (allowDefView &&
-                 string.Equals(className, "SHELLDLL_DefView", StringComparison.Ordinal)))
+                string.Equals(className, "WorkerW", StringComparison.Ordinal))
             {
                 return IsDesktopHostWindow(current);
             }
 
-            current = Win32Helper.GetParent(current);
+            current = Win32Helper.GetChildParent(current);
         }
 
         if (root != IntPtr.Zero)

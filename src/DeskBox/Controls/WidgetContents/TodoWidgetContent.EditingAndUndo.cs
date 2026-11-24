@@ -23,7 +23,109 @@ public sealed partial class TodoWidgetContent
     private const int CompletionVisualDwellMs = 260;
     private long _inlineEditOpenedAtTick;
     private bool _inlineEditorBlurSubscribed;
+    private int _pendingMenuInlineEditDepth;
+    private int _pendingOverlayHandoffDepth;
     private readonly Dictionary<string, CancellationTokenSource> _pendingCompletionDwells = new(StringComparer.Ordinal);
+
+    internal bool HasActiveCustomDueDateOverlay =>
+        !_isDisposed &&
+        CustomDueDateOverlay is { Visibility: Visibility.Visible };
+
+    internal bool HasActiveInlineOverlay =>
+        HasActiveInlineEdit ||
+        HasActiveCustomDueDateOverlay ||
+        _pendingOverlayHandoffDepth > 0;
+
+    internal void AttachDeferredFlyoutOverlayAction(
+        MenuFlyout rootFlyout,
+        MenuFlyoutItem triggerItem,
+        Func<Task> actionAfterClose)
+    {
+        bool pending = false;
+        bool holdingHandoff = false;
+
+        void ReleaseHandoff()
+        {
+            if (holdingHandoff)
+            {
+                holdingHandoff = false;
+                if (_pendingOverlayHandoffDepth > 0)
+                {
+                    _pendingOverlayHandoffDepth--;
+                }
+            }
+        }
+
+        triggerItem.Click += (_, _) =>
+        {
+            pending = true;
+            if (!holdingHandoff)
+            {
+                holdingHandoff = true;
+                _pendingOverlayHandoffDepth++;
+            }
+
+            rootFlyout.Hide();
+        };
+
+        rootFlyout.Closed += (_, _) =>
+        {
+            if (!pending)
+            {
+                ReleaseHandoff();
+                return;
+            }
+
+            pending = false;
+            if (DispatcherQueue is null ||
+                !DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        if (!_isDisposed && ViewModel is not null)
+                        {
+                            await actionAfterClose();
+                        }
+                    }
+                    finally
+                    {
+                        ReleaseHandoff();
+                    }
+                }))
+            {
+                ReleaseHandoff();
+            }
+        };
+    }
+
+    private void ShowAndFocusCustomDueDateOverlay()
+    {
+        if (CustomDueDateOverlay is null)
+        {
+            return;
+        }
+
+        CustomDueDateOverlay.Visibility = Visibility.Visible;
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "todo-custom-due",
+            expectTextInput: true);
+        if (DispatcherQueue is not null)
+        {
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isDisposed &&
+                    CustomDueDateOverlay is { Visibility: Visibility.Visible })
+                {
+                    CustomDueDatePicker?.Focus(FocusState.Programmatic);
+                }
+            });
+        }
+        else
+        {
+            CustomDueDatePicker?.Focus(FocusState.Programmatic);
+        }
+    }
 
     private Task PickBatchCustomDueDateAsync(
         IReadOnlyList<string> itemIds,
@@ -52,8 +154,7 @@ public sealed partial class TodoWidgetContent
         ConfigureCustomDueTimeState(dueDate, includeTime: initialDueDate is not null && initialHasDueTime);
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
-        CustomDueDateOverlay!.Visibility = Visibility.Visible;
-        CustomDueDatePicker?.Focus(FocusState.Programmatic);
+        ShowAndFocusCustomDueDateOverlay();
         return Task.CompletedTask;
     }
 
@@ -150,11 +251,19 @@ public sealed partial class TodoWidgetContent
 
     private void CloseCustomDueDateOverlay()
     {
+        bool wasVisible = CustomDueDateOverlay is { Visibility: Visibility.Visible };
         _customDueDateItem = null;
         _customDueDateItemIds = null;
         if (CustomDueDateOverlay is not null)
         {
             CustomDueDateOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        if (wasVisible)
+        {
+            DeskBox.Views.WidgetWindowBase.TryRequestOwnerDesktopPinnedRestoreIfIdle(
+                this,
+                "todo-custom-due-closed");
         }
     }
 
@@ -285,6 +394,12 @@ public sealed partial class TodoWidgetContent
     {
         await SaveTodoEditAsync();
     }
+
+    internal bool HasActiveInlineEdit =>
+        !_isDisposed &&
+        (_pendingMenuInlineEditDepth > 0 ||
+         (_editingItem is not null &&
+          TodoInlineEditor is { Visibility: Visibility.Visible }));
 
     internal void OpenTodoInlineEdit(TodoItemViewModel item)
     {
@@ -466,6 +581,7 @@ public sealed partial class TodoWidgetContent
 
     private void CloseTodoEdit()
     {
+        bool wasVisible = TodoInlineEditor is { Visibility: Visibility.Visible };
         _editingItem = null;
         _inlineEditOpenedAtTick = 0;
         if (TodoInlineEditor is null)
@@ -476,6 +592,12 @@ public sealed partial class TodoWidgetContent
         TodoInlineEditor.Visibility = Visibility.Collapsed;
         TodoInlineEditor.Text = string.Empty;
         TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.Menu.Edit");
+        if (wasVisible)
+        {
+            DeskBox.Views.WidgetWindowBase.TryRequestOwnerDesktopPinnedRestoreIfIdle(
+                this,
+                "todo-inline-edit-closed");
+        }
     }
 
     private void SetTodoItemHoverState(DependencyObject? itemRoot, bool isHovered)

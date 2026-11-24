@@ -142,7 +142,8 @@ public sealed class AppDiagnosticsService : IDisposable
 
                     App.Log($"[Watchdog] UI thread unresponsive (miss #{missCount}), " +
                         $"handles={handleCount}, " +
-                        $"gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}");
+                        $"gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}, " +
+                        $"lastBreadcrumb={Platform.InteractionBreadcrumbRecorder.GetLatest() ?? "none"}");
 
                     if (missCount == 5)
                     {

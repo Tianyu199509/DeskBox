@@ -56,6 +56,84 @@
                 svc:Localized.DescriptionKey="Settings.GlobalHotkey.ReservedWarning"
                 svc:Localized.HeaderKey="Settings.Search.Hotkey.Title" />
 
+            <!-- 1b. Desktop Search Entry Widget -->
+            <toolkit:SettingsExpander
+                x:Name="SearchDesktopEntryExpander"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.Search.DesktopEntry.Desc"
+                svc:Localized.HeaderKey="Settings.Search.DesktopEntry.Title">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE721;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SearchDesktopEntryToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="SearchDesktopEntryToggle_Toggled"
+                    svc:Localized.AutomationNameKey="Settings.Search.DesktopEntry.Title" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="SearchDesktopHandoffCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.DesktopEntry.Handoff.Desc"
+                        svc:Localized.HeaderKey="Settings.Search.DesktopEntry.Handoff.Title">
+                        <ComboBox
+                            x:Name="SearchDesktopHandoffComboBox"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            SelectionChanged="SearchDesktopHandoffComboBox_SelectionChanged"
+                            svc:Localized.AutomationNameKey="Settings.Search.DesktopEntry.Handoff.Title">
+                            <ComboBoxItem Tag="enter">
+                                <TextBlock svc:Localized.Key="Settings.Search.DesktopEntry.HandoffEnter" />
+                            </ComboBoxItem>
+                            <ComboBoxItem Tag="instant">
+                                <TextBlock svc:Localized.Key="Settings.Search.DesktopEntry.HandoffInstant" />
+                            </ComboBoxItem>
+                        </ComboBox>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="SearchDesktopShowHistoryCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.DesktopEntry.ShowHistory.Desc"
+                        svc:Localized.HeaderKey="Settings.Search.DesktopEntry.ShowHistory.Title">
+                        <ToggleSwitch
+                            x:Name="SearchDesktopShowHistoryToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="SearchDesktopShowHistoryToggle_Toggled"
+                            svc:Localized.AutomationNameKey="Settings.Search.DesktopEntry.ShowHistory.Title" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="SearchDesktopShowRecentOpenedCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.DesktopEntry.ShowRecentOpened.Desc"
+                        svc:Localized.HeaderKey="Settings.Search.DesktopEntry.ShowRecentOpened.Title">
+                        <ToggleSwitch
+                            x:Name="SearchDesktopShowRecentOpenedToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="SearchDesktopShowRecentOpenedToggle_Toggled"
+                            svc:Localized.AutomationNameKey="Settings.Search.DesktopEntry.ShowRecentOpened.Title" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="SearchDesktopPrivacyMaskCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.Search.DesktopEntry.PrivacyMask.Desc"
+                        svc:Localized.HeaderKey="Settings.Search.DesktopEntry.PrivacyMask.Title">
+                        <ToggleSwitch
+                            x:Name="SearchDesktopPrivacyMaskToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="SearchDesktopPrivacyMaskToggle_Toggled"
+                            svc:Localized.AutomationNameKey="Settings.Search.DesktopEntry.PrivacyMask.Title" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
             <!-- 2. Recommendations -->
             <toolkit:SettingsCard
                 x:Name="SearchRecommendationsCard"

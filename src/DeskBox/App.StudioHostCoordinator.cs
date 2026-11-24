@@ -287,6 +287,7 @@ public partial class App
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
             };
             startInfo.ArgumentList.Add(StudioHostLaunchArgument);
             startInfo.ArgumentList.Add(Environment.ProcessId.ToString());
@@ -363,9 +364,14 @@ public partial class App
                 return;
             }
 
+            bool bootWasConfirmed = _studioHostBootConfirmed;
             ClearStudioHostWindowState();
             FailAllPendingStudioContextQueries();
             NotifyStudioHostClosedForMemoryCleanup();
+            if (!bootWasConfirmed)
+            {
+                Log("[StudioHost] Companion process exited before HostBootReady confirmation");
+            }
         }
         catch (Exception ex)
         {

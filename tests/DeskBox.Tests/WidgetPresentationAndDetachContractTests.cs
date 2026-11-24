@@ -17,7 +17,7 @@ public sealed class WidgetPresentationAndDetachContractTests
             "if (revealAfterCreate)",
             StringComparison.Ordinal);
         int raisedShow = creation.IndexOf(
-            "window.ShowPreparedRaisedFromTray();",
+            "window.ShowPreparedRaisedFromTray(deferRevealUntilAnimationReady: true);",
             StringComparison.Ordinal);
         int desktopBranch = creation.IndexOf(
             "else if (!keepPreparedForAnimation)",
@@ -33,7 +33,7 @@ public sealed class WidgetPresentationAndDetachContractTests
             desktopBranch < desktopShow);
         Assert.Equal(
             1,
-            CountOccurrences(creation, "window.ShowPreparedRaisedFromTray();"));
+            CountOccurrences(creation, "window.ShowPreparedRaisedFromTray("));
         Assert.Equal(
             1,
             CountOccurrences(creation, "window.ShowPreparedAtDesktopLayer();"));
@@ -42,13 +42,13 @@ public sealed class WidgetPresentationAndDetachContractTests
     [Theory]
     [InlineData(
         "src/DeskBox/Views/ContentWidgetWindow.xaml.cs",
-        "public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)",
-        "public void ShowPreparedRaisedFromTray(bool persistVisibility = true)",
+        "public void ShowPreparedAtDesktopLayer(",
+        "public void ShowPreparedRaisedFromTray(",
         "PushToBottom(showWindow: false);",
         "TrayAnimation.RevealWindowForTrayShow();")]
     [InlineData(
         "src/DeskBox/Views/ContentWidgetWindow.xaml.cs",
-        "public void ShowPreparedRaisedFromTray(bool persistVisibility = true)",
+        "public void ShowPreparedRaisedFromTray(",
         "public void PlayTrayShowAnimation()",
         "HoldTemporaryTopMost(showWindow: false);",
         "TrayAnimation.RevealWindowForTrayShow();")]
@@ -65,9 +65,82 @@ public sealed class WidgetPresentationAndDetachContractTests
             endMarker);
 
         int layerIndex = section.IndexOf(layerCall, StringComparison.Ordinal);
+        int deferGuardIndex = section.IndexOf(
+            "WidgetTrayAnimationPreparation.ShouldDeferWindowReveal(",
+            StringComparison.Ordinal);
         int revealIndex = section.IndexOf(revealCall, StringComparison.Ordinal);
 
-        Assert.True(layerIndex >= 0 && layerIndex < revealIndex);
+        Assert.True(
+            layerIndex >= 0 &&
+            layerIndex < deferGuardIndex &&
+            deferGuardIndex < revealIndex);
+    }
+
+    [Fact]
+    public void BatchTrayShow_CommitsHiddenVisualBeforeUncloakingActivatingAndStartingAnimations()
+    {
+        string trayAnimation = Read("src/DeskBox/Services/WidgetManager.TrayAnimation.cs");
+        string raiseCore = ExtractSection(
+            trayAnimation,
+            "private async Task<bool?> RaiseWidgetsFromTrayCoreAsync(",
+            "private async Task<IDesktopWidgetWindow?> PrepareWidgetForBatchShowAsync(");
+
+        int deferShowRaise = raiseCore.IndexOf(
+            "deferRevealUntilAnimationReady: true",
+            StringComparison.Ordinal);
+        int commitAndRevealRaise = raiseCore.IndexOf(
+            "await CommitAndRevealPreparedTrayShowWindowsAsync(shownWindows);",
+            StringComparison.Ordinal);
+        int activateRaise = raiseCore.IndexOf(
+            "ActivateIdleHighestWindow(shownWindows);",
+            StringComparison.Ordinal);
+        int confirmZOrderRaise = raiseCore.IndexOf(
+            "QueueTrayRaiseTopMostConfirmation(shownWindows);",
+            StringComparison.Ordinal);
+        int playRaise = raiseCore.IndexOf(
+            "PlayPreparedTrayShowAnimations(windowsToAnimate);",
+            StringComparison.Ordinal);
+
+        Assert.True(
+            deferShowRaise >= 0 &&
+            deferShowRaise < commitAndRevealRaise &&
+            commitAndRevealRaise < activateRaise &&
+            activateRaise < confirmZOrderRaise &&
+            confirmZOrderRaise < playRaise);
+
+        string managerSource = Read("src/DeskBox/Services/WidgetManager.cs");
+        string setAllVisible = ExtractSection(
+            managerSource,
+            "private async Task SetAllWidgetsVisibleCoreAsync(bool visible)",
+            "InteractionBreadcrumbRecorder.Record(\"tray-hide-start\");");
+
+        int deferShowDesktop = setAllVisible.IndexOf(
+            "deferRevealUntilAnimationReady: true",
+            StringComparison.Ordinal);
+        int commitAndRevealDesktop = setAllVisible.IndexOf(
+            "await CommitAndRevealPreparedTrayShowWindowsAsync(shownWindows);",
+            StringComparison.Ordinal);
+        int playDesktop = setAllVisible.IndexOf(
+            "PlayPreparedTrayShowAnimations(windowsToAnimate);",
+            StringComparison.Ordinal);
+
+        Assert.True(
+            deferShowDesktop >= 0 &&
+            deferShowDesktop < commitAndRevealDesktop &&
+            commitAndRevealDesktop < playDesktop);
+
+        string commitHelper = ExtractSection(
+            trayAnimation,
+            "private async Task CommitAndRevealPreparedTrayShowWindowsAsync(",
+            "private void PrepareTrayShowAnimations(");
+        int waitCommit = commitHelper.IndexOf(
+            "WaitForPreparedTrayShowCommitAsync(",
+            StringComparison.Ordinal);
+        int finallyReveal = commitHelper.IndexOf(
+            "RevealPreparedTrayShowWindows(shownWindows);",
+            StringComparison.Ordinal);
+
+        Assert.True(waitCommit >= 0 && waitCommit < finallyReveal);
     }
 
     [Fact]
@@ -258,7 +331,7 @@ public sealed class WidgetPresentationAndDetachContractTests
         string preparation = ExtractSection(
             source,
             "private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)",
-            "public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)");
+            "public void ShowPreparedAtDesktopLayer(");
 
         int cloak = preparation.IndexOf(
             "TrayAnimation.CloakWindowForTrayShow();",

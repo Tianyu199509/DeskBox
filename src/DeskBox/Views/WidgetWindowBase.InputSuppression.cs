@@ -9,7 +9,7 @@ public abstract partial class WidgetWindowBase
     private bool _trayHideTransparentStyleAdded;
     private bool _trayHideRootWasHitTestVisible;
 
-    protected bool IsTrayHideInputSuppressed =>
+    public bool IsTrayHideInputSuppressed =>
         _trayHideInputSuppressed;
 
     /// <summary>

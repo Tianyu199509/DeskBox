@@ -15,6 +15,7 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     private readonly SearchHotkeyService? _searchHotkeyService;
     private readonly Func<SearchHotkeyService?>? _searchHotkeyProvider;
     private readonly Func<ClipboardHotkeyService?>? _clipboardHotkeyProvider;
+    private readonly Action? _onClipboardRuntimeReconcile;
     private readonly DesktopDoubleClickActivationService? _doubleClickService;
     private readonly SettingsService _settingsService;
 
@@ -24,12 +25,14 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
         DesktopDoubleClickActivationService? doubleClickService,
         SettingsService settingsService,
         Func<SearchHotkeyService?>? searchHotkeyProvider = null,
-        Func<ClipboardHotkeyService?>? clipboardHotkeyProvider = null)
+        Func<ClipboardHotkeyService?>? clipboardHotkeyProvider = null,
+        Action? onClipboardRuntimeReconcile = null)
     {
         _hotkeyService = hotkeyService;
         _searchHotkeyService = searchHotkeyService;
         _searchHotkeyProvider = searchHotkeyProvider;
         _clipboardHotkeyProvider = clipboardHotkeyProvider;
+        _onClipboardRuntimeReconcile = onClipboardRuntimeReconcile;
         _doubleClickService = doubleClickService;
         _settingsService = settingsService;
         // Subscribed eagerly for the facade's lifetime: the settings window
@@ -42,6 +45,8 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     }
 
     public event Action? RegistrationChanged;
+
+    internal void NotifyRegistrationChanged() => RegistrationChanged?.Invoke();
 
     private void OnRegistrationChanged() => RegistrationChanged?.Invoke();
 
@@ -93,8 +98,20 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     public Task<bool> IsClipboardHotkeyRegisteredAsync() =>
         Task.FromResult(ClipboardHotkey?.IsRegistered == true);
 
-    public void SetClipboardHotkeyEnabled(bool enabled) =>
-        ClipboardHotkey?.SetEnabled(enabled);
+    public void SetClipboardHotkeyEnabled(bool enabled)
+    {
+        if (ClipboardHotkey is { } clipboard)
+        {
+            clipboard.SetEnabled(enabled);
+        }
+        else
+        {
+            _settingsService.Settings.Clipboard.ClipboardHotkeyEnabled = enabled;
+            _settingsService.SaveDebounced();
+        }
+
+        _onClipboardRuntimeReconcile?.Invoke();
+    }
 
     public bool TryApplyClipboardHotkeyActivation(GlobalHotkeyActivation activation, out string? error)
     {
@@ -111,8 +128,11 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
         return clipboard.TryApplyActivation(activation, out error);
     }
 
-    public void RefreshClipboardHotkeyRegistration() =>
+    public void RefreshClipboardHotkeyRegistration()
+    {
+        _onClipboardRuntimeReconcile?.Invoke();
         ClipboardHotkey?.RefreshRegistration();
+    }
 
     public GlobalHotkeyRuntimeState? GetRuntimeState()
     {

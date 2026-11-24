@@ -1073,6 +1073,11 @@ public partial class WidgetViewModel
             }
         }
 
+        if (recycle && deletedCount > 0)
+        {
+            RecycleBinEmptyStateCache.Shared.MarkKnownState(isEmpty: false);
+        }
+
         NormalizeSortOrder();
         RemoveStackMemberOverridePaths(
             targets
@@ -1157,6 +1162,11 @@ public partial class WidgetViewModel
                     Items.Remove(item);
                     RemoveFileAddedAt(item.Path);
                 }
+            }
+
+            if (deletedCount > permanentlyDeletedCount)
+            {
+                RecycleBinEmptyStateCache.Shared.MarkKnownState(isEmpty: false);
             }
 
             NormalizeSortOrder();

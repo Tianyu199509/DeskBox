@@ -307,26 +307,54 @@ internal sealed class WindowsCrashEventCollector
         return await RunProcessAsync(startInfo, cancellationToken);
     }
 
+    private static readonly TimeSpan WevtutilTimeout = TimeSpan.FromSeconds(8);
+
     private static async Task<string> RunProcessAsync(
         ProcessStartInfo startInfo,
         CancellationToken cancellationToken)
     {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(WevtutilTimeout);
+        CancellationToken token = timeoutCts.Token;
+
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
         {
             throw new InvalidOperationException("wevtutil failed to start.");
         }
 
-        string output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        _ = await process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(output))
+        try
         {
-            throw new InvalidOperationException(
-                $"wevtutil produced no output (exit code {process.ExitCode}).");
-        }
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(token);
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync(token);
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+            await process.WaitForExitAsync(token).ConfigureAwait(false);
 
-        return output;
+            string output = await stdoutTask.ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(output))
+            {
+                throw new InvalidOperationException(
+                    $"wevtutil produced no output (exit code {process.ExitCode}).");
+            }
+
+            return output;
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup when EventLog / wevtutil is hung.
+            }
+
+            throw;
+        }
     }
 }
 

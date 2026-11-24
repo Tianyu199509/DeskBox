@@ -57,7 +57,7 @@ internal static partial class ShellDesktopDropTarget
              depth++)
         {
             AddWindowClass(current, classNames);
-            current = Win32Helper.GetParent(current);
+            current = Win32Helper.GetChildParent(current);
         }
 
         IntPtr root = Win32Helper.GetAncestor(

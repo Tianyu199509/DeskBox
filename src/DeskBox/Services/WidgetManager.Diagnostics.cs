@@ -54,7 +54,8 @@ public sealed partial class WidgetManager
                     fileSurface?.IsImportBusy == true,
                     fileSurface?.ImportBusyElapsedMilliseconds,
                     ToDiagnosticRect(window.AnimationBounds),
-                    ToDiagnosticRect(window.RestingAnimationBounds));
+                    ToDiagnosticRect(window.RestingAnimationBounds),
+                    InputSuppressed: window.IsTrayHideInputSuppressed);
             })
             .ToArray();
 

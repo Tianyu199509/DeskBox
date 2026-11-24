@@ -87,14 +87,14 @@ public sealed class ContentWidgetWindowFactorySurfaceTests
     }
 
     [Fact]
-    public void RetiredSearchKind_CannotCreateContentWindow()
+    public void DesktopSearchKind_CanCreateContentWindow()
     {
         var factory = new ContentWidgetWindowFactory(
             TestServices.CreateWidgetContentFactory(),
             new SettingsService());
 
-        Assert.False(factory.CanCreateContentWindow(WidgetKind.Search));
-        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Search));
+        Assert.True(factory.CanCreateContentWindow(WidgetKind.Search));
+        Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Search));
     }
 
     private sealed class StubContent(WidgetConfig config) : IWidgetContent

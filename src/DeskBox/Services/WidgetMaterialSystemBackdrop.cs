@@ -56,8 +56,27 @@ internal sealed partial class SolidTintSystemBackdrop : SystemBackdrop, IDisposa
             _tintColor = value;
             if (_brush is not null && !_isDisposed)
             {
-                _brush.Color = value;
+                try
+                {
+                    _brush.Color = value;
+                }
+                catch
+                {
+                }
             }
+        }
+    }
+
+    internal static Windows.UI.Composition.Compositor? TryEnsureThreadCompositor()
+    {
+        try
+        {
+            EnsureWindowsSystemDispatcherQueue();
+            return t_compositor ??= new Windows.UI.Composition.Compositor();
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -74,9 +93,11 @@ internal sealed partial class SolidTintSystemBackdrop : SystemBackdrop, IDisposa
         DetachBrushAndWindowState(connectedTarget);
         _target = connectedTarget;
 
-        EnsureWindowsSystemDispatcherQueue();
-        Windows.UI.Composition.Compositor compositor =
-            t_compositor ??= new Windows.UI.Composition.Compositor();
+        Windows.UI.Composition.Compositor? compositor = TryEnsureThreadCompositor();
+        if (compositor is null)
+        {
+            return;
+        }
         _brush = compositor.CreateColorBrush(_tintColor);
         connectedTarget.SystemBackdrop = _brush;
 
@@ -222,6 +243,16 @@ internal sealed partial class ElementBackdropTargetBridge : SystemBackdrop, IDis
     internal bool SetInteractionTintOverride(Windows.UI.Color? color) =>
         !_isDisposed && _maskedProxy?.SetInteractionTintOverride(color) == true;
 
+    internal void Suspend()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _maskedProxy?.ReleaseSuspendedResources();
+    }
+
     protected override void OnTargetConnected(
         ICompositionSupportsSystemBackdrop connectedTarget,
         XamlRoot xamlRoot)
@@ -229,11 +260,12 @@ internal sealed partial class ElementBackdropTargetBridge : SystemBackdrop, IDis
         base.OnTargetConnected(connectedTarget, xamlRoot);
         if (_isDisposed)
         {
+            TryDisposeElementTargetLink(connectedTarget, "[ElementBackdropBridge]");
             return;
         }
 
         DetachXamlRoot();
-        _maskedProxy?.Dispose();
+        DisposeMaskedProxySafely(ref _maskedProxy, "[ElementBackdropBridge]");
 
         _rawTarget = connectedTarget;
         AttachXamlRoot(xamlRoot);
@@ -281,29 +313,29 @@ internal sealed partial class ElementBackdropTargetBridge : SystemBackdrop, IDis
             if (wasCurrent)
             {
                 DetachXamlRoot();
-                if (_maskedProxy is { } activeProxy)
-                {
-                    _onTargetDisconnecting?.Invoke(activeProxy);
-                    activeProxy.Dispose();
-                    _maskedProxy = null;
-                }
-
                 _rawTarget = null;
                 _configuration = null;
+                NotifyAndDisposeMaskedProxySafely(
+                    ref _maskedProxy,
+                    _onTargetDisconnecting,
+                    "[ElementBackdropBridge]");
             }
 
-            try
-            {
-                disconnectedTarget.As<IDisposable>().Dispose();
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[ElementBackdropBridge] Element target close failed: {ex}");
-            }
+            // Always close the thread-affine SystemBackdropElement native link on
+            // the UI thread even if proxy cleanup above faulted; leaving it to the
+            // GC finalizer thread crashes WinUI natively during background collection.
+            TryDisposeElementTargetLink(disconnectedTarget, "[ElementBackdropBridge]");
 
             if (wasCurrent && !_isDisposed)
             {
-                _onTargetChanged?.Invoke();
+                try
+                {
+                    _onTargetChanged?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[ElementBackdropBridge] Target changed callback failed: {ex}");
+                }
             }
         }
     }
@@ -317,15 +349,92 @@ internal sealed partial class ElementBackdropTargetBridge : SystemBackdrop, IDis
 
         _isDisposed = true;
         DetachXamlRoot();
-        if (_maskedProxy is { } activeProxy)
-        {
-            _onTargetDisconnecting?.Invoke(activeProxy);
-            activeProxy.Dispose();
-            _maskedProxy = null;
-        }
-
         _rawTarget = null;
         _configuration = null;
+        NotifyAndDisposeMaskedProxySafely(
+            ref _maskedProxy,
+            _onTargetDisconnecting,
+            "[ElementBackdropBridge]");
+    }
+
+    internal static void NotifyAndDisposeMaskedProxySafely<TProxy>(
+        ref TProxy? proxyField,
+        Action<TProxy>? onDisconnecting,
+        string logTag)
+        where TProxy : class, IDisposable
+    {
+        TProxy? activeProxy = proxyField;
+        if (activeProxy is null)
+        {
+            return;
+        }
+
+        proxyField = null;
+        if (onDisconnecting is not null)
+        {
+            try
+            {
+                onDisconnecting(activeProxy);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"{logTag} Target disconnecting callback failed: {ex}");
+            }
+        }
+
+        DisposeProxyInstanceSafely(activeProxy, logTag);
+    }
+
+    internal static void DisposeMaskedProxySafely<TProxy>(
+        ref TProxy? proxyField,
+        string logTag)
+        where TProxy : class, IDisposable
+    {
+        TProxy? activeProxy = proxyField;
+        if (activeProxy is null)
+        {
+            return;
+        }
+
+        proxyField = null;
+        DisposeProxyInstanceSafely(activeProxy, logTag);
+    }
+
+    private static void DisposeProxyInstanceSafely(IDisposable proxy, string logTag)
+    {
+        try
+        {
+            proxy.Dispose();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"{logTag} Masked proxy dispose failed: {ex}");
+        }
+    }
+
+    internal static bool TryDisposeElementTargetLink(object? target, string logTag)
+    {
+        if (target is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (target is IDisposable managedDisposable)
+            {
+                managedDisposable.Dispose();
+                return true;
+            }
+
+            target.As<IDisposable>().Dispose();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"{logTag} Element target close failed: {ex}");
+            return false;
+        }
     }
 
     private void AttachXamlRoot(XamlRoot? xamlRoot)
@@ -452,9 +561,23 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         XamlRoot xamlRoot)
     {
         base.OnTargetConnected(connectedTarget, xamlRoot);
+        if (_isDisposed)
+        {
+            if (_closeElementTargetOnDisconnect)
+            {
+                ElementBackdropTargetBridge.TryDisposeElementTargetLink(
+                    connectedTarget,
+                    "[WidgetMaterialBackdrop]");
+            }
+
+            return;
+        }
+
         DisposeControllers();
         DetachXamlRoot();
-        _maskedProxy?.Dispose();
+        ElementBackdropTargetBridge.DisposeMaskedProxySafely(
+            ref _maskedProxy,
+            "[WidgetMaterialBackdrop]");
 
         _rawTarget = connectedTarget;
         AttachXamlRoot(xamlRoot);
@@ -498,10 +621,11 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
             {
                 DisposeControllers();
                 DetachXamlRoot();
-                _maskedProxy?.Dispose();
-                _maskedProxy = null;
                 _rawTarget = null;
                 _configuration = null;
+                ElementBackdropTargetBridge.DisposeMaskedProxySafely(
+                    ref _maskedProxy,
+                    "[WidgetMaterialBackdrop]");
             }
 
             // SystemBackdropElement drops its native backdrop link after this
@@ -510,11 +634,9 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
             // Window targets are owned by their windows and must not be closed here.
             if (_closeElementTargetOnDisconnect)
             {
-                try { disconnectedTarget.As<IDisposable>().Dispose(); }
-                catch (Exception ex)
-                {
-                    App.Log($"[WidgetMaterialBackdrop] Element target close failed: {ex}");
-                }
+                ElementBackdropTargetBridge.TryDisposeElementTargetLink(
+                    disconnectedTarget,
+                    "[WidgetMaterialBackdrop]");
             }
         }
     }
@@ -526,6 +648,7 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
     {
         _isSuspended = true;
         DisposeControllers();
+        _maskedProxy?.ReleaseSuspendedResources();
     }
 
     public void Dispose()
@@ -534,9 +657,10 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         _isDisposed = true;
         Suspend();
         DetachXamlRoot();
-        _maskedProxy?.Dispose();
-        _maskedProxy = null;
         _rawTarget = null;
+        ElementBackdropTargetBridge.DisposeMaskedProxySafely(
+            ref _maskedProxy,
+            "[WidgetMaterialBackdrop]");
     }
 
     private void AttachXamlRoot(XamlRoot? xamlRoot)

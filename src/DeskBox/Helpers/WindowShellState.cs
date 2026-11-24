@@ -78,7 +78,6 @@ internal static class WindowShellState
 
     public static void TryApplyFloatingPopupPresenter(AppWindow appWindow)
     {
-        bool useNativeBorder = WindowsCompatibilityService.IsWindows11OrLater;
         try
         {
             appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
@@ -88,10 +87,7 @@ internal static class WindowShellState
                 presenter.IsMaximizable = false;
                 presenter.IsMinimizable = false;
                 presenter.IsAlwaysOnTop = true;
-                // On Win10 (19041-19045), SetBorderAndTitleBar(true, false) with
-                // IsResizable=false paints a thin light non-client top border strip
-                // across dark/acrylic popups. Popups already draw a 1px XAML border.
-                presenter.SetBorderAndTitleBar(useNativeBorder, false);
+                presenter.SetBorderAndTitleBar(false, false);
             }
         }
         catch (Exception ex)
@@ -99,39 +95,36 @@ internal static class WindowShellState
             App.Log($"[Window] Floating popup presenter not applied: {ex.Message}");
         }
 
-        if (!useNativeBorder)
+        try
         {
-            try
+            IntPtr hwnd = Win32Interop.GetWindowFromWindowId(appWindow.Id);
+            if (hwnd != IntPtr.Zero && Win32Helper.IsWindow(hwnd))
             {
-                IntPtr hwnd = Win32Interop.GetWindowFromWindowId(appWindow.Id);
-                if (hwnd != IntPtr.Zero && Win32Helper.IsWindow(hwnd))
+                int style = Win32Helper.GetWindowLong(hwnd, Win32Helper.GWL_STYLE);
+                int stripped = style & ~(Win32Helper.WS_CAPTION |
+                                         Win32Helper.WS_BORDER |
+                                         Win32Helper.WS_DLGFRAME |
+                                         Win32Helper.WS_THICKFRAME);
+                if (stripped != style)
                 {
-                    int style = Win32Helper.GetWindowLong(hwnd, Win32Helper.GWL_STYLE);
-                    int stripped = style & ~(Win32Helper.WS_CAPTION |
-                                             Win32Helper.WS_BORDER |
-                                             Win32Helper.WS_DLGFRAME |
-                                             Win32Helper.WS_THICKFRAME);
-                    if (stripped != style)
-                    {
-                        _ = Win32Helper.SetWindowLong(hwnd, Win32Helper.GWL_STYLE, stripped);
-                        _ = Win32Helper.SetWindowPos(
-                            hwnd,
-                            IntPtr.Zero,
-                            0,
-                            0,
-                            0,
-                            0,
-                            Win32Helper.SWP_NOMOVE |
-                            Win32Helper.SWP_NOSIZE |
-                            Win32Helper.SWP_NOZORDER |
-                            Win32Helper.SWP_NOACTIVATE |
-                            Win32Helper.SWP_FRAMECHANGED);
-                    }
+                    _ = Win32Helper.SetWindowLong(hwnd, Win32Helper.GWL_STYLE, stripped);
+                    _ = Win32Helper.SetWindowPos(
+                        hwnd,
+                        IntPtr.Zero,
+                        0,
+                        0,
+                        0,
+                        0,
+                        Win32Helper.SWP_NOMOVE |
+                        Win32Helper.SWP_NOSIZE |
+                        Win32Helper.SWP_NOZORDER |
+                        Win32Helper.SWP_NOACTIVATE |
+                        Win32Helper.SWP_FRAMECHANGED);
                 }
             }
-            catch
-            {
-            }
+        }
+        catch
+        {
         }
     }
 

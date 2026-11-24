@@ -279,7 +279,7 @@ public sealed partial class SearchPopupWindow
         SearchInlineScope.Documents => "\uE8A5",
         SearchInlineScope.Videos => "\uE714",
         SearchInlineScope.Music => "\uE8D6",
-        SearchInlineScope.Archives => "\uF012",
+        SearchInlineScope.Archives => WindowsCompatibilityService.IsWindows11OrLater ? "\uF012" : "\uE7B8",
         SearchInlineScope.Clipboard => "\uE77F",
         SearchInlineScope.Todos => "\uE9D5",
         SearchInlineScope.Notes => "\uE70F",

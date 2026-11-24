@@ -6,6 +6,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
+using Microsoft.Win32;
 
 namespace DeskBox;
 
@@ -45,7 +46,7 @@ public partial class App
             _lastRecoveryOfferOutcome.ToString());
 
         return new DeskBoxDiagnosticSnapshot(
-            SchemaVersion: 9,
+            SchemaVersion: 10,
             GeneratedAtUtc: DateTimeOffset.UtcNow,
             AppVersion: GetDiagnosticVersion(),
             DistributionChannel: DistributionService.ChannelName,
@@ -75,7 +76,8 @@ public partial class App
             Displays: displays,
             StorageMigration: WidgetManager?.StorageMigrationDiagnostic,
             StartupLedger: startupLedger,
-            CallbackRadar: callbackRadar);
+            CallbackRadar: callbackRadar,
+            RecentInteractionBreadcrumbs: Platform.InteractionBreadcrumbRecorder.Snapshot());
     }
 
     internal DeskBoxHotkeyDiagnostic BuildHotkeyDiagnostics()
@@ -160,5 +162,64 @@ public partial class App
                    ?.InformationalVersion
                ?? assembly.GetName().Version?.ToString()
                ?? "unknown";
+    }
+
+    private static string GetAppCompatReport()
+    {
+        string exePath = Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
+        string? currentUser = GetAppCompatLayerValue(Registry.CurrentUser, exePath);
+        string? localMachine = GetAppCompatLayerValue(Registry.LocalMachine, exePath);
+
+        return $"exe='{exePath}' hkcu={(string.IsNullOrWhiteSpace(currentUser) ? "none" : currentUser)} " +
+               $"hklm={(string.IsNullOrWhiteSpace(localMachine) ? "none" : localMachine)}";
+    }
+
+    private static string GetUacPolicyReport()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Policies\System");
+            object? enableLua = key?.GetValue("EnableLUA");
+            object? consentPrompt = key?.GetValue("ConsentPromptBehaviorAdmin");
+            object? promptOnSecureDesktop = key?.GetValue("PromptOnSecureDesktop");
+            object? validateAdminCodeSignatures = key?.GetValue("ValidateAdminCodeSignatures");
+
+            return $"EnableLUA={FormatRegistryValue(enableLua)} " +
+                   $"ConsentPromptBehaviorAdmin={FormatRegistryValue(consentPrompt)} " +
+                   $"PromptOnSecureDesktop={FormatRegistryValue(promptOnSecureDesktop)} " +
+                   $"ValidateAdminCodeSignatures={FormatRegistryValue(validateAdminCodeSignatures)}";
+        }
+        catch (Exception ex)
+        {
+            return $"unknown error={ex.Message}";
+        }
+    }
+
+    private static string FormatRegistryValue(object? value)
+    {
+        return value is null ? "missing" : value.ToString() ?? "unknown";
+    }
+
+    private static string? GetAppCompatLayerValue(RegistryKey? rootKey, string exePath)
+    {
+        if (rootKey is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var key = rootKey.OpenSubKey(@"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers");
+            if (key?.GetValue(exePath) is string value && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+        catch (Exception ex)
+        {
+            return $"error:{ex.Message}";
+        }
+
+        return null;
     }
 }

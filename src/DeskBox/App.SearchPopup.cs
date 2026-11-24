@@ -290,4 +290,235 @@ public partial class App
                 break;
         }
     }
+
+    internal async Task ExecuteSearchActionFromWidgetAsync(string actionId)
+    {
+        if (string.IsNullOrWhiteSpace(actionId))
+        {
+            return;
+        }
+
+        if (!UiDispatcherQueue.HasThreadAccess)
+        {
+            UiDispatcherQueue.TryEnqueue(() => _ = ExecuteSearchActionFromWidgetAsync(actionId));
+            return;
+        }
+
+        await HandleSearchActionAsync(actionId);
+    }
+
+    internal async Task OpenSearchRecommendationFromWidgetAsync(Models.SearchRecommendationItem recommendation)
+    {
+        if (recommendation is null)
+        {
+            return;
+        }
+
+        if (!UiDispatcherQueue.HasThreadAccess)
+        {
+            UiDispatcherQueue.TryEnqueue(() => _ = OpenSearchRecommendationFromWidgetAsync(recommendation));
+            return;
+        }
+
+        var item = new Models.SearchResultItem
+        {
+            Kind = recommendation.Kind,
+            Title = recommendation.Title,
+            Subtitle = recommendation.Subtitle,
+            Glyph = recommendation.Glyph,
+            DetailPath = recommendation.DetailPath,
+            ActionId = recommendation.ActionId,
+            TodoWidgetId = recommendation.TodoWidgetId,
+            TodoItemId = recommendation.TodoItemId,
+            QuickCaptureItemId = recommendation.QuickCaptureItemId,
+            CustomWidgetId = recommendation.CustomWidgetId,
+            CustomWidgetItemId = recommendation.CustomWidgetItemId
+        };
+
+        switch (recommendation.Kind)
+        {
+            case Models.SearchResultKind.Todo:
+            case Models.SearchResultKind.QuickCapture:
+            case Models.SearchResultKind.CustomWidget:
+                await HandleSearchContentAsync(item);
+                if (SettingsService.Settings.Search.SearchSaveHistory)
+                {
+                    EnsureSearchHistoryService()?.RecordResult(item);
+                }
+                break;
+
+            case Models.SearchResultKind.Action when !string.IsNullOrWhiteSpace(recommendation.ActionId):
+                await HandleSearchActionAsync(recommendation.ActionId);
+                break;
+
+            case Models.SearchResultKind.File:
+            case Models.SearchResultKind.Folder:
+                if (!string.IsNullOrWhiteSpace(recommendation.DetailPath))
+                {
+                    DeskBox.Services.ShellLaunchService.FireAndForgetOpenPath(recommendation.DetailPath);
+                    if (SettingsService.Settings.Search.SearchSaveHistory)
+                    {
+                        EnsureSearchHistoryService()?.RecordResult(item);
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(recommendation.Title))
+                {
+                    OpenSearchPopupWithQuery(recommendation.Title);
+                }
+                break;
+
+            default:
+                string fallbackQuery = !string.IsNullOrWhiteSpace(recommendation.HistoryQuery)
+                    ? recommendation.HistoryQuery
+                    : recommendation.Title;
+                if (!string.IsNullOrWhiteSpace(fallbackQuery))
+                {
+                    OpenSearchPopupWithQuery(fallbackQuery);
+                }
+                else
+                {
+                    OpenSearchPopup();
+                }
+                break;
+        }
+    }
+
+    internal SearchWidgetHostCallbacks CreateSearchWidgetHostCallbacks(SettingsService settingsService)
+    {
+        SearchHistoryService? historyService = EnsureSearchHistoryService();
+
+        return new SearchWidgetHostCallbacks(
+            HistoryService: historyService,
+            IsEverythingConnected: () =>
+                TryGetActiveEverythingSearchService()?.CurrentSnapshot.State == Models.EverythingConnectionState.Connected,
+            SubscribeEverythingConnectionChanged: handler =>
+            {
+                EverythingSearchService? service = TryGetActiveEverythingSearchService();
+                if (service is null)
+                {
+                    return null;
+                }
+
+                void OnConnectionChanged(DeskBox.Contracts.EverythingConnectionSnapshot snapshot)
+                {
+                    if (UiDispatcherQueue is { HasThreadAccess: false } dq)
+                    {
+                        dq.TryEnqueue(() => handler());
+                        return;
+                    }
+
+                    handler();
+                }
+
+                service.ConnectionChanged += OnConnectionChanged;
+                return new SearchWidgetSubscriptionHandle(() => service.ConnectionChanged -= OnConnectionChanged);
+            },
+            ProbeEverythingConnectionAsync: async ct =>
+            {
+                if (!settingsService.Settings.Search.SearchEverythingEnabled)
+                {
+                    return;
+                }
+
+                EverythingSearchService? service = TryGetActiveEverythingSearchService();
+                if (service is null)
+                {
+                    var dq = UiDispatcherQueue;
+                    if (dq is null || dq.HasThreadAccess)
+                    {
+                        service = EnsureEverythingSearchServiceForIpc();
+                    }
+                    else
+                    {
+                        var tcs = new TaskCompletionSource<EverythingSearchService?>(
+                            TaskCreationOptions.RunContinuationsAsynchronously);
+                        if (dq.TryEnqueue(() =>
+                        {
+                            try
+                            {
+                                tcs.TrySetResult(EnsureEverythingSearchServiceForIpc());
+                            }
+                            catch (Exception ex)
+                            {
+                                tcs.TrySetException(ex);
+                            }
+                        }))
+                        {
+                            service = await tcs.Task.ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                if (service is not null &&
+                    service.CurrentSnapshot.State == Models.EverythingConnectionState.Unknown)
+                {
+                    await service.RefreshConnectionAsync(allowIpcProbe: true, ct).ConfigureAwait(false);
+                }
+            },
+            SubscribePreferencesChanged: handler =>
+            {
+                SearchSettingsCoordinator? coordinator = SearchSettingsCoordinator;
+                if (coordinator is null)
+                {
+                    return null;
+                }
+
+                coordinator.PreferencesChanged += handler;
+                return new SearchWidgetSubscriptionHandle(() => coordinator.PreferencesChanged -= handler);
+            },
+            OpenSearchPopup: OpenSearchPopup,
+            OpenSearchPopupWithQuery: OpenSearchPopupWithQuery,
+            ExecuteSearchAction: ExecuteSearchActionFromWidgetAsync,
+            OpenRecommendation: OpenSearchRecommendationFromWidgetAsync,
+            OpenSettings: sectionTag => ShowSettings(sectionTag),
+            CopyText: static text =>
+            {
+                try
+                {
+                    var pkg = new Windows.ApplicationModel.DataTransfer.DataPackage();
+                    pkg.SetText(text);
+                    Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(pkg);
+                    Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+                }
+                catch
+                {
+                    // Ignore transient clipboard lock errors on copy feedback.
+                }
+            },
+            SetPrivacyMaskPreference: masked =>
+            {
+                if (SearchSettingsCoordinator is { } coordinator)
+                {
+                    coordinator.UpdatePreferences(
+                        new DeskBox.Contracts.SearchPreferenceChange(DesktopPrivacyMask: masked));
+                }
+                else
+                {
+                    settingsService.Settings.Search.SearchDesktopPrivacyMask = masked;
+                    settingsService.SaveDebounced();
+                }
+            },
+            UiDispatch: action =>
+            {
+                var dq = UiDispatcherQueue;
+                if (dq is null || dq.HasThreadAccess)
+                {
+                    action();
+                }
+                else
+                {
+                    dq.TryEnqueue(() => action());
+                }
+            });
+    }
+
+    private sealed class SearchWidgetSubscriptionHandle(Action unsubscribe) : IDisposable
+    {
+        private Action? _unsubscribe = unsubscribe;
+
+        public void Dispose()
+        {
+            System.Threading.Interlocked.Exchange(ref _unsubscribe, null)?.Invoke();
+        }
+    }
 }

@@ -165,4 +165,25 @@ public sealed class DeskBoxUpdaterTests
                 elevationRequired,
                 installerLogWritten));
     }
+
+    [Theory]
+    [InlineData(1, true, false, true, "failed")]
+    [InlineData(1, true, false, false, "cancelled")]
+    [InlineData(1, true, true, true, "failed")]
+    [InlineData(2, true, false, true, "cancelled")]
+    public void ElevationSignaturePolicyBlock_MapsToFailedInsteadOfCancelled(
+        int exitCode,
+        bool elevationRequired,
+        bool installerLogWritten,
+        bool validateAdminCodeSignatures,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            DeskBox.Updater.Program.GetIncompleteUpdateOutcome(
+                exitCode,
+                elevationRequired,
+                installerLogWritten,
+                validateAdminCodeSignatures));
+    }
 }

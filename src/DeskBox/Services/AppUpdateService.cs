@@ -416,8 +416,13 @@ public sealed partial class AppUpdateService : IAppUpdateService
             // Deep review R13 (R12 debt ③): the core reports every 128KB
             // chunk; the throttler collapses that to percent steps / 100ms
             // beats so the IPC push lane and the About page stop flooding.
+            // Use a synchronous IProgress<T> wrapper so every throttled progress
+            // tick completes inline before DownloadUpdateCoreAsync returns and
+            // before _downloadInProgress / DownloadCompleted fire (System.Progress<T>
+            // posts to the thread pool when constructed off-UI, which allowed the
+            // final 100% tick to land after DownloadCompleted).
             var throttle = new AppUpdateDownloadProgressThrottle();
-            var reportingProgress = new Progress<AppUpdateDownloadProgress>(p =>
+            var reportingProgress = new SynchronousProgress<AppUpdateDownloadProgress>(p =>
             {
                 if (!throttle.ShouldPush(p, Environment.TickCount64))
                 {
@@ -625,6 +630,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
     {
         if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
         {
+            App.Log("[Update] StartInstallerHelper failed: downloaded installer does not exist.");
             return AppUpdateInstallResult.Failed("The downloaded installer no longer exists.");
         }
 
@@ -648,11 +654,6 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 "The installer path is not inside DeskBox's managed update directory.");
         }
 
-        // From here to process exit this app hands the installer over to the
-        // detached updater: a periodic check landing in that window must not
-        // retire (delete) the directory the armed installer lives in.
-        _installerHelperArmed = true;
-
         string? appPath = AppExecutablePath.ResolveMainExecutablePath();
         if (string.IsNullOrWhiteSpace(appPath) || !File.Exists(appPath))
         {
@@ -661,6 +662,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
 
         if (!TryGetInstallDirectory(appPath, out string installDirectory))
         {
+            App.Log("[Update] StartInstallerHelper failed: could not resolve current installation directory.");
             return AppUpdateInstallResult.Failed(
                 "DeskBox could not determine the current installation directory. Please use the manual installer instead.");
         }
@@ -670,6 +672,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
             string helperPath = PrepareDetachedUpdaterHelper(AppContext.BaseDirectory, _updateRootPath);
             if (!File.Exists(helperPath))
             {
+                App.Log("[Update] StartInstallerHelper failed: DeskBox.Updater.exe was not found in the application directory.");
                 return AppUpdateInstallResult.Failed("DeskBox.Updater.exe was not found in the application directory.");
             }
 
@@ -678,7 +681,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 FileName = helperPath,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = AppContext.BaseDirectory
+                WorkingDirectory = Path.GetDirectoryName(helperPath) ?? _updateRootPath
             };
             startInfo.ArgumentList.Add("--pid");
             startInfo.ArgumentList.Add(Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
@@ -712,11 +715,25 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 }
             }
 
-            Process.Start(startInfo);
+            // Latch right before launch and clear if Process.Start fails so a
+            // failed helper start does not permanently suppress cleanup.
+            _installerHelperArmed = true;
+            if (Process.Start(startInfo) is null)
+            {
+                _installerHelperArmed = false;
+                return AppUpdateInstallResult.Failed("DeskBox.Updater.exe did not start.");
+            }
+
             return AppUpdateInstallResult.Started();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
+            _installerHelperArmed = false;
+            int? nativeError = ex is System.ComponentModel.Win32Exception win32 ? win32.NativeErrorCode : null;
+            App.Log(
+                $"[Update] StartInstallerHelper failed: exception={ex.GetType().Name} " +
+                $"nativeError={(nativeError?.ToString(CultureInfo.InvariantCulture) ?? "none")} " +
+                $"message={ex.Message}");
             return AppUpdateInstallResult.Failed(ex.Message);
         }
     }
@@ -1496,6 +1513,11 @@ public sealed partial class AppUpdateService : IAppUpdateService
         catch
         {
         }
+    }
+
+    private sealed class SynchronousProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 
     private sealed class GitHubReleaseResponse

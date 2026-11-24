@@ -1731,13 +1731,29 @@ public sealed class ClipboardWidgetTests
         var tinyRect = new DeskBox.Platform.Win32Helper.RECT { Left = 10, Top = 10, Right = 11, Bottom = 12 };
         Assert.False(ClipboardPlatformInterop.IsMeaningfulGuiCaret(guiFlags: 0x00000001, tinyRect));
 
-        // 5. ClipboardHotkeyService stays disabled/unregistered when WidgetKind.Clipboard feature is disabled.
+        // 5. ClipboardHotkeyService & ClipboardRuntimePolicy decouple Quick-Paste mode from WidgetKind.Clipboard.
         var settingsService = new SettingsService();
         FeatureWidgetSettings.SetEnabled(settingsService.Settings, WidgetKind.Clipboard, false);
         settingsService.Settings.Clipboard.ClipboardHotkeyEnabled = true;
+        Assert.True(ClipboardRuntimePolicy.IsMonitoringActive(settingsService.Settings));
+        Assert.True(ClipboardRuntimePolicy.IsQuickPasteHotkeyActive(settingsService.Settings));
+        Assert.True(SearchSettingsSlice.IsCategoryFeatureEnabled(settingsService.Settings, SearchSettingsSlice.CategoryClipboard));
+
         var localization = TestServices.CreateLocalizationService();
         using var hotkeyService = new ClipboardHotkeyService(settingsService, localization, static () => Task.CompletedTask);
         hotkeyService.RefreshRegistration();
+        Assert.False(hotkeyService.IsRegistered); // windowHandle is IntPtr.Zero in unit test host
+
+        FeatureWidgetSettings.SetEnabled(settingsService.Settings, WidgetKind.Clipboard, true);
+        settingsService.Settings.Clipboard.ClipboardHotkeyEnabled = false;
+        Assert.True(ClipboardRuntimePolicy.IsMonitoringActive(settingsService.Settings));
+        Assert.False(ClipboardRuntimePolicy.IsQuickPasteHotkeyActive(settingsService.Settings));
+        Assert.False(((IHookRegistrationMaintenanceTarget)hotkeyService).RegistrationMaintenanceWanted);
+
+        FeatureWidgetSettings.SetEnabled(settingsService.Settings, WidgetKind.Clipboard, false);
+        settingsService.Settings.Clipboard.ClipboardHotkeyEnabled = false;
+        Assert.False(ClipboardRuntimePolicy.IsMonitoringActive(settingsService.Settings));
+        Assert.False(ClipboardRuntimePolicy.IsQuickPasteHotkeyActive(settingsService.Settings));
         Assert.False(hotkeyService.IsRegistered);
         Assert.False(((IHookRegistrationMaintenanceTarget)hotkeyService).RegistrationMaintenanceWanted);
     }
@@ -2415,6 +2431,128 @@ public sealed class ClipboardWidgetTests
             {
                 Directory.Delete(tempRoot, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public void QuickPasteStandalone_AndIntegratedPopupChrome_MeetContracts()
+    {
+        string settingsSectionCode = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml.cs"));
+        Assert.DoesNotContain("EnableClipboardToggle.IsOn &&", settingsSectionCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("bool featureEnabled = EnableClipboardToggle.IsOn;", settingsSectionCode, StringComparison.Ordinal);
+        Assert.Contains("bool hotkeyAvailable = _hotkeyActions is not null;", settingsSectionCode, StringComparison.Ordinal);
+        Assert.Contains("ClipboardHotkeyToggle.IsOn = hotkeyEnabled;", settingsSectionCode, StringComparison.Ordinal);
+
+        string settingsSectionXaml = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml"));
+        int enableIdx = settingsSectionXaml.IndexOf("x:Name=\"EnableClipboardCard\"", StringComparison.Ordinal);
+        int quickPasteIdx = settingsSectionXaml.IndexOf("x:Name=\"QuickPastePopupExpander\"", StringComparison.Ordinal);
+        int bodyIdx = settingsSectionXaml.IndexOf("x:Name=\"ClipboardSettingsBodyPanel\"", StringComparison.Ordinal);
+        Assert.True(enableIdx >= 0 && quickPasteIdx > enableIdx && bodyIdx > quickPasteIdx);
+
+        string quickPasteXaml = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/ClipboardQuickPasteWindow.xaml"));
+        Assert.Contains("x:Name=\"PopupHeaderGrid\"", quickPasteXaml, StringComparison.Ordinal);
+        Assert.Contains("Padding=\"10,8,8,0\"", quickPasteXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ClosePopupButton\"", quickPasteXaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource WidgetCompactIconButtonStyle}\"", quickPasteXaml, StringComparison.Ordinal);
+        Assert.Contains("Width=\"26\"", quickPasteXaml, StringComparison.Ordinal);
+        Assert.Contains("Height=\"26\"", quickPasteXaml, StringComparison.Ordinal);
+
+        string windowShellState = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Helpers/WindowShellState.cs"));
+        Assert.Contains("presenter.SetBorderAndTitleBar(false, false);", windowShellState, StringComparison.Ordinal);
+
+        string quickPasteCode = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/ClipboardQuickPasteWindow.xaml.cs"));
+        Assert.Contains("Win32Helper.SetWindowBorderColor(_hwnd, unchecked((int)0xFFFFFFFE));", quickPasteCode, StringComparison.Ordinal);
+
+        string ipcRouter = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Services/SettingsIpcMethodRouter.cs"));
+        int stateIdx = ipcRouter.IndexOf("case SettingsIpcMethods.ClipboardHotkeyState:", StringComparison.Ordinal);
+        int setEnabledIdx = ipcRouter.IndexOf("case SettingsIpcMethods.ClipboardHotkeySetEnabled:", StringComparison.Ordinal);
+        Assert.True(stateIdx >= 0 && setEnabledIdx > stateIdx);
+        string stateCaseSlice = ipcRouter[stateIdx..setEnabledIdx];
+        Assert.Contains("UiDispatch.RunAsync", stateCaseSlice, StringComparison.Ordinal);
+
+        int toggleIdx = settingsSectionCode.IndexOf("private async void ClipboardHotkeyToggle_Toggled", StringComparison.Ordinal);
+        int captureIdx = settingsSectionCode.IndexOf("private async void ClipboardHotkeyCaptureButton_Click", StringComparison.Ordinal);
+        Assert.True(toggleIdx >= 0 && captureIdx > toggleIdx);
+        string toggleMethod = settingsSectionCode[toggleIdx..captureIdx];
+        Assert.Contains("_clipboardHotkeyRegistered = false;", toggleMethod, StringComparison.Ordinal);
+        Assert.Contains("PopupPlacementCard.IsEnabled = hotkeyAvailable;", toggleMethod, StringComparison.Ordinal);
+        int refreshControlsIdx = toggleMethod.IndexOf("RefreshClipboardHotkeyControls();", StringComparison.Ordinal);
+        int elseIdx = toggleMethod.IndexOf("else", StringComparison.Ordinal);
+        Assert.True(refreshControlsIdx > 0 && elseIdx > refreshControlsIdx);
+    }
+
+    [Fact]
+    public async Task ClipboardFeatureRuntime_PreservesCallerSynchronizationContext_WhenStartAwaitsBehindDispose()
+    {
+        var stopGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capturedContext = new TrackingSynchronizationContext();
+        bool startedOnCapturedContext = false;
+        int startCount = 0;
+
+        var runtime = new ClipboardFeatureRuntime(
+            () =>
+            {
+                startCount++;
+                startedOnCapturedContext = ReferenceEquals(SynchronizationContext.Current, capturedContext);
+            },
+            () => new ValueTask(stopGate.Task));
+
+        await runtime.StartAsync();
+        Assert.Equal(1, startCount);
+
+        ValueTask disposeTask = runtime.DisposeAsync();
+
+        Task startTask;
+        SynchronizationContext? previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(capturedContext);
+        try
+        {
+            startTask = runtime.StartAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        Assert.False(startTask.IsCompleted);
+        stopGate.TrySetResult();
+
+        await disposeTask;
+        await startTask;
+
+        Assert.Equal(2, startCount);
+        Assert.True(startedOnCapturedContext);
+        Assert.True(capturedContext.PostCount >= 1);
+    }
+
+    private sealed class TrackingSynchronizationContext : SynchronizationContext
+    {
+        private int _postCount;
+
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                SynchronizationContext? previous = Current;
+                SetSynchronizationContext(this);
+                try
+                {
+                    d(state);
+                }
+                finally
+                {
+                    SetSynchronizationContext(previous);
+                }
+            });
         }
     }
 }

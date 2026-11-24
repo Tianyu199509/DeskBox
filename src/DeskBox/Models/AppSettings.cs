@@ -872,6 +872,18 @@ public sealed class AppSettings
     /// <inheritdoc cref="SearchSettingsSlice.SearchCategoryLayout"/>
     public string SearchCategoryLayout { get => Search.SearchCategoryLayout; set => Search.SearchCategoryLayout = value; }
 
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopHandoffMode"/>
+    public string SearchDesktopHandoffMode { get => Search.SearchDesktopHandoffMode; set => Search.SearchDesktopHandoffMode = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopShowHistory"/>
+    public bool SearchDesktopShowHistory { get => Search.SearchDesktopShowHistory; set => Search.SearchDesktopShowHistory = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopShowRecentOpened"/>
+    public bool SearchDesktopShowRecentOpened { get => Search.SearchDesktopShowRecentOpened; set => Search.SearchDesktopShowRecentOpened = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDesktopPrivacyMask"/>
+    public bool SearchDesktopPrivacyMask { get => Search.SearchDesktopPrivacyMask; set => Search.SearchDesktopPrivacyMask = value; }
+
     // ─── Cloud Backup (roadmap §10 — non-secret provider config only) ───
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupProvider"/>

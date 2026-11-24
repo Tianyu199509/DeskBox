@@ -324,7 +324,7 @@ public sealed class ModuleBoundaryContractTests
         string app = ProductionSource().Single(item =>
             item.Path == "src/DeskBox/App.xaml.cs").Source;
 
-        Assert.DoesNotContain("WidgetKind.Search", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("SearchHotkeyEnabled", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("ISearchFeatureSettings", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("App.Current.SetSearchFeatureEnabled", manager, StringComparison.Ordinal);
         Assert.DoesNotContain("ISearchFeatureSettings", coordinator, StringComparison.Ordinal);

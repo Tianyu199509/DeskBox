@@ -128,6 +128,10 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
+        bool previous = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+        _settingsService.MutateGraphUnderLock(() =>
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled));
+
         try
         {
             (bool ok, string? payload, string? error) = await _client.RequestAsync(
@@ -138,25 +142,33 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             if (!ok)
             {
                 // A refused command left the authoritative dictionary on its
-                // old value: report the OPPOSITE of the request so every
-                // optimistic mirror (card, Todo/QC section switches) reverts
-                // instead of showing a fabricated success (batch R9).
+                // old value: roll back the optimistic mirror and report the
+                // opposite of the request so callers revert their toggle UI.
+                _settingsService.MutateGraphUnderLock(() =>
+                    FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, previous));
                 App.Log(
                     $"[SettingsIpc] Feature switch {kind} refused: {error ?? "unknown"} — reverting the optimistic mirror");
                 return !enabled;
             }
 
-            // The response carries the applied authoritative value; on failure
-            // keep the requested value so the optimistic mirror stands.
-            return SettingsIpcPayload.DecodeBoolean(payload) is { } applied && applied != enabled
-                ? applied
+            // Converge the local mirror to the authoritative applied state.
+            bool applied = SettingsIpcPayload.DecodeBoolean(payload) is { } responseApplied
+                ? responseApplied
                 : enabled;
+            if (applied != enabled)
+            {
+                _settingsService.MutateGraphUnderLock(() =>
+                    FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, applied));
+            }
+
+            return applied;
         }
         catch (Exception ex)
         {
-            // Same revert contract for transport failures/timeouts: the main
-            // process either never saw the switch or will report the truth
-            // with its next layout push.
+            // Roll back on transport failures/timeouts: the main process either
+            // never saw the switch or will reconcile with the next layout push.
+            _settingsService.MutateGraphUnderLock(() =>
+                FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, previous));
             App.Log(
                 $"[SettingsIpc] Feature switch {kind} failed: {ex.Message} — reverting the optimistic mirror");
             return !enabled;

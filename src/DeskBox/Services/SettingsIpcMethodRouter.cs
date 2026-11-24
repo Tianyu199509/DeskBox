@@ -275,7 +275,8 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.ClipboardHotkeyState:
                 if (_hotkey is null) return unavailable(method);
-                bool clipboardReg = await _hotkey.IsClipboardHotkeyRegisteredAsync().ConfigureAwait(false);
+                bool clipboardReg = await DeskBox.Platform.UiDispatch.RunAsync(
+                    () => _hotkey.IsClipboardHotkeyRegisteredAsync()).ConfigureAwait(false);
                 return (true, SettingsIpcPayload.EncodeBoolean(clipboardReg), null);
 
             case SettingsIpcMethods.ClipboardHotkeySetEnabled:
@@ -887,9 +888,13 @@ public sealed class SettingsIpcMethodRouter
                 // its own fetch when no manifest rides along. The window is
                 // XAML-heavy: open on the UI thread and answer immediately
                 // (org-window pattern).
+                Func<CancellationToken, Task<AppUpdateManifest?>>? loader =
+                    manifest is null && notes.AllowLazyFetch
+                        ? ct => _appActions.FetchReleaseNotesManifestAsync(notes.Version, ct)
+                        : null;
                 _ = DeskBox.Platform.UiDispatch.RunAsync(() =>
                 {
-                    _appActions.OpenReleaseNotesWindow(manifest, notes.Version, null, (nint)notes.OwnerHwnd);
+                    _appActions.OpenReleaseNotesWindow(manifest, notes.Version, loader, (nint)notes.OwnerHwnd);
                     return Task.CompletedTask;
                 });
                 return (true, null, null);
@@ -1257,10 +1262,16 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "missing payload");
                 }
 
-                AppUpdateDownloadResult downloadResult = await _appUpdate.DownloadUpdateAsync(
-                    downloadManifest,
-                    progress: null,
-                    cancellationToken);
+                AppUpdateDownloadResult downloadResult = AppDistributionService.Current.IsPackaged
+                    ? await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                        _appUpdate.DownloadUpdateAsync(
+                            downloadManifest,
+                            progress: null,
+                            cancellationToken))
+                    : await _appUpdate.DownloadUpdateAsync(
+                        downloadManifest,
+                        progress: null,
+                        cancellationToken);
                 return (true, SettingsIpcPayload.Encode(
                     downloadResult,
                     SettingsIpcJsonContext.Default.AppUpdateDownloadResult), null);

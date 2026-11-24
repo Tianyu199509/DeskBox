@@ -32,7 +32,8 @@ public sealed record DeskBoxWidgetHostDiagnostic(
     bool ImportBusy,
     long? ImportBusyElapsedMilliseconds,
     DeskBoxDiagnosticRect AnimationBounds,
-    DeskBoxDiagnosticRect RestingBounds);
+    DeskBoxDiagnosticRect RestingBounds,
+    bool InputSuppressed = false);
 
 public sealed record DeskBoxTrayQueueDiagnostic(
     int PendingCount,
@@ -184,7 +185,8 @@ public sealed record DeskBoxDiagnosticSnapshot(
     IReadOnlyList<DeskBoxDisplayDiagnostic> Displays,
     ManagedStorageMigrationDiagnostic? StorageMigration = null,
     DeskBoxStartupLedgerDiagnostic? StartupLedger = null,
-    DeskBoxCallbackRadarDiagnostic? CallbackRadar = null);
+    DeskBoxCallbackRadarDiagnostic? CallbackRadar = null,
+    IReadOnlyList<string>? RecentInteractionBreadcrumbs = null);
 
 [JsonSourceGenerationOptions(
     GenerationMode = JsonSourceGenerationMode.Metadata,
@@ -294,6 +296,53 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        return await Task.Run(
+            () => ExportCoreAsync(destinationDirectory, snapshot, logFilePath, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<string> ExportEmergencyFromHostAsync(
+        string destinationDirectory,
+        string fallbackReason,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+
+        var snapshot = new DeskBoxDiagnosticSnapshot(
+            SchemaVersion: 10,
+            GeneratedAtUtc: DateTimeOffset.UtcNow,
+            AppVersion: typeof(DeskBoxDiagnosticsBundleService).Assembly.GetName().Version?.ToString(3) ?? "unknown",
+            DistributionChannel: AppDistributionService.Current.ChannelName,
+            IsPackaged: AppDistributionService.Current.IsPackaged,
+            OperatingSystem: System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            ProcessArchitecture: System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            UiCulture: System.Globalization.CultureInfo.CurrentUICulture.Name,
+            Hotkeys: new DeskBoxHotkeyDiagnostic(false, false, 0, 0, 0, 0, 0, false, 0, 0, 0, 0, 0, false, false, false, 0, 0),
+            Settings: new DeskBoxSettingsDiagnostic(SettingsLoadRecoveryState.Primary, false, null, null),
+            RecoveryOffer: new DeskBoxRecoveryOfferDiagnostic(false, null, null, null, 0, "UnknownFromSettingsHost"),
+            ShortcutNative: new DeskBoxShortcutNativeDiagnostic("Unknown", string.Empty, false, null, null, false, "Unavailable", null, null),
+            RuntimeHealth: null,
+            WidgetManager: DeskBoxWidgetManagerDiagnostic.Empty with
+            {
+                SessionState = string.IsNullOrWhiteSpace(fallbackReason)
+                    ? "MainProcessUnresponsiveFallback"
+                    : fallbackReason
+            },
+            Displays: []);
+
+        return ExportAsync(
+            destinationDirectory,
+            snapshot,
+            DeskBoxDataPathService.Current.LogFilePath,
+            cancellationToken);
+    }
+
+    private async Task<string> ExportCoreAsync(
+        string destinationDirectory,
+        DeskBoxDiagnosticSnapshot snapshot,
+        string? logFilePath,
+        CancellationToken cancellationToken)
+    {
         Directory.CreateDirectory(destinationDirectory);
         string archivePath = GetAvailableArchivePath(destinationDirectory, snapshot.GeneratedAtUtc);
         string temporaryPath = archivePath + ".tmp";
@@ -366,6 +415,9 @@ public sealed partial class DeskBoxDiagnosticsBundleService
             ("DeskBox.Studio-sanitized.log", isAppRootExport
                 ? DeskBoxDataPathService.Current.StudioHostLogFilePath
                 : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "DeskBox.Studio.log") : null)),
+            ("DeskBox.Updater-sanitized.log", isAppRootExport
+                ? DeskBoxDataPathService.Current.UpdaterLogFilePath
+                : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "DeskBox.Updater.log") : null)),
             ("deskbox-settings-host-sanitized.log", isAppRootExport
                 ? Path.Combine(Path.GetTempPath(), "deskbox-settings-host.log")
                 : (resolvedLogRoot is not null ? Path.Combine(resolvedLogRoot, "deskbox-settings-host.log") : null))

@@ -177,7 +177,7 @@ public sealed partial class TodoWidgetContent
                 "todo-export-failed")));
     }
 
-    private IntPtr ResolveExportOwnerWindowHandle()
+    internal IntPtr ResolveExportOwnerWindowHandle()
     {
         if (XamlRoot?.ContentIslandEnvironment is { } env && env.AppWindowId.Value != 0)
         {
@@ -189,6 +189,11 @@ public sealed partial class TodoWidgetContent
         }
 
         IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero || DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(foreground))
+        {
+            return IntPtr.Zero;
+        }
+
         IntPtr root = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
         return root != IntPtr.Zero ? root : foreground;
     }

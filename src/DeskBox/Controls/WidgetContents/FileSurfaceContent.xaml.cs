@@ -47,6 +47,15 @@ public sealed partial class FileSurfaceContent :
     private bool _isCommittingItemRename;
     private bool _isCancellingItemRename;
     private long _itemRenameOpenedAtTick;
+    private int _pendingMenuRenameHandoffDepth;
+    private int _systemContextMenuInFlightDepth;
+
+    internal bool HasActiveInlineRename =>
+        _itemRenameTarget is not null ||
+        _pendingMenuRenameHandoffDepth > 0;
+
+    internal bool HasActiveSystemContextMenu =>
+        _systemContextMenuInFlightDepth > 0;
 
     // Slow-click rename: clicking the label of the already-sole-selected item
     // arms a delayed rename; one system double-click window of grace lets a
@@ -555,14 +564,23 @@ public sealed partial class FileSurfaceContent :
     {
         _hasSurfaceActivationFocus = true;
         bool pointerActivation = Win32Helper.IsAnyMouseButtonDown();
+        bool preserveActiveEditor =
+            _itemRenameTarget is not null ||
+            _pendingMenuRenameHandoffDepth > 0 ||
+            _stackPopoverTitleEditing ||
+            IsStackPopoverItemRenameEditing ||
+            DeskBox.Helpers.TransientInputFocusGuard.HasActiveEditorOrShellTitleRename(this);
         if (IsLoaded && !pointerActivation)
         {
-            Root.Focus(FocusState.Programmatic);
+            if (!preserveActiveEditor)
+            {
+                Root.Focus(FocusState.Programmatic);
+            }
         }
         App.LogVerbose(
             $"[FileStack] Surface activated widget={WidgetId} " +
             $"pointerActivation={pointerActivation} " +
-            $"focusedRoot={IsLoaded && !pointerActivation}");
+            $"focusedRoot={IsLoaded && !pointerActivation && !preserveActiveEditor}");
 
         if (IsLoaded &&
             (ItemsGrid.SelectedItems.Count > 0 ||
@@ -658,6 +676,7 @@ public sealed partial class FileSurfaceContent :
             _stackPopoverTitleEditing ||
             IsStackPopoverItemRenameEditing ||
             _itemRenameTarget is not null ||
+            _pendingMenuRenameHandoffDepth > 0 ||
             _pendingPointerDragItems.Length > 0)
         {
             return;
@@ -1435,7 +1454,10 @@ public sealed partial class FileSurfaceContent :
             {
                 if (!_stackPopoverSystemContextMenuOpen)
                 {
-                    CompleteStackPopoverContextMenu();
+                    if (_pendingMenuRenameHandoffDepth == 0)
+                    {
+                        CompleteStackPopoverContextMenu();
+                    }
                 }
             };
         }
@@ -1443,8 +1465,13 @@ public sealed partial class FileSurfaceContent :
         {
             flyout.Closed += (_, _) =>
             {
-                ItemsGrid.SelectedItems.Remove(removedStack);
-                ItemsList.SelectedItems.Remove(removedStack);
+                if (_pendingMenuRenameHandoffDepth == 0 &&
+                    !ReferenceEquals(_itemRenameTarget, removedStack) &&
+                    !string.Equals(_itemRenameStackKey, removedStack.StackKey, StringComparison.Ordinal))
+                {
+                    ItemsGrid.SelectedItems.Remove(removedStack);
+                    ItemsList.SelectedItems.Remove(removedStack);
+                }
             };
         }
         try
@@ -2387,7 +2414,6 @@ public sealed partial class FileSurfaceContent :
         SetItemsViewScrollingSuspended(true);
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-file-item-rename-opened");
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this);
         DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(ItemRenameTextBox);
 
         SelectItemNameForRename(
@@ -2510,6 +2536,9 @@ public sealed partial class FileSurfaceContent :
 
     private void CompleteItemRename()
     {
+        bool wasRenaming =
+            _itemRenameTarget is not null ||
+            ItemRenameTextBox is { Visibility: Visibility.Visible };
         if (ItemRenameTextBox is not null)
         {
             ItemRenameTextBox.Visibility = Visibility.Collapsed;
@@ -2527,6 +2556,12 @@ public sealed partial class FileSurfaceContent :
         _itemRenameStackKey = null;
         App.Current?.WidgetManager?.EndWidgetInteraction(
             "surface-file-item-rename-closed");
+        if (wasRenaming)
+        {
+            DeskBox.Views.WidgetWindowBase.TryRequestOwnerDesktopPinnedRestoreIfIdle(
+                this,
+                "file-inline-rename-closed");
+        }
     }
 
     private void PositionItemRenameTextBox(
@@ -2939,13 +2974,15 @@ public sealed partial class FileSurfaceContent :
             }
         }
 
+        if (ReferenceEquals(textBox, ItemRenameTextBox))
+        {
+            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "file-inline-rename");
+        }
         InlineEditorFocus.FocusWhenLoaded(
             textBox,
             ApplyRenameSelection,
             DispatcherQueue,
-            "FileItemRename",
-            onFocused: () => DeskBox.Helpers.TransientInputFocusGuard.FocusContentIslandIfForeground(
-                DeskBox.Views.WidgetEditorPopoverWindow.ResolveOwnerWindowHandle(this)));
+            "FileItemRename");
     }
 
     private async Task DeleteItemAsync(WidgetItem item)

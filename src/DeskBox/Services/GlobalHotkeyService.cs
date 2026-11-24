@@ -637,8 +637,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
     internal bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation)
     {
         var settings = _settingsService.Settings;
-        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) ||
-            !settings.Clipboard.ClipboardHotkeyEnabled)
+        if (!settings.Clipboard.ClipboardHotkeyEnabled)
         {
             return false;
         }

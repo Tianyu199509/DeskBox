@@ -42,7 +42,7 @@ public sealed partial class SettingsWindow
                 }
 
                 string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-                if (string.IsNullOrWhiteSpace(folderPath))
+                if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || SettingsRoot.XamlRoot is null)
                 {
                     return;
                 }
@@ -187,18 +187,40 @@ public sealed partial class SettingsWindow
         _ = ChangeManagedStoragePathAsync();
     }
 
+    private int _managedStorageWarningRefreshGeneration;
+    private int _managedStorageShortcutRefreshGeneration;
+
     private void RefreshManagedStoragePathWarning()
     {
-        if (!_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
+        _ = RefreshManagedStoragePathWarningAsync();
+    }
+
+    private async Task RefreshManagedStoragePathWarningAsync()
+    {
+        if (_isClosed ||
+            !_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
             el is not Views.SettingsSections.FileWidgetSettingsSection section)
         {
             return;
         }
 
-        ManagedStoragePathAssessment assessment =
-            ManagedStoragePathService.AssessPath(ViewModel.ManagedStorageRootPath);
+        int generation = Interlocked.Increment(ref _managedStorageWarningRefreshGeneration);
+        string rootPath = ViewModel.ManagedStorageRootPath;
+        (bool overlapsDesktop, ManagedStoragePathAssessment assessment) = await Task.Run(() =>
+            (
+                ManagedStoragePathService.OverlapsDesktop(rootPath),
+                ManagedStoragePathService.AssessPath(rootPath)
+            ));
+
+        if (_isClosed ||
+            generation != Volatile.Read(ref _managedStorageWarningRefreshGeneration) ||
+            !string.Equals(rootPath, ViewModel.ManagedStorageRootPath, StringComparison.Ordinal))
+        {
+            return;
+        }
+
         var warnings = new List<string>();
-        if (ManagedStoragePathService.OverlapsDesktop(ViewModel.ManagedStorageRootPath))
+        if (overlapsDesktop)
         {
             warnings.Add(_localizationService.T("Settings.ManagedPath.Warning.DesktopOverlap"));
         }
@@ -230,13 +252,37 @@ public sealed partial class SettingsWindow
 
     private void RefreshManagedStorageDesktopShortcutState()
     {
-        if (!_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
+        _ = RefreshManagedStorageDesktopShortcutStateAsync();
+    }
+
+    private async Task RefreshManagedStorageDesktopShortcutStateAsync()
+    {
+        if (_isClosed ||
+            !_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
             el is not Views.SettingsSections.FileWidgetSettingsSection section)
         {
             return;
         }
 
-        section.SetDesktopShortcutState(_appActions.HasManagedStorageDesktopShortcut());
+        int generation = Interlocked.Increment(ref _managedStorageShortcutRefreshGeneration);
+        bool hasShortcut;
+        try
+        {
+            hasShortcut = await Task.Run(() => _appActions.HasManagedStorageDesktopShortcut());
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] Desktop shortcut state probe failed: {ex.Message}");
+            return;
+        }
+
+        if (_isClosed ||
+            generation != Volatile.Read(ref _managedStorageShortcutRefreshGeneration))
+        {
+            return;
+        }
+
+        section.SetDesktopShortcutState(hasShortcut);
     }
 
     private async void AppearanceDetailSection_DesktopShortcutToggled(

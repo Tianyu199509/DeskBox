@@ -35,6 +35,7 @@ public partial class App
         // Deep review R13-2 (D8 census): the smoke-harness branch was never
         // consumed (no smoke drives the desktop-organization window) and
         // the retail push no-ops safely without the IPC server.
+        _inProcessFallbackSettingsWindow?.RefreshDesktopOrganizationState();
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
     }
 
@@ -56,6 +57,7 @@ public partial class App
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
         RefreshInProcessSettingsDesktopOrganizationForSmoke();
 #endif
+        _inProcessFallbackSettingsWindow?.RefreshDesktopOrganizationState();
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);
         ScheduleBackgroundMemoryCleanup("desktop-organization-closed");

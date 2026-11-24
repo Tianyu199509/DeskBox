@@ -932,7 +932,10 @@ public sealed partial class TodoWidgetContent : UserControl, IDisposable
             Text = localization.T("Todo.Due.Custom"),
             Icon = new FontIcon { Glyph = "\uE8A5" }
         };
-        customItem.Click += async (_, _) => await PickCustomDueDateAsync(item: null);
+        AttachDeferredFlyoutOverlayAction(
+            flyout,
+            customItem,
+            () => PickCustomDueDateAsync(item: null));
         flyout.Items.Add(customItem);
 
         if (ViewModel?.DraftDueDate is not null)
@@ -1049,7 +1052,10 @@ public sealed partial class TodoWidgetContent : UserControl, IDisposable
             Text = localization.T("Todo.Due.Custom"),
             Icon = new FontIcon { Glyph = "\uE8A5" }
         };
-        customItem.Click += async (_, _) => await PickCustomDueDateAsync(item);
+        AttachDeferredFlyoutOverlayAction(
+            flyout,
+            customItem,
+            () => PickCustomDueDateAsync(item));
         flyout.Items.Add(customItem);
 
         if (item.DueDate is not null)

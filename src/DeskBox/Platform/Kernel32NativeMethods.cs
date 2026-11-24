@@ -101,6 +101,40 @@ internal static partial class Kernel32NativeMethods
         out ulong totalNumberOfBytes,
         out ulong totalNumberOfFreeBytes);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "MultiByteToWideChar")]
+    internal static unsafe partial int MultiByteToWideChar(
+        uint codePage,
+        uint dwFlags,
+        byte* lpMultiByteStr,
+        int cbMultiByte,
+        char* lpWideCharStr,
+        int cchWideChar);
+
+    internal static unsafe string DecodeActiveCodePageString(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        fixed (byte* srcPtr = bytes)
+        {
+            int charCount = MultiByteToWideChar(0, 0, srcPtr, bytes.Length, null, 0);
+            if (charCount <= 0)
+            {
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+
+            string result = new('\0', charCount);
+            fixed (char* dstPtr = result)
+            {
+                _ = MultiByteToWideChar(0, 0, srcPtr, bytes.Length, dstPtr, charCount);
+            }
+
+            return result;
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativeFileTime
     {

@@ -75,7 +75,12 @@ public sealed class WidgetTrayAnimationController : IDisposable
     private int _preparedRefreshRateHz = WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
     private int _preparedRefreshAnchorX;
     private int _preparedRefreshAnchorY;
+    private const int ContentReadyFallbackTimeoutMs = 350;
+    private const int SingleAnimationDeadlineGraceMs = 2000;
+    private const int SingleAnimationMinDeadlineMs = 2500;
+
     private EventHandler<object>? _contentReadyRenderingHandler;
+    private DispatcherQueueTimer? _contentReadyFallbackTimer;
     private int _contentReadyFrameCount;
     private long _contentReadyGeneration;
     private Action? _contentReadyAction;
@@ -93,6 +98,7 @@ public sealed class WidgetTrayAnimationController : IDisposable
     private Action? _renderCompleted;
     private Action? _renderFailed;
     private IDisposable? _renderFrameRegistration;
+    private IDisposable? _renderDeadlineRegistration;
     private readonly WidgetAnimationFramePacingPolicy _renderPacing = new();
     private PointInt32? _lastCommittedPosition;
     private WidgetTrayAnimationFrameTracker? _renderFrameTracker;
@@ -120,6 +126,8 @@ public sealed class WidgetTrayAnimationController : IDisposable
     public bool IsApplyingBounds { get; private set; }
 
     public bool IsPositionTransitionActive => _targetPosition.HasValue;
+
+    public bool IsWindowCloakedForTrayShow => _isWindowCloakedForTrayShow;
 
     public long NextGeneration()
     {
@@ -197,14 +205,137 @@ public sealed class WidgetTrayAnimationController : IDisposable
             sizeof(int));
     }
 
+    public Task WaitForVisualCommitAsync(
+        int fallbackTimeoutMs = WidgetTrayAnimationPreparation.DefaultVisualCommitFallbackTimeoutMs)
+    {
+        return WaitForCurrentThreadVisualCommitAsync(
+            _dispatcherQueue,
+            fallbackTimeoutMs,
+            () => GetCachedCompositor(GetCachedRootVisual()));
+    }
+
+    [ThreadStatic]
+    private static Microsoft.UI.Composition.Compositor? s_inFlightCommitCompositor;
+
+    [ThreadStatic]
+    private static Task? s_inFlightCommitTask;
+
+    public static Task WaitForCurrentThreadVisualCommitAsync(
+        DispatcherQueue dispatcherQueue,
+        int fallbackTimeoutMs = WidgetTrayAnimationPreparation.DefaultVisualCommitFallbackTimeoutMs,
+        Func<Microsoft.UI.Composition.Compositor?>? getCompositor = null)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcherQueue);
+
+        return WidgetTrayAnimationPreparation.AwaitVisualCommitWithFallbackAsync(
+            callback => dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () => callback()),
+            () =>
+            {
+                Microsoft.UI.Composition.Compositor? compositor = getCompositor is not null
+                    ? getCompositor()
+                    : CompositionTarget.GetCompositorForCurrentThread();
+                if (compositor is null)
+                {
+                    return null;
+                }
+
+                if (ReferenceEquals(s_inFlightCommitCompositor, compositor) &&
+                    s_inFlightCommitTask is { IsCompleted: false } existingCommit)
+                {
+                    return existingCommit;
+                }
+
+                Task commitTask = compositor.RequestCommitAsync().AsTask();
+                s_inFlightCommitCompositor = compositor;
+                s_inFlightCommitTask = commitTask;
+                return commitTask;
+            },
+            (timeout, onExpired) => ScheduleOneShotTimer(dispatcherQueue, timeout, onExpired),
+            fallbackTimeoutMs);
+    }
+
+    private static IDisposable ScheduleOneShotTimer(
+        DispatcherQueue dispatcherQueue,
+        TimeSpan timeout,
+        Action onExpired)
+    {
+        DispatcherQueueTimer timer = dispatcherQueue.CreateTimer();
+        timer.Interval = timeout;
+        timer.IsRepeating = false;
+        Windows.Foundation.TypedEventHandler<DispatcherQueueTimer, object>? tickHandler = null;
+        tickHandler = (sender, _) =>
+        {
+            sender.Stop();
+            sender.Tick -= tickHandler;
+            onExpired();
+        };
+        timer.Tick += tickHandler;
+        timer.Start();
+        return new OneShotTimerSubscription(timer, tickHandler);
+    }
+
+    private sealed class OneShotTimerSubscription(
+        DispatcherQueueTimer timer,
+        Windows.Foundation.TypedEventHandler<DispatcherQueueTimer, object> tickHandler) : IDisposable
+    {
+        private DispatcherQueueTimer? _timer = timer;
+        private Windows.Foundation.TypedEventHandler<DispatcherQueueTimer, object>? _tickHandler = tickHandler;
+
+        public void Dispose()
+        {
+            DispatcherQueueTimer? activeTimer = Interlocked.Exchange(ref _timer, null);
+            var handler = Interlocked.Exchange(ref _tickHandler, null);
+            if (activeTimer is not null)
+            {
+                activeTimer.Stop();
+                if (handler is not null)
+                {
+                    activeTimer.Tick -= handler;
+                }
+            }
+        }
+    }
+
     public void PlayAfterContentReady(Action action)
     {
         CancelContentReadyCallback();
-        _contentReadyGeneration = Generation;
+        long generation = Generation;
+        _contentReadyGeneration = generation;
         _contentReadyFrameCount = 0;
         _contentReadyAction = action;
         _contentReadyRenderingHandler = OnContentReadyRenderingFrame;
         CompositionTarget.Rendering += _contentReadyRenderingHandler;
+
+        DispatcherQueueTimer timer = _dispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(ContentReadyFallbackTimeoutMs);
+        timer.IsRepeating = false;
+        void CompleteFromFallback()
+        {
+            if (_contentReadyGeneration != generation || _contentReadyAction is null)
+            {
+                return;
+            }
+
+            App.Log($"[TrayAnimation] Content-ready wait timed out after {ContentReadyFallbackTimeoutMs}ms; continuing");
+            InteractionBreadcrumbRecorder.Record("content-ready-timeout");
+            Action? pendingAction = _contentReadyAction;
+            CancelContentReadyCallback();
+            pendingAction?.Invoke();
+        }
+
+        timer.Tick += (_, _) =>
+        {
+            if (CallbackDepth.Depth > 0)
+            {
+                UiDispatch.PostAfterCallback(CompleteFromFallback);
+            }
+            else
+            {
+                CompleteFromFallback();
+            }
+        };
+        _contentReadyFallbackTimer = timer;
+        timer.Start();
     }
 
     /// <summary>
@@ -549,6 +680,10 @@ public sealed class WidgetTrayAnimationController : IDisposable
 
         _renderFrameRegistration = WidgetCompactAnimationCoordinator.Register(
             OnRenderingFrame, GetAnimationFrameBudgetMilliseconds);
+        int deadlineMs = Math.Max(SingleAnimationMinDeadlineMs, durationMs + SingleAnimationDeadlineGraceMs);
+        _renderDeadlineRegistration = WidgetCompactAnimationCoordinator.ScheduleDeadline(
+            TimeSpan.FromMilliseconds(deadlineMs),
+            OnSingleAnimationDeadlineExpired);
         }
         catch (Exception ex)
         {
@@ -792,8 +927,57 @@ public sealed class WidgetTrayAnimationController : IDisposable
         }
     }
 
+    private void OnSingleAnimationDeadlineExpired()
+    {
+        if (!_isRendering || _renderGeneration != Generation)
+        {
+            StopRendering("superseded");
+            return;
+        }
+
+        string mode = _renderIsShowing ? "show" : "hide";
+        double toOffsetX = _renderToOffsetX;
+        double toOffsetY = _renderToOffsetY;
+        bool isShowing = _renderIsShowing;
+        long generation = _renderGeneration;
+        Action? completed = _renderCompleted;
+        Action? failed = _renderFailed;
+
+        App.Log(
+            $"[TrayAnimation] Single animation deadline expired mode={mode} " +
+            $"hwnd=0x{_windowHandle.ToInt64():X} durationMs={_renderDurationMs:F0}; forcing completion");
+        InteractionBreadcrumbRecorder.Record("tray-single-timeout", $"mode={mode}");
+
+        try
+        {
+            if (_useCrossingFade)
+            {
+                GetCachedRootVisual().Opacity = ComputeCrossingFadeOpacity(toOffsetX, toOffsetY);
+            }
+
+            _ = ApplyWindowOffset(toOffsetX, toOffsetY, force: true);
+            StopRendering("timeout-completed");
+            CompleteAnimation(
+                toOffsetX,
+                toOffsetY,
+                isShowing,
+                generation,
+                completed,
+                positionAlreadyCommitted: true);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetTrayAnimationController] Deadline completion exception: {ex.Message}\n{ex.StackTrace}");
+            StopRendering("failed");
+            try { AbortPositionAnimation(generation, failed); }
+            catch (Exception cleanupError) { _log($"Animation failure cleanup: {cleanupError.Message}"); }
+        }
+    }
+
     private void StopRendering(string outcome = "cancelled")
     {
+        _renderDeadlineRegistration?.Dispose();
+        _renderDeadlineRegistration = null;
         if (!_isRendering)
         {
             return;
@@ -858,6 +1042,12 @@ public sealed class WidgetTrayAnimationController : IDisposable
 
     private void CancelContentReadyCallback()
     {
+        if (_contentReadyFallbackTimer is not null)
+        {
+            _contentReadyFallbackTimer.Stop();
+            _contentReadyFallbackTimer = null;
+        }
+
         if (_contentReadyRenderingHandler is not null)
         {
             CompositionTarget.Rendering -= _contentReadyRenderingHandler;
@@ -994,6 +1184,11 @@ public sealed class WidgetTrayAnimationController : IDisposable
                 target.Y + (int)Math.Round(finalOffsetY));
         }
         SetOffsetOverride(null, null);
+        try { RevealWindowForTrayShow(); }
+        catch
+        {
+            // Window teardown races are non-fatal; cloak cleanup is best-effort.
+        }
         RestoreDwmTransitions();
         if (_cachedRootVisual is { } visual)
         {
@@ -1409,6 +1604,7 @@ public sealed class WidgetTrayAnimationController : IDisposable
 
     private static void StopVisualAnimations(Microsoft.UI.Composition.Visual visual)
     {
+        visual.StopAnimation("CenterPoint");
         visual.StopAnimation("Offset");
         visual.StopAnimation("Opacity");
         visual.StopAnimation("Scale");

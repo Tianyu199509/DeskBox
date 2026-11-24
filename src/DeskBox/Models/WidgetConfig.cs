@@ -308,7 +308,7 @@ public enum WidgetKind
     /// <summary>Reserved for a future system monitor widget.</summary>
     SystemMonitor,
 
-    /// <summary>Legacy value kept only for migrating old settings files (Search is now standalone).</summary>
+    /// <summary>Global search desktop entry widget (independent of the SearchPopupWindow hotkey).</summary>
     Search,
 
     /// <summary>Legacy value kept only for migrating old settings files.</summary>

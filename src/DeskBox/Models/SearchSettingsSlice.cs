@@ -348,7 +348,7 @@ public sealed class SearchSettingsSlice
         CategoryCommand => "\uE756",
         CategoryVideo => "\uE714",
         CategoryMusic => "\uE8D6",
-        CategoryArchive => "\uF012",
+        CategoryArchive => DeskBox.Services.WindowsCompatibilityService.IsWindows11OrLater ? "\uF012" : "\uE7B8",
         _ => "\uE8A5"
     };
 
@@ -379,6 +379,12 @@ public sealed class SearchSettingsSlice
         }
 
         if (Services.FeatureWidgetSettings.IsEnabled(settings, linked.Value))
+        {
+            return true;
+        }
+
+        if (linked.Value == WidgetKind.Clipboard &&
+            settings.Clipboard.ClipboardHotkeyEnabled)
         {
             return true;
         }
@@ -559,4 +565,31 @@ public sealed class SearchSettingsSlice
     /// Default enables searching across all categories and shows only All + File + Image tabs.
     /// </summary>
     public string SearchCategoryLayout { get; set; } = DefaultCategoryLayout;
+
+    /// <summary>Desktop search widget submit handoff mode: "enter" (default) or "instant".</summary>
+    public const string DesktopHandoffEnter = "enter";
+
+    /// <summary>Desktop search widget instant handoff mode (syncs on pause/typing to launch SearchPopupWindow).</summary>
+    public const string DesktopHandoffInstant = "instant";
+
+    /// <summary>Default desktop search widget handoff mode.</summary>
+    public const string DefaultDesktopHandoffMode = DesktopHandoffEnter;
+
+    /// <summary>Normalizes the desktop search widget handoff mode to "enter" or "instant".</summary>
+    public static string NormalizeDesktopHandoffMode(string? mode) =>
+        string.Equals(mode?.Trim(), DesktopHandoffInstant, StringComparison.OrdinalIgnoreCase)
+            ? DesktopHandoffInstant
+            : DesktopHandoffEnter;
+
+    /// <summary>When the desktop search widget hands off to the global search popup: "enter" or "instant".</summary>
+    public string SearchDesktopHandoffMode { get; set; } = DefaultDesktopHandoffMode;
+
+    /// <summary>Whether the desktop search widget displays pinned and recent search queries.</summary>
+    public bool SearchDesktopShowHistory { get; set; } = true;
+
+    /// <summary>Whether large desktop search widget tiers display the "Continue work / Recent opened" column.</summary>
+    public bool SearchDesktopShowRecentOpened { get; set; } = true;
+
+    /// <summary>Whether the desktop search widget masks queries and history items until the pointer hovers over the widget.</summary>
+    public bool SearchDesktopPrivacyMask { get; set; }
 }

@@ -27,7 +27,10 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-context-menu");
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+            this,
+            "todo-context-menu",
+            expectTextInput: false);
         TodoListView.Focus(FocusState.Programmatic);
         if (!item.IsCopySelected)
         {
@@ -54,36 +57,88 @@ public sealed partial class TodoWidgetContent
         var localization = App.Current.LocalizationService;
 
         var editItem = CreateTodoContextCommand("Todo.Menu.Edit", "\uE70F");
-        editItem.Click += async (_, _) =>
+        bool pendingEditAfterClose = false;
+        bool pendingRenameAfterClose = false;
+        flyout.Closed += (_, _) =>
         {
-            flyout.Hide();
-            ClearCopySelection();
-            ClearTodoListContainerSelection();
-            CloseCustomDueDateOverlay();
-            MarkDetailSelectionExplicit();
-            if (await OpenDetailItemAsync(item.Id) is null || ViewModel is null)
+            if (!pendingEditAfterClose && !pendingRenameAfterClose)
             {
                 return;
             }
 
-            ViewModel.BeginEdit(item.Id);
-            _ = EnsureDetailPageRealized();
-            DispatcherQueue.TryEnqueue(() =>
+            bool runEdit = pendingEditAfterClose;
+            bool runRename = pendingRenameAfterClose;
+            pendingEditAfterClose = false;
+            pendingRenameAfterClose = false;
+            if (runRename)
             {
-                if (DetailTitleTextBox is not null)
+                Interlocked.Increment(ref _pendingMenuInlineEditDepth);
+            }
+
+            bool enqueued = DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
                 {
-                    DetailTitleTextBox.Focus(FocusState.Programmatic);
-                    DetailTitleTextBox.Select(DetailTitleTextBox.Text?.Length ?? 0, 0);
+                    if (_isDisposed || ViewModel is null)
+                    {
+                        return;
+                    }
+
+                    if (runRename)
+                    {
+                        OpenTodoInlineEdit(item);
+                        return;
+                    }
+
+                    if (runEdit)
+                    {
+                        ClearCopySelection();
+                        ClearTodoListContainerSelection();
+                        CloseCustomDueDateOverlay();
+                        MarkDetailSelectionExplicit();
+                        if (await OpenDetailItemAsync(item.Id) is null || ViewModel is null)
+                        {
+                            return;
+                        }
+
+                        ViewModel.BeginEdit(item.Id);
+                        _ = EnsureDetailPageRealized();
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            if (DetailTitleTextBox is not null)
+                            {
+                                DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-detail-title");
+                                DetailTitleTextBox.Focus(FocusState.Programmatic);
+                                DetailTitleTextBox.Select(DetailTitleTextBox.Text?.Length ?? 0, 0);
+                            }
+                        });
+                    }
+                }
+                finally
+                {
+                    if (runRename)
+                    {
+                        Interlocked.Decrement(ref _pendingMenuInlineEditDepth);
+                    }
                 }
             });
+            if (!enqueued && runRename)
+            {
+                Interlocked.Decrement(ref _pendingMenuInlineEditDepth);
+            }
+        };
+        editItem.Click += (_, _) =>
+        {
+            pendingEditAfterClose = true;
+            flyout.Hide();
         };
         flyout.Items.Add(editItem);
 
         var renameItem = CreateTodoContextCommand("Todo.Menu.Rename", "\uE8AC");
         renameItem.Click += (_, _) =>
         {
+            pendingRenameAfterClose = true;
             flyout.Hide();
-            OpenTodoInlineEdit(item);
         };
         flyout.Items.Add(renameItem);
 
@@ -172,7 +227,10 @@ public sealed partial class TodoWidgetContent
                 Text = localization.T("Todo.Due.Custom"),
                 Icon = new FontIcon { Glyph = "\uE8A5" }
             };
-            customDueDateItem.Click += async (_, _) => await PickCustomDueDateAsync(item);
+            AttachDeferredFlyoutOverlayAction(
+                flyout,
+                customDueDateItem,
+                () => PickCustomDueDateAsync(item));
             menu.Items.Add(customDueDateItem);
             if (item.DueDate is not null)
             {
@@ -356,15 +414,17 @@ public sealed partial class TodoWidgetContent
             Text = localization.T("Todo.Due.Custom"),
             Icon = new FontIcon { Glyph = "\uE8A5" }
         };
-        customDueDateItem.Click += async (_, _) =>
-        {
-            flyout.Hide();
-            TodoItemViewModel? initialItem = selectedItems.FirstOrDefault(item => item.DueDate is not null);
-            await PickBatchCustomDueDateAsync(
-                selectedIds,
-                initialItem?.DueDate,
-                initialItem?.HasDueTime == true);
-        };
+        AttachDeferredFlyoutOverlayAction(
+            flyout,
+            customDueDateItem,
+            () =>
+            {
+                TodoItemViewModel? initialItem = selectedItems.FirstOrDefault(item => item.DueDate is not null);
+                return PickBatchCustomDueDateAsync(
+                    selectedIds,
+                    initialItem?.DueDate,
+                    initialItem?.HasDueTime == true);
+            });
         dueDateMenu.Items.Add(customDueDateItem);
         if (hasDueDate)
         {

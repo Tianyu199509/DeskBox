@@ -163,8 +163,9 @@ public sealed partial class TodoQuickAddBar : UserControl, INotifyPropertyChange
 
         if (focus)
         {
-            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-quick-add");
+            DeskBox.Platform.InteractionBreadcrumbRecorder.Record("todo-quick-add", "open-composer");
             DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(InlineComposerTextBox);
+            DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-quick-add");
             if (DispatcherQueue is { } dispatcher)
             {
                 dispatcher.TryEnqueue(() =>

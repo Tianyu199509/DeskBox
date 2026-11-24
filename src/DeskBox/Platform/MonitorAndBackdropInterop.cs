@@ -145,6 +145,12 @@ internal static unsafe class MonitorAndBackdropInterop
     internal static extern IntPtr SetFocus(IntPtr hWnd);
 
     [DllImport("user32.dll", ExactSpelling = true)]
+    internal static extern IntPtr GetFocus();
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    internal static extern int IsChild(IntPtr hWndParent, IntPtr hWnd);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
     internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
 
     [StructLayout(LayoutKind.Sequential)]

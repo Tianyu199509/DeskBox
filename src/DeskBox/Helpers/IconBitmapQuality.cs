@@ -8,8 +8,13 @@ namespace DeskBox.Helpers;
 /// </summary>
 internal static class IconBitmapQuality
 {
-    private const int MinimumCanvasDimension = 96;
-    private const double MaximumVisibleDimensionRatio = 0.35;
+    private const int MinimumCanvasDimension = 48;
+    // Windows Shell centers 32 px and 48 px icon frames (common in older/indie
+    // Steam .url game icons) inside a 96 px or 256 px transparent canvas at
+    // ratios up to 48/96 = 0.50 (plus 1-2 px shadow). Ordinary full-bleed
+    // icons fill >= 0.70 of at least one axis, so 0.55 catches padded canvases
+    // without trimming intentional icon margins.
+    private const double MaximumVisibleDimensionRatio = 0.55;
     private const int MinimumSignificantAlpha = 32;
 
     /// <summary>

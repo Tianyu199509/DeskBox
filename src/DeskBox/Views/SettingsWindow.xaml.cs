@@ -276,8 +276,6 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.KeyDown += SettingsRoot_KeyDown;
         LogConstructionCheckpoint("bindings-and-responsive-tree");
 
-        WindowsCompatibilityService.ApplySettingsBackdrop(this);
-
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
@@ -297,7 +295,14 @@ public sealed partial class SettingsWindow : Window
         UpdateTitleBarInsets();
         LogConstructionCheckpoint("native-window");
 
+        // Subscribed only after _appWindow exists: ActualThemeChanged can
+        // also fire on an OS theme flip while RequestedTheme is Default,
+        // and the handler touches _appWindow.TitleBar. Subscribed before
+        // TrackWindow so the initial RequestedTheme application updates the
+        // solid fallback backdrop on Windows 10 immediately.
+        SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;
         _themeService.TrackWindow(this);
+        WindowsCompatibilityService.ApplySettingsBackdrop(this);
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
@@ -333,10 +338,6 @@ public sealed partial class SettingsWindow : Window
         // process has a whole topology-archive system for its widgets;
         // this window only needs the cheap clamp.
         App.Current.DisplayTopologyChanged += SettingsWindow_DisplayTopologyChanged;
-        // Subscribed only after _appWindow exists: ActualThemeChanged can
-        // also fire on an OS theme flip while RequestedTheme is Default,
-        // and the handler touches _appWindow.TitleBar.
-        SettingsRoot.ActualThemeChanged += SettingsRoot_ActualThemeChanged;
         WindowsCompatibilityService.HighContrastChanged += SettingsWindow_HighContrastChanged;
         Closed += SettingsWindow_Closed;
         constructionStopwatch.Stop();
@@ -357,6 +358,11 @@ public sealed partial class SettingsWindow : Window
         // break in the refresh chain) can never leave the window visibly
         // frozen on a stale theme.
         _themeService.ApplyToWindow(this);
+        if (SystemBackdrop is null)
+        {
+            WindowsCompatibilityService.ApplySettingsBackdrop(this);
+        }
+        ApplyTitleBarButtonColors();
         bool wasShownOnce = _hasShownOnce;
         _appWindow.Show();
         EnsureFirstShowPlacementApplied();
@@ -818,25 +824,10 @@ public sealed partial class SettingsWindow : Window
     {
         if (SettingsRoot is not null)
         {
-            return SettingsRoot.ActualTheme switch
-            {
-                ElementTheme.Dark => true,
-                ElementTheme.Light => false,
-                _ => _themeService.CurrentTheme switch
-                {
-                    ElementTheme.Dark => true,
-                    ElementTheme.Light => false,
-                    _ => Win32Helper.IsSystemDarkMode()
-                }
-            };
+            return Helpers.NeutralInteractionBrush.IsDarkTheme(SettingsRoot);
         }
 
-        return _themeService.CurrentTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
+        return _themeService.EffectiveTheme == ElementTheme.Dark;
     }
 
     private void ApplyTitleBarButtonColors()

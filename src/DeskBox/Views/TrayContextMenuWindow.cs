@@ -689,7 +689,7 @@ internal sealed partial class TrayContextMenuWindow : Window
         }
 
         _isMenuOpen = false;
-        ++_sessionId;
+        long closedSession = ++_sessionId;
 
         StopOutsidePressMonitor();
         StopBandPromoter();
@@ -711,42 +711,59 @@ internal sealed partial class TrayContextMenuWindow : Window
 
         SetCloaked(true);
 
-        IntPtr foregroundBeforeClose = Win32Helper.GetForegroundWindow();
-        if (invokedEntry is null &&
-            (foregroundBeforeClose == WindowHandle || IsCurrentProcessPopupBridge(foregroundBeforeClose)))
+        void ParkAnchorAndRestoreForeground()
         {
-            App.Current?.WidgetManager?.RestoreForegroundToRaisedWidgetBeforeAuxiliaryHide(WindowHandle);
-            foregroundBeforeClose = Win32Helper.GetForegroundWindow();
-        }
-
-        if (!_isShutdown)
-        {
-            try
+            if (_isShutdown || _isMenuOpen || _sessionId != closedSession)
             {
-                if (_appWindow.IsVisible)
+                return;
+            }
+
+            IntPtr foregroundBeforeClose = Win32Helper.GetForegroundWindow();
+            if (invokedEntry is null &&
+                (foregroundBeforeClose == WindowHandle || IsCurrentProcessPopupBridge(foregroundBeforeClose)))
+            {
+                App.Current?.WidgetManager?.RestoreForegroundToRaisedWidgetBeforeAuxiliaryHide(WindowHandle);
+                foregroundBeforeClose = Win32Helper.GetForegroundWindow();
+            }
+
+            if (!_isShutdown)
+            {
+                try
                 {
-                    _appWindow.Hide();
-                }
+                    if (_appWindow.IsVisible)
+                    {
+                        _appWindow.Hide();
+                    }
 
-                _ = Win32Helper.ShowWindow(WindowHandle, Win32Helper.SW_HIDE);
+                    _ = Win32Helper.ShowWindow(WindowHandle, Win32Helper.SW_HIDE);
+                }
+                catch (Exception ex)
+                {
+                    App.LogVerbose($"[Tray] Anchor window park failed: {ex.Message}");
+                }
             }
-            catch (Exception ex)
+
+            if (invokedEntry is null &&
+                foregroundBeforeClose != IntPtr.Zero &&
+                foregroundBeforeClose != WindowHandle &&
+                !IsCurrentProcessPopupBridge(foregroundBeforeClose) &&
+                !WidgetLayerService.UsesDesktopPinnedMode() &&
+                App.Current?.IsDeskBoxWindow(foregroundBeforeClose) == true &&
+                Win32Helper.IsWindow(foregroundBeforeClose) &&
+                Win32Helper.IsWindowVisible(foregroundBeforeClose) &&
+                Win32Helper.GetForegroundWindow() != foregroundBeforeClose)
             {
-                App.LogVerbose($"[Tray] Anchor window park failed: {ex.Message}");
+                _ = Win32Helper.SetForegroundWindow(foregroundBeforeClose);
             }
         }
 
-        if (invokedEntry is null &&
-            foregroundBeforeClose != IntPtr.Zero &&
-            foregroundBeforeClose != WindowHandle &&
-            !IsCurrentProcessPopupBridge(foregroundBeforeClose) &&
-            !WidgetLayerService.UsesDesktopPinnedMode() &&
-            App.Current?.IsDeskBoxWindow(foregroundBeforeClose) == true &&
-            Win32Helper.IsWindow(foregroundBeforeClose) &&
-            Win32Helper.IsWindowVisible(foregroundBeforeClose) &&
-            Win32Helper.GetForegroundWindow() != foregroundBeforeClose)
+        if (CallbackDepth.Depth > 0)
         {
-            _ = Win32Helper.SetForegroundWindow(foregroundBeforeClose);
+            UiDispatch.PostAfterCallback(ParkAnchorAndRestoreForeground);
+        }
+        else
+        {
+            ParkAnchorAndRestoreForeground();
         }
 
         if (invokedEntry is { IsEnabled: true, Action: not null } && callback is not null)

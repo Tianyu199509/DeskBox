@@ -17,10 +17,74 @@
             BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
             BorderThickness="1"
             CornerRadius="8">
-            <ContentPresenter
-                x:Name="ContentHost"
-                HorizontalContentAlignment="Stretch"
-                VerticalContentAlignment="Stretch" />
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid
+                    x:Name="PopupHeaderGrid"
+                    Grid.Row="0"
+                    Padding="10,8,8,0"
+                    Background="Transparent"
+                    ColumnSpacing="8"
+                    PointerCanceled="PopupHeaderGrid_PointerReleased"
+                    PointerCaptureLost="PopupHeaderGrid_PointerReleased"
+                    PointerMoved="PopupHeaderGrid_PointerMoved"
+                    PointerPressed="PopupHeaderGrid_PointerPressed"
+                    PointerReleased="PopupHeaderGrid_PointerReleased">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        IsHitTestVisible="False"
+                        Orientation="Horizontal"
+                        Spacing="6">
+                        <FontIcon
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="&#xE77F;" />
+                        <TextBlock
+                            x:Name="PopupTitleText"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            MaxLines="1"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+
+                    <Button
+                        x:Name="ClosePopupButton"
+                        Grid.Column="1"
+                        Width="26"
+                        Height="26"
+                        MinWidth="26"
+                        MinHeight="26"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Click="ClosePopupButton_Click"
+                        CornerRadius="5"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        IsTabStop="False"
+                        Style="{StaticResource WidgetCompactIconButtonStyle}">
+                        <FontIcon FontSize="10.5" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
+
+                <ContentPresenter
+                    x:Name="ContentHost"
+                    Grid.Row="1"
+                    Margin="0,-2,0,0"
+                    HorizontalContentAlignment="Stretch"
+                    VerticalContentAlignment="Stretch" />
+            </Grid>
         </Border>
     </Grid>
 </Window>

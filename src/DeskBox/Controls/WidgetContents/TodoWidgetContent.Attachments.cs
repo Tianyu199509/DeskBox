@@ -20,11 +20,10 @@ public sealed partial class TodoWidgetContent
 
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
+            IntPtr owner = ResolveExportOwnerWindowHandle();
             IReadOnlyList<string> files =
                 await FileOpenPickerService.PickMultipleFilesAsync(
-                    owner == IntPtr.Zero ? foreground : owner,
+                    owner,
                     [],
                     PickerLocationId.Desktop);
             foreach (string file in files)

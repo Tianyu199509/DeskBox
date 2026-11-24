@@ -717,6 +717,7 @@ public sealed partial class WidgetManager
             WidgetKind.Glance => "Glance.Title",
             WidgetKind.Custom => "CustomWidget.Title",
             WidgetKind.Clipboard => "Clipboard.Title",
+            WidgetKind.Search => "Search.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => null

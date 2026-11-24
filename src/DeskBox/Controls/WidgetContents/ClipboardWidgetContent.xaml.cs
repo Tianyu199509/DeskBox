@@ -134,14 +134,18 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
             ItemsList.ScrollIntoView(ViewModel.VisibleItems[0]);
         }
 
-        DispatcherQueue?.TryEnqueue(() =>
-        {
-            if (!_isDisposed)
+        ImeCompositionGuard.AttachAncestors(SearchTextBox);
+        InlineEditorFocus.FocusWhenLoaded(
+            SearchTextBox,
+            tb =>
             {
-                SearchTextBox.Focus(FocusState.Programmatic);
-                SearchTextBox.SelectAll();
-            }
-        });
+                if (!_isDisposed)
+                {
+                    tb.SelectAll();
+                }
+            },
+            DispatcherQueue,
+            "QuickPasteSearch");
     }
 
     public void SyncFromResidentViewModel()
@@ -2382,6 +2386,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
+        ElementTheme popoverTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this);
         string headerMeta = string.IsNullOrWhiteSpace(item.MetaText)
             ? item.RelativeTimeText
             : $"{item.MetaText} · {item.RelativeTimeText}";
@@ -2390,7 +2395,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
             Text = headerMeta,
             FontSize = 11.5,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", this),
+            Foreground = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", popoverTheme),
             TextTrimming = TextTrimming.CharacterEllipsis,
             MaxLines = 1
         });
@@ -2529,7 +2534,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                     MaxHeight = 260,
                     CornerRadius = new CornerRadius(6),
                     BorderThickness = new Thickness(1),
-                    BorderBrush = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this),
+                    BorderBrush = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", popoverTheme),
                     Child = peekImageElement
                 };
                 rootStack.Children.Add(imageBorder);
@@ -2899,6 +2904,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                         if (host != IntPtr.Zero)
                         {
                             _ = Win32Helper.SetForegroundWindow(host);
+                            TransientInputFocusGuard.SetActiveAndFocusIsland(host);
                         }
 
                         object? focused = XamlRoot is { } root
