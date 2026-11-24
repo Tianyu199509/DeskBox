@@ -306,6 +306,9 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
                     _suppressScopeLatchTextChange = false;
                 }
                 TryLatchInlineScopeFromInput(SearchTextBox.Text);
+                int reactivatedEnd = SearchTextBox.Text?.Length ?? 0;
+                SearchTextBox.SelectionStart = reactivatedEnd;
+                SearchTextBox.SelectionLength = 0;
                 _viewModel.Query = GetEffectivePopupQuery();
                 UpdatePanelVisibility();
             }
@@ -337,6 +340,9 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             _suppressScopeLatchTextChange = false;
         }
         TryLatchInlineScopeFromInput(SearchTextBox.Text);
+        int initialEnd = SearchTextBox.Text?.Length ?? 0;
+        SearchTextBox.SelectionStart = initialEnd;
+        SearchTextBox.SelectionLength = 0;
         UpdateScopePrefixBadge(SearchTextBox.Text);
         string effectiveInitialQuery = GetEffectivePopupQuery();
         if (!string.IsNullOrWhiteSpace(effectiveInitialQuery))
@@ -421,7 +427,7 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             _viewModel.UpdateEverythingPromptState();
             _ = _viewModel.EnsureEverythingConnectionProbedAsync();
             UpdateEverythingPromptBanner();
-            _viewModel.Query = initialQuery;
+            _viewModel.Query = GetEffectivePopupQuery();
             UpdatePanelVisibility();
         }
         else
@@ -521,8 +527,16 @@ public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGri
             return false;
         }
 
+        bool wasPendingInitialFocus = _pendingInitialSearchBoxFocus;
         bool focused = SearchTextBox.Focus(FocusState.Programmatic) ||
                        SearchTextBox.FocusState != FocusState.Unfocused;
+        if (focused && wasPendingInitialFocus)
+        {
+            int end = SearchTextBox.Text?.Length ?? 0;
+            SearchTextBox.SelectionStart = end;
+            SearchTextBox.SelectionLength = 0;
+        }
+
         _pendingInitialSearchBoxFocus = !focused;
         return focused;
     }

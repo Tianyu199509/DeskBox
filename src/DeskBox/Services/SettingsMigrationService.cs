@@ -21,7 +21,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 18;
+    public const int CurrentSchemaVersion = 19;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -46,6 +46,7 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_15_To_16());
         _migrations.Add(new Migration_16_To_17());
         _migrations.Add(new Migration_17_To_18());
+        _migrations.Add(new Migration_18_To_19());
     }
 
     /// <summary>
@@ -106,9 +107,9 @@ public sealed class SettingsMigrationPipeline
             }
 
             bool isVersionAdvanceOnly = migration is Migration_9_To_10
-                or Migration_10_To_11
                 or Migration_14_To_15
-                or Migration_17_To_18;
+                or Migration_17_To_18
+                or Migration_18_To_19;
 
             if (anyApplied && !isVersionAdvanceOnly)
             {
@@ -390,15 +391,78 @@ internal sealed class Migration_9_To_10 : ISettingsMigration
 }
 
 /// <summary>
-/// Schema v11 adds the dual-layer text shadow switch (default off, so
-/// existing profiles load correctly without data movement).
+/// Schema v11 preserves explicit legacy v1.x Search disable state onto the standalone
+/// Search hotkey and retires v1.x WidgetKind.Search placeholders once on upgrade.
 /// </summary>
 internal sealed class Migration_10_To_11 : ISettingsMigration
 {
     public int FromVersion => 10;
 
-    public void Migrate(AppSettings settings)
+    public void Migrate(AppSettings settings) =>
+        _ = MigrateLegacyPre160SearchState(settings);
+
+    internal static bool MigrateLegacyPre160SearchState(AppSettings settings)
     {
+        bool changed = false;
+        bool hadEnabledLegacySearch = false;
+        bool disabledLegacySearch = false;
+        if (settings.WidgetLayout.FeatureWidgetEnabledStates is { Count: > 0 } featureStates)
+        {
+            List<string> legacySearchKeys = [];
+            foreach ((string key, bool enabled) in featureStates)
+            {
+                if (string.Equals(key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase))
+                {
+                    legacySearchKeys.Add(key);
+                    if (enabled)
+                    {
+                        hadEnabledLegacySearch = true;
+                    }
+                    else
+                    {
+                        disabledLegacySearch = true;
+                    }
+                }
+            }
+
+            if (hadEnabledLegacySearch)
+            {
+                foreach (string key in legacySearchKeys)
+                {
+                    if (!string.Equals(key, nameof(WidgetKind.Search), StringComparison.Ordinal))
+                    {
+                        changed |= featureStates.Remove(key);
+                    }
+                }
+
+                if (!featureStates.TryGetValue(nameof(WidgetKind.Search), out bool canonical) || !canonical)
+                {
+                    featureStates[nameof(WidgetKind.Search)] = true;
+                    changed = true;
+                }
+
+                return changed;
+            }
+
+            if (disabledLegacySearch && settings.Search.SearchHotkeyEnabled)
+            {
+                settings.Search.SearchHotkeyEnabled = false;
+                changed = true;
+            }
+
+            foreach (string key in legacySearchKeys)
+            {
+                changed |= featureStates.Remove(key);
+            }
+        }
+        else if (settings.WidgetLayout.Widgets.Any(static widget =>
+                     widget.WidgetKind == WidgetKind.Search && !widget.IsDisabled))
+        {
+            return false;
+        }
+
+        changed |= SettingsService.RetireWidgetKind(settings, WidgetKind.Search);
+        return changed;
     }
 }
 
@@ -902,6 +966,22 @@ internal sealed class Migration_16_To_17 : ISettingsMigration
 internal sealed class Migration_17_To_18 : ISettingsMigration
 {
     public int FromVersion => 17;
+
+    public void Migrate(AppSettings settings)
+    {
+    }
+}
+
+/// <summary>
+/// Schema v19 stamps 1.6.1 desktop Search widget preferences
+/// (SearchDesktopHandoffMode, SearchDesktopShowHistory,
+/// SearchDesktopShowRecentOpened, SearchDesktopPrivacyMask) so 1.6.0 builds
+/// enter forward-compatible read-only mode instead of stripping 1.6.1 fields
+/// or misinterpreting FeatureWidgetEnabledStates["Search"].
+/// </summary>
+internal sealed class Migration_18_To_19 : ISettingsMigration
+{
+    public int FromVersion => 18;
 
     public void Migrate(AppSettings settings)
     {

@@ -43,9 +43,7 @@ public static class FolderPickerService
         return PickFolderWithOutcomeCoreAsync(
             ownerHwnd,
             ownerLabel,
-            static referenceOwnerHwnd => NativeFileOpenDialog.RunOnDedicatedStaAsync(
-                referenceOwnerHwnd,
-                static staOwnerHwnd => NativeFileOpenDialog.ShowPickFolder(staOwnerHwnd)));
+            static referenceOwnerHwnd => NativeFileOpenDialog.PickFolderOutOfProcessAsync(referenceOwnerHwnd));
     }
 
     internal static async Task<FolderPickResult> PickFolderWithOutcomeCoreAsync(

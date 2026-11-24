@@ -181,7 +181,8 @@ public static class WindowsCompatibilityService
         string kind = ResolveSafeBackdropKind(
             preferMica,
             SupportsMica,
-            SupportsDesktopAcrylic);
+            SupportsDesktopAcrylic,
+            IsHighContrast);
         try
         {
             switch (kind)
@@ -318,8 +319,14 @@ public static class WindowsCompatibilityService
     internal static string ResolveSafeBackdropKind(
         bool preferMica,
         bool supportsMica,
-        bool supportsDesktopAcrylic)
+        bool supportsDesktopAcrylic,
+        bool isHighContrast = false)
     {
+        if (isHighContrast)
+        {
+            return "Solid";
+        }
+
         if (preferMica && supportsMica)
         {
             return "Mica";

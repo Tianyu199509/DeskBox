@@ -420,7 +420,8 @@ internal sealed partial class WidgetEditorPopoverWindow : Window
             Glyph = "\uE711",
             FontSize = 10
         };
-        if (NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", themeScope) is { } iconBrush)
+        ElementTheme effectiveTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(themeScope);
+        if (NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", effectiveTheme) is { } iconBrush)
         {
             icon.Foreground = iconBrush;
         }
@@ -495,7 +496,9 @@ internal sealed partial class WidgetEditorPopoverWindow : Window
 
         bool isDark = ResolveIsDarkTheme(anchor);
         _hostRoot.FlowDirection = anchor.FlowDirection;
-        _hostRoot.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
+        _hostRoot.RequestedTheme = WindowsCompatibilityService.IsHighContrast
+            ? ElementTheme.Default
+            : (isDark ? ElementTheme.Dark : ElementTheme.Light);
         Win32Helper.SetWindowTheme(WindowHandle, isDark);
         ApplyWindowAppearance(isDark);
 
@@ -1787,16 +1790,7 @@ internal sealed partial class WidgetEditorPopoverWindow : Window
         double cornerRadius = ResolveEffectivePopoverCornerRadius();
         _surfaceBorder.CornerRadius = new CornerRadius(cornerRadius);
 
-        bool highContrast = false;
-        try
-        {
-            highContrast = new AccessibilitySettings().HighContrast;
-        }
-        catch
-        {
-        }
-
-        if (highContrast)
+        if (WindowsCompatibilityService.IsHighContrast)
         {
             ReleaseAndDisposeBackdrops();
             var uiSettings = new UISettings();
@@ -1852,15 +1846,15 @@ internal sealed partial class WidgetEditorPopoverWindow : Window
             }
             catch
             {
+                _materialBackdrop?.Suspend();
                 backdropEl.Visibility = Visibility.Collapsed;
-                backdropEl.SystemBackdrop = null;
                 DisposeMaterialBackdrop();
             }
         }
         else if (backdropEl is not null)
         {
+            _materialBackdrop?.Suspend();
             backdropEl.Visibility = Visibility.Collapsed;
-            backdropEl.SystemBackdrop = null;
         }
 
         _surfaceBorder.BorderBrush =
@@ -1887,10 +1881,13 @@ internal sealed partial class WidgetEditorPopoverWindow : Window
 
     private void ReleaseAndDisposeBackdrops()
     {
+        _materialBackdrop?.Suspend();
         if (FindBackdropElement() is { } backdropEl)
         {
+            // Keep backdropEl.SystemBackdrop rooted until XAML disconnects the element
+            // on visual-tree teardown so OnTargetDisconnected closes the native link on
+            // the UI thread rather than stranding it on the GC finalizer thread.
             backdropEl.Visibility = Visibility.Collapsed;
-            backdropEl.SystemBackdrop = null;
         }
 
         DisposeMaterialBackdrop();

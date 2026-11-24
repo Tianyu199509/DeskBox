@@ -105,8 +105,8 @@ public abstract partial class WidgetWindowBase : Window
     protected bool IsRaisedFromManager;
     protected bool KeepRaisedUntilDeactivate;
     protected bool RestoreDesktopLayerWhenIdle;
-    protected bool IsHideAnimationRunning;
-    protected bool IsTrayShowAnimationInFlight;
+    protected internal bool IsHideAnimationRunning;
+    protected internal bool IsTrayShowAnimationInFlight;
     protected bool SuppressAppWindowCompactVisibilityNotification;
     protected DateTime LastElevateForInteractionUtc = DateTime.MinValue;
     protected DispatcherQueueTimer? TopMostSafetyTimer;
@@ -385,10 +385,14 @@ public abstract partial class WidgetWindowBase : Window
         CleanupWidgetForegroundAppearance();
         DisplayChangeWatcher?.Dispose();
         DisplayChangeWatcher = null;
-        ClearSolidColorBackdrop();
-        DisposeAcrylicController();
-        DisposeMicaController();
-        DisposeMaterialBackdropBridge();
+        try { ClearSolidColorBackdrop(); }
+        catch (Exception ex) { App.LogVerbose($"[Backdrop] Solid backdrop cleanup failed: {ex.Message}"); }
+        try { DisposeAcrylicController(); }
+        catch (Exception ex) { App.LogVerbose($"[Backdrop] Acrylic cleanup failed: {ex.Message}"); }
+        try { DisposeMicaController(); }
+        catch (Exception ex) { App.LogVerbose($"[Backdrop] Mica cleanup failed: {ex.Message}"); }
+        try { DisposeMaterialBackdropBridge(); }
+        catch (Exception ex) { App.LogVerbose($"[Backdrop] Material bridge cleanup failed: {ex.Message}"); }
         WidgetLayerService.ReleaseWindow(HWnd);
         TrackWindowClosedForDiagnostics();
     }

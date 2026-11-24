@@ -68,7 +68,7 @@ public sealed class WidgetLayoutLoadResult
 /// </summary>
 public sealed class WidgetLayoutStore
 {
-    internal const int CurrentSchemaVersion = 2;
+    internal const int CurrentSchemaVersion = 3;
 
     private readonly string _layoutPath;
     private int _loadedSchemaVersion = CurrentSchemaVersion;
@@ -168,7 +168,9 @@ public sealed class WidgetLayoutStore
     /// may strip the settings keys, so the layout survives every crash window
     /// of the migration itself.
     /// </summary>
-    public async Task<WidgetLayoutLoadResult> LoadAsync(WidgetLayoutSettingsSlice legacySeed)
+    public async Task<WidgetLayoutLoadResult> LoadAsync(
+        WidgetLayoutSettingsSlice legacySeed,
+        bool allowRollbackQuarantineRecovery = false)
     {
         ArgumentNullException.ThrowIfNull(legacySeed);
 
@@ -186,6 +188,36 @@ public sealed class WidgetLayoutStore
         if (result.Source is ResilientJsonLoadSource.Primary or ResilientJsonLoadSource.Backup)
         {
             WidgetLayoutSettingsSlice layout = result.Value.Layout ?? new WidgetLayoutSettingsSlice();
+            // If v1.5.9 ran a second time after quarantining a 1.6.x layout,
+            // Launch 2 wrote an empty schemaVersion=1 widget-layout.json.
+            // Recover the single newest post-1.6.0 quarantine once and consume it.
+            if (allowRollbackQuarantineRecovery &&
+                result.Value.SchemaVersion == 1 &&
+                !HasRecoverableLayoutState(layout) &&
+                !HasRecoverableLayoutState(legacySeed) &&
+                TryRecoverValidQuarantinedLayout(
+                    _layoutPath,
+                    out WidgetLayoutDocument? rollbackRecoveredDoc,
+                    out string? rollbackQuarantinePath) &&
+                rollbackRecoveredDoc is not null)
+            {
+                WidgetLayoutSettingsSlice recoveredLayout = rollbackRecoveredDoc.Layout ?? new WidgetLayoutSettingsSlice();
+                _loadedSchemaVersion = rollbackRecoveredDoc.SchemaVersion;
+                bool normalized = NormalizeStructure(recoveredLayout);
+                IsAuthoritative = await TrySaveSeedAsync(recoveredLayout);
+                if (IsAuthoritative)
+                {
+                    TryDeleteConsumedQuarantineFile(rollbackQuarantinePath);
+                }
+
+                return new WidgetLayoutLoadResult
+                {
+                    Data = recoveredLayout,
+                    Authoritative = IsAuthoritative,
+                    NeedsPersist = normalized || rollbackRecoveredDoc.SchemaVersion < CurrentSchemaVersion
+                };
+            }
+
             _loadedSchemaVersion = result.Value.SchemaVersion;
             IsAuthoritative = true;
             return new WidgetLayoutLoadResult
@@ -214,6 +246,34 @@ public sealed class WidgetLayoutStore
             };
         }
 
+        // DefaultMissing: before adopting an empty seed on a verified 1.6.0+
+        // profile, recover the single newest post-1.6.0 quarantine once (#1258)
+        // and consume it so deleted widgets can never resurrect weeks later.
+        if (allowRollbackQuarantineRecovery &&
+            !HasRecoverableLayoutState(legacySeed) &&
+            TryRecoverValidQuarantinedLayout(
+                _layoutPath,
+                out WidgetLayoutDocument? recoveredDoc,
+                out string? consumedQuarantinePath) &&
+            recoveredDoc is not null)
+        {
+            WidgetLayoutSettingsSlice recoveredLayout = recoveredDoc.Layout ?? new WidgetLayoutSettingsSlice();
+            _loadedSchemaVersion = recoveredDoc.SchemaVersion;
+            bool normalized = NormalizeStructure(recoveredLayout);
+            IsAuthoritative = await TrySaveSeedAsync(recoveredLayout);
+            if (IsAuthoritative)
+            {
+                TryDeleteConsumedQuarantineFile(consumedQuarantinePath);
+            }
+
+            return new WidgetLayoutLoadResult
+            {
+                Data = recoveredLayout,
+                Authoritative = IsAuthoritative,
+                NeedsPersist = normalized || recoveredDoc.SchemaVersion < CurrentSchemaVersion
+            };
+        }
+
         // DefaultMissing: no layout file — adopt the (already migrated and
         // normalized) legacy slice as the initial document.
         IsAuthoritative = await TrySaveSeedAsync(legacySeed);
@@ -222,6 +282,71 @@ public sealed class WidgetLayoutStore
             Data = legacySeed,
             Authoritative = IsAuthoritative
         };
+    }
+
+    private static bool HasRecoverableLayoutState(WidgetLayoutSettingsSlice? layout) =>
+        layout is not null &&
+        ((layout.Widgets?.Count ?? 0) > 0 || (layout.WidgetGroups?.Count ?? 0) > 0);
+
+    private static void TryDeleteConsumedQuarantineFile(string? quarantinePath)
+    {
+        if (string.IsNullOrEmpty(quarantinePath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(quarantinePath);
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool TryRecoverValidQuarantinedLayout(
+        string layoutPath,
+        out WidgetLayoutDocument? recovered,
+        out string? matchedPath)
+    {
+        recovered = null;
+        matchedPath = null;
+        try
+        {
+            string? directory = Path.GetDirectoryName(layoutPath);
+            string fileName = Path.GetFileName(layoutPath);
+            if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            string[] candidates = Directory.GetFiles(directory, $"{fileName}.corrupt-*");
+            if (candidates.Length == 0)
+            {
+                return false;
+            }
+
+            Array.Sort(candidates, static (a, b) => string.CompareOrdinal(b, a));
+            // Inspect ONLY the single newest quarantine candidate: never reach
+            // past a newer genuinely torn file into older historical quarantines.
+            string newestCandidate = candidates[0];
+            string raw = File.ReadAllText(newestCandidate);
+            WidgetLayoutDocument parsed = ParseLayoutDocument(raw);
+            if (parsed.SchemaVersion >= 2 &&
+                parsed.SchemaVersion <= CurrentSchemaVersion &&
+                HasRecoverableLayoutState(parsed.Layout))
+            {
+                App.Log($"[WidgetLayout] Recovered valid quarantined layout from '{Path.GetFileName(newestCandidate)}'");
+                recovered = parsed;
+                matchedPath = newestCandidate;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     /// <summary>

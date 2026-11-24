@@ -57,7 +57,7 @@ public partial class App
                 ? history.GetFrecencyBoost
                 : null,
             clipboardPreviewImageResolver: clip =>
-                FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard)
+                ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings)
                     ? EnsureClipboardHistoryService().ResolveThumbnailPath(clip)
                     : null);
     }
@@ -66,7 +66,7 @@ public partial class App
         CancellationToken cancellationToken)
     {
         if (IsShuttingDown ||
-            !FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+            !ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
         {
             return [];
         }
@@ -129,7 +129,7 @@ public partial class App
         {
             string clipId = actionId[clipboardCopyPrefix.Length..].Trim();
             if (!string.IsNullOrWhiteSpace(clipId) &&
-                FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.Clipboard))
+                ClipboardRuntimePolicy.IsMonitoringActive(SettingsService.Settings))
             {
                 ClipboardHistoryService clipService = EnsureClipboardHistoryService();
                 IReadOnlyList<ClipboardHistoryItem> items = await clipService.GetItemsAsync();
@@ -210,6 +210,18 @@ public partial class App
             return;
         }
 
+        if (SettingsService.Settings.Search.SearchSaveHistory)
+        {
+            EnsureSearchHistoryService()?.RecordResult(new Models.SearchResultItem
+            {
+                Kind = Models.SearchResultKind.Todo,
+                Title = result.NormalizedText,
+                Subtitle = LocalizationService.T("Search.Tab.Todo"),
+                TodoWidgetId = result.WidgetId,
+                TodoItemId = result.ItemId
+            });
+        }
+
         if (openAfterSave)
         {
             if (WidgetManager is not null && !string.IsNullOrWhiteSpace(result.WidgetId))
@@ -253,6 +265,20 @@ public partial class App
         }
 
         string createdItemId = writeResult.Item.Id;
+        if (SettingsService.Settings.Search.SearchSaveHistory)
+        {
+            string noteTitle = body.Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()?.Trim() ?? body.Trim();
+            EnsureSearchHistoryService()?.RecordResult(new Models.SearchResultItem
+            {
+                Kind = Models.SearchResultKind.QuickCapture,
+                Title = noteTitle,
+                Subtitle = LocalizationService.T("Search.Tab.Note"),
+                QuickCaptureItemId = createdItemId
+            });
+        }
+
         if (openAfterSave)
         {
             if (WidgetManager is not null)

@@ -202,7 +202,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
-        Assert.Equal(18, service.Settings.SchemaVersion);
+        Assert.Equal(19, service.Settings.SchemaVersion);
 
         // Widgets survive the chain (and the layout-store adoption): both
         // instances keep their identity, kind, and legacy geometry — the 5→6
@@ -263,7 +263,7 @@ public sealed class SettingsServiceTests : IDisposable
         // The migrated profile is persisted back at the current schema.
         using JsonDocument persisted = JsonDocument.Parse(
             await File.ReadAllTextAsync(settingsPath));
-        Assert.Equal(18, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(19, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
         Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
 
@@ -272,7 +272,7 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
-        Assert.Equal(18, reloaded.Settings.SchemaVersion);
+        Assert.Equal(19, reloaded.Settings.SchemaVersion);
         Assert.True(reloaded.Settings.FileStacksEnabled);
         Assert.False(reloaded.Settings.FileStackAutoStacking);
         Assert.Equal(2, reloaded.Settings.Widgets.Count);
@@ -2022,18 +2022,18 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_RetiresLegacySearchWidgetWithoutConvertingToFileWidget()
+    public async Task LoadAsync_PreservesDesktopSearchWidgetWhileRetiringLegacyProductivityWidget()
     {
         await File.WriteAllTextAsync(
             Path.Combine(_settingsRoot, "settings.json"),
             """
             {
-              "schemaVersion": 10,
+              "schemaVersion": 18,
               "featureWidgetEnabledStates": {
                 "Search": true,
                 "Todo": true
               },
-              "widgetCapsuleBarOrder": ["file-1", "search-1", "todo-1"],
+              "widgetCapsuleBarOrder": ["file-1", "search-1", "prod-1", "todo-1"],
               "widgets": [
                 {
                   "id": "file-1",
@@ -2044,6 +2044,11 @@ public sealed class SettingsServiceTests : IDisposable
                   "id": "search-1",
                   "name": "Search",
                   "widgetKind": "Search"
+                },
+                {
+                  "id": "prod-1",
+                  "name": "Productivity",
+                  "widgetKind": "Productivity"
                 },
                 {
                   "id": "todo-1",
@@ -2057,21 +2062,22 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(["file-1", "todo-1"], service.Settings.Widgets.Select(w => w.Id));
-        Assert.DoesNotContain(service.Settings.Widgets, w => w.WidgetKind == WidgetKind.Search);
-        Assert.Equal(["file-1", "todo-1"], service.Settings.WidgetCapsuleBarOrder);
-        Assert.DoesNotContain("Search", service.Settings.FeatureWidgetEnabledStates.Keys);
+        Assert.Equal(["file-1", "search-1", "todo-1"], service.Settings.Widgets.Select(w => w.Id));
+        Assert.Contains(service.Settings.Widgets, w => w.WidgetKind == WidgetKind.Search);
+        Assert.DoesNotContain(service.Settings.Widgets, w => w.WidgetKind == WidgetKind.Productivity);
+        Assert.Equal(["file-1", "search-1", "todo-1"], service.Settings.WidgetCapsuleBarOrder);
+        Assert.True(service.Settings.FeatureWidgetEnabledStates["Search"]);
     }
 
     [Fact]
-    public async Task LoadAsync_DissolvesTwoMemberGroupWithSearchAndTransfersSurfaceStateToSurvivor()
+    public async Task LoadAsync_DissolvesTwoMemberGroupWithProductivityAndTransfersSurfaceStateToSurvivor()
     {
         await File.WriteAllTextAsync(
             Path.Combine(_settingsRoot, "settings.json"),
             """
             {
               "schemaVersion": 10,
-              "widgetCapsuleBarOrder": ["search-1"],
+              "widgetCapsuleBarOrder": ["prod-1"],
               "widgets": [
                 {
                   "id": "file-1",
@@ -2084,9 +2090,9 @@ public sealed class SettingsServiceTests : IDisposable
                   "isVisible": false
                 },
                 {
-                  "id": "search-1",
-                  "name": "Search",
-                  "widgetKind": "Search",
+                  "id": "prod-1",
+                  "name": "Productivity",
+                  "widgetKind": "Productivity",
                   "isVisible": true
                 }
               ],
@@ -2094,8 +2100,8 @@ public sealed class SettingsServiceTests : IDisposable
                 {
                   "id": "grp-1",
                   "surfaceId": "surf-grp-1",
-                  "memberIds": ["file-1", "search-1"],
-                  "activeMemberId": "search-1",
+                  "memberIds": ["file-1", "prod-1"],
+                  "activeMemberId": "prod-1",
                   "x": 420,
                   "y": 180,
                   "width": 520,
@@ -2156,7 +2162,28 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesDormantSearchHotkeyWhenLegacySearchWidgetWasExplicitlyDisabled()
+    public async Task LoadAsync_DisablingDesktopSearchWidgetDoesNotDisableGlobalHotkey()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 18,
+              "searchHotkeyEnabled": true,
+              "featureWidgetEnabledStates": {
+                "Search": false
+              }
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+        Assert.True(service.Settings.Search.SearchHotkeyEnabled);
+        Assert.False(service.Settings.FeatureWidgetEnabledStates["Search"]);
+    }
+
+    [Fact]
+    public async Task LoadAsync_MigratesLegacyV10SearchWidgetAndDisabledHotkeyState()
     {
         await File.WriteAllTextAsync(
             Path.Combine(_settingsRoot, "settings.json"),
@@ -2165,42 +2192,39 @@ public sealed class SettingsServiceTests : IDisposable
               "schemaVersion": 10,
               "searchHotkeyEnabled": true,
               "featureWidgetEnabledStates": {
-                "Search": false
-              }
+                "Search": false,
+                "Todo": true
+              },
+              "widgetCapsuleBarOrder": ["file-1", "search-1", "todo-1"],
+              "widgets": [
+                {
+                  "id": "file-1",
+                  "name": "Files",
+                  "widgetKind": "File"
+                },
+                {
+                  "id": "search-1",
+                  "name": "Search",
+                  "widgetKind": "Search"
+                },
+                {
+                  "id": "todo-1",
+                  "name": "Todo",
+                  "widgetKind": "Todo"
+                }
+              ]
             }
             """);
 
-        var disabledLegacy = new SettingsService(_settingsRoot);
-        await disabledLegacy.LoadAsync();
-        Assert.False(disabledLegacy.Settings.SearchHotkeyEnabled);
-        Assert.DoesNotContain("Search", disabledLegacy.Settings.FeatureWidgetEnabledStates.Keys);
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
 
-        // Once the legacy "Search" widget entry is stripped, turning SearchHotkeyEnabled
-        // back on persists across reloads without requiring any widget.
-        disabledLegacy.Settings.SearchHotkeyEnabled = true;
-        await disabledLegacy.SaveAsync();
-
-        var reloaded = new SettingsService(_settingsRoot);
-        await reloaded.LoadAsync();
-        Assert.True(reloaded.Settings.SearchHotkeyEnabled);
-
-        // Existing users who had both Search widget and SearchHotkeyEnabled active keep it enabled.
-        string enabledRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "enabled-legacy")).FullName;
-        await File.WriteAllTextAsync(
-            Path.Combine(enabledRoot, "settings.json"),
-            """
-            {
-              "schemaVersion": 10,
-              "searchHotkeyEnabled": true,
-              "featureWidgetEnabledStates": {
-                "Search": true
-              }
-            }
-            """);
-
-        var enabledLegacy = new SettingsService(enabledRoot);
-        await enabledLegacy.LoadAsync();
-        Assert.True(enabledLegacy.Settings.SearchHotkeyEnabled);
+        Assert.False(service.Settings.Search.SearchHotkeyEnabled);
+        Assert.False(service.Settings.FeatureWidgetEnabledStates["Search"]);
+        Assert.False(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.Search));
+        Assert.DoesNotContain(service.Settings.Widgets, w => w.WidgetKind == WidgetKind.Search);
+        Assert.Equal(["file-1", "todo-1"], service.Settings.Widgets.Select(w => w.Id));
+        Assert.Equal(["file-1", "todo-1"], service.Settings.WidgetCapsuleBarOrder);
     }
 
     [Fact]

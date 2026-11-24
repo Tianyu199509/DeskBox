@@ -229,6 +229,14 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
+    public async Task<bool> HasManagedStorageDesktopShortcutAsync()
+    {
+        (bool ok, string? payload, _) = await _client
+            .RequestAsync(SettingsIpcMethods.AppHasShortcut)
+            .ConfigureAwait(false);
+        return ok && SettingsIpcPayload.DecodeBoolean(payload);
+    }
+
     public async Task<bool> CreateManagedStorageDesktopShortcutAsync()
     {
         (bool ok, _, _) = await _client.RequestAsync(SettingsIpcMethods.AppCreateShortcut);
@@ -246,15 +254,39 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public async Task<string> ExportDiagnosticBundleAsync(string destinationDirectory)
     {
-        (bool ok, string? payload, string? error) = await _client.RequestAsync(
-            SettingsIpcMethods.AppExportDiagnostics,
-            destinationDirectory);
-        if (!ok || string.IsNullOrEmpty(payload))
+        try
         {
-            throw new InvalidOperationException(error ?? "diagnostic export failed");
-        }
+            Task<(bool Ok, string? Payload, string? Error)> ipcTask = _client.RequestAsync(
+                SettingsIpcMethods.AppExportDiagnostics,
+                destinationDirectory);
+            Task completed = await Task.WhenAny(ipcTask, Task.Delay(TimeSpan.FromSeconds(15)))
+                .ConfigureAwait(false);
+            if (ReferenceEquals(completed, ipcTask))
+            {
+                (bool ok, string? payload, string? error) = await ipcTask.ConfigureAwait(false);
+                if (ok && !string.IsNullOrEmpty(payload))
+                {
+                    return payload;
+                }
 
-        return payload;
+                App.Log($"[DiagnosticsBundle] Main IPC export failed ({error ?? "empty payload"}); exporting emergency host bundle.");
+                return await new DeskBoxDiagnosticsBundleService()
+                    .ExportEmergencyFromHostAsync(destinationDirectory, $"MainIpcFailed:{error ?? "empty"}")
+                    .ConfigureAwait(false);
+            }
+
+            App.Log("[DiagnosticsBundle] Main IPC export timed out after 15s; exporting emergency host bundle.");
+            return await new DeskBoxDiagnosticsBundleService()
+                .ExportEmergencyFromHostAsync(destinationDirectory, "MainIpcTimeout15s")
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DiagnosticsBundle] Main IPC export threw ({ex.Message}); exporting emergency host bundle.");
+            return await new DeskBoxDiagnosticsBundleService()
+                .ExportEmergencyFromHostAsync(destinationDirectory, $"MainIpcException:{ex.GetType().Name}")
+                .ConfigureAwait(false);
+        }
     }
 
     public async Task<bool> UploadDiagnosticsForFeedbackAsync(long feedbackId, string tempDirectory)

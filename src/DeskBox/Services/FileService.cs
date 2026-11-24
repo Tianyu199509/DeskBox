@@ -1755,27 +1755,27 @@ public sealed partial class FileService
             {
                 // Partial completion (Explorer semantics): completed items stay;
                 // the completed results ride the exception for callers.
-                throw new FileTransferCanceledException(
-                    completedResults.ToList(),
-                    CancellationToken.None);
+                var canceledSnapshot = completedResults.ToList();
+                NotifyCompletedMoveShellViews(operations, canceledSnapshot, move);
+                throw new FileTransferCanceledException(canceledSnapshot, CancellationToken.None);
             }
             catch (Exception exception)
             {
                 // Partial completion: completed items stay; the failure
                 // propagates with the completed results attached (including any
                 // item-level receipts the inner exception already carries).
-                App.Log(
-                    $"[FileTransfer] Managed transfer failed after " +
-                    $"{completedOperations.Count} of {operations.Count} item(s): {exception}");
+                App.Log($"[FileTransfer] Managed transfer failed after {completedOperations.Count} of {operations.Count} item(s): {exception}");
                 var completedSnapshot = completedResults.ToList();
                 if (exception is IFileTransferWithCompletedResults itemLevelResults)
                 {
                     completedSnapshot.AddRange(itemLevelResults.CompletedResults);
                 }
 
+                NotifyCompletedMoveShellViews(operations, completedSnapshot, move);
                 throw new FileTransferPartialFailureException(completedSnapshot, exception);
             }
 
+            NotifyCompletedMoveShellViews(operations, completedResults, move);
             return completedResults;
         }
         finally

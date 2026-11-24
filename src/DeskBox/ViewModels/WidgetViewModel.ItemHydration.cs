@@ -1020,6 +1020,11 @@ public partial class WidgetViewModel
                 // stored-metadata read is cache-hot at this point, so only
                 // PIDL-only links pay the vtable pass, once per item.
                 NamespaceShortcutHelper.ResolveKind(item);
+                if (item.NamespaceShortcutKind == NamespaceShortcutKind.RecycleBin)
+                {
+                    RecycleBinEmptyStateCache.Shared.EnsureWarm(
+                        _dispatcherQueue ?? Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread());
+                }
             }
         }
 

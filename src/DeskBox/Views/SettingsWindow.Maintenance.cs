@@ -28,8 +28,21 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-        if (string.IsNullOrWhiteSpace(folderPath))
+        FolderPickResult pick = await FolderPickerService.PickFolderWithOutcomeAsync(
+            _hWnd,
+            "Settings.ExportDiagnostics");
+        string? folderPath = pick.Folder;
+        if (pick.Outcome == FolderPickOutcome.Failed)
+        {
+            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (!string.IsNullOrWhiteSpace(desktopPath) && Directory.Exists(desktopPath))
+            {
+                App.Log($"[DiagnosticsBundle] Folder picker failed (hr=0x{pick.HResult:X8}); falling back to Desktop.");
+                folderPath = desktopPath;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || SettingsRoot.XamlRoot is null)
         {
             return;
         }
@@ -46,21 +59,30 @@ public sealed partial class SettingsWindow
         try
         {
             string archivePath = await _appActions.ExportDiagnosticBundleAsync(folderPath);
-            await ShowInfoDialogAsync(
-                _localizationService.T("Settings.Diagnostics.SuccessTitle"),
-                _localizationService.Format("Settings.Diagnostics.SuccessBody", archivePath));
             ShellLaunchService.FireAndForgetRevealInExplorer(archivePath);
+            if (!_isClosed && SettingsRoot.XamlRoot is not null)
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.Diagnostics.SuccessTitle"),
+                    _localizationService.Format("Settings.Diagnostics.SuccessBody", archivePath));
+            }
         }
         catch (Exception ex)
         {
             App.Log($"[DiagnosticsBundle] Export failed: {ex}");
-            await ShowInfoDialogAsync(
-                _localizationService.T("Settings.Diagnostics.FailedTitle"),
-                _localizationService.Format("Settings.Diagnostics.FailedBody", ex.Message));
+            if (!_isClosed && SettingsRoot.XamlRoot is not null)
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.Diagnostics.FailedTitle"),
+                    _localizationService.Format("Settings.Diagnostics.FailedBody", ex.Message));
+            }
         }
         finally
         {
-            ExportDiagnosticsButton.IsEnabled = true;
+            if (!_isClosed)
+            {
+                ExportDiagnosticsButton.IsEnabled = true;
+            }
         }
     }
 
@@ -292,13 +314,16 @@ public sealed partial class SettingsWindow
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Restore picker failed: {ex}");
-            await ShowInfoDialogAsync(
-                _localizationService.T("Settings.DataBackup.RestoreFailedTitle"),
-                _localizationService.Format("Settings.DataBackup.RestoreFailedBody", FormatBackupError(ex)));
+            if (!_isClosed && SettingsRoot.XamlRoot is not null)
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.DataBackup.RestoreFailedTitle"),
+                    _localizationService.Format("Settings.DataBackup.RestoreFailedBody", FormatBackupError(ex)));
+            }
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(backupPath))
+        if (string.IsNullOrWhiteSpace(backupPath) || _isClosed || SettingsRoot.XamlRoot is null)
         {
             return;
         }
@@ -454,7 +479,7 @@ public sealed partial class SettingsWindow
         }
 
         string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-        if (string.IsNullOrWhiteSpace(folderPath))
+        if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || SettingsRoot.XamlRoot is null)
         {
             return;
         }

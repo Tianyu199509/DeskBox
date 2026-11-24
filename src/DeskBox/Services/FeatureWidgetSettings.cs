@@ -152,6 +152,7 @@ public static class FeatureWidgetSettings
             WidgetKind.Custom => HasLiveWidget(settings, WidgetKind.Custom),
             WidgetKind.Clipboard => HasLiveWidget(settings, WidgetKind.Clipboard) ||
                 (IsEnabled(settings, WidgetKind.QuickCapture) && settings.QuickCapture.QuickCaptureClipboardEnabled),
+            WidgetKind.Search => HasLiveWidget(settings, WidgetKind.Search),
             _ => false
         };
     }

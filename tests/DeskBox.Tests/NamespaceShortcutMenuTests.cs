@@ -142,4 +142,260 @@ public sealed class NamespaceShortcutMenuTests
             source,
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void OrderFixedDriveRootsForProbe_PrioritizesSystemDriveAndExcludesNonFixedOrSubstDrives()
+    {
+        IReadOnlyList<string> ordered = ShellRecycleBinInterop.OrderFixedDriveRootsForProbe(
+        [
+            ("D:\\", DriveType.Fixed, false),
+            ("Z:\\", DriveType.Network, false),
+            ("E:\\", DriveType.Removable, false),
+            ("S:\\", DriveType.Fixed, true),
+            ("c:\\", DriveType.Fixed, false),
+            ("F:\\", DriveType.CDRom, false),
+            ("d:\\", DriveType.Fixed, false),
+        ],
+        systemRoot: "C:\\");
+
+        Assert.Equal(["C:\\", "D:\\"], ordered);
+    }
+
+    [Fact]
+    public void TryEvaluateTwoStageHasAnyItems_ShortCircuitsOnFirstNonEmptyFixedDriveWithoutTouchingLaterOrAggregateRoots()
+    {
+        var visitedRoots = new List<string?>();
+        bool ok = ShellRecycleBinInterop.TryEvaluateTwoStageHasAnyItems(
+            ["C:\\", "D:\\"],
+            (string? root, out long count) =>
+            {
+                visitedRoots.Add(root);
+                if (string.Equals(root, "C:\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    count = 3;
+                    return true;
+                }
+
+                throw new InvalidOperationException("Secondary or aggregate root must not be queried once C:\\ is non-empty.");
+            },
+            out bool hasItems);
+
+        Assert.True(ok);
+        Assert.True(hasItems);
+        Assert.Equal(["C:\\"], visitedRoots);
+    }
+
+    [Fact]
+    public void TryEvaluateTwoStageHasAnyItems_FallsBackToAggregateNullRootOnlyWhenAllFixedDrivesAreEmpty()
+    {
+        var visitedRoots = new List<string?>();
+        bool ok = ShellRecycleBinInterop.TryEvaluateTwoStageHasAnyItems(
+            ["C:\\", "D:\\"],
+            (string? root, out long count) =>
+            {
+                visitedRoots.Add(root);
+                count = root is null ? 2 : 0;
+                return true;
+            },
+            out bool hasItems);
+
+        Assert.True(ok);
+        Assert.True(hasItems);
+        Assert.Equal(new string?[] { "C:\\", "D:\\", null }, visitedRoots);
+    }
+
+    [Fact]
+    public void TryEvaluateTwoStageHasAnyItems_ReturnsFalseWhenAggregateFallbackFailsSoMenuStaysEnabled()
+    {
+        bool ok = ShellRecycleBinInterop.TryEvaluateTwoStageHasAnyItems(
+            ["C:\\"],
+            (string? root, out long count) =>
+            {
+                count = 0;
+                return root is not null;
+            },
+            out bool hasItems);
+
+        Assert.False(ok);
+        Assert.False(hasItems);
+    }
+
+    [Theory]
+    [InlineData(0, nameof(RecycleBinEmptyOperationOutcome.Emptied))]
+    [InlineData(1, nameof(RecycleBinEmptyOperationOutcome.Emptied))]
+    [InlineData(unchecked((int)0x800704C7), nameof(RecycleBinEmptyOperationOutcome.Cancelled))]
+    [InlineData(unchecked((int)0x80004004), nameof(RecycleBinEmptyOperationOutcome.Cancelled))]
+    [InlineData(unchecked((int)0x8000FFFF), nameof(RecycleBinEmptyOperationOutcome.AlreadyEmpty))]
+    [InlineData(unchecked((int)0x80070005), nameof(RecycleBinEmptyOperationOutcome.Failed))]
+    [InlineData(unchecked((int)0x80004005), nameof(RecycleBinEmptyOperationOutcome.Failed))]
+    public void ClassifyEmptyAllBinsHResult_DistinguishesSuccessCancelAlreadyEmptyAndFailure(
+        int hr,
+        string expectedOutcome)
+    {
+        Assert.Equal(
+            expectedOutcome,
+            ShellRecycleBinInterop.ClassifyEmptyAllBinsHResult(hr).ToString());
+    }
+
+    [Fact]
+    public async Task RecycleBinEmptyStateCache_ColdReadNeverBlocksAndCoalescesSingleFlightProbe()
+    {
+        using var allowProbeToFinish = new ManualResetEventSlim(false);
+        using var probeEntered = new ManualResetEventSlim(false);
+        int probeCount = 0;
+
+        using var cache = new RecycleBinEmptyStateCache(
+            (out bool hasItems) =>
+            {
+                Interlocked.Increment(ref probeCount);
+                probeEntered.Set();
+                allowProbeToFinish.Wait(TimeSpan.FromSeconds(5));
+                hasItems = false;
+                return true;
+            });
+
+        // Cold read returns immediately on the caller thread while the slow
+        // Shell probe is blocked on the worker thread.
+        Assert.False(cache.TryGetKnownEmptyState(out bool coldEmpty));
+        Assert.False(coldEmpty);
+        Assert.True(probeEntered.Wait(TimeSpan.FromSeconds(3)));
+
+        // Additional reads and EnsureWarm calls join the single in-flight probe.
+        cache.EnsureWarm(uiDispatcher: null);
+        Assert.False(cache.TryGetKnownEmptyState(out _));
+        Assert.Equal(1, Volatile.Read(ref probeCount));
+
+        allowProbeToFinish.Set();
+        bool? refreshed = await cache.StartOrJoinRefreshAsync(forceFollowUp: false);
+        Assert.Equal(true, refreshed);
+        Assert.True(cache.TryGetKnownEmptyState(out bool warmEmpty));
+        Assert.True(warmEmpty);
+        Assert.Equal(1, Volatile.Read(ref probeCount));
+    }
+
+    [Fact]
+    public async Task RecycleBinEmptyStateCache_MarkKnownStatePreventsStaleInFlightOverwriteAndRunsFollowUp()
+    {
+        using var firstProbeEntered = new ManualResetEventSlim(false);
+        using var releaseFirstProbe = new ManualResetEventSlim(false);
+        int callIndex = 0;
+
+        using var cache = new RecycleBinEmptyStateCache(
+            (out bool hasItems) =>
+            {
+                int current = Interlocked.Increment(ref callIndex);
+                if (current == 1)
+                {
+                    firstProbeEntered.Set();
+                    releaseFirstProbe.Wait(TimeSpan.FromSeconds(5));
+                    // Stale probe observed an empty bin before the drop happened.
+                    hasItems = false;
+                    return true;
+                }
+
+                // Follow-up probe observes the newly recycled item.
+                hasItems = true;
+                return true;
+            });
+
+        Task<bool?> inFlight = cache.StartOrJoinRefreshAsync(forceFollowUp: false);
+        Assert.True(firstProbeEntered.Wait(TimeSpan.FromSeconds(3)));
+
+        // User recycles an item while the stale empty-bin probe is still running.
+        cache.MarkKnownState(isEmpty: false);
+        Assert.True(cache.TryGetKnownEmptyState(out bool immediateEmpty));
+        Assert.False(immediateEmpty);
+
+        releaseFirstProbe.Set();
+        bool? finalEmpty = await inFlight.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(false, finalEmpty);
+        Assert.Equal(2, Volatile.Read(ref callIndex));
+        Assert.True(cache.TryGetKnownEmptyState(out bool postEmpty));
+        Assert.False(postEmpty);
+    }
+
+    [Fact]
+    public async Task RecycleBinEmptyStateCache_NotifyShellChangedImmediatelyClearsEmptyStateAndRefreshes()
+    {
+        long nowMs = 1_000;
+        bool binHasItems = false;
+        var secondPassDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+
+        using var cache = new RecycleBinEmptyStateCache(
+            (out bool hasItems) =>
+            {
+                int n = Interlocked.Increment(ref calls);
+                hasItems = Volatile.Read(ref binHasItems);
+                if (n >= 2)
+                {
+                    secondPassDone.TrySetResult(true);
+                }
+                return true;
+            },
+            clockTick64: () => Interlocked.Read(ref nowMs),
+            unwatchedTtlMs: 10_000,
+            changeDebounceMs: 25);
+
+        _ = await cache.StartOrJoinRefreshAsync(forceFollowUp: false);
+        Assert.True(cache.TryGetKnownEmptyState(out bool initiallyEmpty));
+        Assert.True(initiallyEmpty);
+
+        // External Explorer deletion arrives via SHChangeNotify: must immediately
+        // drop the cached empty=true state before the debounce timer even fires.
+        Volatile.Write(ref binHasItems, true);
+        cache.NotifyShellChanged();
+        Assert.False(cache.TryGetKnownEmptyState(out _));
+
+        await secondPassDone.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        SpinWait.SpinUntil(() => cache.TryGetKnownEmptyState(out _), TimeSpan.FromSeconds(2));
+        Assert.True(cache.TryGetKnownEmptyState(out bool afterRefreshEmpty));
+        Assert.False(afterRefreshEmpty);
+    }
+
+    [Fact]
+    public async Task RecycleBinEmptyStateCache_UnwatchedCachedEmptyExpiresAfterTtl()
+    {
+        long nowMs = 5_000;
+        using var cache = new RecycleBinEmptyStateCache(
+            (out bool hasItems) =>
+            {
+                hasItems = false;
+                return true;
+            },
+            clockTick64: () => Interlocked.Read(ref nowMs),
+            unwatchedTtlMs: 2_000);
+
+        _ = await cache.StartOrJoinRefreshAsync(forceFollowUp: false);
+        Assert.True(cache.TryGetKnownEmptyState(out bool freshEmpty));
+        Assert.True(freshEmpty);
+
+        Interlocked.Add(ref nowMs, 2_500);
+        Assert.False(cache.TryGetKnownEmptyState(out _));
+    }
+
+    [Fact]
+    public async Task RecycleBinEmptyStateCache_BoundedFreshQueryReturnsFalseOnHungDriveTimeout()
+    {
+        using var unblockHungDrive = new ManualResetEventSlim(false);
+        using var cache = new RecycleBinEmptyStateCache(
+            (out bool hasItems) =>
+            {
+                unblockHungDrive.Wait(TimeSpan.FromSeconds(5));
+                hasItems = false;
+                return true;
+            });
+
+        try
+        {
+            bool knownEmpty = await cache.QueryFreshIsKnownEmptyBoundedAsync(
+                TimeSpan.FromMilliseconds(60));
+            Assert.False(knownEmpty);
+        }
+        finally
+        {
+            unblockHungDrive.Set();
+        }
+    }
 }

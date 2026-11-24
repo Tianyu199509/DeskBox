@@ -42,6 +42,74 @@ public sealed partial class WidgetManager
     private readonly Dictionary<WidgetKind, WidgetWindowProvider> _windowProviders;
     private bool _isApplyingAppearancePreview;
 
+    private Dictionary<WidgetKind, FeatureWidgetHandler> CreateFeatureWidgetHandlers()
+    {
+        FeatureWidgetHandler[] handlers =
+        [
+            new(
+                WidgetKind.QuickCapture,
+                async reveal => await CreateOrShowQuickCaptureWidgetAsync(reveal),
+                SetQuickCaptureEnabledAsync,
+                CloseLoadedQuickCaptureWidgets),
+            new(
+                WidgetKind.Todo,
+                async _ => await CreateTodoWidgetAsync(),
+                SetTodoEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Todo)),
+            new(
+                WidgetKind.Music,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Music),
+                SetContentFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Music)),
+            new(
+                WidgetKind.Weather,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Weather),
+                SetWeatherFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather)),
+            new(
+                WidgetKind.Clipboard,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Clipboard),
+                SetClipboardFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Clipboard)),
+            new(
+                WidgetKind.Search,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Search),
+                SetSearchFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Search)),
+            new(
+                WidgetKind.Glance,
+                CreateOrShowGlanceWidgetsAsync,
+                SetGlanceFeatureWidgetEnabledAsync,
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance)),
+            new(
+                WidgetKind.Custom,
+                CreateOrShowCustomWidgetsAsync,
+                SetCustomFeatureWidgetEnabledAsync,
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Custom))
+        ];
+
+        return handlers.ToDictionary(handler => handler.WidgetKind);
+    }
+
+    private (double Width, double Height) GetDefaultFeatureWidgetSize(WidgetKind kind)
+    {
+        return kind switch
+        {
+            WidgetKind.Todo => (
+                Math.Max(_settingsService.Settings.WidgetShell.DefaultWidgetWidth, 320),
+                Math.Max(_settingsService.Settings.WidgetShell.DefaultWidgetHeight, 420)),
+            WidgetKind.Music => (380, 190),
+            WidgetKind.Weather => (200, 200),
+            WidgetKind.Glance => (360, 260),
+            WidgetKind.Custom => (360, 460),
+            WidgetKind.Clipboard => (320, 420),
+            WidgetKind.Search => (420, 290),
+            _ => (
+                _settingsService.Settings.WidgetShell.DefaultWidgetWidth,
+                _settingsService.Settings.WidgetShell.DefaultWidgetHeight)
+        };
+    }
+
     private void ApplyFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
         if (!UiDispatch.HasAccess)
@@ -542,6 +610,7 @@ public sealed partial class WidgetManager
             WidgetKind.Glance => "Glance.Title",
             WidgetKind.Custom => "CustomWidget.Title",
             WidgetKind.Clipboard => "Clipboard.Title",
+            WidgetKind.Search => "Search.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => string.Empty
@@ -598,6 +667,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Glance => 360,
                 WidgetKind.Custom => 360,
                 WidgetKind.Clipboard => 320,
+                WidgetKind.Search => 420,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320)
             },
             Height = kind switch
@@ -607,6 +677,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Glance => 260,
                 WidgetKind.Custom => 460,
                 WidgetKind.Clipboard => 420,
+                WidgetKind.Search => 290,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
             }
         };
@@ -1143,13 +1214,36 @@ public sealed partial class WidgetManager
             return false;
         }
 
-        bool shown = await ShowWidgetAsync(widgetId, reveal: true, autoRestoreOnReveal: false);
-        if (shown && _contentWidgets.TryGetValue(widgetId, out var window) && window.Content is Microsoft.UI.Xaml.UIElement root)
+        WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(_settingsService.Settings, widgetId);
+        bool isActiveInGroupOrStandalone =
+            group is null ||
+            string.Equals(group.ActiveMemberId, widgetId, StringComparison.Ordinal);
+
+        if (isActiveInGroupOrStandalone &&
+            _contentWidgets.TryGetValue(widgetId, out ContentWidgetWindow? existingWindow) &&
+            existingWindow.Visible &&
+            !existingWindow.IsClosing &&
+            !existingWindow.IsHideAnimationRunning)
         {
-            DeskBox.Helpers.FluentMotionHelper.PlayDesktopArrivalPulse(root);
+            if (existingWindow.IsTrayShowAnimationInFlight || existingWindow.IsTrayShowWindowCloaked)
+            {
+                return true;
+            }
+
+            existingWindow.RestoreBoundsForCurrentTopology();
+            existingWindow.RaiseTemporarilyFromManager();
+            if (existingWindow.CurrentContent is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter
+                {
+                    ActiveContentElement: Microsoft.UI.Xaml.UIElement contentRoot
+                })
+            {
+                DeskBox.Helpers.FluentMotionHelper.PlayDesktopArrivalPulse(contentRoot);
+            }
+
+            return true;
         }
 
-        return shown;
+        return await ShowWidgetAsync(widgetId, reveal: true, autoRestoreOnReveal: false);
     }
 
     public Task RemoveCustomWidgetAsync(string widgetId) => RemoveWidgetAsync(widgetId);
@@ -2645,6 +2739,11 @@ public sealed partial class WidgetManager
     private Task SetClipboardFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Clipboard, enabled, reveal);
+    }
+
+    private Task SetSearchFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Search, enabled, reveal);
     }
 
     private Task SetGlanceFeatureWidgetEnabledAsync(bool enabled, bool reveal)

@@ -43,6 +43,18 @@
             <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#FFF5F5F5" />
             <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#E8FFFFFF" />
             <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#8FFFFFFF" />
+            <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#FF2C2C2C" />
+            <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="#FF222830" />
+            <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#38FFFFFF" />
+            <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPointerOver" Color="#18FFFFFF" />
+            <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPressed" Color="#10FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBackground" Color="#0FFFFFFF" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#18FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#10FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#0BFFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#18FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#24FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#12FFFFFF" />
 
             <!-- Keep native text controls and virtualized item containers in the
                  same widget-local foreground scope. These aliases share the

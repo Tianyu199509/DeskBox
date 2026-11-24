@@ -764,7 +764,7 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     Background="{ThemeResource WidgetOverlaySurfaceBrush}"
-                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource WidgetOverlayStrokeBrush}"
                                     BorderThickness="1"
                                     CornerRadius="6"
                                     IsHitTestVisible="False"

@@ -1,3 +1,6 @@
+using DeskBox.Helpers;
+using Microsoft.UI.Xaml;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -313,6 +316,39 @@ public sealed class NeutralInteractionPaletteContractTests
 
         Assert.Contains("\"WidgetPivotSegmentedStyle\"", helper, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"WidgetPivotSegmentedStyle\"", appXaml, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    // Unloaded element with Default requested theme uses appEffectiveTheme instead of startup OS ActualTheme.
+    [InlineData(ElementTheme.Default, false, ElementTheme.Light, ElementTheme.Dark, ElementTheme.Dark)]
+    [InlineData(ElementTheme.Default, false, ElementTheme.Dark, ElementTheme.Light, ElementTheme.Light)]
+    // Explicit nearest RequestedTheme wins whether unloaded or loaded, even if appEffectiveTheme differs.
+    [InlineData(ElementTheme.Light, false, ElementTheme.Dark, ElementTheme.Dark, ElementTheme.Light)]
+    [InlineData(ElementTheme.Dark, false, ElementTheme.Light, ElementTheme.Light, ElementTheme.Dark)]
+    [InlineData(ElementTheme.Light, true, ElementTheme.Dark, ElementTheme.Dark, ElementTheme.Light)]
+    [InlineData(ElementTheme.Dark, true, ElementTheme.Light, ElementTheme.Light, ElementTheme.Dark)]
+    // Loaded element with Default requested theme honors its live elementActualTheme.
+    [InlineData(ElementTheme.Default, true, ElementTheme.Dark, ElementTheme.Light, ElementTheme.Dark)]
+    [InlineData(ElementTheme.Default, true, ElementTheme.Light, ElementTheme.Dark, ElementTheme.Light)]
+    // Null appEffectiveTheme falls back to elementActualTheme; Default everywhere falls back to Light.
+    [InlineData(ElementTheme.Default, false, ElementTheme.Dark, null, ElementTheme.Dark)]
+    [InlineData(ElementTheme.Default, false, ElementTheme.Light, null, ElementTheme.Light)]
+    [InlineData(ElementTheme.Default, false, ElementTheme.Default, null, ElementTheme.Light)]
+    [InlineData(ElementTheme.Default, true, ElementTheme.Default, null, ElementTheme.Light)]
+    public void ResolveElementThemeCore_PrefersExplicitAndAppThemeOverUnloadedStartupActualTheme(
+        ElementTheme nearestExplicitRequestedTheme,
+        bool isElementLoaded,
+        ElementTheme elementActualTheme,
+        ElementTheme? appEffectiveTheme,
+        ElementTheme expected)
+    {
+        ElementTheme actual = NeutralInteractionBrush.ResolveElementThemeCore(
+            nearestExplicitRequestedTheme,
+            isElementLoaded,
+            elementActualTheme,
+            appEffectiveTheme);
+
+        Assert.Equal(expected, actual);
     }
 
     private static string Read(string relativePath) =>

@@ -149,7 +149,21 @@ public sealed class WidgetContentFactory
             IsFeatureWidget: true,
             SettingsSectionTag: "ClipboardSettings",
             ChromeCategory: WidgetChromeCategory.Interactive,
-            DefaultChromeMode: WidgetChromeMode.Standard)
+            DefaultChromeMode: WidgetChromeMode.Standard),
+        new(
+            WidgetKind.Search,
+            "Search",
+            "\uE721",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Search.StatusLabel",
+            "WidgetContent.Search.StatusDescription",
+            HasSettingsPage: true,
+            IsFeatureWidget: true,
+            SettingsSectionTag: "SearchSettings",
+            ChromeCategory: WidgetChromeCategory.Display,
+            DefaultChromeMode: WidgetChromeMode.Overlay)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
@@ -293,6 +307,7 @@ public sealed class WidgetContentFactory
             new GlanceWidgetContentProvider(),
             new CustomWidgetContentProvider(),
             new ClipboardWidgetContentProvider(),
+            new SearchWidgetContentProvider(),
             new PlaceholderWidgetContentProvider(WidgetKind.Tags),
             new PlaceholderWidgetContentProvider(WidgetKind.SystemMonitor)
         ];

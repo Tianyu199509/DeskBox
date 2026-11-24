@@ -44,6 +44,8 @@
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#3F7ABC" />
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#245B96" />
                     <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPointerOver" Color="#0D000000" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPressed" Color="#16000000" />
                     <Color x:Key="SolidBackgroundFillColorBase">#F3F3F3</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
@@ -73,6 +75,8 @@
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#457CB3" />
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#295B8E" />
                     <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPointerOver" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPressed" Color="#10FFFFFF" />
                     <Color x:Key="SolidBackgroundFillColorBase">#202020</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
@@ -106,6 +110,8 @@
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#457CB3" />
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#295B8E" />
                     <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPointerOver" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPressed" Color="#10FFFFFF" />
                     <Color x:Key="SolidBackgroundFillColorBase">#202020</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
@@ -149,6 +155,8 @@
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="WidgetSubtleButtonBackgroundPressed" Color="Transparent" />
                     <Color x:Key="SolidBackgroundFillColorBase">#000000</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
@@ -393,6 +401,59 @@
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="5" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{ThemeResource SubtleButtonForeground}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid
+                                x:Name="RootGrid"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                                <Border
+                                    x:Name="StateWash"
+                                    Background="{ThemeResource WidgetSubtleButtonBackgroundPointerOver}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    IsHitTestVisible="False"
+                                    Opacity="0" />
+                                <ContentPresenter
+                                    x:Name="ContentPresenter"
+                                    Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Foreground="{TemplateBinding Foreground}"
+                                    AutomationProperties.AccessibilityView="Raw"
+                                    Content="{TemplateBinding Content}"
+                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    ContentTransitions="{TemplateBinding ContentTransitions}" />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="StateWash.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="StateWash.Background" Value="{ThemeResource WidgetSubtleButtonBackgroundPressed}" />
+                                                <Setter Target="StateWash.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.45" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <Style x:Key="WidgetQuickAddCardButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">

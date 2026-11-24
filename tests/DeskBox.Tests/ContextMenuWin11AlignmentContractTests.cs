@@ -165,15 +165,54 @@ public sealed class ContextMenuWin11AlignmentContractTests
             CountOccurrences(builder, "if (!isNamespaceShortcut)") == 2,
             "Open file location and Compress both hide for namespace links");
 
-        // The empty-bin state check must stay off the right-tap callback
-        // frame (shell aggregate query on a low-priority UI pass instead).
+        // Empty-bin state must NEVER run SHQueryRecycleBinW on the UI STA
+        // thread or mutate MenuFlyoutItem.IsEnabled after flyout.Opened (1.5.9
+        // / 1.6.0 freeze + 0xC000027B popup crash): pre-ShowAt reads come from
+        // the background RecycleBinEmptyStateCache, and EmptyRecycleBinAsync
+        // runs on ShellLaunchService's modal STA pool.
         Assert.Contains(
-            "ScheduleRecycleBinEmptyStateCheck(row)",
+            "RecycleBinEmptyStateCache.Shared.EnsureWarm(",
             builder,
             StringComparison.Ordinal);
         Assert.Contains(
-            "DispatcherQueuePriority.Low",
+            "RecycleBinEmptyStateCache.Shared.TryGetKnownEmptyState(out bool isEmpty)",
             builder,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ScheduleRecycleBinEmptyStateCheck",
+            builder,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShellRecycleBinInterop.TryQuery",
+            builder,
+            StringComparison.Ordinal);
+
+        int emptyRowStart = builder.IndexOf(
+            "private static void AddEmptyRecycleBinRow(",
+            StringComparison.Ordinal);
+        int openWithHelperStart = builder.IndexOf(
+            "private static void AddOpenWithRow(",
+            StringComparison.Ordinal);
+        Assert.True(emptyRowStart >= 0 && openWithHelperStart > emptyRowStart);
+        string emptyRowRegion = builder[emptyRowStart..openWithHelperStart];
+        Assert.DoesNotContain(
+            "flyout.Opened",
+            emptyRowRegion,
+            StringComparison.Ordinal);
+
+        string selectionAndMenus = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs");
+        Assert.Contains(
+            "ShellLaunchService.EmptyRecycleBinAsync(",
+            selectionAndMenus,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShellRecycleBinInterop.TryQueryTotalItemCount",
+            selectionAndMenus,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShellRecycleBinInterop.TryEmptyAllBins(",
+            selectionAndMenus,
             StringComparison.Ordinal);
 
         // Host verbs: the surface supplies create-shortcut and empty-bin.

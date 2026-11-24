@@ -71,6 +71,12 @@ public sealed class TodoWidgetContentAdapter :
 
     public bool IsReadyForReuse => ViewModel.IsInitialized && !IsDisposed;
 
+    public bool HasActiveInlineEdit =>
+        MaterializedView is TodoWidgetContent { HasActiveInlineEdit: true };
+
+    internal bool HasActiveInlineOverlay =>
+        MaterializedView is TodoWidgetContent { HasActiveInlineOverlay: true };
+
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
     private bool _pendingWideSelectionWasAutomatic;

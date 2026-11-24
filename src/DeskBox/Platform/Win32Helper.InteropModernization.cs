@@ -23,6 +23,24 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll", EntryPoint = "GetDesktopWindow")]
     public static partial IntPtr GetDesktopWindow();
 
+    [LibraryImport("user32.dll", EntryPoint = "PostQuitMessage")]
+    internal static partial void PostQuitMessage(int nExitCode);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    private static partial int SetWindowLongNative(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    /// <summary>Tracked wrapper matching <see cref="SetWindowLongPtr"/> for
+    /// 32-bit style mutations such as <c>GWL_EXSTYLE</c>.</summary>
+    public static int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong)
+    {
+        if (CallbackDepth.Depth > 0)
+        {
+            CallbackDepth.RecordWindowOperation();
+        }
+
+        return SetWindowLongNative(hWnd, nIndex, dwNewLong);
+    }
+
     [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
     private static unsafe partial int GetWindowTextNative(IntPtr hWnd, char* lpString, int nMaxCount);
 
@@ -443,5 +461,75 @@ public static partial class Win32Helper
         workingSetBytes = 0;
         privateBytes = 0;
         return false;
+    }
+
+    private static bool TryCreateSettingsIpcPipeCore(
+        string pipeName,
+        int bufferSize,
+        string sddl,
+        out SafePipeHandle? pipeHandle,
+        out int win32Error)
+    {
+        pipeHandle = null;
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl,
+                1,
+                out IntPtr descriptor,
+                IntPtr.Zero))
+        {
+            win32Error = Marshal.GetLastWin32Error();
+            return false;
+        }
+
+        try
+        {
+            var attributes = new SecurityAttributes
+            {
+                Length = (uint)Marshal.SizeOf<SecurityAttributes>(),
+                SecurityDescriptor = descriptor,
+                InheritHandle = 0,
+            };
+            SafePipeHandle handle = CreateNamedPipeW(
+                pipeName,
+                PipeAccessDuplex | FileFlagOverlapped,
+                PipeModeByteWaiting | 0x00000008u,
+                maxInstances: 1,
+                outBufferSize: (uint)bufferSize,
+                inBufferSize: (uint)bufferSize,
+                defaultTimeOut: 0,
+                ref attributes);
+            if (handle.IsInvalid)
+            {
+                win32Error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                return false;
+            }
+
+            win32Error = 0;
+            pipeHandle = handle;
+            return true;
+        }
+        finally
+        {
+            LocalFree(descriptor);
+        }
+    }
+
+    public const uint GA_PARENT = 1;
+    public const int MA_NOACTIVATEANDEAT = 4;
+
+    /// <summary>
+    /// Walks only true WS_CHILD parent links without crossing WS_POPUP GW_OWNER
+    /// relationships (unlike user32!GetParent, which returns GW_OWNER for popups).
+    /// </summary>
+    public static IntPtr GetChildParent(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero || (GetWindowLong(hWnd, GWL_STYLE) & WS_CHILD) == 0)
+        {
+            return IntPtr.Zero;
+        }
+
+        IntPtr parent = GetAncestor(hWnd, GA_PARENT);
+        return parent == GetDesktopWindow() ? IntPtr.Zero : parent;
     }
 }

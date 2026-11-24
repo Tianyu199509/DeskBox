@@ -49,7 +49,8 @@ public sealed record FileItemMenuActions(
     Func<IReadOnlyList<WidgetItem>, bool>? CanCompressSelection = null,
     Func<IReadOnlyList<WidgetItem>, ArchiveCompressionFormat, Task>? CompressSelectionAsync = null,
     Func<WidgetItem, Task>? CreateItemShortcutAsync = null,
-    Func<Task>? EmptyRecycleBinAsync = null);
+    Func<Task>? EmptyRecycleBinAsync = null,
+    Func<IDisposable?>? AcquireMenuCloseRenameHandoff = null);
 
 /// <summary>
 /// Builds the item context menus as a single-column MenuFlyout — one popup
@@ -331,12 +332,58 @@ public static class FileItemMenuBuilder
         WidgetItem item,
         FileItemMenuActions actions)
     {
-        flyout.Items.Add(CreateRow(
+        bool startRenameWhenClosed = false;
+        IDisposable? renameHandoff = null;
+
+        MenuFlyoutItem row = CreateRow(
             actions,
             "Common.Rename",
             "\uE8AC",
             "F2",
-            async () => await actions.RenameItemAsync(item)));
+            () =>
+            {
+                startRenameWhenClosed = true;
+                renameHandoff ??= actions.AcquireMenuCloseRenameHandoff?.Invoke();
+                return Task.CompletedTask;
+            });
+
+        flyout.Closed += (_, _) =>
+        {
+            if (!startRenameWhenClosed)
+            {
+                renameHandoff?.Dispose();
+                renameHandoff = null;
+                return;
+            }
+
+            startRenameWhenClosed = false;
+            IDisposable? heldHandoff = renameHandoff;
+            renameHandoff = null;
+            DispatcherQueue? dq = DispatcherQueue.GetForCurrentThread();
+            if (dq is not null &&
+                dq.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        await actions.RenameItemAsync(item);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[FileItemMenu] Deferred rename failed: {ex}");
+                    }
+                    finally
+                    {
+                        heldHandoff?.Dispose();
+                    }
+                }))
+            {
+                return;
+            }
+
+            heldHandoff?.Dispose();
+        };
+
+        flyout.Items.Add(row);
     }
 
     private static void AddOpenRow(
@@ -372,41 +419,31 @@ public static class FileItemMenuBuilder
     /// <summary>
     /// Empty Recycle Bin for the bin's namespace shortcut — the target
     /// desktop icon's own verb, kept in its native slot right after the
-    /// open family. Native grays the verb for an empty bin; the aggregate
-    /// query is Shell work, so it runs on a low-priority UI pass after the
-    /// menu is up, never in the right-tap callback. Until it answers, the
-    /// row stays enabled and the click path re-checks before invoking.
+    /// open family. Native grays the verb for an empty bin; the state is read
+    /// synchronously in memory from <see cref="RecycleBinEmptyStateCache"/>
+    /// BEFORE <c>ShowAt</c> (never calling <c>SHQueryRecycleBinW</c> on the UI
+    /// STA thread and never mutating <c>MenuFlyoutItem.IsEnabled</c> while the
+    /// popup window bridge is open or closing). When the cache is still cold,
+    /// the row stays enabled and the click path re-checks off the UI thread.
     /// </summary>
     private static void AddEmptyRecycleBinRow(
         MenuFlyout flyout,
         FileItemMenuActions actions)
     {
+        RecycleBinEmptyStateCache.Shared.EnsureWarm(
+            DispatcherQueue.GetForCurrentThread());
+        bool disableRow =
+            RecycleBinEmptyStateCache.Shared.TryGetKnownEmptyState(out bool isEmpty) &&
+            isEmpty;
+
         MenuFlyoutItem row = CreateRow(
             actions,
             "Widget.EmptyRecycleBin",
             "\uE74D",
             null,
             async () => await actions.EmptyRecycleBinAsync!());
-        flyout.Opened += (_, _) => ScheduleRecycleBinEmptyStateCheck(row);
+        row.IsEnabled = !disableRow;
         flyout.Items.Add(row);
-    }
-
-    private static void ScheduleRecycleBinEmptyStateCheck(MenuFlyoutItem row)
-    {
-        DispatcherQueue? queue = DispatcherQueue.GetForCurrentThread();
-        if (queue is null)
-        {
-            return;
-        }
-
-        _ = queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-        {
-            if (ShellRecycleBinInterop.TryQueryTotalItemCount(out long totalItems) &&
-                totalItems == 0)
-            {
-                row.IsEnabled = false;
-            }
-        });
     }
 
     private static void AddOpenWithRow(

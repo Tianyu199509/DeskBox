@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.6.1 - 2026-11-25
+
+### English
+
+#### New features
+
+- **Desktop Search widget returns.** A redesigned desktop Search widget with adaptive Micro, Compact Bar, Medium, and Large layouts. Type `+ ` to add a todo, `; ` to capture a quick note, `> ` to run a command, or enter an expression to calculate directly; optionally display pinned/recent searches and recently opened items with an auto-blur privacy mask on pointer exit.
+- **Standalone Quick Paste (`Alt+V`).** Global clipboard capture and the `Alt+V` Quick Paste popup can now run independently without keeping a Clipboard widget on the desktop.
+- **Refined menu acrylic & text contrast.** Context menus and transient flyouts adopt theme-aware acrylic surfaces and cleaner text shadows for better legibility across light and dark wallpapers.
+
+#### Fixes & Performance
+
+- **Reliable rename & keyboard focus.** Fixed unresponsive Rename/Edit actions and IME composition interruptions across files, folders, stacks, stack popovers, widget titles, Todo items, and Quick Capture notes in desktop-pinned mode; eliminated focus/retry loops when renaming widgets.
+- **Smooth file/folder pickers & UI responsiveness.** Moved all folder and file pickers into the isolated out-of-process native proxy (with dark-theme sync and automatic cleanup on host exit) so slow network drives or Shell extensions can never freeze DeskBox. Fixed repeated desktop-layer Z-order restacking above wallpaper/helper windows, Recycle Bin menu probe stalls, and UI-thread drive checks in Settings.
+- **Steadier capsules, overlays & diagnostics.** Fixed a crash when placing a newly created Custom Widget from Workshop onto the desktop, capsule placement jumps after title-bar drags or canceled group merges, Todo custom due-date overlay focus races, post-update layout quarantine recovery, update download progress ordering, and added a 15-second standalone emergency fallback when exporting diagnostics bundles.
+
+### 中文
+
+#### 新功能
+
+- **桌面搜索组件回归。** 全新设计自适应微尺寸图标、紧凑横条、中等卡片与大尺寸面板布局；支持输入 `+ ` 快速新建待办、`; ` 快速记录随记、`> ` 执行快捷指令或直接输入算式求值，可选展示搜索历史与最近打开项目，并支持指针离开自动模糊的桌面隐私遮罩。
+- **快捷粘贴弹窗（`Alt+V`）支持独立运行。** 无需在桌面常驻剪贴板格子，即可单独开启全局剪贴板采集与 `Alt+V` 快捷粘贴弹窗。
+- **菜单亚克力质感与文字可读性优化。** 应用内右键菜单与弹出浮层升级主题自适应亚克力背景与清晰文字阴影，深浅色壁纸下阅读更舒适。
+
+#### 修复与性能优化
+
+- **重命名与输入焦点全面修复。** 修复桌面钉住模式下文件、文件夹、叠放标题、叠放弹窗内项目、盒子标题、待办事项及随记点击「重命名 / 编辑」无反应或输入法选词中断的问题；消除盒子重命名失焦引发的重试与焦点循环。
+- **彻底解决选目录/选文件假死与界面卡顿。** 将全部文件夹与文件选择器迁入独立原生代理进程（同步深色主题并在宿主退出时自动清理），彻底避免第三方外壳扩展或慢速网络盘卡死主界面；修复特定壁纸/辅助窗口下的桌面底层反复重排、右键探测回收站状态卡顿及设置页磁盘检测阻塞。
+- **组件创建、胶囊拖拽与诊断导出更稳健。** 修复从工坊创建自定义组件并放置到桌面时的动画竞态闪退、智能胶囊标题栏拖拽或取消分组合并后的位置跳变、待办自定义到期日浮层焦点竞态，加固升级后布局恢复与更新进度顺序，并为一键导出诊断包增加 15 秒独立应急导出兜底。
+
 ## 1.6.0 - 2026-11-23
 
 ### English

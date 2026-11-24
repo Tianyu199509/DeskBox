@@ -5,6 +5,14 @@ using System.Runtime.InteropServices;
 
 namespace DeskBox.Platform;
 
+internal enum RecycleBinEmptyOperationOutcome
+{
+    Emptied,
+    AlreadyEmpty,
+    Cancelled,
+    Failed
+}
+
 /// <summary>
 /// Recycle-bin verbs, stock-icon location query, and shell change-notification
 /// primitives shared by the namespace shortcut menu and Custom Widget RecycleBin cards.
@@ -16,6 +24,10 @@ internal static class ShellRecycleBinInterop
 {
     internal const string RecycleBinParsingName = "::{645FF040-5081-101B-9F08-00AA002F954E}";
     internal const string RecycleBinShellOpenArg = "shell:::{645FF040-5081-101B-9F08-00AA002F954E}";
+
+    private const int HResultCancelledWin32 = unchecked((int)0x800704C7);
+    private const int HResultAbort = unchecked((int)0x80004004);
+    private const int HResultUnexpected = unchecked((int)0x8000FFFF);
 
     private const uint SherbNoConfirmation = 0x00000001;
     private const uint SherbNoSound = 0x00000004;
@@ -103,9 +115,159 @@ internal static class ShellRecycleBinInterop
     /// <summary>
     /// Total item count across all bins; false when the aggregate query
     /// itself fails (callers then keep the menu row enabled rather than
-    /// graying a working verb).
+    /// graying a working verb). Must run off the UI thread.
     /// </summary>
-    internal static bool TryQueryTotalItemCount(out long totalItems)
+    internal static bool TryQueryTotalItemCount(out long totalItems) =>
+        TryQueryRootItemCount(null, out totalItems);
+
+    /// <summary>
+    /// Determines whether any Recycle Bin contains at least one item without
+    /// scanning every drive up front: checks the live subscribed service first,
+    /// then probes non-SUBST local fixed drives (system drive first) so any
+    /// non-empty local bin short-circuits before touching secondary sleeping
+    /// disks or network mounts, falling back to the aggregate null-root query
+    /// only when every local fixed drive reports zero items. Must run off the
+    /// UI thread.
+    /// </summary>
+    internal static bool TryQueryHasAnyItems(out bool hasItems)
+    {
+        if (Services.CustomWidgetRecycleBinService.Shared.TryGetLiveSubscribedItemCount(out long liveCount))
+        {
+            hasItems = liveCount > 0;
+            return true;
+        }
+
+        IReadOnlyList<string> fixedRoots = GetOrderedLocalFixedDriveRoots();
+        return TryEvaluateTwoStageHasAnyItems(
+            fixedRoots,
+            TryQueryRootItemCount,
+            out hasItems);
+    }
+
+    internal delegate bool TryQueryBinRootItemCountDelegate(string? rootPath, out long itemCount);
+
+    internal static bool TryEvaluateTwoStageHasAnyItems(
+        IReadOnlyList<string> orderedFixedRoots,
+        TryQueryBinRootItemCountDelegate tryQueryRootCount,
+        out bool hasItems)
+    {
+        ArgumentNullException.ThrowIfNull(orderedFixedRoots);
+        ArgumentNullException.ThrowIfNull(tryQueryRootCount);
+
+        for (int i = 0; i < orderedFixedRoots.Count; i++)
+        {
+            string root = orderedFixedRoots[i];
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                continue;
+            }
+
+            if (tryQueryRootCount(root, out long rootItems) && rootItems > 0)
+            {
+                hasItems = true;
+                return true;
+            }
+        }
+
+        if (!tryQueryRootCount(null, out long totalItems))
+        {
+            hasItems = false;
+            return false;
+        }
+
+        hasItems = totalItems > 0;
+        return true;
+    }
+
+    internal static IReadOnlyList<string> OrderFixedDriveRootsForProbe(
+        IEnumerable<(string Root, DriveType DriveType, bool IsSubst)> candidates,
+        string? systemRoot)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+
+        string normalizedSystemRoot = NormalizeDriveRoot(systemRoot);
+        var roots = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string rawRoot, DriveType driveType, bool isSubst) in candidates)
+        {
+            if (driveType != DriveType.Fixed || isSubst)
+            {
+                continue;
+            }
+
+            string normalized = NormalizeDriveRoot(rawRoot);
+            if (normalized.Length == 0 || !seen.Add(normalized))
+            {
+                continue;
+            }
+
+            if (normalizedSystemRoot.Length > 0 &&
+                string.Equals(normalized, normalizedSystemRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                roots.Insert(0, normalized);
+            }
+            else
+            {
+                roots.Add(normalized);
+            }
+        }
+
+        return roots;
+    }
+
+    private static IReadOnlyList<string> GetOrderedLocalFixedDriveRoots()
+    {
+        try
+        {
+            string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
+            DriveInfo[] drives = DriveInfo.GetDrives();
+            var candidates = new List<(string Root, DriveType DriveType, bool IsSubst)>(drives.Length);
+            foreach (DriveInfo drive in drives)
+            {
+                try
+                {
+                    string root = drive.Name;
+                    DriveType driveType = drive.DriveType;
+                    bool isSubst = driveType == DriveType.Fixed &&
+                        FileOperationNativeMethods.IsSubstDriveRoot(root);
+                    candidates.Add((root, driveType, isSubst));
+                }
+                catch
+                {
+                }
+            }
+
+            return OrderFixedDriveRootsForProbe(candidates, systemRoot);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string NormalizeDriveRoot(string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = root.Trim();
+        if (trimmed.Length < 2 || trimmed[1] != Path.VolumeSeparatorChar)
+        {
+            return string.Empty;
+        }
+
+        return string.Create(3, trimmed[0], static (span, driveLetter) =>
+        {
+            span[0] = char.ToUpperInvariant(driveLetter);
+            span[1] = Path.VolumeSeparatorChar;
+            span[2] = Path.DirectorySeparatorChar;
+        });
+    }
+
+    private static bool TryQueryRootItemCount(string? rootPath, out long totalItems)
     {
         totalItems = 0;
         try
@@ -114,7 +276,7 @@ internal static class ShellRecycleBinInterop
             {
                 cbSize = (uint)Marshal.SizeOf<SHQUERYRBINFO>()
             };
-            if (SHQueryRecycleBin(null, ref info) < 0)
+            if (SHQueryRecycleBin(rootPath, ref info) < 0)
             {
                 return false;
             }
@@ -131,18 +293,44 @@ internal static class ShellRecycleBinInterop
     /// <summary>
     /// Empties every bin with flags 0, so the system shows its own
     /// confirmation and progress dialogs — the same behavior as the native
-    /// desktop verb.
+    /// desktop verb. Must run off the UI thread.
     /// </summary>
-    internal static bool TryEmptyAllBins(IntPtr ownerWindow)
+    internal static bool TryEmptyAllBins(IntPtr ownerWindow) =>
+        EmptyAllBinsWithOutcome(ownerWindow) is
+            RecycleBinEmptyOperationOutcome.Emptied or
+            RecycleBinEmptyOperationOutcome.AlreadyEmpty;
+
+    /// <summary>
+    /// Empties every bin with flags 0 and classifies cancellation and
+    /// already-empty HRESULTs separately from genuine failures. Must run on a
+    /// dedicated STA worker off the UI thread.
+    /// </summary>
+    internal static RecycleBinEmptyOperationOutcome EmptyAllBinsWithOutcome(IntPtr ownerWindow)
     {
         try
         {
-            return SHEmptyRecycleBin(ownerWindow, null, 0) >= 0;
+            int hr = SHEmptyRecycleBin(ownerWindow, null, 0);
+            return ClassifyEmptyAllBinsHResult(hr);
         }
         catch
         {
-            return false;
+            return RecycleBinEmptyOperationOutcome.Failed;
         }
+    }
+
+    internal static RecycleBinEmptyOperationOutcome ClassifyEmptyAllBinsHResult(int hr)
+    {
+        if (hr >= 0)
+        {
+            return RecycleBinEmptyOperationOutcome.Emptied;
+        }
+
+        return hr switch
+        {
+            HResultCancelledWin32 or HResultAbort => RecycleBinEmptyOperationOutcome.Cancelled,
+            HResultUnexpected => RecycleBinEmptyOperationOutcome.AlreadyEmpty,
+            _ => RecycleBinEmptyOperationOutcome.Failed
+        };
     }
 
     /// <summary>

@@ -220,6 +220,18 @@ public abstract partial class WidgetWindowBase
             "ButtonForegroundDisabled",
             "SubtleButtonForegroundDisabled");
         SetBrushColor(palette.Divider, "DividerStrokeColorDefaultBrush");
+        SetBrushColor(palette.OverlaySurface, "WidgetOverlaySurfaceBrush");
+        SetBrushColor(palette.OverlayInputSurface, "WidgetOverlayInputSurfaceBrush");
+        SetBrushColor(palette.OverlayStroke, "WidgetOverlayStrokeBrush");
+        SetBrushColor(palette.SubtleButtonPointerOver, "WidgetSubtleButtonBackgroundPointerOver");
+        SetBrushColor(palette.SubtleButtonPressed, "WidgetSubtleButtonBackgroundPressed");
+        SetBrushColor(palette.ButtonBackground, "ButtonBackground");
+        SetBrushColor(palette.ButtonBackgroundPointerOver, "ButtonBackgroundPointerOver");
+        SetBrushColor(palette.ButtonBackgroundPressed, "ButtonBackgroundPressed");
+        SetBrushColor(palette.ButtonBackgroundDisabled, "ButtonBackgroundDisabled");
+        SetBrushColor(palette.ButtonBorder, "ButtonBorderBrush");
+        SetBrushColor(palette.ButtonBorderPointerOver, "ButtonBorderBrushPointerOver");
+        SetBrushColor(palette.ButtonBorderPressed, "ButtonBorderBrushPressed");
     }
 
     private void SetBrushColor(Color color, params string[] keys)
@@ -234,27 +246,76 @@ public abstract partial class WidgetWindowBase
         }
     }
 
-    private static WidgetForegroundPalette ResolveForegroundPalette(
+    internal static readonly Color DarkOverlaySurfaceColor = Color.FromArgb(0xFF, 0x2C, 0x2C, 0x2C);
+    internal static readonly Color LightOverlaySurfaceColor = Color.FromArgb(0xFF, 0xF9, 0xF9, 0xF9);
+
+    internal static double ComputeRelativeLuminance(Color color)
+    {
+        static double Linearize(byte channel)
+        {
+            double c = channel / 255.0;
+            return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+        }
+
+        return (0.2126 * Linearize(color.R)) +
+               (0.7152 * Linearize(color.G)) +
+               (0.0722 * Linearize(color.B));
+    }
+
+    internal static double ComputeContrastRatio(Color a, Color b)
+    {
+        double la = ComputeRelativeLuminance(a);
+        double lb = ComputeRelativeLuminance(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    internal static bool ShouldUseDarkOverlaySurface(Color foreground) =>
+        ComputeContrastRatio(foreground, DarkOverlaySurfaceColor) >=
+        ComputeContrastRatio(foreground, LightOverlaySurfaceColor);
+
+    internal static WidgetForegroundPalette ResolveForegroundPalette(
         string mode,
         Color customColor,
         ElementTheme actualTheme,
-        bool highContrast)
+        bool highContrast,
+        Color? highContrastForeground = null,
+        Color? highContrastBackground = null)
     {
         if (highContrast)
         {
             // Reuse the shared cached UISettings instance instead of a new
             // projection per palette resolve; TryGetUiColor already carries
             // the unavailability fallback contract.
-            Color? foreground = WindowsCompatibilityService.TryGetUiColor(
-                UIColorType.Foreground);
-            if (foreground is { } highContrastForeground)
+            Color? foreground = highContrastForeground ??
+                WindowsCompatibilityService.TryGetUiColor(UIColorType.Foreground);
+            if (foreground is { } hcForeground)
             {
+                Color hcBackground = highContrastBackground ??
+                    WindowsCompatibilityService.TryGetUiColor(UIColorType.Background) ??
+                    (actualTheme == ElementTheme.Light
+                        ? Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
+                        : Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
+                Color transparent = Color.FromArgb(0x00, 0x00, 0x00, 0x00);
+
                 return new WidgetForegroundPalette(
-                    highContrastForeground,
-                    highContrastForeground,
-                    highContrastForeground,
-                    highContrastForeground,
-                    highContrastForeground);
+                    Primary: hcForeground,
+                    Secondary: hcForeground,
+                    Tertiary: hcForeground,
+                    Disabled: hcForeground,
+                    Divider: hcForeground,
+                    UseDarkOverlay: ComputeRelativeLuminance(hcBackground) < 0.5,
+                    OverlaySurface: hcBackground,
+                    OverlayInputSurface: hcBackground,
+                    OverlayStroke: hcForeground,
+                    SubtleButtonPointerOver: transparent,
+                    SubtleButtonPressed: transparent,
+                    ButtonBackground: hcBackground,
+                    ButtonBackgroundPointerOver: hcBackground,
+                    ButtonBackgroundPressed: hcBackground,
+                    ButtonBackgroundDisabled: hcBackground,
+                    ButtonBorder: hcForeground,
+                    ButtonBorderPointerOver: hcForeground,
+                    ButtonBorderPressed: hcForeground);
             }
 
             // Continue with the selected palette if WinRT accessibility
@@ -274,21 +335,69 @@ public abstract partial class WidgetWindowBase
             _ => Color.FromArgb(0xFF, 0xF7, 0xF7, 0xF7)
         };
 
-        return new WidgetForegroundPalette(
-            primary,
-            WithAlpha(primary, 0xE8),
-            WithAlpha(primary, 0xCC),
-            WithAlpha(primary, 0x8F),
-            WithAlpha(primary, 0x66));
+        bool useDarkOverlay = ShouldUseDarkOverlaySurface(primary);
+
+        return useDarkOverlay
+            ? new WidgetForegroundPalette(
+                Primary: primary,
+                Secondary: WithAlpha(primary, 0xE8),
+                Tertiary: WithAlpha(primary, 0xCC),
+                Disabled: WithAlpha(primary, 0x8F),
+                Divider: WithAlpha(primary, 0x66),
+                UseDarkOverlay: true,
+                OverlaySurface: DarkOverlaySurfaceColor,
+                OverlayInputSurface: Color.FromArgb(0xFF, 0x22, 0x28, 0x30),
+                OverlayStroke: Color.FromArgb(0x38, 0xFF, 0xFF, 0xFF),
+                SubtleButtonPointerOver: Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF),
+                SubtleButtonPressed: Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF),
+                ButtonBackground: Color.FromArgb(0x0F, 0xFF, 0xFF, 0xFF),
+                ButtonBackgroundPointerOver: Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF),
+                ButtonBackgroundPressed: Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF),
+                ButtonBackgroundDisabled: Color.FromArgb(0x0B, 0xFF, 0xFF, 0xFF),
+                ButtonBorder: Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF),
+                ButtonBorderPointerOver: Color.FromArgb(0x24, 0xFF, 0xFF, 0xFF),
+                ButtonBorderPressed: Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF))
+            : new WidgetForegroundPalette(
+                Primary: primary,
+                Secondary: WithAlpha(primary, 0xE8),
+                Tertiary: WithAlpha(primary, 0xCC),
+                Disabled: WithAlpha(primary, 0x8F),
+                Divider: WithAlpha(primary, 0x66),
+                UseDarkOverlay: false,
+                OverlaySurface: LightOverlaySurfaceColor,
+                OverlayInputSurface: Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+                OverlayStroke: Color.FromArgb(0x24, 0x00, 0x00, 0x00),
+                SubtleButtonPointerOver: Color.FromArgb(0x0D, 0x00, 0x00, 0x00),
+                SubtleButtonPressed: Color.FromArgb(0x16, 0x00, 0x00, 0x00),
+                ButtonBackground: Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF),
+                ButtonBackgroundPointerOver: Color.FromArgb(0x80, 0xF9, 0xF9, 0xF9),
+                ButtonBackgroundPressed: Color.FromArgb(0x4D, 0xF9, 0xF9, 0xF9),
+                ButtonBackgroundDisabled: Color.FromArgb(0x4D, 0xF9, 0xF9, 0xF9),
+                ButtonBorder: Color.FromArgb(0x1F, 0x00, 0x00, 0x00),
+                ButtonBorderPointerOver: Color.FromArgb(0x29, 0x00, 0x00, 0x00),
+                ButtonBorderPressed: Color.FromArgb(0x14, 0x00, 0x00, 0x00));
     }
 
     private static Color WithAlpha(Color color, byte alpha) =>
         Color.FromArgb(alpha, color.R, color.G, color.B);
 
-    private readonly record struct WidgetForegroundPalette(
+    internal readonly record struct WidgetForegroundPalette(
         Color Primary,
         Color Secondary,
         Color Tertiary,
         Color Disabled,
-        Color Divider);
+        Color Divider,
+        bool UseDarkOverlay,
+        Color OverlaySurface,
+        Color OverlayInputSurface,
+        Color OverlayStroke,
+        Color SubtleButtonPointerOver,
+        Color SubtleButtonPressed,
+        Color ButtonBackground,
+        Color ButtonBackgroundPointerOver,
+        Color ButtonBackgroundPressed,
+        Color ButtonBackgroundDisabled,
+        Color ButtonBorder,
+        Color ButtonBorderPointerOver,
+        Color ButtonBorderPressed);
 }

@@ -36,6 +36,85 @@
                 Toggled="EnableClipboardToggle_Toggled" />
         </toolkit:SettingsCard>
 
+        <!-- Standalone Quick-Paste Popup Entry -->
+        <toolkit:SettingsExpander
+            x:Name="QuickPastePopupExpander"
+            IsExpanded="False"
+            svc:Localized.HeaderKey="Clipboard.Settings.Group.QuickPastePopup"
+            svc:InfoTip.TitleKey="Settings.GlobalHotkey.ElevatedNotice.Title"
+            svc:InfoTip.BodyKey="Settings.GlobalHotkey.ElevatedNotice.Description">
+            <toolkit:SettingsExpander.HeaderIcon>
+                <FontIcon Glyph="&#xE765;" />
+            </toolkit:SettingsExpander.HeaderIcon>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button
+                    x:Name="ClipboardHotkeyCaptureButton"
+                    Click="ClipboardHotkeyCaptureButton_Click"
+                    Style="{StaticResource ShortcutCaptureButtonStyle}"
+                    svc:Localized.ToolTipKey="Clipboard.Settings.Hotkey.ChangeTooltip" />
+                <ToggleSwitch svc:Localized.AutomationNameKey="Clipboard.Settings.Group.QuickPastePopup"
+                    x:Name="ClipboardHotkeyToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="ClipboardHotkeyToggle_Toggled" />
+            </StackPanel>
+            <toolkit:SettingsExpander.Items>
+                <toolkit:SettingsCard
+                    x:Name="PopupPlacementCard"
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Clipboard.PopupPlacement.Description"
+                    svc:Localized.HeaderKey="Settings.Clipboard.PopupPlacement.Title">
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.PopupPlacement.Title"
+                        x:Name="PopupPlacementComboBox"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                        SelectionChanged="PopupPlacementComboBox_SelectionChanged">
+                        <ComboBoxItem Tag="FollowCaret">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.FollowCaret" />
+                        </ComboBoxItem>
+                        <ComboBoxItem Tag="FollowMouse">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.FollowMouse" />
+                        </ComboBoxItem>
+                        <ComboBoxItem Tag="ScreenCenter">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.ScreenCenter" />
+                        </ComboBoxItem>
+                    </ComboBox>
+                </toolkit:SettingsCard>
+
+                <toolkit:SettingsCard
+                    x:Name="DoubleCopyCard"
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Clipboard.DoubleCopy.Description"
+                    svc:Localized.HeaderKey="Settings.Clipboard.DoubleCopy.Title">
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.DoubleCopy.Title"
+                        x:Name="DoubleCopyComboBox"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                        SelectionChanged="DoubleCopyComboBox_SelectionChanged">
+                        <ComboBoxItem Tag="None">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.None" />
+                        </ComboBoxItem>
+                        <ComboBoxItem Tag="Pin">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.Pin" />
+                        </ComboBoxItem>
+                        <ComboBoxItem Tag="SaveToQuickCapture">
+                            <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.SaveToQuickCapture" />
+                        </ComboBoxItem>
+                    </ComboBox>
+                </toolkit:SettingsCard>
+            </toolkit:SettingsExpander.Items>
+        </toolkit:SettingsExpander>
+
+        <InfoBar
+            x:Name="ClipboardHotkeyReservedWarning"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Warning"
+            Visibility="Collapsed"
+            svc:Localized.DescriptionKey="Settings.GlobalHotkey.ReservedWarning"
+            svc:Localized.HeaderKey="Clipboard.Settings.Group.QuickPastePopup" />
+
         <StackPanel
             x:Name="ClipboardSettingsBodyPanel"
             Margin="0,4,0,0"
@@ -245,85 +324,6 @@
                     OnContent=""
                     Toggled="ShowSourceAppToggle_Toggled" />
             </toolkit:SettingsCard>
-
-            <!-- Expander 1: Quick-Paste Popup -->
-            <toolkit:SettingsExpander
-                x:Name="QuickPastePopupExpander"
-                IsExpanded="False"
-                svc:Localized.HeaderKey="Clipboard.Settings.Group.QuickPastePopup"
-                svc:InfoTip.TitleKey="Settings.GlobalHotkey.ElevatedNotice.Title"
-                svc:InfoTip.BodyKey="Settings.GlobalHotkey.ElevatedNotice.Description">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE765;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Button
-                        x:Name="ClipboardHotkeyCaptureButton"
-                        Click="ClipboardHotkeyCaptureButton_Click"
-                        Style="{StaticResource ShortcutCaptureButtonStyle}"
-                        svc:Localized.ToolTipKey="Clipboard.Settings.Hotkey.ChangeTooltip" />
-                    <ToggleSwitch svc:Localized.AutomationNameKey="Clipboard.Settings.Group.QuickPastePopup"
-                        x:Name="ClipboardHotkeyToggle"
-                        MinWidth="0"
-                        OffContent=""
-                        OnContent=""
-                        Toggled="ClipboardHotkeyToggle_Toggled" />
-                </StackPanel>
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        x:Name="PopupPlacementCard"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Clipboard.PopupPlacement.Description"
-                        svc:Localized.HeaderKey="Settings.Clipboard.PopupPlacement.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.PopupPlacement.Title"
-                            x:Name="PopupPlacementComboBox"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            SelectionChanged="PopupPlacementComboBox_SelectionChanged">
-                            <ComboBoxItem Tag="FollowCaret">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.FollowCaret" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="FollowMouse">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.FollowMouse" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="ScreenCenter">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.ScreenCenter" />
-                            </ComboBoxItem>
-                        </ComboBox>
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        x:Name="DoubleCopyCard"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Clipboard.DoubleCopy.Description"
-                        svc:Localized.HeaderKey="Settings.Clipboard.DoubleCopy.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.DoubleCopy.Title"
-                            x:Name="DoubleCopyComboBox"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
-                            SelectionChanged="DoubleCopyComboBox_SelectionChanged">
-                            <ComboBoxItem Tag="None">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.None" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="Pin">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.Pin" />
-                            </ComboBoxItem>
-                            <ComboBoxItem Tag="SaveToQuickCapture">
-                                <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.SaveToQuickCapture" />
-                            </ComboBoxItem>
-                        </ComboBox>
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
-
-            <InfoBar
-                x:Name="ClipboardHotkeyReservedWarning"
-                IsClosable="False"
-                IsOpen="False"
-                Severity="Warning"
-                Visibility="Collapsed"
-                svc:Localized.DescriptionKey="Settings.GlobalHotkey.ReservedWarning"
-                svc:Localized.HeaderKey="Clipboard.Settings.Group.QuickPastePopup" />
 
             <!-- Expander 2: Privacy & Excluded Apps -->
             <toolkit:SettingsExpander

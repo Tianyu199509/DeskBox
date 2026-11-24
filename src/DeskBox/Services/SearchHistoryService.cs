@@ -47,6 +47,9 @@ public sealed partial class SearchHistoryService
     /// <summary>Raised whenever the recent-query list changes (record/clear).</summary>
     public event Action? RecentQueriesChanged;
 
+    /// <summary>Raised whenever any history list changes (recent, favorites, or recently opened items).</summary>
+    public event Action? HistoryChanged;
+
     /// <summary>Most recent queries, newest first.</summary>
     public IReadOnlyList<string> RecentQueries
     {
@@ -154,6 +157,7 @@ public sealed partial class SearchHistoryService
         {
             Save();
             RecentQueriesChanged?.Invoke();
+            HistoryChanged?.Invoke();
         }
     }
 
@@ -200,6 +204,7 @@ public sealed partial class SearchHistoryService
         }
 
         Save();
+        HistoryChanged?.Invoke();
     }
 
     /// <summary>
@@ -227,6 +232,7 @@ public sealed partial class SearchHistoryService
 
         Save();
         RecentQueriesChanged?.Invoke();
+        HistoryChanged?.Invoke();
         return true;
     }
 
@@ -259,6 +265,7 @@ public sealed partial class SearchHistoryService
         }
 
         Save();
+        HistoryChanged?.Invoke();
         return isFavorite;
     }
 
@@ -294,6 +301,7 @@ public sealed partial class SearchHistoryService
 
         Save();
         RecentQueriesChanged?.Invoke();
+        HistoryChanged?.Invoke();
     }
 
     public void ClearAllHistory()
@@ -308,6 +316,7 @@ public sealed partial class SearchHistoryService
 
         Save();
         RecentQueriesChanged?.Invoke();
+        HistoryChanged?.Invoke();
     }
 
     private void RebuildFrecencySnapshotUnderGate()
@@ -357,6 +366,14 @@ public sealed partial class SearchHistoryService
                 data.Recent ??= [];
                 data.Favorites ??= [];
                 data.RecentResults ??= [];
+                data.Recent.RemoveAll(string.IsNullOrWhiteSpace);
+                data.Favorites.RemoveAll(string.IsNullOrWhiteSpace);
+                data.RecentResults.RemoveAll(static r => r is null || string.IsNullOrWhiteSpace(r.Title));
+                foreach (PersistedResult result in data.RecentResults)
+                {
+                    result.Identity ??= string.Empty;
+                }
+
                 _data = data;
                 RebuildFrecencySnapshotUnderGate();
             }

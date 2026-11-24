@@ -279,7 +279,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
             }
 
             int unpinnedCount = Math.Max(0, stats.ActiveItemCount - stats.PinnedItemCount);
-            ClearUnpinnedButton.IsEnabled = EnableClipboardToggle.IsOn && unpinnedCount > 0;
+            ClearUnpinnedButton.IsEnabled = unpinnedCount > 0;
             StorageSummaryCard.Description = stats.ActiveItemCount == 0 && stats.TotalCacheBytes == 0
                 ? _localization.T("Settings.Clipboard.StorageSummary.Empty")
                 : _localization.Format(
@@ -436,29 +436,21 @@ public sealed partial class ClipboardSettingsSection : UserControl
     }
 
     /// <summary>
-    /// Grays the capture/behavior/privacy/storage cards while the clipboard
-    /// widget is disabled (batch 1 gating fix): editing them with the feature
-    /// off had no visible effect, which read as a broken page. Panels are not
-    /// Controls (no IsEnabled), so the direct card children are gated
-    /// instead — same semantics as the Quick Capture per-card bindings.
+    /// Clipboard capture, appearance, privacy, storage, and quick-paste popup
+    /// settings remain editable independently of whether the resident desktop
+    /// widget is currently open.
     /// </summary>
-    private void ApplyFeatureEnableGating(bool enabled)
+    private void ApplyFeatureEnableGating(bool _)
     {
         foreach (UIElement child in ClipboardSettingsBodyPanel.Children)
         {
-            if (ReferenceEquals(child, QuickPastePopupExpander) ||
-                ReferenceEquals(child, ClipboardHotkeyReservedWarning))
-            {
-                continue;
-            }
-
             if (child is Control control)
             {
-                control.IsEnabled = enabled;
+                control.IsEnabled = true;
             }
             else
             {
-                child.Opacity = enabled ? 1.0 : 0.45;
+                child.Opacity = 1.0;
             }
         }
 
@@ -468,22 +460,21 @@ public sealed partial class ClipboardSettingsSection : UserControl
 
     private void ApplyDependentControlGating()
     {
-        bool featureEnabled = EnableClipboardToggle.IsOn;
         bool isMinimalist =
             CardStyleComboBox.SelectedItem is ComboBoxItem { Tag: string styleTag } &&
             string.Equals(styleTag, CardStyleMinimalist, StringComparison.OrdinalIgnoreCase);
-        ShowSourceAppCard.IsEnabled = featureEnabled && !isMinimalist;
-        ShowSourceAppToggle.IsEnabled = featureEnabled && !isMinimalist;
+        ShowSourceAppCard.IsEnabled = !isMinimalist;
+        ShowSourceAppToggle.IsEnabled = !isMinimalist;
 
         bool captureImages = CaptureImagesCheckBox.IsChecked == true;
-        MaxImageSizeCard.IsEnabled = featureEnabled && captureImages;
-        MaxImageSizeComboBox.IsEnabled = featureEnabled && captureImages;
+        MaxImageSizeCard.IsEnabled = captureImages;
+        MaxImageSizeComboBox.IsEnabled = captureImages;
 
         bool isDefaultTabLayout = _settingsService is null ||
             ClipboardSettingsSlice.IsDefaultTabLayout(_settingsService.Settings.Clipboard.ClipboardTabLayout);
-        ResetTabLayoutButton.IsEnabled = featureEnabled && !isDefaultTabLayout;
+        ResetTabLayoutButton.IsEnabled = !isDefaultTabLayout;
 
-        ResetClipboardButton.IsEnabled = featureEnabled && (_widgetActions?.IsHostAvailable ?? false);
+        ResetClipboardButton.IsEnabled = _widgetActions?.IsHostAvailable ?? false;
     }
 
     private async Task RefreshClipboardHotkeyRegistrationStateAsync()
@@ -529,8 +520,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
         }
 
         ClipboardSettingsSlice slice = _settingsService.Settings.Clipboard;
-        bool featureEnabled = EnableClipboardToggle.IsOn;
-        bool hotkeyAvailable = featureEnabled && _hotkeyActions is not null;
+        bool hotkeyAvailable = _hotkeyActions is not null;
         bool hotkeyEnabled = slice.ClipboardHotkeyEnabled;
 
         GlobalHotkeyActivation effectiveActivation = GlobalHotkeyService.NormalizeActivation(
@@ -544,13 +534,13 @@ public sealed partial class ClipboardSettingsSection : UserControl
         {
             ClipboardHotkeyToggle.IsEnabled = hotkeyAvailable;
             ClipboardHotkeyCaptureButton.IsEnabled = hotkeyAvailable;
-            ClipboardHotkeyToggle.IsOn = hotkeyEnabled && hotkeyAvailable;
+            ClipboardHotkeyToggle.IsOn = hotkeyEnabled;
 
             bool popupPlacementEnabled = hotkeyAvailable && hotkeyEnabled;
             PopupPlacementCard.IsEnabled = popupPlacementEnabled;
             PopupPlacementComboBox.IsEnabled = popupPlacementEnabled;
-            DoubleCopyCard.IsEnabled = featureEnabled;
-            DoubleCopyComboBox.IsEnabled = featureEnabled;
+            DoubleCopyCard.IsEnabled = true;
+            DoubleCopyComboBox.IsEnabled = true;
         }
         finally
         {
@@ -628,8 +618,20 @@ public sealed partial class ClipboardSettingsSection : UserControl
 
         bool enabled = ClipboardHotkeyToggle.IsOn;
         _clipboardHotkeyError = null;
-        _hotkeyActions?.SetClipboardHotkeyEnabled(enabled);
         await SaveSliceMutationAsync(slice => slice.ClipboardHotkeyEnabled = enabled);
+        _hotkeyActions?.SetClipboardHotkeyEnabled(enabled);
+        if (!enabled)
+        {
+            _clipboardHotkeyRegistered = false;
+            RefreshClipboardHotkeyControls();
+        }
+        else
+        {
+            bool hotkeyAvailable = _hotkeyActions is not null;
+            PopupPlacementCard.IsEnabled = hotkeyAvailable;
+            PopupPlacementComboBox.IsEnabled = hotkeyAvailable;
+        }
+
         await RefreshClipboardHotkeyRegistrationStateAsync();
     }
 

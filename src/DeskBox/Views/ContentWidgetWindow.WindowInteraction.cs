@@ -719,7 +719,7 @@ public sealed partial class ContentWidgetWindow
         if (ContentWidgetShell.TitleEditorContent is TextBox &&
             ShouldOpenTitleBarFlyout(e.OriginalSource))
         {
-            _ = CommitTitleRenameAsync();
+            _ = CommitTitleRenameAsync(initiatedByBlur: true);
             e.Handled = true;
             return;
         }

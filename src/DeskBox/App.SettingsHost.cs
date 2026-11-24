@@ -61,6 +61,9 @@ public partial class App
             return 0;
         }
 
+        internal static bool IsBareSettingsArgumentWithoutPid(string[] arguments) =>
+            IsSettingsHostLaunch(arguments) && TryGetMainProcessId(arguments) == 0;
+
         /// <summary>The value after "--settings-section", or null (spawn deep link).</summary>
         internal static string? TryGetSectionArgument(string[] arguments) =>
             TryGetValueAfter(arguments, "--settings-section");
@@ -138,7 +141,7 @@ public partial class App
                     System.IO.File.AppendAllText(logPath, line);
                 }
             }
-            catch (System.IO.IOException)
+            catch (Exception)
             {
                 // Trace logging must never take the host down.
             }
@@ -152,6 +155,7 @@ public partial class App
 {
     private SettingsIpcClient? _settingsHostClient;
     private int _settingsHostMainProcessId;
+    private string[] _settingsHostLaunchArguments = [];
     private bool _settingsHostExitStarted;
     private Views.SettingsWindow? _settingsHostWindow;
     private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
@@ -167,15 +171,12 @@ public partial class App
     /// (AUMID, activation event, single-instance mutex, watchdog, elevation
     /// gate, DI container) stays skipped.
     /// </summary>
-    private void InitializeSettingsHost()
+    private void InitializeSettingsHost(string[]? launchArguments = null)
     {
         _isSettingsHost = true;
-        // Group the host window with the main app's taskbar button (without
-        // touching the Start Menu shortcut — see RegisterProcessAppUserModelIdOnly).
-        JumpListService.RegisterProcessAppUserModelIdOnly();
-        SettingsHostTrace("branch-entered");
-        Log("[SettingsHost] Constructor branch entered");
-        InitializeComponent();
+        _settingsHostLaunchArguments = launchArguments is { Length: > 0 }
+            ? launchArguments
+            : Environment.GetCommandLineArgs();
         UnhandledException += (_, eventArgs) =>
         {
             Log($"[SettingsHost] Unhandled exception: {eventArgs.Message}");
@@ -186,6 +187,24 @@ public partial class App
 
             eventArgs.Handled = true;
         };
+        // Group the host window with the main app's taskbar button (without
+        // touching the Start Menu shortcut — see RegisterProcessAppUserModelIdOnly).
+        JumpListService.RegisterProcessAppUserModelIdOnly();
+        SettingsHostTrace("branch-entered");
+        Log("[SettingsHost] Constructor branch entered");
+        try
+        {
+            InitializeComponent();
+            Log("[SettingsHost] InitializeComponent completed");
+        }
+        catch (Exception ex)
+        {
+            Log(
+                $"[SettingsHost] InitializeComponent failed: {ex.GetType().FullName} " +
+                $"(0x{ex.HResult:X8}): {ex.Message}{Environment.NewLine}{ex}");
+            DrainLogQueue();
+            throw;
+        }
     }
 
     /// <summary>
@@ -195,61 +214,76 @@ public partial class App
     /// </summary>
     private async void LaunchSettingsHostAsync()
     {
-        UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-        if (UiDispatcherQueue is not null)
-        {
-            DeskBox.Platform.UiDispatch.MarkReady(UiDispatcherQueue);
-        }
-        DeskBox.Helpers.ImeCompositionGuard.EnsureGlobalFocusTracking();
-        _settingsHostMainProcessId = SettingsHostLaunch.TryGetMainProcessId(
-            Environment.GetCommandLineArgs());
-        if (_settingsHostMainProcessId == 0)
-        {
-            Log("[SettingsHost] Missing main process id argument; exiting");
-            ExitSettingsHost();
-            return;
-        }
-
-        SettingsIpcClient client;
         try
         {
-            client = await SettingsIpcClient.ConnectAsync(
-                DeskBoxDataPathService.Current.SettingsIpcPipeName,
-                TimeSpan.FromMilliseconds(500),
-                attempts: 20);
+            UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            if (UiDispatcherQueue is not null)
+            {
+                DeskBox.Platform.UiDispatch.MarkReady(UiDispatcherQueue);
+            }
+            DeskBox.Helpers.ImeCompositionGuard.EnsureGlobalFocusTracking();
+            string[] effectiveArgs = _settingsHostLaunchArguments is { Length: > 0 }
+                ? _settingsHostLaunchArguments
+                : Environment.GetCommandLineArgs();
+            _settingsHostMainProcessId = SettingsHostLaunch.TryGetMainProcessId(effectiveArgs);
+            if (_settingsHostMainProcessId == 0)
+            {
+                Log("[SettingsHost] Missing main process id argument; exiting");
+                ExitSettingsHost();
+                return;
+            }
+
+            string pipeName = DeskBoxDataPathService.Current.SettingsIpcPipeName;
+            Log($"[SettingsHost] OnLaunched entered mainPid={_settingsHostMainProcessId} pipe={pipeName}");
+
+            SettingsIpcClient client;
+            try
+            {
+                client = await SettingsIpcClient.ConnectAsync(
+                    pipeName,
+                    TimeSpan.FromMilliseconds(500),
+                    attempts: 20);
+            }
+            catch (Exception ex)
+            {
+                Log(
+                    $"[SettingsHost] IPC connect failed: {ex.GetType().FullName} " +
+                    $"(0x{ex.HResult:X8}): {ex.Message}");
+                ExitSettingsHost();
+                return;
+            }
+
+            _settingsHostClient = client;
+            // Batch R12 (sequence audit, defect E): a broken pipe with the
+            // main process still alive used to leave this window running with
+            // every subsequent command failing into the silent-loss chain.
+            // The host is useless without the pipe — say so and exit in order.
+            client.Disconnected += () =>
+            {
+                Log("[SettingsHost] Pipe disconnected while the main process lives; exiting host");
+                UiDispatcherQueue?.TryEnqueue(ExitSettingsHost);
+            };
+            try
+            {
+                await RunSettingsHostBootAsync(client);
+            }
+            catch (Exception ex)
+            {
+                // A busy main process can make any boot step (load, VM
+                // construction) throw — without this the host stayed alive with
+                // no window (zombie) until the main process died (batch R5).
+                // Log full type + HRESULT + stack trace because Native AOT resource-key
+                // stripping leaves COMException.Message empty on missing WinUI modules.
+                Log(
+                    $"[SettingsHost] Boot failed: {ex.GetType().FullName} " +
+                    $"(0x{ex.HResult:X8}): {ex.Message}{Environment.NewLine}{ex}");
+                ExitSettingsHost();
+            }
         }
         catch (Exception ex)
         {
             Log(
-                $"[SettingsHost] IPC connect failed: {ex.GetType().FullName} " +
-                $"(0x{ex.HResult:X8}): {ex.Message}");
-            ExitSettingsHost();
-            return;
-        }
-
-        _settingsHostClient = client;
-        // Batch R12 (sequence audit, defect E): a broken pipe with the
-        // main process still alive used to leave this window running with
-        // every subsequent command failing into the silent-loss chain.
-        // The host is useless without the pipe — say so and exit in order.
-        client.Disconnected += () =>
-        {
-            Log("[SettingsHost] Pipe disconnected while the main process lives; exiting host");
-            UiDispatcherQueue?.TryEnqueue(ExitSettingsHost);
-        };
-        try
-        {
-            await RunSettingsHostBootAsync(client);
-        }
-        catch (Exception ex)
-        {
-            // A busy main process can make any boot step (load, VM
-            // construction) throw — without this the host stayed alive with
-            // no window (zombie) until the main process died (batch R5).
-            // Log full type + HRESULT + stack trace because Native AOT resource-key
-            // stripping leaves COMException.Message empty on missing WinUI modules.
-            Log(
-                $"[SettingsHost] Boot failed: {ex.GetType().FullName} " +
+                $"[SettingsHost] Unhandled launch failure: {ex.GetType().FullName} " +
                 $"(0x{ex.HResult:X8}): {ex.Message}{Environment.NewLine}{ex}");
             ExitSettingsHost();
         }
@@ -450,7 +484,9 @@ public partial class App
         // These ride the command line because the host cannot receive
         // pushed events before its pipe connects — pushing right after a
         // spawn is a silent drop.
-        string[] launchArguments = Environment.GetCommandLineArgs();
+        string[] launchArguments = _settingsHostLaunchArguments is { Length: > 0 }
+            ? _settingsHostLaunchArguments
+            : Environment.GetCommandLineArgs();
         if (SettingsHostLaunch.TryGetGlanceArgument(launchArguments) is { } launchGlance)
         {
             window.ShowGlanceSection(launchGlance);
@@ -833,6 +869,31 @@ public partial class App
         }
 
         DrainLogQueue();
+
+        // Unwind the active WinUI 3 Application.Start / OnLaunched message frame via
+        // DispatcherQueue before exiting so DllMain teardown never races live XAML/CoreMessaging
+        // handles on Win10 19044 (#1254). The background backstop thread above still enforces a
+        // hard 2.6s upper bound if the XAML loop fails to pump.
+        if (UiDispatcherQueue is { } dispatcher &&
+            dispatcher.TryEnqueue(() =>
+            {
+                try
+                {
+                    Exit();
+                    if (_settingsHostWindow is null)
+                    {
+                        Platform.Win32Helper.PostQuitMessage(0);
+                    }
+                }
+                catch
+                {
+                    Environment.Exit(0);
+                }
+            }))
+        {
+            return;
+        }
+
         Environment.Exit(0);
     }
 

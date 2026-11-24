@@ -129,15 +129,20 @@ internal static class WidgetTrayWindowPositionCommitter
 /// </summary>
 public sealed class WidgetTrayBatchAnimationDriver
 {
+    internal const int DeadlineGraceMilliseconds = 800;
+    internal const int MinimumDeadlineMilliseconds = 1000;
+
     private readonly List<WidgetTrayBatchAnimationEntry> _entries = new();
     private readonly Dictionary<WidgetTrayBatchAnimationEntry, EntryMotionState> _motionStates = new();
     private readonly List<WidgetTrayWindowPosition> _pendingMoves = new();
     private readonly List<(EntryMotionState State, int RefreshRateHz)> _pendingParticipants = new();
     private readonly Action<string> _log;
+    private readonly Action<string> _warnLog;
     private readonly Func<Action, Func<double>, IDisposable> _registerFrame;
     private readonly Func<WidgetTrayBatchAnimationEntry, double> _getFrameBudget;
     private readonly Func<IReadOnlyList<WidgetTrayWindowPosition>, bool[]> _commitPositions;
     private readonly Func<long> _getTimestamp;
+    private readonly Func<TimeSpan, Action, IDisposable>? _scheduleDeadline;
     private long? _startedTimestamp;
     private double _durationMs = 1;
     private double _maxStaggerDelayMs;
@@ -146,6 +151,7 @@ public sealed class WidgetTrayBatchAnimationDriver
     private int _remainingDelayFrames;
     private bool _isRunning;
     private IDisposable? _frameRegistration;
+    private IDisposable? _deadlineRegistration;
     private WidgetTrayAnimationFrameTracker? _frameTracker;
     private TaskCompletionSource? _idleCompletion;
     private Task _idleTask = Task.CompletedTask;
@@ -157,7 +163,9 @@ public sealed class WidgetTrayBatchAnimationDriver
                 entry.RefreshAnchorX ?? entry.BaseX, entry.RefreshAnchorY ?? entry.BaseY),
             positions => WidgetTrayWindowPositionCommitter.Commit(positions),
             Stopwatch.GetTimestamp,
-            log)
+            log,
+            WidgetCompactAnimationCoordinator.ScheduleDeadline,
+            App.Log)
     {
     }
 
@@ -166,16 +174,22 @@ public sealed class WidgetTrayBatchAnimationDriver
         Func<WidgetTrayBatchAnimationEntry, double> getFrameBudget,
         Func<IReadOnlyList<WidgetTrayWindowPosition>, bool[]> commitPositions,
         Func<long> getTimestamp,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        Func<TimeSpan, Action, IDisposable>? scheduleDeadline = null,
+        Action<string>? warnLog = null)
     {
         _registerFrame = registerFrame;
         _getFrameBudget = getFrameBudget;
         _commitPositions = commitPositions;
         _getTimestamp = getTimestamp;
         _log = log ?? (_ => { });
+        _warnLog = warnLog ?? _log;
+        _scheduleDeadline = scheduleDeadline;
     }
 
     public bool IsRunning => _isRunning;
+
+    public bool IsHiding => _isRunning && !_isShowing;
 
     /// <summary>
     /// Completes after the active batch has fully stopped. Visibility request
@@ -277,6 +291,15 @@ public sealed class WidgetTrayBatchAnimationDriver
         _idleTask = _idleCompletion.Task;
         _isRunning = true;
         StartFrameClock();
+        int deadlineMs = Math.Max(
+            MinimumDeadlineMilliseconds,
+            (int)Math.Ceiling(_durationMs + _maxStaggerDelayMs) + DeadlineGraceMilliseconds);
+        _deadlineRegistration = _scheduleDeadline?.Invoke(
+            TimeSpan.FromMilliseconds(deadlineMs),
+            OnBatchDeadlineExpired);
+        InteractionBreadcrumbRecorder.Record(
+            "tray-batch-start",
+            $"mode={(isShowing ? "show" : "hide")} n={_entries.Count}");
         _log(
             $"[BatchAnim] Start count={_entries.Count} durationMs={_durationMs} " +
             $"mode={(isShowing ? "show" : "hide")} delayFrames={_remainingDelayFrames} " +
@@ -304,9 +327,62 @@ public sealed class WidgetTrayBatchAnimationDriver
             return;
         }
 
+        InteractionBreadcrumbRecorder.Record(
+            "tray-batch-cancel",
+            $"mode={(_isShowing ? "show" : "hide")} n={_entries.Count}");
         ReportFrameMetrics("cancelled");
         StopCore();
         _log("[BatchAnim] Cancelled");
+    }
+
+    private void OnBatchDeadlineExpired()
+    {
+        if (!_isRunning)
+        {
+            return;
+        }
+
+        string mode = _isShowing ? "show" : "hide";
+        _warnLog(
+            $"[TrayAnimation] Batch animation deadline expired mode={mode} " +
+            $"participants={_entries.Count} durationMs={_durationMs:F0} " +
+            $"staggerMs={_maxStaggerDelayMs:F0}; forcing completion");
+        InteractionBreadcrumbRecorder.Record("tray-batch-timeout", $"mode={mode} n={_entries.Count}");
+
+        for (int i = _entries.Count - 1; i >= 0; i--)
+        {
+            if (!_entries[i].IsValid())
+            {
+                _motionStates.Remove(_entries[i]);
+                _entries.RemoveAt(i);
+            }
+        }
+
+        if (_entries.Count == 0)
+        {
+            Cancel();
+            return;
+        }
+
+        _remainingDelayFrames = 0;
+        long frameTimestamp = _getTimestamp();
+        if (_startedTimestamp is null)
+        {
+            _startedTimestamp = frameTimestamp;
+            _frameTracker = new WidgetTrayAnimationFrameTracker(
+                frameTimestamp,
+                _entries.Select(entry => entry.RefreshRateHz));
+        }
+
+        double totalMs = _durationMs + _maxStaggerDelayMs;
+        bool committed = MoveEntriesFrame(totalMs, finalFrame: true, frameTimestamp);
+        if (!committed)
+        {
+            FailBatch(new TimeoutException("Tray batch animation deadline expired before reaching final positions."));
+            return;
+        }
+
+        FinishBatch("timeout-completed");
     }
 
     private void OnRenderingFrame()
@@ -472,6 +548,9 @@ public sealed class WidgetTrayBatchAnimationDriver
 
     private void FinishBatch(string outcome = "completed")
     {
+        InteractionBreadcrumbRecorder.Record(
+            "tray-batch-done",
+            $"mode={(_isShowing ? "show" : "hide")} outcome={outcome} n={_entries.Count}");
         var completed = _entries.ToArray();
         ReportFrameMetrics(outcome);
         StopCore();
@@ -525,6 +604,8 @@ public sealed class WidgetTrayBatchAnimationDriver
 
     private void StopCore(Exception? failure = null)
     {
+        _deadlineRegistration?.Dispose();
+        _deadlineRegistration = null;
         TaskCompletionSource? idleCompletion = _idleCompletion;
         _idleCompletion = null;
         _isRunning = false;

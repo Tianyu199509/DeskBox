@@ -90,34 +90,33 @@ public sealed partial class QuickCaptureSurfaceContent
             if (!isBatch)
             {
                 var editItem = CreateContextMenuItem("QuickCapture.Edit", "\uE70F");
-                editItem.Click += async (_, _) =>
+                AttachDeferredContextFlyoutAction(flyout, editItem, async () =>
                 {
-                    flyout.Hide();
                     await OpenDetailAfterSavingAsync(primaryItem);
                     if (_detailItem is not null)
                     {
                         BeginDetailEditing();
                     }
-                };
+                });
                 flyout.Items.Add(editItem);
             }
 
             if (!isBatch)
             {
                 var popoutItem = CreateContextMenuItem("QuickCapture.Popout", "\uE8A7");
-                popoutItem.Click += (_, _) =>
+                AttachDeferredContextFlyoutAction(flyout, popoutItem, () =>
                 {
-                    flyout.Hide();
                     App.Current?.OpenQuickCapturePopoutWindow(primaryItem.Id, startAlwaysOnTop: false);
-                };
+                    return Task.CompletedTask;
+                });
                 flyout.Items.Add(popoutItem);
 
                 var stickyTopItem = CreateContextMenuItem("QuickCapture.PinOnTop", "\uE77A");
-                stickyTopItem.Click += (_, _) =>
+                AttachDeferredContextFlyoutAction(flyout, stickyTopItem, () =>
                 {
-                    flyout.Hide();
                     App.Current?.OpenQuickCapturePopoutWindow(primaryItem.Id, startAlwaysOnTop: true);
-                };
+                    return Task.CompletedTask;
+                });
                 flyout.Items.Add(stickyTopItem);
             }
 
@@ -179,11 +178,11 @@ public sealed partial class QuickCaptureSurfaceContent
         else
         {
             var stickyTopItem = CreateContextMenuItem("QuickCapture.PinOnTop", "\uE77A");
-            stickyTopItem.Click += (_, _) =>
+            AttachDeferredContextFlyoutAction(flyout, stickyTopItem, () =>
             {
-                flyout.Hide();
                 App.Current?.OpenQuickCapturePopoutWindow(primaryItem.Id, startAlwaysOnTop: true);
-            };
+                return Task.CompletedTask;
+            });
             flyout.Items.Add(stickyTopItem);
         }
 
@@ -201,11 +200,10 @@ public sealed partial class QuickCaptureSurfaceContent
 
         // Export .md
         var exportMdItem = CreateContextMenuItem("QuickCapture.ExportMarkdown", "\uEDE1");
-        exportMdItem.Click += async (_, _) =>
-        {
-            flyout.Hide();
-            await ExportItemsAsMarkdownWithPickerAsync(targetItems);
-        };
+        AttachDeferredContextFlyoutAction(
+            flyout,
+            exportMdItem,
+            () => ExportItemsAsMarkdownWithPickerAsync(targetItems));
         flyout.Items.Add(exportMdItem);
 
         // Merge notes (2+ selected)
@@ -400,11 +398,10 @@ public sealed partial class QuickCaptureSurfaceContent
         }
 
         var chooseFolderItem = CreateContextMenuItem("QuickCapture.SetMirrorFolder", "\uE8B7");
-        chooseFolderItem.Click += async (_, _) =>
-        {
-            owner.Hide();
-            await PickAndSetMirrorFolderAsync();
-        };
+        AttachDeferredContextFlyoutAction(
+            owner,
+            chooseFolderItem,
+            PickAndSetMirrorFolderAsync);
         submenu.Items.Add(chooseFolderItem);
 
         if (!string.IsNullOrWhiteSpace(activePath))
@@ -500,10 +497,7 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = foreground != IntPtr.Zero && Win32Helper.IsWindow(foreground)
-                ? foreground
-                : Win32Helper.GetDesktopWindow();
+            IntPtr owner = ResolveHostOwnerWindowHandle();
             string? folder = await FolderPickerService.PickFolderAsync(owner, "QuickCapture.ExportMarkdown");
             if (string.IsNullOrWhiteSpace(folder))
             {
@@ -546,10 +540,7 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            IntPtr owner = foreground != IntPtr.Zero && Win32Helper.IsWindow(foreground)
-                ? foreground
-                : Win32Helper.GetDesktopWindow();
+            IntPtr owner = ResolveHostOwnerWindowHandle();
             string? folder = await FolderPickerService.PickFolderAsync(owner, "QuickCapture.MirrorFolder");
             if (string.IsNullOrWhiteSpace(folder))
             {
@@ -677,5 +668,56 @@ public sealed partial class QuickCaptureSurfaceContent
             T(isArchived ? "QuickCapture.ArchivedSuccess" : "QuickCapture.UnarchivedSuccess"),
             WidgetFeedbackSeverity.Success,
             isArchived ? "quick-archived" : "quick-unarchived");
+    }
+
+    private void AttachDeferredContextFlyoutAction(
+        MenuFlyout rootFlyout,
+        MenuFlyoutItem triggerItem,
+        Func<Task> actionAfterClose)
+    {
+        bool pending = false;
+        triggerItem.Click += (_, _) =>
+        {
+            pending = true;
+            rootFlyout.Hide();
+        };
+
+        rootFlyout.Closed += (_, _) =>
+        {
+            if (!pending)
+            {
+                return;
+            }
+
+            pending = false;
+            DispatcherQueue?.TryEnqueue(async () =>
+            {
+                if (!_isDisposed)
+                {
+                    await actionAfterClose();
+                }
+            });
+        };
+    }
+
+    internal IntPtr ResolveHostOwnerWindowHandle()
+    {
+        if (XamlRoot?.ContentIslandEnvironment is { } env && env.AppWindowId.Value != 0)
+        {
+            IntPtr xamlHwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(env.AppWindowId);
+            if (xamlHwnd != IntPtr.Zero && Win32Helper.IsWindow(xamlHwnd))
+            {
+                return xamlHwnd;
+            }
+        }
+
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero || DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(foreground))
+        {
+            return IntPtr.Zero;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOT);
+        return root != IntPtr.Zero ? root : foreground;
     }
 }

@@ -785,6 +785,18 @@ public sealed partial class WidgetManager
                 continue;
             }
 
+            if (window is WidgetWindowBase activeInputWindow &&
+                activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus())
+            {
+                continue;
+            }
+
+            if (WidgetLayerService.IsDesktopHostTopMost(window.WindowHandle))
+            {
+                ResetBeddingLeakTracking();
+                return;
+            }
+
             witness = WidgetLayerService.FindForeignWindowBelow(window.WindowHandle);
             if (witness != IntPtr.Zero)
             {
@@ -825,7 +837,9 @@ public sealed partial class WidgetManager
         List<IntPtr> handles = GetLoadedDesktopWindows()
             .Where(window => window.Visible &&
                 window.WindowHandle != IntPtr.Zero &&
-                Win32Helper.IsWindow(window.WindowHandle))
+                Win32Helper.IsWindow(window.WindowHandle) &&
+                !(window is WidgetWindowBase activeInputWindow &&
+                  activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus()))
             .Select(window => window.WindowHandle)
             .ToList();
         if (handles.Count == 0)
@@ -1843,7 +1857,7 @@ public sealed partial class WidgetManager
                 return true;
             }
 
-            currentWindow = Win32Helper.GetParent(currentWindow);
+            currentWindow = Win32Helper.GetChildParent(currentWindow);
         }
 
         IntPtr rootWindow = Win32Helper.GetAncestor(pointerWindow, Win32Helper.GA_ROOT);
@@ -1884,7 +1898,7 @@ public sealed partial class WidgetManager
                 return true;
             }
 
-            currentWindow = Win32Helper.GetParent(currentWindow);
+            currentWindow = Win32Helper.GetChildParent(currentWindow);
         }
 
         IntPtr rootWindow = Win32Helper.GetAncestor(hWnd, Win32Helper.GA_ROOT);

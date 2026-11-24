@@ -230,13 +230,26 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             // different-process impostor cannot reproduce the spawn-time
             // creation stamp. A missing expected stamp (lookup failed at
             // spawn) keeps the pid-only contract.
-            if (expectedStart is { } expectedStartTime &&
-                Process.GetProcessById((int)clientPid).StartTime - expectedStartTime is
-                    { } drift && Math.Abs(drift.TotalMilliseconds) > 500)
+            if (expectedStart is { } expectedStartTime)
             {
-                App.Log(
-                    $"[SettingsIpc] Rejected pipe client pid={clientPid}: start time mismatch (suspected pid reuse)");
-                return false;
+                try
+                {
+                    using var clientProcess = Process.GetProcessById((int)clientPid);
+                    TimeSpan drift = clientProcess.StartTime - expectedStartTime;
+                    if (Math.Abs(drift.TotalMilliseconds) > 500)
+                    {
+                        App.Log(
+                            $"[SettingsIpc] Rejected pipe client pid={clientPid}: start time mismatch (suspected pid reuse)");
+                        return false;
+                    }
+                }
+                catch (Exception startEx)
+                {
+                    // Mirror spawn-side TryGetStartTime: if StartTime cannot be queried
+                    // after clientPid == expected already matched, keep the pid match (#1254).
+                    App.Log(
+                        $"[SettingsIpc] StartTime probe unavailable for pid={clientPid} ({startEx.GetType().Name}); accepting pid match");
+                }
             }
 
             return true;

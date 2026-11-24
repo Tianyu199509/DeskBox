@@ -208,6 +208,7 @@ public sealed partial class FileService
                 $"move={move} bytes={reporter.BytesTransferred} " +
                 $"elapsedMs={reporter.ElapsedMilliseconds}");
             NotifyShellDirectoriesUpdated(completedOperations, move);
+            NotifyCompletedMoveShellViews(operations, completedResults, move, notifyShellDirectories: false);
 
             return completedResults;
         }
@@ -242,6 +243,7 @@ public sealed partial class FileService
                 cancelSnapshot.AddRange(itemLevelCancelResults.CompletedResults);
             }
 
+            NotifyCompletedMoveShellViews(operations, cancelSnapshot, move);
             throw new FileTransferCanceledException(cancelSnapshot, cancellationToken);
         }
         catch (Exception exception)
@@ -259,6 +261,7 @@ public sealed partial class FileService
                 completedSnapshot.AddRange(itemLevelResults.CompletedResults);
             }
 
+            NotifyCompletedMoveShellViews(operations, completedSnapshot, move);
             throw new FileTransferPartialFailureException(completedSnapshot, exception);
         }
     }

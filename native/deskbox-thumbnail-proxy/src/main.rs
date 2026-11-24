@@ -11,12 +11,12 @@ mod windows_proxy {
     use std::{
         cell::RefCell,
         ffi::{OsStr, OsString, c_void},
-        io::{self, BufRead, Write},
+        io::{self, BufRead, Read, Write},
         mem::size_of,
         os::windows::ffi::{OsStrExt, OsStringExt},
         path::{Path, PathBuf},
         sync::{
-            Mutex, OnceLock,
+            Arc, Mutex, OnceLock,
             atomic::{AtomicBool, AtomicI8, AtomicIsize, AtomicU32, AtomicUsize, Ordering},
             mpsc,
         },
@@ -25,7 +25,7 @@ mod windows_proxy {
 
     use windows::{
         Win32::{
-            Foundation::{HANDLE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM},
+            Foundation::{COLORREF, HANDLE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM},
             Graphics::Gdi::{
                 AC_SRC_ALPHA, AC_SRC_OVER, AlphaBlend, BI_RGB, BITMAP, BITMAPINFO, BLENDFUNCTION,
                 CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits,
@@ -33,7 +33,10 @@ mod windows_proxy {
             },
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
             System::{
-                Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+                Com::{
+                    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
+                    CoInitializeEx, CoTaskMemFree, CoUninitialize,
+                },
                 LibraryLoader::{
                     GetModuleHandleW, GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
                 },
@@ -48,28 +51,35 @@ mod windows_proxy {
                 Shell::{
                     CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
                     CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
-                    Common::ITEMIDLIST, GCS_VERBA, GCS_VERBW, IContextMenu, IContextMenu2,
-                    IContextMenu3,
-                    IShellFolder, IShellItemImageFactory, SHBindToParent,
+                    Common::{COMDLG_FILTERSPEC, ITEMIDLIST},
+                    FILEOPENDIALOGOPTIONS, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST,
+                    FOS_FORCEFILESYSTEM, FOS_NODEREFERENCELINKS, FOS_PATHMUSTEXIST,
+                    FOS_PICKFOLDERS, FileOpenDialog, GCS_VERBA, GCS_VERBW, IContextMenu,
+                    IContextMenu2, IContextMenu3, IFileOpenDialog, IShellFolder, IShellItem,
+                    IShellItemArray, IShellItemImageFactory, SHBindToParent,
                     SHCreateItemFromParsingName, SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON,
                     SHGFI_LARGEICON, SHGFI_OVERLAYINDEX, SHGFI_SYSICONINDEX, SHGetFileInfoW,
                     SHGetImageList, SHIL_EXTRALARGE, SHIL_JUMBO, SHParseDisplayName,
-                    SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_SCALEUP, SIIGBF_THUMBNAILONLY,
+                    SIGDN_FILESYSPATH, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY, SIIGBF_SCALEUP,
+                    SIIGBF_THUMBNAILONLY,
                 },
                 WindowsAndMessaging::{
-                    AppendMenuW, CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-                    DeleteMenu, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
-                    GetClassNameW,
-                    GetIconInfo, GetMenuItemCount, GetMenuItemInfoW, GetMessageW, HICON, HMENU,
-                    ICONINFO, InsertMenuItemW, MENUITEMINFOW, MF_BYPOSITION, MF_SEPARATOR,
-                    MFT_SEPARATOR,
-                    MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
-                    PeekMessageW, PostMessageW, PostThreadMessageW, RegisterClassW, SW_SHOWNORMAL,
-                    SetForegroundWindow, SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx,
-                    TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_DRAWITEM,
-                    WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-                    WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WM_QUIT, WM_RBUTTONDOWN, WM_XBUTTONDOWN,
-                    WNDCLASSW, WS_EX_TOPMOST, WindowFromPoint,
+                    ASFW_ANY, AllowSetForegroundWindow, AppendMenuW, CallNextHookEx,
+                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DeleteMenu, DestroyIcon,
+                    DestroyMenu, DestroyWindow, DispatchMessageW, EnumWindows, GetClassNameW,
+                    GetIconInfo, GetMenuItemCount, GetMenuItemInfoW, GetMessageW,
+                    GetWindowThreadProcessId, HICON, HMENU, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO,
+                    InsertMenuItemW, LWA_ALPHA, MENUITEMINFOW, MF_BYPOSITION, MF_SEPARATOR,
+                    MFT_SEPARATOR, MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG,
+                    MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW,
+                    RegisterClassW, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowPos,
+                    SetWindowsHookExW, ShowWindow, TPM_RETURNCMD, TrackPopupMenuEx,
+                    TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_CLOSE,
+                    WM_DRAWITEM, WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+                    WM_MBUTTONDOWN, WM_MEASUREITEM, WM_MENUCHAR, WM_NULL, WM_QUIT, WM_RBUTTONDOWN,
+                    WM_XBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_EX_TRANSPARENT, WS_POPUP, WindowFromPoint,
                 },
             },
         },
@@ -219,6 +229,22 @@ mod windows_proxy {
             dark: bool,
         },
         MediaSessionServer,
+        PickFolder {
+            anchor_x: i32,
+            anchor_y: i32,
+            dark: bool,
+            watch_stdin: bool,
+        },
+        PickFiles {
+            anchor_x: i32,
+            anchor_y: i32,
+            default_folder: Option<PathBuf>,
+            filter_spec: Option<String>,
+            allow_multi_select: bool,
+            no_dereference_links: bool,
+            dark: bool,
+            watch_stdin: bool,
+        },
     }
 
     #[derive(Clone)]
@@ -640,6 +666,31 @@ mod windows_proxy {
             }
             ProxyRequest::ContextMenuServer { dark } => run_context_menu_server(dark),
             ProxyRequest::MediaSessionServer => crate::media_session::run_media_session_server(),
+            ProxyRequest::PickFolder {
+                anchor_x,
+                anchor_y,
+                dark,
+                watch_stdin,
+            } => run_pick_folder(anchor_x, anchor_y, dark, watch_stdin),
+            ProxyRequest::PickFiles {
+                anchor_x,
+                anchor_y,
+                default_folder,
+                filter_spec,
+                allow_multi_select,
+                no_dereference_links,
+                dark,
+                watch_stdin,
+            } => run_pick_files(
+                anchor_x,
+                anchor_y,
+                default_folder.as_deref(),
+                filter_spec.as_deref(),
+                allow_multi_select,
+                no_dereference_links,
+                dark,
+                watch_stdin,
+            ),
         }
     }
 
@@ -676,6 +727,94 @@ mod windows_proxy {
                 return Err("unexpected extra arguments".to_string());
             }
             return Ok(ProxyRequest::MediaSessionServer);
+        }
+        if first == "--pick-folder" {
+            let anchor_x = parse_coordinate(arguments.next(), "x")?;
+            let anchor_y = parse_coordinate(arguments.next(), "y")?;
+            let mut dark = false;
+            let mut watch_stdin = false;
+            while let Some(arg) = arguments.next() {
+                let text = arg.to_string_lossy();
+                match text.as_ref() {
+                    "--watch-stdin" => watch_stdin = true,
+                    "--theme" => {
+                        let token = arguments
+                            .next()
+                            .ok_or_else(|| "missing --theme value".to_string())?;
+                        dark = menu_dark_from_token(&token.to_string_lossy());
+                    }
+                    "dark" | "light" | "1" | "0" | "true" | "false" => {
+                        dark = menu_dark_from_token(&text);
+                    }
+                    _ => return Err("unexpected extra arguments".to_string()),
+                }
+            }
+            return Ok(ProxyRequest::PickFolder {
+                anchor_x,
+                anchor_y,
+                dark,
+                watch_stdin,
+            });
+        }
+        if first == "--pick-files" {
+            let anchor_x = parse_coordinate(arguments.next(), "x")?;
+            let anchor_y = parse_coordinate(arguments.next(), "y")?;
+            let mut default_folder: Option<PathBuf> = None;
+            let mut filter_spec: Option<String> = None;
+            let mut allow_multi_select = true;
+            let mut no_dereference_links = true;
+            let mut dark = false;
+            let mut watch_stdin = false;
+            while let Some(arg) = arguments.next() {
+                let text = arg.to_string_lossy();
+                match text.as_ref() {
+                    "--watch-stdin" => watch_stdin = true,
+                    "--single" => allow_multi_select = false,
+                    "--dereference-links" => no_dereference_links = false,
+                    "--theme" => {
+                        let token = arguments
+                            .next()
+                            .ok_or_else(|| "missing --theme value".to_string())?;
+                        dark = menu_dark_from_token(&token.to_string_lossy());
+                    }
+                    "--default-folder" => {
+                        let folder = arguments
+                            .next()
+                            .ok_or_else(|| "missing --default-folder value".to_string())?
+                            .to_string_lossy()
+                            .into_owned();
+                        if !folder.trim().is_empty() {
+                            default_folder = Some(PathBuf::from(folder));
+                        }
+                    }
+                    "--filter" => {
+                        let raw_filter = arguments
+                            .next()
+                            .ok_or_else(|| "missing --filter value".to_string())?
+                            .to_string_lossy()
+                            .into_owned();
+                        if !raw_filter.trim().is_empty() {
+                            filter_spec = Some(raw_filter);
+                        }
+                    }
+                    _ if default_folder.is_none() && !text.starts_with("--") => {
+                        if !text.trim().is_empty() {
+                            default_folder = Some(PathBuf::from(text.into_owned()));
+                        }
+                    }
+                    _ => return Err("unexpected extra arguments".to_string()),
+                }
+            }
+            return Ok(ProxyRequest::PickFiles {
+                anchor_x,
+                anchor_y,
+                default_folder,
+                filter_spec,
+                allow_multi_select,
+                no_dereference_links,
+                dark,
+                watch_stdin,
+            });
         }
         if first == "--extract-batch" {
             if arguments.next().is_some() {
@@ -1719,8 +1858,12 @@ mod windows_proxy {
             return Ok(CONTEXT_MENU_EXIT_CANCELLED);
         }
         if selected >= CONTEXT_MENU_CUSTOM_COMMAND_FIRST {
-            // Host-owned command (rename today). The host executes it with its
-            // own view-host pipeline; nothing to invoke on the Shell side.
+            // Host-owned command (rename today). Hand foreground activation
+            // permission back to DeskBox before returning so inline rename can
+            // claim Win32 foreground on desktop-pinned / popover surfaces.
+            unsafe {
+                let _ = AllowSetForegroundWindow(ASFW_ANY);
+            }
             return Ok(CONTEXT_MENU_EXIT_CUSTOM_COMMAND);
         }
         if selected < CONTEXT_MENU_FIRST_COMMAND_ID {
@@ -2304,14 +2447,31 @@ mod windows_proxy {
             } else {
                 consecutive_failures = 0;
             }
-            if menus_served >= CONTEXT_MENU_SERVER_MAX_MENUS
-                || consecutive_failures >= CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES
-            {
+            if should_retire_context_menu_server(result_code, menus_served, consecutive_failures) {
                 write_stdout(b"bye\n")?;
                 return Ok(0);
             }
         }
         Ok(0)
+    }
+
+    /// Retires the warm context-menu server once its menu budget or consecutive
+    /// failure cap is reached, except on host-owned custom commands (such as
+    /// rename): destroying the foreground proxy owner HWND immediately after
+    /// `AllowSetForegroundWindow(ASFW_ANY)` causes Windows to hand foreground to
+    /// an arbitrary third-party window and revokes DeskBox's foreground grant
+    /// before the inline rename editor can activate.
+    fn should_retire_context_menu_server(
+        result_code: i32,
+        menus_served: u32,
+        consecutive_failures: u32,
+    ) -> bool {
+        if consecutive_failures >= CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES {
+            return true;
+        }
+
+        result_code != CONTEXT_MENU_EXIT_CUSTOM_COMMAND
+            && menus_served >= CONTEXT_MENU_SERVER_MAX_MENUS
     }
 
     /// Loads and populates one throwaway menu so the shared handler DLLs are
@@ -2514,6 +2674,353 @@ mod windows_proxy {
         }
         .map_err(|error| format!("Context menu owner window creation failed: {error}"))?;
         Ok(WindowGuard(window))
+    }
+
+    const PICK_DIALOG_EXIT_PICKED: i32 = 0;
+    const PICK_DIALOG_EXIT_CANCELLED: i32 = 2;
+    const PICK_DIALOG_EXIT_FAILED: i32 = 3;
+    const HRESULT_ERROR_CANCELLED: i32 = 0x8007_04C7_u32 as i32;
+
+    struct CoTaskMemStringGuard(PWSTR);
+
+    impl Drop for CoTaskMemStringGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: Allocated by IShellItem::GetDisplayName via CoTaskMemAlloc.
+                unsafe {
+                    CoTaskMemFree(Some(self.0.0.cast()));
+                }
+            }
+        }
+    }
+
+    fn create_picker_owner_window(anchor_x: i32, anchor_y: i32) -> Result<WindowGuard, String> {
+        let class_name: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let window_name: Vec<u16> = "DeskBox Picker Host\0".encode_utf16().collect();
+        let module = unsafe { GetModuleHandleW(None) }
+            .map_err(|error| format!("Module handle lookup failed: {error}"))?;
+        let window = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_TRANSPARENT,
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR(window_name.as_ptr()),
+                WS_POPUP,
+                anchor_x,
+                anchor_y,
+                1,
+                1,
+                None,
+                None,
+                Some(module.into()),
+                None,
+            )
+        }
+        .map_err(|error| format!("Picker owner window creation failed: {error}"))?;
+
+        let guard = WindowGuard(window);
+        unsafe {
+            let _ = SetLayeredWindowAttributes(window, COLORREF(0), 0, LWA_ALPHA);
+            let _ = ShowWindow(window, SW_SHOWNORMAL);
+            if !SetForegroundWindow(window).as_bool() {
+                let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+                let _ = SetWindowPos(window, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+                let _ = SetWindowPos(window, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+            }
+        }
+        pump_messages_once();
+        Ok(guard)
+    }
+
+    fn shell_item_filesystem_path(item: &IShellItem) -> Result<Option<String>, windows::core::Error> {
+        let raw_name = unsafe { item.GetDisplayName(SIGDN_FILESYSPATH) }?;
+        let _guard = CoTaskMemStringGuard(raw_name);
+        if raw_name.is_null() {
+            return Ok(None);
+        }
+
+        // SAFETY: GetDisplayName returns a NUL-terminated UTF-16 string on S_OK.
+        let mut len = 0usize;
+        unsafe {
+            while *raw_name.0.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(raw_name.0, len);
+            let text = OsString::from_wide(slice).to_string_lossy().into_owned();
+            if text.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(text))
+            }
+        }
+    }
+
+    fn close_current_process_file_dialogs() {
+        unsafe extern "system" fn close_dialog_callback(hwnd: HWND, l_param: LPARAM) -> BOOL {
+            let target_pid = l_param.0 as u32;
+            let mut window_pid = 0u32;
+            unsafe {
+                let _ = GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+            }
+            if window_pid != target_pid {
+                return BOOL(1);
+            }
+
+            let mut class_buf = [0u16; 32];
+            let len = unsafe { GetClassNameW(hwnd, &mut class_buf) };
+            if len > 0 {
+                let class_name = String::from_utf16_lossy(&class_buf[..len as usize]);
+                if class_name == "#32770" {
+                    unsafe {
+                        let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                    }
+                }
+            }
+            BOOL(1)
+        }
+
+        let self_pid = std::process::id() as isize;
+        unsafe {
+            let _ = EnumWindows(Some(close_dialog_callback), LPARAM(self_pid));
+        }
+    }
+
+    fn spawn_picker_stdin_eof_watchdog(picker_done: &Arc<AtomicBool>) {
+        let done = Arc::clone(picker_done);
+        let _ = std::thread::Builder::new()
+            .name("picker-stdin-eof".to_string())
+            .spawn(move || {
+                let mut buf = [0u8; 1];
+                loop {
+                    match io::stdin().read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => continue,
+                    }
+                }
+                if !done.load(Ordering::Acquire) {
+                    close_current_process_file_dialogs();
+                    std::thread::sleep(Duration::from_millis(350));
+                    if !done.load(Ordering::Acquire) {
+                        std::process::exit(PICK_DIALOG_EXIT_CANCELLED);
+                    }
+                }
+            });
+    }
+
+    fn parse_file_filter_entries(raw: Option<&str>) -> Vec<(String, String)> {
+        let Some(raw_text) = raw else {
+            return Vec::new();
+        };
+        let mut patterns: Vec<String> = Vec::new();
+        for token in raw_text.split(';') {
+            let trimmed = token.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed == "*" || trimmed == "*.*" || trimmed == ".*" {
+                return Vec::new();
+            }
+            let normalized = if let Some(stripped) = trimmed.strip_prefix("*.") {
+                format!("*.{stripped}")
+            } else if let Some(stripped) = trimmed.strip_prefix('.') {
+                format!("*.{stripped}")
+            } else {
+                format!("*.{trimmed}")
+            };
+            if normalized.len() <= 2 {
+                continue;
+            }
+            if !patterns
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&normalized))
+            {
+                patterns.push(normalized);
+            }
+        }
+        if patterns.is_empty() {
+            return Vec::new();
+        }
+        if patterns.len() == 1 {
+            let single = patterns.remove(0);
+            return vec![(single.clone(), single)];
+        }
+        let combined_spec = patterns.join(";");
+        let combined_label = patterns.join("; ");
+        let mut entries = Vec::with_capacity(patterns.len() + 1);
+        entries.push((combined_label, combined_spec));
+        for pattern in patterns {
+            entries.push((pattern.clone(), pattern));
+        }
+        entries
+    }
+
+    fn run_pick_folder(
+        anchor_x: i32,
+        anchor_y: i32,
+        dark: bool,
+        watch_stdin: bool,
+    ) -> Result<i32, String> {
+        apply_per_monitor_dpi_awareness();
+        set_process_menu_theme(dark);
+        let picker_done = Arc::new(AtomicBool::new(false));
+        if watch_stdin {
+            spawn_picker_stdin_eof_watchdog(&picker_done);
+        }
+        let _com_guard = initialize_com()?;
+        let outcome: Result<Option<String>, windows::core::Error> = (|| {
+            let owner = create_picker_owner_window(anchor_x, anchor_y).ok();
+            let owner_hwnd = owner.as_ref().map(|guard| guard.0);
+            if let Some(hwnd) = owner_hwnd {
+                apply_menu_theme(hwnd, dark);
+            }
+            let dialog: IFileOpenDialog =
+                unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }?;
+            let options: FILEOPENDIALOGOPTIONS =
+                FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+            unsafe { dialog.SetOptions(options) }?;
+            unsafe { dialog.Show(owner_hwnd) }?;
+            let item = unsafe { dialog.GetResult() }?;
+            let picked = shell_item_filesystem_path(&item)?;
+            drop(item);
+            drop(dialog);
+            drop(owner);
+            pump_messages_once();
+            Ok(picked)
+        })();
+        picker_done.store(true, Ordering::Release);
+
+        match outcome {
+            Ok(Some(folder)) => {
+                let mut payload = folder;
+                payload.push('\n');
+                write_stdout(payload.as_bytes())?;
+                unsafe {
+                    let _ = AllowSetForegroundWindow(ASFW_ANY);
+                }
+                Ok(PICK_DIALOG_EXIT_PICKED)
+            }
+            Ok(None) => Ok(PICK_DIALOG_EXIT_CANCELLED),
+            Err(error) if error.code().0 == HRESULT_ERROR_CANCELLED => Ok(PICK_DIALOG_EXIT_CANCELLED),
+            Err(error) => {
+                eprintln!("hr=0x{:08X} {error}", error.code().0 as u32);
+                Ok(PICK_DIALOG_EXIT_FAILED)
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_pick_files(
+        anchor_x: i32,
+        anchor_y: i32,
+        default_folder: Option<&Path>,
+        filter_spec: Option<&str>,
+        allow_multi_select: bool,
+        no_dereference_links: bool,
+        dark: bool,
+        watch_stdin: bool,
+    ) -> Result<i32, String> {
+        apply_per_monitor_dpi_awareness();
+        set_process_menu_theme(dark);
+        let picker_done = Arc::new(AtomicBool::new(false));
+        if watch_stdin {
+            spawn_picker_stdin_eof_watchdog(&picker_done);
+        }
+        let _com_guard = initialize_com()?;
+        let filter_entries = parse_file_filter_entries(filter_spec);
+        let outcome: Result<Vec<String>, windows::core::Error> = (|| {
+            let owner = create_picker_owner_window(anchor_x, anchor_y).ok();
+            let owner_hwnd = owner.as_ref().map(|guard| guard.0);
+            if let Some(hwnd) = owner_hwnd {
+                apply_menu_theme(hwnd, dark);
+            }
+            let dialog: IFileOpenDialog =
+                unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER) }?;
+            let mut options: FILEOPENDIALOGOPTIONS =
+                FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST;
+            if allow_multi_select {
+                options |= FOS_ALLOWMULTISELECT;
+            }
+            if no_dereference_links {
+                options |= FOS_NODEREFERENCELINKS;
+            }
+            unsafe { dialog.SetOptions(options) }?;
+
+            let wide_filters: Vec<(Vec<u16>, Vec<u16>)> = filter_entries
+                .iter()
+                .map(|(label, spec)| {
+                    let wide_label: Vec<u16> =
+                        label.encode_utf16().chain(std::iter::once(0)).collect();
+                    let wide_spec: Vec<u16> =
+                        spec.encode_utf16().chain(std::iter::once(0)).collect();
+                    (wide_label, wide_spec)
+                })
+                .collect();
+            if !wide_filters.is_empty() {
+                let specs: Vec<COMDLG_FILTERSPEC> = wide_filters
+                    .iter()
+                    .map(|(wide_label, wide_spec)| COMDLG_FILTERSPEC {
+                        pszName: PCWSTR(wide_label.as_ptr()),
+                        pszSpec: PCWSTR(wide_spec.as_ptr()),
+                    })
+                    .collect();
+                unsafe { dialog.SetFileTypes(&specs) }?;
+                unsafe { dialog.SetFileTypeIndex(1) }?;
+            }
+
+            if let Some(folder_path) = default_folder {
+                let wide: Vec<u16> = folder_path
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                if let Ok(folder_item) =
+                    unsafe { SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None) }
+                {
+                    let _ = unsafe { dialog.SetDefaultFolder(&folder_item) };
+                }
+            }
+
+            unsafe { dialog.Show(owner_hwnd) }?;
+            let mut paths = Vec::new();
+            if allow_multi_select {
+                let results: IShellItemArray = unsafe { dialog.GetResults() }?;
+                let count = unsafe { results.GetCount() }?;
+                paths.reserve(count as usize);
+                for index in 0..count {
+                    let item = unsafe { results.GetItemAt(index) }?;
+                    if let Some(path) = shell_item_filesystem_path(&item)? {
+                        paths.push(path);
+                    }
+                }
+            } else {
+                let item = unsafe { dialog.GetResult() }?;
+                if let Some(path) = shell_item_filesystem_path(&item)? {
+                    paths.push(path);
+                }
+            }
+            drop(dialog);
+            drop(owner);
+            pump_messages_once();
+            Ok(paths)
+        })();
+        picker_done.store(true, Ordering::Release);
+
+        match outcome {
+            Ok(paths) if !paths.is_empty() => {
+                let mut payload = paths.join("\n");
+                payload.push('\n');
+                write_stdout(payload.as_bytes())?;
+                unsafe {
+                    let _ = AllowSetForegroundWindow(ASFW_ANY);
+                }
+                Ok(PICK_DIALOG_EXIT_PICKED)
+            }
+            Ok(_) => Ok(PICK_DIALOG_EXIT_CANCELLED),
+            Err(error) if error.code().0 == HRESULT_ERROR_CANCELLED => Ok(PICK_DIALOG_EXIT_CANCELLED),
+            Err(error) => {
+                eprintln!("hr=0x{:08X} {error}", error.code().0 as u32);
+                Ok(PICK_DIALOG_EXIT_FAILED)
+            }
+        }
     }
 
     unsafe extern "system" fn context_menu_window_proc(
@@ -3276,6 +3783,175 @@ mod windows_proxy {
             )
             .expect_err("extra arguments must be rejected");
             assert!(rejected.contains("unexpected extra arguments"));
+        }
+
+        #[test]
+        fn pick_folder_and_pick_files_requests_parse_coordinates_and_optional_folder() {
+            let folder_req = parse_request_from(
+                ["--pick-folder", "320", "240"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("pick folder request");
+            assert!(matches!(
+                folder_req,
+                ProxyRequest::PickFolder {
+                    anchor_x: 320,
+                    anchor_y: 240,
+                    dark: false,
+                    watch_stdin: false,
+                }
+            ));
+
+            let folder_dark_watched = parse_request_from(
+                ["--pick-folder", "320", "240", "--theme", "dark", "--watch-stdin"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("pick folder dark watched");
+            assert!(matches!(
+                folder_dark_watched,
+                ProxyRequest::PickFolder {
+                    anchor_x: 320,
+                    anchor_y: 240,
+                    dark: true,
+                    watch_stdin: true,
+                }
+            ));
+
+            let files_without_default = parse_request_from(
+                ["--pick-files", "-100", "480"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("pick files without default folder");
+            assert!(matches!(
+                files_without_default,
+                ProxyRequest::PickFiles {
+                    anchor_x: -100,
+                    anchor_y: 480,
+                    default_folder: None,
+                    filter_spec: None,
+                    allow_multi_select: true,
+                    no_dereference_links: true,
+                    dark: false,
+                    watch_stdin: false,
+                }
+            ));
+
+            let files_with_default = parse_request_from(
+                ["--pick-files", "120", "160", r"C:\Work"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("pick files with default folder");
+            match files_with_default {
+                ProxyRequest::PickFiles {
+                    anchor_x,
+                    anchor_y,
+                    default_folder,
+                    filter_spec,
+                    allow_multi_select,
+                    no_dereference_links,
+                    dark,
+                    watch_stdin,
+                } => {
+                    assert_eq!((anchor_x, anchor_y), (120, 160));
+                    assert_eq!(default_folder, Some(PathBuf::from(r"C:\Work")));
+                    assert_eq!(filter_spec, None);
+                    assert!(allow_multi_select);
+                    assert!(no_dereference_links);
+                    assert!(!dark);
+                    assert!(!watch_stdin);
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+
+            let filtered_single = parse_request_from(
+                [
+                    "--pick-files",
+                    "40",
+                    "80",
+                    "--theme",
+                    "dark",
+                    "--watch-stdin",
+                    "--single",
+                    "--dereference-links",
+                    "--default-folder",
+                    "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}",
+                    "--filter",
+                    "*.png;*.jpg",
+                ]
+                .into_iter()
+                .map(OsString::from),
+            )
+            .expect("filtered single file request");
+            match filtered_single {
+                ProxyRequest::PickFiles {
+                    anchor_x,
+                    anchor_y,
+                    default_folder,
+                    filter_spec,
+                    allow_multi_select,
+                    no_dereference_links,
+                    dark,
+                    watch_stdin,
+                } => {
+                    assert_eq!((anchor_x, anchor_y), (40, 80));
+                    assert_eq!(
+                        default_folder,
+                        Some(PathBuf::from("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"))
+                    );
+                    assert_eq!(filter_spec.as_deref(), Some("*.png;*.jpg"));
+                    assert!(!allow_multi_select);
+                    assert!(!no_dereference_links);
+                    assert!(dark);
+                    assert!(watch_stdin);
+                }
+                other => panic!("unexpected request: {other:?}"),
+            }
+        }
+
+        #[test]
+        fn parse_file_filter_entries_builds_combined_and_per_extension_specs() {
+            assert!(parse_file_filter_entries(None).is_empty());
+            assert!(parse_file_filter_entries(Some("*.*")).is_empty());
+            assert_eq!(
+                parse_file_filter_entries(Some(".zip")),
+                vec![("*.zip".to_string(), "*.zip".to_string())]
+            );
+            assert_eq!(
+                parse_file_filter_entries(Some("*.png; .jpg ; *.PNG")),
+                vec![
+                    ("*.png; *.jpg".to_string(), "*.png;*.jpg".to_string()),
+                    ("*.png".to_string(), "*.png".to_string()),
+                    ("*.jpg".to_string(), "*.jpg".to_string()),
+                ]
+            );
+        }
+
+        #[test]
+        fn context_menu_server_retirement_defers_for_custom_rename_command() {
+            assert!(!should_retire_context_menu_server(
+                CONTEXT_MENU_EXIT_CUSTOM_COMMAND,
+                CONTEXT_MENU_SERVER_MAX_MENUS,
+                0
+            ));
+            assert!(should_retire_context_menu_server(
+                CONTEXT_MENU_EXIT_INVOKED,
+                CONTEXT_MENU_SERVER_MAX_MENUS,
+                0
+            ));
+            assert!(should_retire_context_menu_server(
+                CONTEXT_MENU_EXIT_CANCELLED,
+                CONTEXT_MENU_SERVER_MAX_MENUS,
+                0
+            ));
+            assert!(should_retire_context_menu_server(
+                CONTEXT_MENU_EXIT_FAILED,
+                1,
+                CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES
+            ));
         }
     }
 }

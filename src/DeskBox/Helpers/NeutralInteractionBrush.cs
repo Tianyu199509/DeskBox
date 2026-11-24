@@ -145,18 +145,67 @@ public static class NeutralInteractionBrush
     {
         if (scope is FrameworkElement element)
         {
-            if (element.RequestedTheme is ElementTheme.Light or ElementTheme.Dark)
+            ElementTheme nearestRequested = ElementTheme.Default;
+            for (DependencyObject? current = element;
+                 current is not null;
+                 current = VisualTreeHelper.GetParent(current))
             {
-                return element.RequestedTheme;
+                if (current is FrameworkElement candidate &&
+                    candidate.RequestedTheme is ElementTheme.Light or ElementTheme.Dark)
+                {
+                    nearestRequested = candidate.RequestedTheme;
+                    break;
+                }
             }
 
-            if (element.ActualTheme is ElementTheme.Light or ElementTheme.Dark)
-            {
-                return element.ActualTheme;
-            }
+            return ResolveElementThemeCore(
+                nearestRequested,
+                element.IsLoaded,
+                element.ActualTheme,
+                App.Current?.ThemeService?.EffectiveTheme);
         }
 
-        return App.Current?.ThemeService?.EffectiveTheme ?? ElementTheme.Light;
+        return ResolveElementThemeCore(
+            ElementTheme.Default,
+            isElementLoaded: false,
+            ElementTheme.Default,
+            App.Current?.ThemeService?.EffectiveTheme);
+    }
+
+    /// <summary>
+    /// Resolves the effective <see cref="ElementTheme"/> for a scope element.
+    /// An unloaded WinUI element with <see cref="ElementTheme.Default"/> reports
+    /// <c>Application.Current.RequestedTheme</c> (pinned to the startup OS theme)
+    /// as its <c>ActualTheme</c>, so unloaded elements fall back to the app's
+    /// effective theme first.
+    /// </summary>
+    internal static ElementTheme ResolveElementThemeCore(
+        ElementTheme nearestExplicitRequestedTheme,
+        bool isElementLoaded,
+        ElementTheme elementActualTheme,
+        ElementTheme? appEffectiveTheme)
+    {
+        if (nearestExplicitRequestedTheme is ElementTheme.Light or ElementTheme.Dark)
+        {
+            return nearestExplicitRequestedTheme;
+        }
+
+        if (isElementLoaded && elementActualTheme is ElementTheme.Light or ElementTheme.Dark)
+        {
+            return elementActualTheme;
+        }
+
+        if (appEffectiveTheme is ElementTheme.Light or ElementTheme.Dark)
+        {
+            return appEffectiveTheme.Value;
+        }
+
+        if (elementActualTheme is ElementTheme.Light or ElementTheme.Dark)
+        {
+            return elementActualTheme;
+        }
+
+        return ElementTheme.Light;
     }
 
     internal static bool TryResolveBrushBackedColorKey(string resourceKey, out string colorKey)

@@ -600,14 +600,25 @@ public sealed partial class ContentWidgetWindow
             Text = App.Current.LocalizationService.T("Common.Rename"),
             Icon = new FontIcon { Glyph = "\uE8AC" }
         };
-        rename.Click += (_, _) => startRenameWhenClosed = true;
+        rename.Click += (_, _) =>
+        {
+            startRenameWhenClosed = true;
+            pickerHandoff ??= AcquireCloseWidgetFlyoutHandoff();
+        };
         flyout.Closed += (_, _) =>
         {
             try
             {
                 if (startRenameWhenClosed)
                 {
-                    DispatcherQueue.TryEnqueue(StartTitleRename);
+                    QueueInteractionGuardedFlyout(
+                        pickerHandoff,
+                        () =>
+                        {
+                            StartTitleRename();
+                            return Task.CompletedTask;
+                        });
+                    pickerHandoff = null;
                 }
                 else if (showCloseWhenClosed)
                 {
@@ -841,10 +852,17 @@ public sealed partial class ContentWidgetWindow
         };
         e.Menu.Closed += (_, _) =>
         {
-            if (showCloseWhenClosed)
+            try
             {
-                QueueCloseWidgetFlyout(closeWidgetFlyoutHandoff);
-                closeWidgetFlyoutHandoff = null;
+                if (showCloseWhenClosed)
+                {
+                    QueueCloseWidgetFlyout(closeWidgetFlyoutHandoff);
+                    closeWidgetFlyoutHandoff = null;
+                }
+            }
+            finally
+            {
+                closeWidgetFlyoutHandoff?.Dispose();
             }
         };
         e.CloseWidgetItem = closeWidget;
@@ -1079,12 +1097,19 @@ public sealed partial class ContentWidgetWindow
         flyout.Items.Add(recycleFolder);
         flyout.Closed += (_, _) =>
         {
-            if (confirmFolderRecycleWhenClosed)
+            try
             {
-                QueueInteractionGuardedFlyout(
-                    recycleConfirmationHandoff,
-                    () => ShowDeleteManagedFolderConfirmationAsync());
-                recycleConfirmationHandoff = null;
+                if (confirmFolderRecycleWhenClosed)
+                {
+                    QueueInteractionGuardedFlyout(
+                        recycleConfirmationHandoff,
+                        () => ShowDeleteManagedFolderConfirmationAsync());
+                    recycleConfirmationHandoff = null;
+                }
+            }
+            finally
+            {
+                recycleConfirmationHandoff?.Dispose();
             }
         };
         flyout.Items.Add(new MenuFlyoutSeparator());
@@ -1319,28 +1344,31 @@ public sealed partial class ContentWidgetWindow
 
     private void StartTitleRename()
     {
-        if (IsDragging ||
+        if (!Visible ||
+            IsClosing ||
+            IsHideAnimationRunning ||
+            IsTrayHideInputSuppressed ||
+            IsDragging ||
             IsResizing ||
             ContentWidgetShell.TitleEditorContent is not null)
         {
             return;
         }
 
+        if (IsWidgetCollapsed)
+        {
+            PrepareSurfaceForExternalInteraction();
+        }
+
         _isCancellingTitleRename = false;
         _titleRenameOpenedAtTick = Environment.TickCount64;
+        _titleRenameInitialText = _titleViewModel.DisplayName;
         BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction("content-title-rename-opened");
         var editor = CreateTitleRenameEditor();
         ContentWidgetShell.TitleEditorContent = editor;
         HoldTemporaryTopMost();
         ActivateForTitleRename();
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (ReferenceEquals(ContentWidgetShell.TitleEditorContent, editor))
-            {
-                ActivateForTitleRename();
-            }
-        });
         InlineEditorFocus.FocusWhenLoaded(
             editor,
             static focused => focused.SelectAll(),
@@ -1350,19 +1378,8 @@ public sealed partial class ContentWidgetWindow
 
     private void ActivateForTitleRename()
     {
-        if (WidgetLayerService.UsesDesktopPinnedMode())
-        {
-            // Resting desktop-pinned widgets carry WS_EX_NOACTIVATE; strip it
-            // before the explicit activation so the editor window can take
-            // keyboard focus without waiting for the GotFocus routing.
-            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
-        }
-
-        _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
         AppWindow.Show();
-        base.Activate();
-        Win32Helper.SetForegroundWindow(HWnd);
-        DeskBox.Helpers.TransientInputFocusGuard.SetActiveAndFocusIsland(HWnd);
+        ActivateForKeyboardInput("widget-title-rename", expectTextInput: true);
     }
 
     private TextBox CreateTitleRenameEditor()
@@ -1410,12 +1427,12 @@ public sealed partial class ContentWidgetWindow
                 _titleRenameOpenedAtTick,
                 HWnd,
                 () => ReferenceEquals(ContentWidgetShell.TitleEditorContent, sender),
-                CommitTitleRenameAsync))
+                () => CommitTitleRenameAsync(initiatedByBlur: true)))
         {
             return;
         }
 
-        await CommitTitleRenameAsync();
+        await CommitTitleRenameAsync(initiatedByBlur: true);
     }
 
     private async void TitleRenameEditor_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1427,7 +1444,7 @@ public sealed partial class ContentWidgetWindow
 
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            await CommitTitleRenameAsync();
+            await CommitTitleRenameAsync(initiatedByBlur: false);
             e.Handled = true;
         }
         else if (e.Key == Windows.System.VirtualKey.Escape)
@@ -1437,7 +1454,7 @@ public sealed partial class ContentWidgetWindow
         }
     }
 
-    private async Task CommitTitleRenameAsync()
+    private async Task CommitTitleRenameAsync(bool initiatedByBlur = false)
     {
         if (_isCommittingTitleRename ||
             ContentWidgetShell.TitleEditorContent is not TextBox editor)
@@ -1445,32 +1462,47 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
+        if (DeskBox.Helpers.WidgetTitleRenamePolicy.ShouldSkipCommitAsUnchanged(
+                editor.Text,
+                _titleRenameInitialText))
+        {
+            CompleteTitleRename("content-title-rename-unchanged");
+            return;
+        }
+
         string newName = editor.Text.Trim();
         _isCommittingTitleRename = true;
         try
         {
-            if (!string.IsNullOrEmpty(newName))
-            {
-                await App.Current.WidgetManager!.RenameWidgetAsync(_config.Id, newName);
-                _titleViewModel.RefreshDisplayName();
-            }
-
+            await App.Current.WidgetManager!.RenameWidgetAsync(_config.Id, newName);
+            _titleViewModel.RefreshDisplayName();
             CompleteTitleRename("content-title-rename-committed");
         }
         catch (Exception ex)
         {
-            // A ContentDialog rendered inside a small widget window is
-            // clipped by the window bounds. Surface the failure through the
-            // shell's in-widget feedback instead, like the quick capture
-            // rename does, and keep the editor open so the name can be fixed.
             App.Log(
-                $"[ContentWidget] Title rename failed id={_config.Id}: {ex}");
+                $"[ContentWidget] Title rename failed id={_config.Id} blur={initiatedByBlur}: {ex.Message}");
             ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
                 App.Current.LocalizationService.Format(
                     "Widget.RenameFailedWithReason",
                     ex.Message),
                 WidgetFeedbackSeverity.Error,
                 "widget-title-rename-error"));
+
+            bool ownsForeground = HWnd != IntPtr.Zero &&
+                                  Win32Helper.GetForegroundWindow() == HWnd;
+            if (!DeskBox.Helpers.WidgetTitleRenamePolicy.ShouldKeepEditorOpenAfterFailure(
+                    initiatedByBlur,
+                    Visible,
+                    IsClosing,
+                    IsHideAnimationRunning || IsTrayHideInputSuppressed,
+                    ownsForeground))
+            {
+                CompleteTitleRename("content-title-rename-blur-reverted");
+                return;
+            }
+
+            _titleRenameOpenedAtTick = Environment.TickCount64;
             InlineEditorFocus.FocusWhenLoaded(
                 editor,
                 static focused => focused.SelectAll(),

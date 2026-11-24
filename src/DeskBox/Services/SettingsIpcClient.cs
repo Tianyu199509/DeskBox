@@ -74,6 +74,11 @@ public sealed class SettingsIpcClient : IAsyncDisposable
                     throw;
                 }
             }
+            catch
+            {
+                await stream.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
     }
 

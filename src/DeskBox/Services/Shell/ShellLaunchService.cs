@@ -4,6 +4,15 @@ using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
+public enum EmptyRecycleBinResult
+{
+    Emptied,
+    AlreadyEmpty,
+    Cancelled,
+    Busy,
+    Failed
+}
+
 /// <summary>
 /// Unified, UI-thread-isolated Shell launch facade for DeskBox.
 /// Centralizes STA worker pooling, modal dialog owner-HWND validation,
@@ -254,6 +263,55 @@ public static class ShellLaunchService
             cancellationToken).ConfigureAwait(false);
 
         return operation.Started && operation.Value;
+    }
+
+    public static async Task<EmptyRecycleBinResult> EmptyRecycleBinAsync(
+        IntPtr ownerHwnd,
+        CancellationToken cancellationToken = default)
+    {
+        bool knownEmpty = await RecycleBinEmptyStateCache.Shared
+            .QueryFreshIsKnownEmptyBoundedAsync(
+                TimeSpan.FromMilliseconds(1500),
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (knownEmpty)
+        {
+            RecycleBinEmptyStateCache.Shared.MarkKnownState(isEmpty: true);
+            return EmptyRecycleBinResult.AlreadyEmpty;
+        }
+
+        IntPtr visibleOwner = NormalizeVisibleOwnerWindow(ownerHwnd);
+        StaOperationResult<RecycleBinEmptyOperationOutcome> operation =
+            await ModalShellRunner.RunAsync(
+                () =>
+                {
+                    using IDisposable? childScope =
+                        ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
+                    _ = Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
+                    return ShellRecycleBinInterop.EmptyAllBinsWithOutcome(visibleOwner);
+                },
+                cancellationToken).ConfigureAwait(false);
+        if (!operation.Started)
+        {
+            return EmptyRecycleBinResult.Busy;
+        }
+
+        switch (operation.Value)
+        {
+            case RecycleBinEmptyOperationOutcome.Emptied:
+                RecycleBinEmptyStateCache.Shared.MarkKnownState(isEmpty: true);
+                return EmptyRecycleBinResult.Emptied;
+
+            case RecycleBinEmptyOperationOutcome.AlreadyEmpty:
+                RecycleBinEmptyStateCache.Shared.MarkKnownState(isEmpty: true);
+                return EmptyRecycleBinResult.AlreadyEmpty;
+
+            case RecycleBinEmptyOperationOutcome.Cancelled:
+                return EmptyRecycleBinResult.Cancelled;
+
+            default:
+                return EmptyRecycleBinResult.Failed;
+        }
     }
 
     public static async Task<ElevatedFileLaunchResult> RunAsAdministratorAsync(

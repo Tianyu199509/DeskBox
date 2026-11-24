@@ -24,7 +24,8 @@ public sealed class FeatureWidgetKindContractTests
                 WidgetKind.Weather,
                 WidgetKind.Glance,
                 WidgetKind.Custom,
-                WidgetKind.Clipboard
+                WidgetKind.Clipboard,
+                WidgetKind.Search
             },
             FeatureWidgetSettings.FeatureKinds);
     }
@@ -36,7 +37,6 @@ public sealed class FeatureWidgetKindContractTests
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Tags));
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.SystemMonitor));
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Productivity));
-        Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Search));
     }
 
     [Fact]
@@ -52,10 +52,10 @@ public sealed class FeatureWidgetKindContractTests
     [Fact]
     public void EveryWidgetKindIsDescribedExceptTheKnownGap()
     {
-        // WidgetKind.Productivity and WidgetKind.Search remain in the enum for
+        // WidgetKind.Productivity remains in the enum solely for
         // backward-compatible settings migration, without active descriptors or
         // WidgetRegistry entries.
-        WidgetKind[] knownGap = [WidgetKind.Productivity, WidgetKind.Search];
+        WidgetKind[] knownGap = [WidgetKind.Productivity];
 
         WidgetKind[] described = WidgetContentFactory.DescriptorList
             .Select(descriptor => descriptor.WidgetKind)

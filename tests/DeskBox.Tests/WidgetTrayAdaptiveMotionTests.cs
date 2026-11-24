@@ -79,6 +79,154 @@ public sealed class WidgetTrayAdaptiveMotionTests
         Assert.False(reported);
     }
 
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public void ShouldDeferWindowReveal_OnlyDefersWhenCallerRequestsAndShowAnimationIsInFlight(
+        bool deferRevealUntilAnimationReady,
+        bool isTrayShowAnimationInFlight,
+        bool expectedDefer)
+    {
+        bool actual = WidgetTrayAnimationPreparation.ShouldDeferWindowReveal(
+            deferRevealUntilAnimationReady,
+            isTrayShowAnimationInFlight);
+
+        Assert.Equal(expectedDefer, actual);
+    }
+
+    [Fact]
+    public async Task VisualCommitBarrier_WaitsForLowPriorityTurnAndCompositorCommit_ThenDisposesFallbackTimer()
+    {
+        Action? queuedLowPriority = null;
+        var commitTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool fallbackDisposed = false;
+        TimeSpan scheduledTimeout = default;
+
+        Task barrier = WidgetTrayAnimationPreparation.AwaitVisualCommitWithFallbackAsync(
+            callback =>
+            {
+                queuedLowPriority = callback;
+                return true;
+            },
+            () => commitTcs.Task,
+            (timeout, _) =>
+            {
+                scheduledTimeout = timeout;
+                return new CallbackRegistration(() => fallbackDisposed = true);
+            },
+            fallbackTimeoutMs: 40);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(40), scheduledTimeout);
+        Assert.NotNull(queuedLowPriority);
+        Assert.False(barrier.IsCompleted);
+        Assert.False(fallbackDisposed);
+
+        queuedLowPriority!();
+        Assert.False(barrier.IsCompleted);
+
+        commitTcs.SetResult();
+        await barrier;
+
+        Assert.True(fallbackDisposed);
+    }
+
+    [Fact]
+    public async Task VisualCommitBarrier_CompletesViaFallbackTimer_WhenCompositorCommitStalls()
+    {
+        Action? queuedLowPriority = null;
+        Action? onTimerExpired = null;
+        bool fallbackDisposed = false;
+        var neverCompletingCommit = new TaskCompletionSource();
+
+        Task barrier = WidgetTrayAnimationPreparation.AwaitVisualCommitWithFallbackAsync(
+            callback =>
+            {
+                queuedLowPriority = callback;
+                return true;
+            },
+            () => neverCompletingCommit.Task,
+            (_, expired) =>
+            {
+                onTimerExpired = expired;
+                return new CallbackRegistration(() => fallbackDisposed = true);
+            },
+            fallbackTimeoutMs: 32);
+
+        queuedLowPriority?.Invoke();
+        Assert.False(barrier.IsCompleted);
+        Assert.NotNull(onTimerExpired);
+
+        onTimerExpired!();
+        await barrier;
+
+        Assert.True(fallbackDisposed);
+    }
+
+    [Theory]
+    [InlineData("enqueue-rejected")]
+    [InlineData("enqueue-throws")]
+    [InlineData("null-commit-task")]
+    [InlineData("commit-throws-synchronously")]
+    [InlineData("commit-task-faults")]
+    public async Task VisualCommitBarrier_NeverStrandsCloakedWindow_WhenEnqueueRejectsOrCompositorFaults(
+        string mode)
+    {
+        bool fallbackDisposed = false;
+
+        Task barrier = WidgetTrayAnimationPreparation.AwaitVisualCommitWithFallbackAsync(
+            callback =>
+            {
+                if (mode == "enqueue-rejected")
+                {
+                    return false;
+                }
+
+                if (mode == "enqueue-throws")
+                {
+                    throw new InvalidOperationException("Dispatcher shutting down");
+                }
+
+                callback();
+                return true;
+            },
+            () => mode switch
+            {
+                "null-commit-task" => null,
+                "commit-throws-synchronously" => throw new InvalidOperationException("Compositor lost"),
+                "commit-task-faults" => Task.FromException(new InvalidOperationException("Device hung")),
+                _ => Task.CompletedTask
+            },
+            (_, _) => new CallbackRegistration(() => fallbackDisposed = true));
+
+        await barrier;
+        Assert.True(fallbackDisposed);
+    }
+
+    [Fact]
+    public void RevealAllSafely_IsolatesPerWindowFailureAndRevealsRemainingPeers()
+    {
+        var revealed = new List<int>();
+        var failures = new List<(int Window, string Message)>();
+
+        WidgetTrayAnimationPreparation.RevealAllSafely(
+            new[] { 1, 2, 3 },
+            window =>
+            {
+                if (window == 2)
+                {
+                    throw new InvalidOperationException("Window 2 destroyed");
+                }
+
+                revealed.Add(window);
+            },
+            (window, ex) => failures.Add((window, ex.Message)));
+
+        Assert.Equal(new[] { 1, 3 }, revealed);
+        Assert.Equal((2, "Window 2 destroyed"), Assert.Single(failures));
+    }
+
     [Fact]
     public void NativeTransaction_UsesNewestHandleAndDoesNotRepeatSuccessfulBatch()
     {

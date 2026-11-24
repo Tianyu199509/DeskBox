@@ -77,20 +77,9 @@ internal static partial class FileOperationNativeMethods
                 return false;
             }
 
-            string deviceName = root[..2];
-            Span<char> targetBuffer = stackalloc char[512];
-            fixed (char* targetPtr = targetBuffer)
+            if (IsSubstDriveRoot(root))
             {
-                uint chars = QueryDosDevice(deviceName, targetPtr, (uint)targetBuffer.Length);
-                if (chars > 0)
-                {
-                    ReadOnlySpan<char> target = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(targetPtr);
-                    // SUBST drives map to "\??\<folder>" and have no Recycle Bin.
-                    if (target.StartsWith(@"\??\", StringComparison.Ordinal))
-                    {
-                        return false;
-                    }
-                }
+                return false;
             }
 
             if (IsRecycleBinNukeOnDeleteEnabled(root))
@@ -108,6 +97,37 @@ internal static partial class FileOperationNativeMethods
         {
             return false;
         }
+    }
+
+    internal static unsafe bool IsSubstDriveRoot(string? root)
+    {
+        if (string.IsNullOrWhiteSpace(root) ||
+            root.Length < 2 ||
+            root[1] != Path.VolumeSeparatorChar)
+        {
+            return false;
+        }
+
+        try
+        {
+            string deviceName = root[..2];
+            Span<char> targetBuffer = stackalloc char[512];
+            fixed (char* targetPtr = targetBuffer)
+            {
+                uint chars = QueryDosDevice(deviceName, targetPtr, (uint)targetBuffer.Length);
+                if (chars > 0)
+                {
+                    ReadOnlySpan<char> target = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(targetPtr);
+                    // SUBST drives map to "\??\<folder>" and have no Recycle Bin.
+                    return target.StartsWith(@"\??\", StringComparison.Ordinal);
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static unsafe bool IsRecycleBinNukeOnDeleteEnabled(string root)

@@ -532,6 +532,7 @@ public sealed class LocalizationService
 
     private static readonly string[] s_residentHostAllowedSettingsSubtrees =
     [
+        "AiSettings",
         "AutoStart",
         "Capsule",
         "Clipboard",
@@ -598,6 +599,33 @@ public sealed class LocalizationService
             FilterDictionaryInPlace(_bnBd);
             FilterDictionaryInPlace(_ruRu);
             FilterDictionaryInPlace(_koKr);
+        }
+    }
+
+    internal static void DisableResidentHostKeyFilter()
+    {
+        lock (s_loadLock)
+        {
+            if (!s_residentHostKeyFilterEnabled)
+            {
+                return;
+            }
+
+            s_residentHostKeyFilterEnabled = false;
+            s_missingKeyFallbackCache = null;
+            _zhCn = null;
+            _zhTw = null;
+            _enUs = null;
+            _jaJp = null;
+            _deDe = null;
+            _ptBr = null;
+            _hiIn = null;
+            _esEs = null;
+            _frFr = null;
+            _arSa = null;
+            _bnBd = null;
+            _ruRu = null;
+            _koKr = null;
         }
     }
 

@@ -9,7 +9,7 @@ namespace DeskBox.Services.Lyrics;
 public sealed class LrclibLyricsProvider
 {
     private const string SearchEndpoint = "https://lrclib.net/api/search";
-    private const string ClientUserAgent = "DeskBox/1.6.0 (https://deskbox.fun)";
+    private const string ClientUserAgent = "DeskBox/1.6.1 (https://deskbox.fun)";
     private static readonly HttpClient SharedHttpClient = CreateHttpClient();
 
     private readonly HttpClient _httpClient;

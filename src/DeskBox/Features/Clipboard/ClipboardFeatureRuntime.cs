@@ -4,8 +4,9 @@ namespace DeskBox.Features.Clipboard;
 
 /// <summary>
 /// Formal <see cref="IFeatureRuntime"/> lease over the Clipboard capture daemon:
-/// active only while <c>WidgetKind.Clipboard</c> is enabled, zero OS listener
-/// overhead when disabled or after shutdown.
+/// active while either <c>WidgetKind.Clipboard</c> or standalone quick-paste
+/// shortcut mode is enabled; zero OS listener overhead when both are off or
+/// after shutdown.
 /// </summary>
 internal sealed class ClipboardFeatureRuntime : IFeatureRuntime
 {
@@ -31,7 +32,7 @@ internal sealed class ClipboardFeatureRuntime : IFeatureRuntime
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _lifecycleLock.WaitAsync(cancellationToken);
         try
         {
             if (_started)
@@ -51,7 +52,7 @@ internal sealed class ClipboardFeatureRuntime : IFeatureRuntime
 
     public async ValueTask DisposeAsync()
     {
-        await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+        await _lifecycleLock.WaitAsync();
         try
         {
             if (!_started)
@@ -60,7 +61,7 @@ internal sealed class ClipboardFeatureRuntime : IFeatureRuntime
             }
 
             _started = false;
-            await _stopAsync().ConfigureAwait(false);
+            await _stopAsync();
         }
         finally
         {

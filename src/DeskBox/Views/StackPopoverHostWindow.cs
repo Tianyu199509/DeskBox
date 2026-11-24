@@ -365,24 +365,10 @@ internal sealed partial class StackPopoverHostWindow : Window
             return;
         }
 
-        int extendedStyle = Win32Helper.GetWindowLong(
+        TransientInputFocusGuard.ActivateWindowAndFocusIsland(
+            this,
             WindowHandle,
-            Win32Helper.GWL_EXSTYLE);
-        if ((extendedStyle & Win32Helper.WS_EX_NOACTIVATE) != 0)
-        {
-            extendedStyle &= ~Win32Helper.WS_EX_NOACTIVATE;
-            _ = Win32Helper.SetWindowLong(
-                WindowHandle,
-                Win32Helper.GWL_EXSTYLE,
-                extendedStyle);
-        }
-
-        _ = SetForegroundWindow(WindowHandle);
-        _ = SetActiveWindow(WindowHandle);
-        Activate();
-
-        IntPtr childIslandHwnd = GetWindow(WindowHandle, GwChild);
-        _ = SetFocus(childIslandHwnd != IntPtr.Zero ? childIslandHwnd : WindowHandle);
+            clearNoActivate: true);
 
         if (focusTarget is Control control)
         {

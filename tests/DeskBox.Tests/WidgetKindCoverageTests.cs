@@ -5,7 +5,7 @@ namespace DeskBox.Tests;
 
 public sealed class WidgetKindCoverageTests
 {
-    private static readonly WidgetKind[] LegacyWidgetKinds = [WidgetKind.Productivity, WidgetKind.Search];
+    private static readonly WidgetKind[] LegacyWidgetKinds = [WidgetKind.Productivity];
 
     private static readonly WidgetKind[] ActiveWidgetKinds = Enum
         .GetValues<WidgetKind>()
@@ -38,7 +38,6 @@ public sealed class WidgetKindCoverageTests
 
     [Theory]
     [InlineData(WidgetKind.Productivity)]
-    [InlineData(WidgetKind.Search)]
     public void LegacyWidgetKinds_AreNotRegisteredAsActiveContent(WidgetKind legacyKind)
     {
         var registry = WidgetRegistry.Default;

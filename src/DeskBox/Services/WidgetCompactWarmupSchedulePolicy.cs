@@ -30,6 +30,7 @@ internal static class WidgetCompactWarmupSchedulePolicy
     {
         WidgetKind.QuickCapture => 220,
         WidgetKind.Clipboard => 240,
+        WidgetKind.Search => 250,
         WidgetKind.Weather => 260,
         WidgetKind.Music => 340,
         WidgetKind.Todo => 380,

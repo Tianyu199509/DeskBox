@@ -736,6 +736,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.Search.SearchQuickCreateDefaultTarget = "todo";
         settings.Search.SearchQuickCreateShowHud = true;
         settings.Search.SearchCategoryLayout = SearchSettingsSlice.DefaultCategoryLayout;
+        ApplyDefaultDesktopSearchPreferences(settings.Search);
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
@@ -909,6 +910,7 @@ settings.FocusClickedWidgetOnRaise = false;
             }
 
             bool changed;
+            int loadedSettingsSchemaVersion = SettingsMigrationPipeline.CurrentSchemaVersion;
             lock (_lock)
             {
                 changed = false;
@@ -934,9 +936,14 @@ settings.FocusClickedWidgetOnRaise = false;
                 // Run schema migrations if the loaded version is older than current.
                 // Copy-on-write: the pipeline returns the migrated graph (or the
                 // input untouched on failure) and this service swaps the reference.
+                loadedSettingsSchemaVersion = _settings.SchemaVersion;
                 var migrationPipeline = new SettingsMigrationPipeline();
                 (_settings, bool migrationsApplied) = migrationPipeline.RunMigrationsOnCopy(_settings);
                 changed |= migrationsApplied;
+                if (loadedFromDisk && loadedSettingsSchemaVersion < 16)
+                {
+                    changed |= Migration_10_To_11.MigrateLegacyPre160SearchState(_settings);
+                }
                 changed |= AutoStartDefaultPolicy.TryPreserveLegacyOptOut(
                     _settings,
                     loadedFromDisk,
@@ -1001,13 +1008,20 @@ settings.FocusClickedWidgetOnRaise = false;
             // keys so nothing is lost; once authoritative the writer strips
             // them and the layout file is the single owner.
             WidgetLayoutLoadResult layoutResult =
-                await Layout.LoadAsync(_settings.WidgetLayout);
+                await Layout.LoadAsync(
+                    _settings.WidgetLayout,
+                    allowRollbackQuarantineRecovery: loadedFromDisk && loadedSettingsSchemaVersion >= 16);
             lock (_lock)
             {
                 _settings.WidgetLayout.CopyFrom(layoutResult.Data);
                 _widgetLayoutMerged = layoutResult.Authoritative;
                 if (layoutResult.Authoritative)
                 {
+                    if (Layout.LoadedSchemaVersion > 0 && Layout.LoadedSchemaVersion < 2)
+                    {
+                        changed |= Migration_10_To_11.MigrateLegacyPre160SearchState(_settings);
+                    }
+
                     // File-won data has not seen this session's normalize
                     // passes — re-run the ones that own layout members
                     // (idempotent on an adopted seed, safe unconditionally).
@@ -1512,6 +1526,14 @@ settings.FocusClickedWidgetOnRaise = false;
         clipboard.ClipboardPopupPlacementMode = ClipboardSettingsSlice.PopupFollowCaret;
         clipboard.ClipboardDoubleCopyAction = ClipboardSettingsSlice.DoubleCopyNone;
         clipboard.ClipboardFetchUrlTitles = false;
+    }
+
+    public static void ApplyDefaultDesktopSearchPreferences(SearchSettingsSlice search)
+    {
+        search.SearchDesktopHandoffMode = SearchSettingsSlice.DefaultDesktopHandoffMode;
+        search.SearchDesktopShowHistory = true;
+        search.SearchDesktopShowRecentOpened = true;
+        search.SearchDesktopPrivacyMask = false;
     }
 
     public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
@@ -3606,18 +3628,21 @@ settings.FocusClickedWidgetOnRaise = false;
         return changed;
     }
 
-    private static bool RetireLegacyWidgets(AppSettings settings)
+    private static bool RetireLegacyWidgets(AppSettings settings) =>
+        RetireWidgetKind(settings, WidgetKind.Productivity);
+
+    internal static bool RetireWidgetKind(AppSettings settings, WidgetKind kindToRetire)
     {
         settings.Widgets ??= [];
         bool hasRetiredWidget = settings.Widgets.Any(
-            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+            widget => widget.WidgetKind == kindToRetire);
         if (!hasRetiredWidget)
         {
             return false;
         }
 
         HashSet<string> retiredIds = settings.Widgets
-            .Where(widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search)
+            .Where(widget => widget.WidgetKind == kindToRetire)
             .Select(widget => widget.Id)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.Ordinal);
@@ -3692,7 +3717,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         settings.Widgets.RemoveAll(
-            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+            widget => widget.WidgetKind == kindToRetire);
         return true;
     }
 
@@ -3808,33 +3833,7 @@ settings.FocusClickedWidgetOnRaise = false;
 
     internal static bool NormalizeFeatureWidgetSettings(AppSettings settings)
     {
-        bool changed = false;
-        if (HasExplicitlyDisabledLegacySearchWidget(settings) && settings.SearchHotkeyEnabled)
-        {
-            settings.SearchHotkeyEnabled = false;
-            changed = true;
-        }
-
-        changed |= FeatureWidgetSettings.Normalize(settings);
-        return changed;
-    }
-
-    private static bool HasExplicitlyDisabledLegacySearchWidget(AppSettings settings)
-    {
-        if (settings.FeatureWidgetEnabledStates is null)
-        {
-            return false;
-        }
-
-        foreach ((string key, bool enabled) in settings.FeatureWidgetEnabledStates)
-        {
-            if (string.Equals(key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase))
-            {
-                return !enabled;
-            }
-        }
-
-        return false;
+        return FeatureWidgetSettings.Normalize(settings);
     }
 
     public static string GetDefaultManagedStorageRootPath()
@@ -4370,6 +4369,13 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!string.Equals(settings.Search.SearchCustomWebUrl, customWebUrl, StringComparison.Ordinal))
         {
             settings.Search.SearchCustomWebUrl = customWebUrl;
+            changed = true;
+        }
+
+        string handoffMode = SearchSettingsSlice.NormalizeDesktopHandoffMode(settings.Search.SearchDesktopHandoffMode);
+        if (!string.Equals(settings.Search.SearchDesktopHandoffMode, handoffMode, StringComparison.Ordinal))
+        {
+            settings.Search.SearchDesktopHandoffMode = handoffMode;
             changed = true;
         }
 

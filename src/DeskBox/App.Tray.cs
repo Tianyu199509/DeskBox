@@ -82,12 +82,15 @@ public partial class App
 
     private void OnTrayLeftClickRequested()
     {
-        TrayContextMenuWindow.DismissActiveIfOpen();
-        if (WidgetManager is not null)
+        UiDispatch.PostAfterCallback(() =>
         {
-            SafeFireAndForget(() => ToggleTrayWidgetsAsync(
-                DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
-        }
+            TrayContextMenuWindow.DismissActiveIfOpen();
+            if (WidgetManager is not null)
+            {
+                SafeFireAndForget(() => ToggleTrayWidgetsAsync(
+                    DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
+            }
+        });
     }
 
     /// <summary>Attempts per tray creation pass through the early-logon window

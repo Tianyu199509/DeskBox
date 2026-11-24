@@ -85,8 +85,8 @@ public sealed partial class OnboardingWindow : Window
         EnsureSearchHotkeySubscription();
         App.Current.OnboardingWidgetsVisibilityChanged += OnOnboardingWidgetsVisibilityChanged;
 
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
         _themeService?.TrackWindow(this);
+        WindowsCompatibilityService.ApplySafeBackdrop(this);
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarHost);

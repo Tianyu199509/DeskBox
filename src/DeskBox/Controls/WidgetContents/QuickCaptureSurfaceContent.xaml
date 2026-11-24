@@ -443,7 +443,7 @@
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource WidgetOverlaySurfaceBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource WidgetOverlayStrokeBrush}"
                                         BorderThickness="1"
                                         CornerRadius="6"
                                         IsHitTestVisible="False"
@@ -465,7 +465,7 @@
                                                 Style="{StaticResource WidgetCompactIconButtonStyle}"
                                                 Tag="{Binding}"
                                                 ToolTipService.ToolTip="{Binding ElementName=ItemsList, Path=DataContext.DetailPopoutText}">
-                                                <FontIcon FontSize="11" Glyph="&#xE8A7;" Opacity="0.82" />
+                                                <FontIcon FontSize="11" Glyph="&#xE8A7;" />
                                             </Button>
                                             <Button
                                                 x:Name="QuickCaptureCopyItemButton"
@@ -479,7 +479,7 @@
                                                 Style="{StaticResource WidgetCompactIconButtonStyle}"
                                                 Tag="{Binding}"
                                                 ToolTipService.ToolTip="{Binding ElementName=ItemsList, Path=DataContext.DetailCopyText}">
-                                                <FontIcon FontSize="11" Glyph="&#xE8C8;" Opacity="0.82" />
+                                                <FontIcon FontSize="11" Glyph="&#xE8C8;" />
                                             </Button>
                                             <Button
                                                 x:Name="QuickCapturePinItemButton"
@@ -493,7 +493,7 @@
                                                 Style="{StaticResource WidgetCompactIconButtonStyle}"
                                                 Tag="{Binding}"
                                                 ToolTipService.ToolTip="{Binding PinTooltip}">
-                                                <controls:PinStateIcon Width="13" Height="13" IsPinned="{Binding IsPinned}" Opacity="0.82" />
+                                                <controls:PinStateIcon Width="13" Height="13" IsPinned="{Binding IsPinned}" />
                                             </Button>
                                         </StackPanel>
                                     </Border>

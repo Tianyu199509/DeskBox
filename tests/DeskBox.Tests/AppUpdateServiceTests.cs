@@ -885,4 +885,160 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.Equal("1.6.0", StoreAppUpdateService.FormatStorePackageVersion(1, 6, 0, 0));
         Assert.Equal("1.6.0.2", StoreAppUpdateService.FormatStorePackageVersion(1, 6, 0, 2));
     }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_DeliversAllProgressCallbacksBeforeDownloadCompleted()
+    {
+        byte[] payload = new byte[256 * 1024];
+        for (int i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i & 0xFF);
+        }
+
+        string sha256 = Convert.ToHexString(SHA256.HashData(payload));
+        string arch = AppUpdateService.CurrentInstallerArchitectureSuffix;
+
+        using var httpClient = CreateHttpClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(new ChunkedAsyncStream(payload, chunkSize: 32 * 1024))
+            {
+                Headers = { ContentLength = payload.Length }
+            }
+        });
+
+        var service = new AppUpdateService(httpClient, updateRootPath: _tempRoot);
+        for (int iteration = 0; iteration < 8; iteration++)
+        {
+            var events = new List<string>();
+            var gate = new object();
+            bool sawProgressDuringDownload = false;
+
+            void OnProgress(AppUpdateDownloadProgress p)
+            {
+                bool inProgress = service.IsDownloadInProgress;
+                lock (gate)
+                {
+                    events.Add("progress");
+                    if (inProgress)
+                    {
+                        sawProgressDuringDownload = true;
+                    }
+                }
+            }
+
+            void OnCompleted(AppUpdateDownloadResult r)
+            {
+                bool inProgress = service.IsDownloadInProgress;
+                lock (gate)
+                {
+                    events.Add(inProgress ? "completed-while-in-progress" : "completed");
+                }
+            }
+
+            service.DownloadProgressChanged += OnProgress;
+            service.DownloadCompleted += OnCompleted;
+            try
+            {
+                var manifest = new AppUpdateManifest
+                {
+                    Version = $"1.6.{iteration}",
+                    DownloadUrl = $"https://deskbox.fun/update/DeskBox_Setup_1.6.{iteration}_{arch}.exe",
+                    Sha256 = sha256,
+                    Size = payload.Length
+                };
+
+                AppUpdateDownloadResult result = await Task.Run(() => service.DownloadUpdateAsync(manifest));
+                Assert.True(result.Success);
+            }
+            finally
+            {
+                service.DownloadProgressChanged -= OnProgress;
+                service.DownloadCompleted -= OnCompleted;
+            }
+
+            Assert.True(sawProgressDuringDownload);
+            Assert.True(events.Count >= 2);
+            Assert.Equal("completed", events[^1]);
+            Assert.All(events.Take(events.Count - 1), entry => Assert.Equal("progress", entry));
+        }
+    }
+
+    [Fact]
+    public void ServiceDownloadEventOrderGate_DropsProgressCapturedBeforeCompletion_AndAcceptsNextDownload()
+    {
+        var gate = new SettingsViewModel.ServiceDownloadEventOrderGate();
+
+        long downloadOneGeneration = gate.CaptureProgressGeneration();
+        Assert.True(gate.IsCurrent(downloadOneGeneration));
+
+        gate.MarkCompleted();
+
+        Assert.False(gate.IsCurrent(downloadOneGeneration));
+
+        long downloadTwoGeneration = gate.CaptureProgressGeneration();
+        Assert.True(gate.IsCurrent(downloadTwoGeneration));
+    }
+
+    [Fact]
+    public void StartInstallerHelper_MissingInstaller_ReturnsFailureWithoutThrowing()
+    {
+        var service = new AppUpdateService(updateRootPath: _tempRoot);
+        string missingPath = Path.Combine(_tempRoot, "1.6.0", "DeskBox_Setup_1.6.0_x64.exe");
+
+        AppUpdateInstallResult result = service.StartInstallerHelper(missingPath);
+
+        Assert.False(result.Success);
+        Assert.False(string.IsNullOrWhiteSpace(result.ErrorMessage));
+    }
+
+    private sealed class ChunkedAsyncStream(byte[] data, int chunkSize) : Stream
+    {
+        private int _offset;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => data.Length;
+        public override long Position
+        {
+            get => _offset;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_offset >= data.Length || count <= 0)
+            {
+                return 0;
+            }
+
+            int toCopy = Math.Min(Math.Min(count, chunkSize), data.Length - _offset);
+            Buffer.BlockCopy(data, _offset, buffer, offset, toCopy);
+            _offset += toCopy;
+            return toCopy;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_offset >= data.Length || buffer.Length <= 0)
+            {
+                return 0;
+            }
+
+            int toCopy = Math.Min(Math.Min(buffer.Length, chunkSize), data.Length - _offset);
+            data.AsMemory(_offset, toCopy).CopyTo(buffer);
+            _offset += toCopy;
+            return toCopy;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }

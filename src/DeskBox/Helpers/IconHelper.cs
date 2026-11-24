@@ -13,7 +13,7 @@ namespace DeskBox.Helpers;
 /// <summary>
 /// Extracts native Windows file and folder icons using the Win32 Shell API.
 /// </summary>
-public static class IconHelper
+public static partial class IconHelper
 {
     private const int BaseMaxIconCacheEntries = 200;
     private const long BaseMaxIconCacheBytes = 32L * 1024 * 1024;
@@ -55,7 +55,7 @@ public static class IconHelper
     // resource is gone. Requesting one of these returns a canvas the artwork
     // actually fills, unlike a Jumbo request that pads it.
     private static readonly int[] s_shellItemIconNativeFrameSizes = { 48, 32 };
-    private const string InternetShortcutIconStrategyVersion = "url-shell-v2";
+    private const string InternetShortcutIconStrategyVersion = "url-shell-v3";
 
     // Icon bytes cache: path → PNG bytes (for shell icons, not image thumbnails)
     private static readonly ConcurrentDictionary<string, byte[]?> s_iconBytesCache = new(StringComparer.OrdinalIgnoreCase);
@@ -1166,33 +1166,51 @@ public static class IconHelper
             IconSource loadIconSource = iconSource;
             if (isInternetShortcutPath)
             {
-                // Resolve the original .url as a Shell item before interpreting
-                // IconFile ourselves. This mirrors Explorer and preserves Steam
-                // game artwork, custom protocol icons and per-user associations.
-                shortcutProxyAttempted = true;
-                bytes = await TryLoadHighResolutionShellItemIconAsync(
-                    originalSourcePath,
-                    includeOverlays: !hideShortcutArrowOverlay,
-                    requestedSize: requestedIconSize);
-                if (bytes is { Length: > 0 })
+                InternetShortcutLoadDecision urlDecision =
+                    await DecideInternetShortcutLoadAsync(
+                        originalSourcePath,
+                        hideShortcutArrowOverlay);
+                if (urlDecision.UseShellProxyFirst)
                 {
-                    App.LogVerbose(
-                        $"[IconHelper] Loaded Internet shortcut icon through " +
-                        $"Shell proxy path={originalSourcePath} " +
-                        $"overlays={!hideShortcutArrowOverlay}");
-                }
-                else
-                {
-                    // Only parse IconFile after the isolated Shell route fails.
-                    // The fallback resolver is itself bounded because IconFile
-                    // can name an unavailable drive or network location.
-                    IconSource? fallbackSource =
-                        await ResolveInternetShortcutFallbackSourceAsync(
-                            originalSourcePath);
-                    if (fallbackSource is not null)
+                    // Resolve the original .url as a Shell item when it has no
+                    // missing IconFile / broken Steam game icon, preserving web
+                    // favicons (:favicon:$DATA), custom protocol icons and overlays.
+                    shortcutProxyAttempted = true;
+                    bytes = await TryLoadHighResolutionShellItemIconAsync(
+                        originalSourcePath,
+                        includeOverlays: !hideShortcutArrowOverlay,
+                        requestedSize: requestedIconSize);
+                    if (bytes is { Length: > 0 } &&
+                        !hideShortcutArrowOverlay &&
+                        requestedIconSize > 48 &&
+                        ShellThumbnailProxy.IsLikelyPaddedIconPayload(bytes))
                     {
-                        loadIconSource = fallbackSource;
+                        bytes = await RecoverPaddedShellItemIconAsync(
+                            originalSourcePath,
+                            bytes);
                     }
+
+                    if (bytes is { Length: > 0 })
+                    {
+                        App.LogVerbose(
+                            $"[IconHelper] Loaded Internet shortcut icon through " +
+                            $"Shell proxy path={originalSourcePath} " +
+                            $"overlays={!hideShortcutArrowOverlay}");
+                    }
+                    else
+                    {
+                        IconSource? fallbackSource = urlDecision.FallbackSource ??
+                            await ResolveInternetShortcutFallbackSourceAsync(
+                                originalSourcePath);
+                        if (fallbackSource is not null)
+                        {
+                            loadIconSource = fallbackSource;
+                        }
+                    }
+                }
+                else if (urlDecision.FallbackSource is not null)
+                {
+                    loadIconSource = urlDecision.FallbackSource;
                 }
             }
 
@@ -1205,18 +1223,30 @@ public static class IconHelper
             if (!ShortcutHelper.IsShortcutPath(loadIconSource.Path) &&
                 !loadIconSource.UsesExplicitIconIndex)
             {
-                // Ask the same isolated Shell-item pipeline used by Explorer for
-                // every real file and folder. This also covers a shortcut whose
-                // icon source resolved past the .lnk (the target file): the
-                // resolved source is an ordinary file, no shortcut overlay is
-                // involved, and skipping this pipeline is what made shortcut
-                // tiles render as pre-scaled 32/48 px image-list bitmaps. A
-                // source that still is the .lnk itself keeps the image-list
-                // path so the arrow-overlay rendering the user chose is
-                // preserved.
-                bytes = await TryLoadFileShellItemIconAsync(
-                    loadIconSource.Path,
-                    requestedIconSize);
+                if (IsImageFile(loadIconSource.Path))
+                {
+                    bytes = await BoundedBackgroundWorkScheduler.SharedShell.RunAsync(
+                        () => TryReadDirectImageIconBytes(loadIconSource.Path),
+                        IconBytesLoadTimeout) is { Status: BoundedBackgroundWorkStatus.Completed, Value: { Length: > 0 } imgBytes }
+                            ? imgBytes
+                            : null;
+                }
+                else
+                {
+                    // Ask the same isolated Shell-item pipeline used by Explorer for
+                    // every real file and folder. This also covers a shortcut whose
+                    // icon source resolved past the .lnk (the target file): the
+                    // resolved source is an ordinary file, no shortcut overlay is
+                    // involved, and skipping this pipeline is what made shortcut
+                    // tiles render as pre-scaled 32/48 px image-list bitmaps. A
+                    // source that still is the .lnk itself keeps the image-list
+                    // path so the arrow-overlay rendering the user chose is
+                    // preserved.
+                    bytes = await TryLoadFileShellItemIconAsync(
+                        loadIconSource.Path,
+                        requestedIconSize);
+                }
+
                 if (bytes is { Length: > 0 })
                 {
                     App.LogVerbose(
@@ -1224,7 +1254,11 @@ public static class IconHelper
                         $"path={loadIconSource.Path}");
                 }
             }
-            else if (isShortcutPath && !hideShortcutArrowOverlay)
+            else if (bytes is not { Length: > 0 } &&
+                     isShortcutPath &&
+                     !hideShortcutArrowOverlay &&
+                     ShortcutHelper.IsShortcutPath(loadIconSource.Path) &&
+                     !shortcutProxyAttempted)
             {
                 // Arrow-overlay mode: the source is the .lnk itself, so ask the
                 // Shell explicitly for the item icon WITH overlays through the
@@ -1503,6 +1537,49 @@ public static class IconHelper
         }
 
         return ShellThumbnailProxy.NormalizeIconPayload(bytes) ?? bytes;
+    }
+
+    private static async Task<byte[]> RecoverPaddedShellItemIconAsync(
+        string path,
+        byte[] paddedBytes)
+    {
+        foreach (int frameSize in s_shellItemIconNativeFrameSizes)
+        {
+            byte[]? nativeFrame = await TryLoadRawShellItemIconAsync(
+                path,
+                frameSize);
+            if (nativeFrame is { Length: > 0 } &&
+                !ShellThumbnailProxy.IsLikelyPaddedIconPayload(nativeFrame))
+            {
+                return nativeFrame;
+            }
+        }
+
+        return ShellThumbnailProxy.NormalizeIconPayload(paddedBytes) ?? paddedBytes;
+    }
+
+    private static byte[]? TryReadDirectImageIconBytes(string imagePath)
+    {
+        const int MaxDirectImageIconBytes = 512 * 1024;
+        try
+        {
+            if (!File.Exists(imagePath))
+            {
+                return null;
+            }
+
+            var info = new FileInfo(imagePath);
+            if (info.Length is <= 0 or > MaxDirectImageIconBytes)
+            {
+                return null;
+            }
+
+            return File.ReadAllBytes(imagePath);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static async Task<byte[]?> TryLoadRawShellItemIconAsync(
@@ -2216,6 +2293,101 @@ public static class IconHelper
             $"overlay={(hideShortcutArrowOverlay ? "hidden" : "shown")}:" +
             sourceVersion);
 
+    private readonly record struct InternetShortcutLoadDecision(
+        bool UseShellProxyFirst,
+        IconSource? FallbackSource);
+
+    private static async Task<InternetShortcutLoadDecision>
+        DecideInternetShortcutLoadAsync(
+            string normalizedSourcePath,
+            bool hideShortcutArrowOverlay)
+    {
+        string timeoutKey = BuildInternetShortcutFallbackTimeoutKey(normalizedSourcePath);
+        if (IsRecentTimeout(s_iconSourceTimeouts, timeoutKey))
+        {
+            return new InternetShortcutLoadDecision(UseShellProxyFirst: true, FallbackSource: null);
+        }
+
+        BoundedBackgroundWorkResult<InternetShortcutLoadDecision> result =
+            await s_iconSourceScheduler.RunAsync(
+                () => EvaluateInternetShortcutLoadDecision(
+                    normalizedSourcePath,
+                    hideShortcutArrowOverlay),
+                IconSourceResolutionTimeout);
+        if (result.Status == BoundedBackgroundWorkStatus.Completed)
+        {
+            s_iconSourceTimeouts.TryRemove(timeoutKey, out _);
+            return result.Value;
+        }
+
+        if (result.Status == BoundedBackgroundWorkStatus.ExecutionTimedOut)
+        {
+            RecordTimeout(s_iconSourceTimeouts, timeoutKey);
+        }
+
+        return new InternetShortcutLoadDecision(UseShellProxyFirst: true, FallbackSource: null);
+    }
+
+    private static InternetShortcutLoadDecision EvaluateInternetShortcutLoadDecision(
+        string normalizedSourcePath,
+        bool hideShortcutArrowOverlay)
+    {
+        ShortcutInfo? shortcut = ShortcutHelper.ReadStoredMetadata(normalizedSourcePath);
+        if (shortcut is null)
+        {
+            return new InternetShortcutLoadDecision(UseShellProxyFirst: true, FallbackSource: null);
+        }
+
+        var (iconFilePath, iconFileIndex) = SplitIconLocation(shortcut.IconLocation);
+        string? iconLocation = NormalizeIconLocation(iconFilePath);
+        int resolvedIconIndex = iconFileIndex ?? shortcut.IconIndex;
+        if (!string.IsNullOrWhiteSpace(iconLocation) &&
+            TryResolveRelativeIconLocation(normalizedSourcePath, iconLocation, out string relativeIcon))
+        {
+            iconLocation = relativeIcon;
+        }
+
+        bool hasDeclaredIconLocation = !string.IsNullOrWhiteSpace(iconLocation);
+        bool declaredIconExists = hasDeclaredIconLocation && File.Exists(iconLocation);
+        if (declaredIconExists)
+        {
+            IconSource directSource = new(
+                iconLocation!,
+                resolvedIconIndex,
+                UsesExplicitIconIndex: true);
+
+            // When shortcut arrows are hidden, extracting directly from the
+            // verified .ico/.exe/.dll avoids spawning ThumbnailProxy, eliminates
+            // url.dll batch contention, and avoids Shell item canvas padding on
+            // 32/48 px Steam game icons inside a 96/256 px canvas.
+            return new InternetShortcutLoadDecision(
+                UseShellProxyFirst: !hideShortcutArrowOverlay,
+                FallbackSource: directSource);
+        }
+
+        bool isSteamShortcut = !string.IsNullOrWhiteSpace(shortcut.TargetPath) &&
+            shortcut.TargetPath.StartsWith("steam://", StringComparison.OrdinalIgnoreCase);
+
+        // Whenever a .url declares an IconFile that no longer exists on disk, or
+        // is a steam:// game shortcut without an IconFile, Windows url.dll returns
+        // S_OK with the generic url.dll,5 blue globe bitmap — poisoning the cache.
+        // Resolve the real game/custom icon source before falling back to Shell.
+        if (hasDeclaredIconLocation || isSteamShortcut)
+        {
+            IconSource resolved = ResolveIconSource(
+                normalizedSourcePath,
+                hideShortcutArrowOverlay: true);
+            if (!ShortcutHelper.IsShortcutPath(resolved.Path))
+            {
+                return new InternetShortcutLoadDecision(
+                    UseShellProxyFirst: false,
+                    FallbackSource: resolved);
+            }
+        }
+
+        return new InternetShortcutLoadDecision(UseShellProxyFirst: true, FallbackSource: null);
+    }
+
     private static async Task<IconSource?>
         ResolveInternetShortcutFallbackSourceAsync(
             string normalizedSourcePath)
@@ -2437,11 +2609,23 @@ public static class IconHelper
             return new IconSource(iconLocation, resolvedIconIndex, UsesExplicitIconIndex: true);
         }
 
-        // For Steam .url shortcuts, the IconFile may point to a steam.exe path
-        // that doesn't exist on this machine. Try to locate steam.exe via registry.
+        // For Steam .url shortcuts whose literal IconFile is missing or stale,
+        // resolve the actual game's .ico, installed executable, or librarycache
+        // square artwork before falling back to generic steam.exe.
         if (!string.IsNullOrWhiteSpace(shortcut.TargetPath) &&
             shortcut.TargetPath.StartsWith("steam://", StringComparison.OrdinalIgnoreCase))
         {
+            SteamResolvedIcon? steamIcon = SteamShortcutIconResolver.TryResolve(
+                shortcut.TargetPath,
+                iconLocation);
+            if (steamIcon is { Path.Length: > 0 })
+            {
+                return new IconSource(
+                    steamIcon.Value.Path,
+                    steamIcon.Value.IconIndex,
+                    UsesExplicitIconIndex: steamIcon.Value.UsesExplicitIconIndex);
+            }
+
             string? steamExe = TryFindSteamExecutable();
             if (steamExe is not null && File.Exists(steamExe))
             {
@@ -2712,7 +2896,14 @@ public static class IconHelper
         }
 
         string expanded = Environment.ExpandEnvironmentVariables(trimmed);
-        return string.IsNullOrWhiteSpace(expanded) ? null : expanded;
+        if (string.IsNullOrWhiteSpace(expanded))
+        {
+            return null;
+        }
+
+        return !expanded.Contains("://", StringComparison.Ordinal)
+            ? expanded.Replace('/', '\\')
+            : expanded;
     }
 
     private static string BuildCacheKey(string sourcePath, IconSource iconSource)
@@ -3259,204 +3450,6 @@ public static class IconHelper
         s_iconBytesLastAccess.TryRemove(cacheKey, out _);
         UnindexIconByteKeyAllScopes(cacheKey);
         return removed;
-    }
-
-    private static readonly uint[] s_pngCrc32Table = CreatePngCrc32Table();
-
-    private static uint[] CreatePngCrc32Table()
-    {
-        var table = new uint[256];
-        for (uint i = 0; i < table.Length; i++)
-        {
-            uint crc = i;
-            for (int bit = 0; bit < 8; bit++)
-            {
-                crc = (crc & 1) != 0
-                    ? 0xEDB88320u ^ (crc >> 1)
-                    : crc >> 1;
-            }
-
-            table[i] = crc;
-        }
-
-        return table;
-    }
-
-    /// <summary>
-    /// Transcodes raw 32-bit BGRA BMP / BMPv5 payloads (such as the 262 KB
-    /// 256x256 payloads returned by <see cref="ShellThumbnailProxy"/>) into
-    /// compact RGBA PNGs without allocating Large Object Heap buffers.
-    /// Already-encoded PNG/JPEG/ICO payloads pass through untouched.
-    /// </summary>
-    internal static byte[] CompressBmpPayloadToPngIfPossible(byte[] bytes)
-    {
-        if (bytes.Length < 54 ||
-            bytes[0] != (byte)'B' ||
-            bytes[1] != (byte)'M')
-        {
-            return bytes;
-        }
-
-        ReadOnlySpan<byte> span = bytes;
-        uint pixelOffset = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(10, 4));
-        uint dibHeaderSize = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(14, 4));
-        if (dibHeaderSize < 40 || 14u + dibHeaderSize > pixelOffset)
-        {
-            return bytes;
-        }
-
-        int width = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(18, 4));
-        int rawHeight = BinaryPrimitives.ReadInt32LittleEndian(span.Slice(22, 4));
-        ushort planes = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(26, 2));
-        ushort bitCount = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(28, 2));
-        uint compression = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(30, 4));
-        if (planes != 1 ||
-            bitCount != 32 ||
-            width is <= 0 or > 1024 ||
-            rawHeight == int.MinValue)
-        {
-            return bytes;
-        }
-
-        if (compression == 3)
-        {
-            if (dibHeaderSize < 52 || span.Length < 14 + 52)
-            {
-                return bytes;
-            }
-
-            uint redMask = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(54, 4));
-            uint greenMask = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(58, 4));
-            uint blueMask = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(62, 4));
-            uint alphaMask = dibHeaderSize >= 56 && span.Length >= 14 + 56
-                ? BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(66, 4))
-                : 0u;
-            if (redMask != 0x00FF0000u ||
-                greenMask != 0x0000FF00u ||
-                blueMask != 0x000000FFu ||
-                (alphaMask != 0u && alphaMask != 0xFF000000u))
-            {
-                return bytes;
-            }
-        }
-        else if (compression != 0)
-        {
-            return bytes;
-        }
-
-        int height = Math.Abs(rawHeight);
-        if (height is <= 0 or > 1024)
-        {
-            return bytes;
-        }
-
-        int rowBytes = width * 4;
-        long totalPixelBytes = (long)rowBytes * height;
-        if (pixelOffset > (uint)bytes.Length ||
-            bytes.Length - (int)pixelOffset < totalPixelBytes)
-        {
-            return bytes;
-        }
-
-        bool topDown = rawHeight < 0;
-        ReadOnlySpan<byte> pixels = span.Slice((int)pixelOffset, (int)totalPixelBytes);
-        IconPngEncoder.InspectBgraAlphaAndColor(pixels, out bool hasAnyAlpha, out bool hasAnyColor);
-
-        bool forceOpaqueAlpha = !hasAnyAlpha && hasAnyColor;
-        int scanlineLength = 1 + rowBytes;
-        byte[] rentedScanline = ArrayPool<byte>.Shared.Rent(scanlineLength);
-        try
-        {
-            using var compressedStream = new MemoryStream(
-                Math.Min(16384, Math.Max(512, bytes.Length / 8)));
-            using (var zlib = new ZLibStream(
-                compressedStream,
-                CompressionLevel.Fastest,
-                leaveOpen: true))
-            {
-                rentedScanline[0] = 0; // Filter 0 (None)
-                for (int y = 0; y < height; y++)
-                {
-                    int srcRow = topDown ? y : (height - 1 - y);
-                    ReadOnlySpan<byte> src = pixels.Slice(srcRow * rowBytes, rowBytes);
-                    Span<byte> dst = rentedScanline.AsSpan(1, rowBytes);
-                    IconPngEncoder.SwizzleBgraToRgba(src, dst, forceOpaqueAlpha);
-                    zlib.Write(rentedScanline, 0, scanlineLength);
-                }
-            }
-
-            if (!compressedStream.TryGetBuffer(out ArraySegment<byte> idatPayload))
-            {
-                return bytes;
-            }
-
-            // PNG = 8-byte signature + IHDR (25B) + IDAT (12B + payload) + IEND (12B)
-            int pngLength = 8 + 25 + 12 + idatPayload.Count + 12;
-            if (pngLength >= bytes.Length || pngLength >= MaxNonSharedIconBytePayloadLength)
-            {
-                // Even if an unusually complex 256x256 icon exceeds 85 KB, still keep
-                // PNG whenever it shrinks the BMP payload meaningfully.
-                if (pngLength >= bytes.Length)
-                {
-                    return bytes;
-                }
-            }
-
-            byte[] png = new byte[pngLength];
-            Span<byte> outSpan = png;
-            ReadOnlySpan<byte> signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-            signature.CopyTo(outSpan);
-            int offset = 8;
-
-            Span<byte> ihdr = stackalloc byte[13];
-            BinaryPrimitives.WriteInt32BigEndian(ihdr.Slice(0, 4), width);
-            BinaryPrimitives.WriteInt32BigEndian(ihdr.Slice(4, 4), height);
-            ihdr[8] = 8; // 8 bits per channel
-            ihdr[9] = 6; // RGBA
-            ihdr[10] = 0;
-            ihdr[11] = 0;
-            ihdr[12] = 0;
-            offset += WritePngChunk(outSpan[offset..], "IHDR"u8, ihdr);
-            offset += WritePngChunk(
-                outSpan[offset..],
-                "IDAT"u8,
-                idatPayload.AsSpan());
-            WritePngChunk(outSpan[offset..], "IEND"u8, ReadOnlySpan<byte>.Empty);
-            return png;
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(rentedScanline);
-        }
-    }
-
-    private static int WritePngChunk(
-        Span<byte> destination,
-        ReadOnlySpan<byte> chunkType,
-        ReadOnlySpan<byte> data)
-    {
-        BinaryPrimitives.WriteInt32BigEndian(destination.Slice(0, 4), data.Length);
-        chunkType.CopyTo(destination.Slice(4, 4));
-        if (!data.IsEmpty)
-        {
-            data.CopyTo(destination.Slice(8, data.Length));
-        }
-
-        uint crc = ComputePngCrc32(destination.Slice(4, 4 + data.Length));
-        BinaryPrimitives.WriteUInt32BigEndian(destination.Slice(8 + data.Length, 4), crc);
-        return 12 + data.Length;
-    }
-
-    private static uint ComputePngCrc32(ReadOnlySpan<byte> data)
-    {
-        uint crc = 0xFFFFFFFFu;
-        uint[] table = s_pngCrc32Table;
-        for (int i = 0; i < data.Length; i++)
-        {
-            crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
-        }
-
-        return crc ^ 0xFFFFFFFFu;
     }
 
     private static bool IsCacheEntryCold(

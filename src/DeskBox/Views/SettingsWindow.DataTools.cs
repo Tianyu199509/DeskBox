@@ -105,7 +105,7 @@ public sealed partial class SettingsWindow
         try
         {
             string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-            if (string.IsNullOrWhiteSpace(folderPath))
+            if (string.IsNullOrWhiteSpace(folderPath) || _isClosed || SettingsRoot.XamlRoot is null)
             {
                 return;
             }

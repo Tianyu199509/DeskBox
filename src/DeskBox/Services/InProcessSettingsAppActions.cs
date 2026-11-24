@@ -97,6 +97,11 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
             manifestLoader,
             (IntPtr)ownerWindowHandle);
 
+    public Task<AppUpdateManifest?> FetchReleaseNotesManifestAsync(
+        string version,
+        CancellationToken cancellationToken) =>
+        _app.LoadReleaseNotesManifestForVersionAsync(version, cancellationToken);
+
     public void UpdateTrayIcon() => _app.UpdateTrayIcon();
 
     public void SetSnapEnabled(bool value) => _app.ResizeGuideOverlay.IsSnapEnabled = value;

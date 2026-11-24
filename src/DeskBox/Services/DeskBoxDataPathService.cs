@@ -197,6 +197,7 @@ public sealed class DeskBoxDataPathService
     /// </summary>
     public string SettingsHostLogFilePath => Path.Combine(RootPath, "DeskBox.Settings.log");
     public string StudioHostLogFilePath => Path.Combine(RootPath, "DeskBox.Studio.log");
+    public string UpdaterLogFilePath => Path.Combine(RootPath, "DeskBox.Updater.log");
 
     private static string? ResolveConfiguredRoot()
     {

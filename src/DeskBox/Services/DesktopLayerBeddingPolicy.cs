@@ -39,25 +39,48 @@ internal static class DesktopLayerBeddingPolicy
     /// <summary>
     /// The widget is safely bedded when every window between it and the shell
     /// desktop host is DeskBox-owned, a shell desktop window, or ignorable.
+    /// Once a <see cref="DesktopLayerBeddingWindowKind.ShellDesktopWindow"/>
+    /// (Progman / shell WorkerW) is reached, the walk has reached the desktop
+    /// floor: DefView-owned widgets cannot be placed below their shell owner,
+    /// so sub-Progman helper/wallpaper windows must never trigger re-bedding
+    /// storms (#1261/#1267/#1273).
     /// </summary>
     public static bool IsBeddedAtDesktopLayer(
-        IEnumerable<DesktopLayerBeddingWindowKind> windowsBelow) =>
-        windowsBelow.All(static kind =>
-            kind is DesktopLayerBeddingWindowKind.DeskBoxWindow or
-                DesktopLayerBeddingWindowKind.ShellDesktopWindow or
-                DesktopLayerBeddingWindowKind.IgnoredWindow);
+        IEnumerable<DesktopLayerBeddingWindowKind> windowsBelow)
+    {
+        foreach (DesktopLayerBeddingWindowKind kind in windowsBelow)
+        {
+            if (kind == DesktopLayerBeddingWindowKind.ShellDesktopWindow)
+            {
+                return true;
+            }
+
+            if (kind == DesktopLayerBeddingWindowKind.ForeignAppWindow)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Picks the foreign application window that witnesses a leak, for callers
     /// that need a stable identity when confirming the same leak across
     /// repeated observations. Ignored windows never witness a leak (they are
-    /// not visually below the widget), so they are skipped.
+    /// not visually below the widget), and walking stops as soon as the shell
+    /// desktop host is reached.
     /// </summary>
     public static DesktopLayerBeddingWindowKind? FindLeakWitness(
         IEnumerable<DesktopLayerBeddingWindowKind> windowsBelow)
     {
         foreach (DesktopLayerBeddingWindowKind kind in windowsBelow)
         {
+            if (kind == DesktopLayerBeddingWindowKind.ShellDesktopWindow)
+            {
+                return null;
+            }
+
             if (kind == DesktopLayerBeddingWindowKind.ForeignAppWindow)
             {
                 return kind;

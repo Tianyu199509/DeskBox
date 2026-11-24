@@ -78,6 +78,39 @@ public sealed class DeskBoxDiagnosticsBundleServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportAsync_IncludesSanitizedUpdaterLogWhenPresent()
+    {
+        Directory.CreateDirectory(_temporaryRoot);
+        string logPath = Path.Combine(_temporaryRoot, "DeskBox.log");
+        string updaterLogPath = Path.Combine(_temporaryRoot, "DeskBox.Updater.log");
+        string userName = Environment.UserName;
+        string privatePath = $@"C:\Users\{userName}\AppData\Local\DeskBox\updates\1.6.0\DeskBox_Setup_1.6.0_x64.exe";
+        await File.WriteAllTextAsync(logPath, "[Startup] ready=True\n");
+        await File.WriteAllTextAsync(
+            updaterLogPath,
+            $"2026-11-24 10:00:00.000 +08:00 Starting installer: {privatePath}\n" +
+            "2026-11-24 10:00:01.000 +08:00 Installer exited with code 1 (elevationRequired=True, logWritten=False, validateAdminCodeSignatures=True).\n");
+        var service = new DeskBoxDiagnosticsBundleService();
+
+        string archivePath = await service.ExportAsync(
+            _temporaryRoot,
+            CreateSnapshot(),
+            logPath);
+
+        Assert.True(File.Exists(archivePath));
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        Assert.Contains(
+            archive.Entries,
+            entry => string.Equals(entry.FullName, "DeskBox.Updater-sanitized.log", StringComparison.Ordinal));
+
+        string updaterLog = await ReadEntryAsync(archive, "DeskBox.Updater-sanitized.log");
+        Assert.DoesNotContain(userName, updaterLog, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DeskBox_Setup_1.6.0_x64.exe", updaterLog, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<PATH>", updaterLog, StringComparison.Ordinal);
+        Assert.Contains("validateAdminCodeSignatures=True", updaterLog, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SanitizeDiagnosticsValue_KeepsImageNameButRedactsDirectories()
     {
         string value = $@"C:\Users\{Environment.UserName}\AppData\Local\DeskBox\DeskBox.exe";

@@ -50,6 +50,11 @@ public interface ISettingsAppActions
         Func<CancellationToken, Task<AppUpdateManifest?>>? manifestLoader,
         nint ownerWindowHandle = 0);
 
+    Task<AppUpdateManifest?> FetchReleaseNotesManifestAsync(
+        string version,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<AppUpdateManifest?>(null);
+
     // ── Shell state ─────────────────────────────────────────────────
 
     void UpdateTrayIcon();
@@ -71,6 +76,9 @@ public interface ISettingsAppActions
     // ── Managed-storage desktop shortcut ────────────────────────────
 
     bool HasManagedStorageDesktopShortcut();
+
+    Task<bool> HasManagedStorageDesktopShortcutAsync() =>
+        Task.Run(HasManagedStorageDesktopShortcut);
 
     Task<bool> CreateManagedStorageDesktopShortcutAsync();
 

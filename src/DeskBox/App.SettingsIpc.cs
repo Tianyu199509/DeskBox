@@ -39,7 +39,8 @@ public partial class App
                 // snapshot was null and every search-hotkey command
                 // silently no-opped.
                 searchHotkeyProvider: () => _searchHotkeyService,
-                clipboardHotkeyProvider: () => _clipboardHotkeyService),
+                clipboardHotkeyProvider: () => _clipboardHotkeyService,
+                onClipboardRuntimeReconcile: ReconcileClipboardFeatureRuntime),
             new InProcessSettingsDataActions(
                 QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
                 LocalizationService,
@@ -328,6 +329,7 @@ public partial class App
     private void OnSettingsIpcHotkeyRegistrationChanged()
     {
         ReconcileHotkeyPriorityYields();
+        NotifyInProcessFallbackHotkeyRegistrationChanged();
 
         if (!HasConnectedSettingsIpcClient)
         {

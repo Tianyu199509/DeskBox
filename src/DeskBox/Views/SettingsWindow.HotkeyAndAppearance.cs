@@ -185,8 +185,7 @@ public sealed partial class SettingsWindow
         // service's: the search hotkey's current activation normalized from
         // the same settings fields both processes mirror.
         var settings = _settingsService.Settings;
-        if (FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) &&
-            settings.Clipboard.ClipboardHotkeyEnabled)
+        if (settings.Clipboard.ClipboardHotkeyEnabled)
         {
             GlobalHotkeyActivation clipboardActivation = GlobalHotkeyService.NormalizeActivation(
                 settings.Clipboard.ClipboardHotkeyActivationKind,

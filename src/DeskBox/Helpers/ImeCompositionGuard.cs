@@ -226,6 +226,7 @@ internal static class ImeCompositionGuard
             SetIsTracked(tb, true);
             tb.TextCompositionStarted += TextBox_TextCompositionStarted;
             tb.TextCompositionEnded += TextBox_TextCompositionEnded;
+            tb.LostFocus += Control_LostFocus;
             tb.Unloaded += Control_Unloaded;
         }
         else if (node is RichEditBox reb)
@@ -238,6 +239,7 @@ internal static class ImeCompositionGuard
             SetIsTracked(reb, true);
             reb.TextCompositionStarted += RichEditBox_TextCompositionStarted;
             reb.TextCompositionEnded += RichEditBox_TextCompositionEnded;
+            reb.LostFocus += Control_LostFocus;
             reb.Unloaded += Control_Unloaded;
         }
         else if (node is AutoSuggestBox asb)
@@ -294,6 +296,14 @@ internal static class ImeCompositionGuard
 
     private static void RichEditBox_TextCompositionEnded(RichEditBox sender, TextCompositionEndedEventArgs args) =>
         NotifyCompositionEnded(sender, recordGrace: true);
+
+    private static void Control_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is DependencyObject dep && GetIsControlComposing(dep))
+        {
+            NotifyCompositionEnded(dep, recordGrace: false);
+        }
+    }
 
     private static void Control_Unloaded(object sender, RoutedEventArgs e)
     {

@@ -16,6 +16,7 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.Glance, "Glance", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Custom, "Custom", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Clipboard, "Clipboard", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
+    [InlineData(WidgetKind.Search, "Search", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     public void GetDescriptor_ReturnsContentMetadata(
         WidgetKind widgetKind,
         string title,
@@ -55,7 +56,8 @@ public sealed class WidgetContentFactoryTests
             WidgetKind.SystemMonitor,
             WidgetKind.Glance,
             WidgetKind.Custom,
-            WidgetKind.Clipboard
+            WidgetKind.Clipboard,
+            WidgetKind.Search
         ], descriptors.Select(descriptor => descriptor.WidgetKind));
     }
 
@@ -70,6 +72,7 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.Glance, WidgetChromeCategory.Display, WidgetChromeMode.Overlay)]
     [InlineData(WidgetKind.Custom, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
     [InlineData(WidgetKind.Clipboard, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
+    [InlineData(WidgetKind.Search, WidgetChromeCategory.Display, WidgetChromeMode.Overlay)]
     public void GetDescriptor_ReturnsChromeDefaults(
         WidgetKind widgetKind,
         WidgetChromeCategory expectedCategory,
@@ -123,7 +126,8 @@ public sealed class WidgetContentFactoryTests
             WidgetKind.Weather,
             WidgetKind.Glance,
             WidgetKind.Custom,
-            WidgetKind.Clipboard
+            WidgetKind.Clipboard,
+            WidgetKind.Search
         ], descriptors.Select(descriptor => descriptor.WidgetKind));
         Assert.DoesNotContain(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.File);
         Assert.DoesNotContain(descriptors, descriptor => descriptor.IsPlanned);
@@ -140,7 +144,7 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.Tags, false, true, false, false, true)]
     [InlineData(WidgetKind.Music, true, false, false, true, false)]
     [InlineData(WidgetKind.SystemMonitor, false, true, false, false, true)]
-    [InlineData(WidgetKind.Search, false, false, false, false, false)]
+    [InlineData(WidgetKind.Search, true, false, false, true, false)]
     [InlineData(WidgetKind.Glance, true, false, false, true, false)]
     [InlineData(WidgetKind.Custom, true, false, false, true, false)]
     [InlineData(WidgetKind.Clipboard, true, false, false, true, false)]
@@ -177,12 +181,11 @@ public sealed class WidgetContentFactoryTests
     }
 
     [Fact]
-    public void GetDescriptor_RejectsLegacyProductivityAndSearchKinds()
+    public void GetDescriptor_RejectsLegacyProductivityKind()
     {
         var factory = TestServices.CreateWidgetContentFactory();
 
         Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Productivity));
-        Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Search));
     }
 
     [Theory]
@@ -397,7 +400,6 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]
     [InlineData(WidgetKind.Productivity)]
-    [InlineData(WidgetKind.Search)]
     public void CreateDetachedContent_RejectsLegacyAndWindowOwnedKinds(WidgetKind widgetKind)
     {
         var factory = TestServices.CreateWidgetContentFactory();

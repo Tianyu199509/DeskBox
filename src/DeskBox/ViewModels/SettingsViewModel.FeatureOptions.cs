@@ -244,6 +244,10 @@ public partial class SettingsViewModel
                     _settingsService.MutateGraphUnderLock(() =>
                         SettingsService.ApplyDefaultClipboardPreferences(_settingsService.Settings.Clipboard));
                     break;
+                case WidgetKind.Search:
+                    _settingsService.MutateGraphUnderLock(() =>
+                        SettingsService.ApplyDefaultDesktopSearchPreferences(_settingsService.Settings.Search));
+                    break;
             }
         }
         finally
@@ -282,6 +286,8 @@ public partial class SettingsViewModel
                 break;
             case WidgetKind.Clipboard:
                 ClipboardSettingsRefreshRequested?.Invoke();
+                break;
+            case WidgetKind.Search:
                 break;
         }
     }

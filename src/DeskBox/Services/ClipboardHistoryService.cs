@@ -1598,7 +1598,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
             return;
         }
 
-        if (!FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Clipboard))
+        if (!ClipboardRuntimePolicy.IsMonitoringActive(_settingsService.Settings))
         {
             return;
         }

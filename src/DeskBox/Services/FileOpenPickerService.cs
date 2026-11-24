@@ -44,13 +44,13 @@ public static class FileOpenPickerService
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            // Isolate modal IFileOpenDialog::Show on a dedicated STA thread
-            // (matching FolderPickerService) so third-party shell extensions
-            // never re-enter the WinUI 3 Mouse-in-Pointer UI thread.
-            IReadOnlyList<string> paths = await NativeFileOpenDialog.RunOnDedicatedStaAsync(
+            // Host modal IFileOpenDialog::Show out-of-process in the single-STA
+            // native proxy so Shell / Quick Access ThreadingModel=Single COM
+            // components can never cross-thread marshal back to WinUI's Main STA
+            // and cause AppHangB1 / Cross-thread deadlocks (#1267).
+            IReadOnlyList<string> paths = await NativeFileOpenDialog.PickFilesOutOfProcessAsync(
                 ownerHwnd,
-                staOwnerHwnd => NativeFileOpenDialog.ShowPickFiles(staOwnerHwnd, suggestedFolder),
-                NativeFileOpenDialog.DedicatedStaDialogKind.File)
+                suggestedFolder)
                 .ConfigureAwait(false);
             return paths
                 .Select(Path.GetFullPath)
@@ -76,10 +76,12 @@ public static class FileOpenPickerService
         PickerLocationId suggestedStartLocation)
     {
         ValidateOwnerWindowHandle(ownerHwnd);
-
-        var picker = BuildPicker(ownerHwnd, fileTypeFilters, suggestedStartLocation);
-        PickFileResult? file = await picker.PickSingleFileAsync();
-        return string.IsNullOrWhiteSpace(file?.Path) ? null : file.Path;
+        IReadOnlyList<string> picked = await PickFilteredFilesOutOfProcessCoreAsync(
+            ownerHwnd,
+            fileTypeFilters,
+            suggestedStartLocation,
+            allowMultiSelect: false);
+        return picked.Count > 0 ? picked[0] : null;
     }
 
     public static async Task<IReadOnlyList<string>> PickMultipleFilesAsync(
@@ -88,41 +90,81 @@ public static class FileOpenPickerService
         PickerLocationId suggestedStartLocation)
     {
         ValidateOwnerWindowHandle(ownerHwnd);
-
-        var picker = BuildPicker(ownerHwnd, fileTypeFilters, suggestedStartLocation);
-        IReadOnlyList<PickFileResult> files =
-            await picker.PickMultipleFilesAsync();
-        return files
-            .Select(file => file.Path)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .ToArray();
+        return await PickFilteredFilesOutOfProcessCoreAsync(
+            ownerHwnd,
+            fileTypeFilters,
+            suggestedStartLocation,
+            allowMultiSelect: true);
     }
 
-    private static FileOpenPicker BuildPicker(
+    private static async Task<IReadOnlyList<string>> PickFilteredFilesOutOfProcessCoreAsync(
         IntPtr ownerHwnd,
         IReadOnlyList<string>? fileTypeFilters,
-        PickerLocationId? suggestedStartLocation)
+        PickerLocationId suggestedStartLocation,
+        bool allowMultiSelect)
     {
-        var ownerWindowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(
-            ownerHwnd);
-        var picker = new FileOpenPicker(ownerWindowId)
+        if (Interlocked.CompareExchange(ref s_pickInFlight, 1, 0) != 0)
         {
-            SuggestedStartLocation = PickerLocationId.Desktop
+            _ = Task.Run(NativeFileOpenDialog.TryActivateActiveFileDialog);
+            App.Log("[FileOpenPicker] outcome=busy elapsedMs=0");
+            return [];
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            string? startFolder = ResolveSuggestedStartFolder(suggestedStartLocation);
+            IReadOnlyList<string> paths = await NativeFileOpenDialog.PickFilesOutOfProcessAsync(
+                ownerHwnd,
+                startFolder,
+                fileTypeFilters,
+                allowMultiSelect: allowMultiSelect,
+                noDereferenceLinks: false)
+                .ConfigureAwait(false);
+            return paths
+                .Where(static path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[FileOpenPicker] Failed to pick filtered files (elapsedMs={stopwatch.ElapsedMilliseconds}): {ex}");
+            return [];
+        }
+        finally
+        {
+            Volatile.Write(ref s_pickInFlight, 0);
+        }
+    }
+
+    internal static string? ResolveSuggestedStartFolder(PickerLocationId suggestedStartLocation)
+    {
+        const string thisPcShellParsingName = "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+        string? candidate = suggestedStartLocation switch
+        {
+            PickerLocationId.ComputerFolder => thisPcShellParsingName,
+            PickerLocationId.DocumentsLibrary => Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            PickerLocationId.PicturesLibrary => Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            PickerLocationId.MusicLibrary => Environment.GetFolderPath(Environment.SpecialFolder.MyMusic),
+            PickerLocationId.VideosLibrary => Environment.GetFolderPath(Environment.SpecialFolder.MyVideos),
+            PickerLocationId.Downloads => Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Downloads"),
+            _ => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
         };
-        if (suggestedStartLocation is { } startLocation)
+
+        if (string.IsNullOrWhiteSpace(candidate))
         {
-            picker.SuggestedStartLocation = startLocation;
+            return null;
         }
 
-        if (fileTypeFilters is not null)
+        if (string.Equals(candidate, thisPcShellParsingName, StringComparison.Ordinal))
         {
-            foreach (string filter in fileTypeFilters)
-            {
-                picker.FileTypeFilter.Add(filter);
-            }
+            return candidate;
         }
 
-        return picker;
+        return Directory.Exists(candidate) ? candidate : null;
     }
 
     internal static void ValidateOwnerWindowHandle(IntPtr ownerHwnd)

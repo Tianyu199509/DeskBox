@@ -78,6 +78,8 @@ internal interface IDesktopWidgetWindow
     IntPtr WindowHandle { get; }
     FrameworkElement? WindowContentRoot { get; }
     bool Visible { get; }
+    bool IsHideAnimationRunning => false;
+    bool IsTrayHideInputSuppressed => false;
     bool IsRaisedAboveDesktopLayer { get; }
     bool IsCompactArrangementActive { get; }
     bool CanParticipateInCoordinatedMove { get; }
@@ -101,8 +103,11 @@ internal interface IDesktopWidgetWindow
     void CancelTrayAnimationAndRestorePosition();
     void PrepareTrayShowAnimation();
     void PrepareSingleWidgetShowAnimation();
-    void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
-    void ShowPreparedRaisedFromTray(bool persistVisibility = true);
+    bool IsTrayShowWindowCloaked { get; }
+    void ShowPreparedAtDesktopLayer(bool persistVisibility = true, bool deferRevealUntilAnimationReady = false);
+    void ShowPreparedRaisedFromTray(bool persistVisibility = true, bool deferRevealUntilAnimationReady = false);
+    Task WaitForPreparedTrayShowCommitAsync();
+    void RevealPreparedTrayShow();
     void PlayTrayShowAnimation();
     void CompleteTrayShowWithoutAnimation();
     void RevealFromTray(bool autoRestore = true);
@@ -604,7 +609,7 @@ public sealed partial class WidgetManager
         _sessionManager = new WidgetSessionManager(App.LogVerbose, App.Log);
         _sessionManager.InteractionActiveChanged += OnSessionInteractionActiveChanged;
         _fileWidgetHostDiagnostics = new FileWidgetHostDiagnostics();
-        _trayToggleRequestQueue = new(ExecuteQueuedTrayToggleAsync);
+        _trayToggleRequestQueue = new(ExecuteQueuedTrayToggleAsync, onAcceptedWhileBusy: CancelStalledHideBatchForQueuedToggle);
         InitializeCapsuleArrangementState();
         _featureWidgetHandlers = CreateFeatureWidgetHandlers();
         _windowProviders = CreateWindowProviders();
@@ -633,56 +638,20 @@ public sealed partial class WidgetManager
             $"fallbackReason={_fileWidgetHostDiagnostics.LastFallbackReason ?? "none"}");
     }
 
-    private Dictionary<WidgetKind, FeatureWidgetHandler> CreateFeatureWidgetHandlers()
-    {
-        FeatureWidgetHandler[] handlers =
-        [
-            new(
-                WidgetKind.QuickCapture,
-                async reveal => await CreateOrShowQuickCaptureWidgetAsync(reveal),
-                SetQuickCaptureEnabledAsync,
-                CloseLoadedQuickCaptureWidgets),
-            new(
-                WidgetKind.Todo,
-                async _ => await CreateTodoWidgetAsync(),
-                SetTodoEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Todo)),
-            new(
-                WidgetKind.Music,
-                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Music),
-                SetContentFeatureWidgetEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Music)),
-            new(
-                WidgetKind.Weather,
-                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Weather),
-                SetWeatherFeatureWidgetEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather)),
-            new(
-                WidgetKind.Clipboard,
-                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Clipboard),
-                SetClipboardFeatureWidgetEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Clipboard)),
-            new(
-                WidgetKind.Glance,
-                CreateOrShowGlanceWidgetsAsync,
-                SetGlanceFeatureWidgetEnabledAsync,
-                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance)),
-            new(
-                WidgetKind.Custom,
-                CreateOrShowCustomWidgetsAsync,
-                SetCustomFeatureWidgetEnabledAsync,
-                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Custom))
-        ];
-
-        return handlers.ToDictionary(handler => handler.WidgetKind);
-    }
-
     private Dictionary<WidgetKind, WidgetWindowProvider> CreateWindowProviders()
     {
         WidgetWindowProvider[] providers =
         [
             new(
                 WidgetKind.Clipboard,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing,
+                    request.CancellationToken)),
+            new(
+                WidgetKind.Search,
                 async request => await CreateContentWidgetFromConfigAsync(
                     request.Config,
                     request.KeepPreparedForAnimation,
@@ -1646,7 +1615,7 @@ public sealed partial class WidgetManager
             if (reveal)
             {
                 contentWindow.PrepareSingleWidgetShowAnimation();
-                contentWindow.ShowPreparedRaisedFromTray();
+                contentWindow.ShowPreparedRaisedFromTray(deferRevealUntilAnimationReady: true);
                 contentWindow.PlayTrayShowAnimation();
             }
             else
@@ -1679,9 +1648,17 @@ public sealed partial class WidgetManager
     /// </summary>
     public Task SetAllWidgetsVisibleAsync(bool visible)
     {
-        return RunOnUiThreadAsync(() => ExecuteTrayVisibilityOperationAsync(
-            $"set-all:{visible}",
-            () => SetAllWidgetsVisibleCoreAsync(visible)));
+        return RunOnUiThreadAsync(() =>
+        {
+            if (visible && _trayBatchAnimationDriver.IsHiding)
+            {
+                _trayBatchAnimationDriver.Cancel();
+            }
+
+            return ExecuteTrayVisibilityOperationAsync(
+                $"set-all:{visible}",
+                () => SetAllWidgetsVisibleCoreAsync(visible));
+        });
     }
 
     private async Task SetAllWidgetsVisibleCoreAsync(bool visible)
@@ -1697,6 +1674,7 @@ public sealed partial class WidgetManager
         CancelActiveTrayAnimationsAndRestorePositions();
         if (visible)
         {
+            InteractionBreadcrumbRecorder.Record("tray-show-start");
             // An explicit show-all is a user reveal: it ends the hidden
             // startup session so later automatic passes can re-show freely.
             ClearStartupHiddenSession("set-all-visible");
@@ -1742,15 +1720,20 @@ public sealed partial class WidgetManager
                         continue;
                     }
 
-                    window.ShowPreparedAtDesktopLayer(persistVisibility: false);
+                    window.ShowPreparedAtDesktopLayer(
+                        persistVisibility: false,
+                        deferRevealUntilAnimationReady: true);
                     shownWindows.Add(window);
                 }
                 catch (Exception ex)
                 {
+                    try { window.RevealPreparedTrayShow(); }
+                    catch { }
                     App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer {FormatHostWindow(window)}: {ex}");
                 }
             }
 
+            await CommitAndRevealPreparedTrayShowWindowsAsync(shownWindows);
             PlayPreparedTrayShowAnimations(windowsToAnimate);
             _sessionManager.MarkDesktopResting("set-all-visible");
             QueueIdleWidgetZOrderNormalization("set-all-visible");
@@ -1761,10 +1744,12 @@ public sealed partial class WidgetManager
             // then only healed on the next drag. Verify the bar once the
             // reveal settles (feedback 327).
             ScheduleCapsuleArrangementConsistencyCheck("tray-reveal-completed");
+            InteractionBreadcrumbRecorder.Record("tray-show-end", $"shown={shownWindows.Count}");
             App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=true prepared={windowsToShow.Count} shown={shownWindows.Count}");
             return;
         }
 
+        InteractionBreadcrumbRecorder.Record("tray-hide-start");
         CancelAllWidgetSurfaceSwitches();
         var hideCandidates = GetLoadedDesktopWindows()
             .Where(window => window.Visible)
@@ -1821,8 +1806,24 @@ public sealed partial class WidgetManager
         }
         finally
         {
+            foreach (IDesktopWidgetWindow window in windowsToHide)
+            {
+                try
+                {
+                    if (window.IsHideAnimationRunning || window.IsTrayHideInputSuppressed)
+                    {
+                        window.CancelTrayAnimationAndRestorePosition();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to cleanup hide state {FormatHostWindow(window)}: {ex}");
+                }
+            }
+
             _batchHideReconcileSuppressionDepth--;
         }
+        InteractionBreadcrumbRecorder.Record("tray-hide-end", $"n={windowsToHide.Count}");
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
 
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
@@ -2295,10 +2296,28 @@ public sealed partial class WidgetManager
                 removalAction != WidgetRemovalAction.RemoveWidgetOnly &&
                 config.FollowsDefaultStoragePath &&
                 IsDefaultManagedStorageFolder(config.MappedFolderPath);
-            await ApplyWidgetRemovalActionAsync(
-                config,
-                folderCleanupApplicable ? removalAction : WidgetRemovalAction.RemoveWidgetOnly,
-                ownerWindowHandle);
+            if (folderCleanupApplicable)
+            {
+                await SuspendFileWidgetWatchersAsync(config.Id);
+            }
+
+            try
+            {
+                await ApplyWidgetRemovalActionAsync(
+                    config,
+                    folderCleanupApplicable ? removalAction : WidgetRemovalAction.RemoveWidgetOnly,
+                    ownerWindowHandle);
+            }
+            catch
+            {
+                if (folderCleanupApplicable)
+                {
+                    await ResumeFileWidgetWatchersIfStoppedAsync(config.Id);
+                }
+
+                throw;
+            }
+
             await RemoveWidgetFromGroupAsync(widgetId, revealStandalone: false);
         }
         _deletedWidgetIds.Add(widgetId);
@@ -3060,24 +3079,6 @@ public sealed partial class WidgetManager
                _settingsService.Settings.DeletedWidgetIds.Contains(widgetId);
     }
 
-    private (double Width, double Height) GetDefaultFeatureWidgetSize(WidgetKind kind)
-    {
-        return kind switch
-        {
-            WidgetKind.Todo => (
-                Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
-                Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)),
-            WidgetKind.Music => (380, 190),
-            WidgetKind.Weather => (200, 200),
-            WidgetKind.Glance => (360, 260),
-            WidgetKind.Custom => (360, 460),
-            WidgetKind.Clipboard => (320, 420),
-            _ => (
-                _settingsService.Settings.DefaultWidgetWidth,
-                _settingsService.Settings.DefaultWidgetHeight)
-        };
-    }
-
     private Task SetContentFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Music, enabled, reveal);
@@ -3261,7 +3262,7 @@ public sealed partial class WidgetManager
                 // raising it detached/re-attached the Explorer owner while the
                 // HWND was already visible, which could flash the whole desktop.
                 window.PrepareSingleWidgetShowAnimation();
-                window.ShowPreparedRaisedFromTray();
+                window.ShowPreparedRaisedFromTray(deferRevealUntilAnimationReady: true);
                 window.PlayTrayShowAnimation();
             }
             else if (!keepPreparedForAnimation)

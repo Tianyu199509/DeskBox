@@ -1279,9 +1279,15 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         Assert.DoesNotContain(vm.CurrentResults, static i => i.Kind == SearchResultKind.Todo);
         Assert.DoesNotContain(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryTodo);
 
-        // 5. FeatureWidgets linkage: disabling Clipboard in FeatureWidgets hides its Tab and search results
+        // 5. FeatureWidgets linkage: disabling only the Clipboard widget keeps standalone Quick-Paste
+        // search active while ClipboardHotkeyEnabled is true; turning both off hides the Tab and results
         // without erasing the user's saved SearchCategoryLayout, and re-enabling restores both.
         FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Clipboard, false);
+        await vm.RefreshSearchAsync();
+        Assert.Contains(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryClipboard);
+        Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard);
+
+        settings.Settings.Clipboard.ClipboardHotkeyEnabled = false;
         await vm.RefreshSearchAsync();
         Assert.DoesNotContain(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryClipboard);
         Assert.DoesNotContain(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard);
@@ -1289,6 +1295,7 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
             .Single(e => e.Id == SearchSettingsSlice.CategoryClipboard).TabShown);
 
         FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Clipboard, true);
+        settings.Settings.Clipboard.ClipboardHotkeyEnabled = true;
         await vm.RefreshSearchAsync();
         Assert.Contains(vm.Tabs, static t => t.Id == SearchSettingsSlice.CategoryClipboard);
         Assert.Contains(vm.CurrentResults, static i => i.Kind == SearchResultKind.Clipboard);

@@ -151,7 +151,7 @@ public sealed partial class SettingsWindow
         switch (section)
         {
             case SearchSettingsSection searchSettings:
-                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd);
+                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd, _widgetActions);
                 break;
             case FileWidgetSettingsSection fileSettings:
                 fileSettings.FileStack = _fileStackSettingsViewModel;
@@ -407,7 +407,7 @@ public sealed partial class SettingsWindow
         try
         {
             string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-            if (!string.IsNullOrWhiteSpace(folderPath))
+            if (!_isClosed && !string.IsNullOrWhiteSpace(folderPath))
             {
                 _musicSettingsViewModel.LocalLyricsFolder = folderPath;
             }

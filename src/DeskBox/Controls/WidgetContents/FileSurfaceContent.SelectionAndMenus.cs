@@ -631,7 +631,46 @@ public sealed partial class FileSurfaceContent
             CanCompressSelection,
             CompressSelectionAsync,
             CreateItemShortcutAsync: CreateItemShortcutAsync,
-            EmptyRecycleBinAsync: EmptyRecycleBinAsync);
+            EmptyRecycleBinAsync: EmptyRecycleBinAsync,
+            AcquireMenuCloseRenameHandoff: AcquireMenuCloseRenameHandoff);
+    }
+
+    private IDisposable AcquireMenuCloseRenameHandoff()
+    {
+        _pendingMenuRenameHandoffDepth++;
+        if (IsStackPopoverInteractionActive)
+        {
+            _stackPopoverCleanupPending = false;
+        }
+
+        return new MenuCloseRenameHandoffScope(this);
+    }
+
+    private void ReleaseMenuCloseRenameHandoff()
+    {
+        if (_pendingMenuRenameHandoffDepth > 0)
+        {
+            _pendingMenuRenameHandoffDepth--;
+        }
+
+        if (_pendingMenuRenameHandoffDepth == 0 &&
+            !_stackPopoverContextMenuOpen &&
+            !_stackPopoverSystemContextMenuOpen &&
+            IsStackPopoverInteractionActive &&
+            _stackPopoverCleanupPending)
+        {
+            CompleteStackPopoverContextMenu();
+        }
+    }
+
+    private sealed class MenuCloseRenameHandoffScope(FileSurfaceContent owner) : IDisposable
+    {
+        private FileSurfaceContent? _owner = owner;
+
+        public void Dispose()
+        {
+            Interlocked.Exchange(ref _owner, null)?.ReleaseMenuCloseRenameHandoff();
+        }
     }
 
     private OpenWithMenuPayload? GetOpenWithMenuItems(WidgetItem item)
@@ -996,20 +1035,28 @@ public sealed partial class FileSurfaceContent
     /// <summary>
     /// Empty Recycle Bin for the bin's namespace shortcut — the desktop
     /// icon's own verb, with the system's confirmation and progress dialogs
-    /// (flags 0). A bin emptied between the menu check and the click no-ops
-    /// instead of popping the dialog for nothing.
+    /// (flags 0) executed on the modal Shell STA pool rather than blocking
+    /// the UI thread. A bin emptied between the menu check and the click
+    /// no-ops instead of popping the dialog for nothing.
     /// </summary>
     private async Task EmptyRecycleBinAsync()
     {
         try
         {
-            if (ShellRecycleBinInterop.TryQueryTotalItemCount(out long totalItems) &&
-                totalItems == 0)
+            WidgetItem? binItem = GetSelectedItems().FirstOrDefault(
+                candidate => NamespaceShortcutHelper.ResolveKind(candidate) ==
+                    NamespaceShortcutKind.RecycleBin);
+            EmptyRecycleBinResult result = await RunWithDialogOwnerAsync(
+                binItem,
+                ownerHwnd => ShellLaunchService.EmptyRecycleBinAsync(
+                    ownerHwnd,
+                    _lifetimeCancellation.Token));
+            if (_isDisposed)
             {
                 return;
             }
 
-            if (!ShellRecycleBinInterop.TryEmptyAllBins(_hostWindowHandle))
+            if (result is EmptyRecycleBinResult.Failed or EmptyRecycleBinResult.Busy)
             {
                 ShowFeedback(new WidgetFeedbackRequest(
                     T("Widget.Error.OperationIncomplete"),
@@ -1018,10 +1065,16 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
-            // The bin just emptied: its state-aware icon (empty vs. full
-            // graphic for the same PIDL) must re-render even though the
-            // shortcut file never changed.
-            await RefreshRecycleBinItemIconsAsync();
+            if (result is EmptyRecycleBinResult.Emptied or EmptyRecycleBinResult.AlreadyEmpty)
+            {
+                // The bin just emptied: its state-aware icon (empty vs. full
+                // graphic for the same PIDL) must re-render even though the
+                // shortcut file never changed.
+                await RefreshRecycleBinItemIconsAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch (Exception ex)
         {
@@ -1032,8 +1085,6 @@ public sealed partial class FileSurfaceContent
                 WidgetFeedbackSeverity.Warning,
                 "empty-recycle-bin"));
         }
-
-        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -1073,6 +1124,7 @@ public sealed partial class FileSurfaceContent
         bool fromStackPopover = _stackPopoverItemsView?.Items
             .OfType<WidgetItem>()
             .Any(candidate => ReferenceEquals(candidate, item)) == true;
+        _systemContextMenuInFlightDepth++;
         if (fromStackPopover)
         {
             // The WinUI flyout closes before the native proxy menu opens. Keep
@@ -1100,7 +1152,10 @@ public sealed partial class FileSurfaceContent
                 // The user picked the host-owned rename entry (a view-host
                 // verb the pure Shell menu cannot offer); run the built-in
                 // rename pipeline, the same one the WinUI flyout uses.
-                await RenameItemAsync(item);
+                using (AcquireMenuCloseRenameHandoff())
+                {
+                    await RenameItemAsync(item);
+                }
             }
             else if (result != ShellContextMenuProxy.MenuResult.Invoked &&
                 result != ShellContextMenuProxy.MenuResult.Cancelled)
@@ -1123,6 +1178,11 @@ public sealed partial class FileSurfaceContent
         }
         finally
         {
+            if (_systemContextMenuInFlightDepth > 0)
+            {
+                _systemContextMenuInFlightDepth--;
+            }
+
             _lastItemContextScreenPoint = null;
             if (fromStackPopover)
             {
@@ -2011,11 +2071,43 @@ public sealed partial class FileSurfaceContent
         toggle.Click += (_, _) => ToggleStackFromInput(stack);
         flyout.Items.Add(toggle);
 
+        bool startStackRenameWhenClosed = false;
+        IDisposable? stackRenameHandoff = null;
         MenuFlyoutItem rename = CreateMenuItem(
             "Widget.Stack.Rename",
             "\uE8AC");
-        rename.Click += async (_, _) =>
-            await RenameStackAsync(stack);
+        rename.Click += (_, _) =>
+        {
+            startStackRenameWhenClosed = true;
+            stackRenameHandoff ??= AcquireMenuCloseRenameHandoff();
+        };
+        flyout.Closed += (_, _) =>
+        {
+            if (!startStackRenameWhenClosed)
+            {
+                stackRenameHandoff?.Dispose();
+                stackRenameHandoff = null;
+                return;
+            }
+
+            startStackRenameWhenClosed = false;
+            IDisposable? heldHandoff = stackRenameHandoff;
+            stackRenameHandoff = null;
+            if (!DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        await RenameStackAsync(stack);
+                    }
+                    finally
+                    {
+                        heldHandoff?.Dispose();
+                    }
+                }))
+            {
+                heldHandoff?.Dispose();
+            }
+        };
         flyout.Items.Add(rename);
         flyout.Items.Add(new MenuFlyoutSeparator());
 
