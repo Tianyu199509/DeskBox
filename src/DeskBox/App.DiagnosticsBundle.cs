@@ -16,14 +16,41 @@ public partial class App
     public DeskBoxDiagnosticsBundleService DiagnosticsBundleService =>
         _diagnosticsBundleService ??= Services.DiagnosticsBundleService;
 
-    public DeskBoxDiagnosticSnapshot CreateDiagnosticSnapshot()
+    public DeskBoxDiagnosticSnapshot CreateDiagnosticSnapshot() =>
+        CreateDiagnosticSnapshotCore(includeUiState: true);
+
+    public async Task<DeskBoxDiagnosticSnapshot> CreateDiagnosticSnapshotSafeAsync(TimeSpan uiTimeout)
+    {
+        if (Platform.UiDispatch.HasAccess)
+        {
+            return CreateDiagnosticSnapshotCore(includeUiState: true);
+        }
+
+        try
+        {
+            return await Platform.UiDispatch
+                .RunAsync(() => Task.FromResult(CreateDiagnosticSnapshotCore(includeUiState: true)))
+                .WaitAsync(uiTimeout)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or InvalidOperationException)
+        {
+            Log($"[Diagnostics] UI thread did not respond within {uiTimeout.TotalMilliseconds:0}ms; capturing UI-free diagnostic snapshot.");
+            return CreateDiagnosticSnapshotCore(includeUiState: false);
+        }
+    }
+
+    private DeskBoxDiagnosticSnapshot CreateDiagnosticSnapshotCore(bool includeUiState)
     {
         AppRuntimeHealthSnapshot? runtimeHealth = DiagnosticsService?.GetRuntimeHealthSnapshot(
             EverythingSearchService,
-            WidgetManager?.GetFolderWatcherHealthSnapshots());
-        DeskBoxWidgetManagerDiagnostic widgetManager =
-            WidgetManager?.CreateDiagnosticsSnapshot() ?? DeskBoxWidgetManagerDiagnostic.Empty;
-        IReadOnlyList<DeskBoxDisplayDiagnostic> displays = GetDisplayDiagnostics();
+            includeUiState ? WidgetManager?.GetFolderWatcherHealthSnapshots() : null);
+        DeskBoxWidgetManagerDiagnostic widgetManager = includeUiState
+            ? (WidgetManager?.CreateDiagnosticsSnapshot() ?? DeskBoxWidgetManagerDiagnostic.Empty)
+            : DeskBoxWidgetManagerDiagnostic.Empty;
+        IReadOnlyList<DeskBoxDisplayDiagnostic> displays = includeUiState
+            ? GetDisplayDiagnostics()
+            : [];
         SettingsPersistenceFailure? saveFailure = SettingsService.LastPersistenceFailure;
         ShortcutNativeDiagnosticState shortcutNative =
             ShortcutNativeBackend.CaptureDiagnosticState();

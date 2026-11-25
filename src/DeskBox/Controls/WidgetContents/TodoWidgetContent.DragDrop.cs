@@ -237,10 +237,22 @@ public sealed partial class TodoWidgetContent
     {
         if (sender is Border
             {
-                DataContext: TodoItemViewModel
+                DataContext: TodoItemViewModel targetTodoItem
             } reorderBorder &&
             !string.IsNullOrWhiteSpace(_draggedTodoItemId))
         {
+            if (ViewModel?.FindItem(_draggedTodoItemId) is { } draggedTodoItem &&
+                draggedTodoItem.IsCompleted != targetTodoItem.IsCompleted)
+            {
+                e.Handled = true;
+                e.AcceptedOperation = DataPackageOperation.None;
+                ApplyTodoReorderDropState(
+                    reorderBorder,
+                    active: false,
+                    insertAfter: false);
+                return;
+            }
+
             bool insertAfter =
                 e.GetPosition(reorderBorder).Y >= reorderBorder.ActualHeight / 2;
             e.Handled = true;
@@ -690,7 +702,10 @@ public sealed partial class TodoWidgetContent
         DragEventArgs e)
     {
         string? draggedItemId = _draggedTodoItemId;
-        if (ViewModel is null || string.IsNullOrWhiteSpace(draggedItemId))
+        if (ViewModel is null ||
+            string.IsNullOrWhiteSpace(draggedItemId) ||
+            (ViewModel.FindItem(draggedItemId) is { } draggedTodoItem &&
+             draggedTodoItem.IsCompleted != targetItem.IsCompleted))
         {
             e.AcceptedOperation = DataPackageOperation.None;
             return;

@@ -354,6 +354,7 @@
                                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                                                    DataContext="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}"
                                                     DataContextChanged="QuickCaptureAttachmentPreview_DataContextChanged"
                                                     Loaded="QuickCaptureAttachmentPreview_Loaded">
                                                     <Grid>

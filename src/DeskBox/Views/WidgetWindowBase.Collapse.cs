@@ -124,7 +124,7 @@ public abstract partial class WidgetWindowBase
     /// True while an expanded capsule lease owns this window's layer; derived
     /// hosts must not force-demote the window until the collapse re-beds it.
     /// </summary>
-    protected bool HasExpandedWidgetLayerLease => _expandedWidgetLayerLeaseGeneration != 0;
+    protected internal bool HasExpandedWidgetLayerLease => _expandedWidgetLayerLeaseGeneration != 0;
 
     /// <summary>
     /// Ends the expanded capsule lease without touching the layer. Manager
@@ -752,6 +752,7 @@ public abstract partial class WidgetWindowBase
 
     protected void BeginWidgetBoundsInteraction()
     {
+        SettleCollapseAnimationBeforeBoundsInteraction();
         CaptureExpandedPairInteraction();
         _isBoundsInteractionActive = true;
         BeginCompactInteraction();
@@ -1840,6 +1841,7 @@ public abstract partial class WidgetWindowBase
     /// </summary>
     protected void PrepareCompactHostForTrayHide()
     {
+        CancelDeferredExpandedLayerRestore();
         if (!_collapseInitialized ||
             IsClosing ||
             _targetCollapsed ||
@@ -1885,6 +1887,7 @@ public abstract partial class WidgetWindowBase
 
         if (!isVisible)
         {
+            CancelDeferredExpandedLayerRestore();
             CancelPendingCompactExpansion();
             CancelCompactExpansionWarmup();
             _compactExpansionReadyCallbacks.Clear();
@@ -2325,12 +2328,7 @@ public abstract partial class WidgetWindowBase
             cursor.X < windowBounds.X + windowBounds.Width &&
             cursor.Y >= windowBounds.Y &&
             cursor.Y < windowBounds.Y + windowBounds.Height;
-        bool nativeRootCanReceivePointer =
-            CanReceivePointerFromRootWindow(pointerRootWindow);
-        if (!WidgetCompactInteractionPolicy.CanTrustPointerOwnership(
-                pointerInsideWindow,
-                nativeRootCanReceivePointer,
-                HasRecentCompactRoutedPointerAuthority()))
+        if (!EvaluateCompactPointerOwnership(pointerInsideWindow, pointerRootWindow, clearPendingHoverOnPeerOcclusion: true))
         {
             bool hadPointerState =
                 _isPointerOverWidget ||
@@ -3084,13 +3082,10 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        bool pointerInsideWindow = IsPointerPhysicallyInsideWindow();
-        bool nativeRootCanReceivePointer =
-            CanReceivePointerFromRootWindow(GetPointerRootWindow(cursor));
-        return WidgetCompactInteractionPolicy.CanTrustPointerOwnership(
-            pointerInsideWindow,
-            nativeRootCanReceivePointer,
-            HasRecentCompactRoutedPointerAuthority());
+        return EvaluateCompactPointerOwnership(
+            IsPointerPhysicallyInsideWindow(),
+            GetPointerRootWindow(cursor),
+            clearPendingHoverOnPeerOcclusion: false);
     }
 
     private void MarkCompactRoutedPointerActivity()
@@ -5642,6 +5637,9 @@ public abstract partial class WidgetWindowBase
         bool restoreDesktopLayer = _restoreDesktopLayerAfterExpandedState;
         _isRaisedForExpandedState = false;
         _restoreDesktopLayerAfterExpandedState = false;
+        GuardHiddenExpandedLayerRestore(out bool abortRestore);
+        if (abortRestore) return;
+
         if (!restoreDesktopLayer)
         {
             ReleaseExpandedWidgetLayerLease("expanded-peer-layer-released");
@@ -5651,7 +5649,7 @@ public abstract partial class WidgetWindowBase
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
         IsAtDesktopLayer = true;
-        WidgetLayerService.MoveToDesktopBottom(HWnd);
+        WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false);
         ReleaseExpandedWidgetLayerLease("expanded-state-restored");
     }
 

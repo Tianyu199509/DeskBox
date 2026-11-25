@@ -157,7 +157,8 @@ public sealed class DesktopOrganizationScanner
             FileAttributes attributes = File.GetAttributes(fullPath);
             isDirectory = (attributes & FileAttributes.Directory) != 0;
             bool isHiddenOrSystem = (attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 ||
-                                    name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase);
+                                    name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+                                    (!isDirectory && ManagedStorageDesktopShortcutService.IsManagedStorageShortcutFile(fullPath));
             bool isTemporary = (attributes & FileAttributes.Temporary) != 0 ||
                                HasTemporarySuffix(name);
 

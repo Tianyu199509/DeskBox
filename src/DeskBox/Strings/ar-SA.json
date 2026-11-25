@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "لم يكتمل التحديث",
   "Settings.Update.InstallFailedBody": "تمت إعادة فتح DeskBox بعد فشل برنامج التثبيت. حاول التحديث مرة أخرى، أو قم بتنزيل برنامج التثبيت من الموقع الرسمي.",
   "Settings.Update.InstallPathMismatchBody": "لم ينته برنامج التثبيت في دليل DeskBox الأصلي، لذا أوقف DeskBox التحديث وأعاد فتح هذا الإصدار. قم بتنزيل برنامج التثبيت من الموقع الرسمي إذا استمرت المشكلة.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "تم حظر برنامج التثبيت بواسطة سياسة أمان Windows",
+  "Settings.Update.InstallBlockedByPolicyBody": "قام التحكم الذكي في التطبيقات (Smart App Control) في Windows أو سياسة توقيع التعليمات البرمجية بحظر برنامج التثبيت المباشر غير الموقّع. أعاد DeskBox فتح إصدارك الحالي مع الحفاظ على بياناتك بالكامل.\n\nملف التثبيت غير تالف—إعادة تنزيله من الموقع الرسمي ستواجه نفس الحظر غالبًا، ولا يُنصح بإيقاف التحكم الذكي في التطبيقات لأنه لا يمكن إعادة تفعيله دون إعادة ضبط Windows. يمكنك الاستمرار في استخدام إصدارك الحالي حاليًا، أو تصدير نسخة احتياطية من «التشخيص والصيانة» والانتقال إلى إصدار Microsoft Store الموقّع.",
   "Settings.Update.DownloadFailedTitle": "تعذر تنزيل التحديث",
   "Settings.Update.DownloadFailedBody": "{0}\n\nحاول التنزيل مرة أخرى، أو احصل على برنامج التثبيت من الموقع الرسمي.",
   "Settings.DragDropPermission.Title": "فحص السحب والإفلات",

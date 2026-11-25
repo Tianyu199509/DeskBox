@@ -2,7 +2,9 @@ using System.Buffers.Binary;
 using System.Reflection;
 using System.Text;
 using DeskBox.Helpers;
+using DeskBox.Models;
 using DeskBox.Platform;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -71,6 +73,372 @@ public sealed class SteamShortcutAndDesktopGhostRegressionTests : IDisposable
         Assert.Contains(filtered, item =>
             string.Equals(item.SourcePath, Path.GetFullPath(movedFolder), StringComparison.OrdinalIgnoreCase) &&
             item.WasDirectory);
+    }
+
+    [Fact]
+    public void ClassifyShellMoveNotification_UsesDeleteAndCreateWhenMovingOffDesktopOrAcrossVolumes()
+    {
+        const string personalDesktop = @"C:\Users\zcxcq\Desktop";
+        const string redirectedPersonalDesktop = @"D:\OneDrive\Desktop";
+        const string publicDesktop = @"C:\Users\Public\Desktop";
+        const string sameVolumeBox = @"C:\Users\zcxcq\AppData\Local\DeskBox\Boxes\Docs";
+        const string crossVolumeBox = @"D:\DeskBox\Boxes\Docs";
+
+        string? AliasResolver(string dir) =>
+            string.Equals(dir, personalDesktop, StringComparison.OrdinalIgnoreCase)
+                ? redirectedPersonalDesktop
+                : null;
+
+        // Same-volume file move off Personal Desktop must emit DELETE + CREATE (never cross-folder RENAMEITEM).
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"C:\Users\zcxcq\Desktop\会议纪要.pdf",
+                Path.Combine(sameVolumeBox, "会议纪要.pdf"),
+                isDirectory: false,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+
+        // Move off redirected/junctioned Desktop target alias is also recognized as leaving the Desktop.
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"D:\OneDrive\Desktop\会议纪要.pdf",
+                Path.Combine(crossVolumeBox, "会议纪要.pdf"),
+                isDirectory: false,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+
+        // Cross-volume non-desktop move also emits DELETE + CREATE.
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"C:\Users\zcxcq\Downloads\report.pdf",
+                Path.Combine(crossVolumeBox, "report.pdf"),
+                isDirectory: false,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+
+        // Same-volume rename staying on Desktop (including across its own resolved alias) stays a file rename.
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.SameVolumeFileRename,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"C:\Users\zcxcq\Desktop\新建 文本文档.txt",
+                @"C:\Users\zcxcq\Desktop\会议记录.txt",
+                isDirectory: false,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.SameVolumeFileRename,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"C:\Users\zcxcq\Desktop\note.txt",
+                @"D:\OneDrive\Desktop\note-renamed.txt",
+                isDirectory: false,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+
+        // Same-volume non-desktop folder move uses SHCNE_RENAMEFOLDER.
+        Assert.Equal(
+            ShellMoveNotificationPlanKind.SameVolumeFolderRename,
+            DesktopIconPositionInterop.ClassifyShellMoveNotification(
+                @"C:\Users\zcxcq\Downloads\ProjectFolder",
+                Path.Combine(sameVolumeBox, "ProjectFolder"),
+                isDirectory: true,
+                personalDesktop,
+                publicDesktop,
+                AliasResolver));
+    }
+
+    [Fact]
+    public void BuildGhostCandidateLookup_IncludesSameScopeDesktopAliasesWithoutCrossScopeLeak()
+    {
+        string personalLexical = Path.Combine(_tempRoot, "LexicalDesktop");
+        string personalPhysical = Path.Combine(_tempRoot, "PhysicalOneDriveDesktop");
+        string publicDesktop = Path.Combine(_tempRoot, "PublicDesktop");
+        Directory.CreateDirectory(personalLexical);
+        Directory.CreateDirectory(personalPhysical);
+        Directory.CreateDirectory(publicDesktop);
+
+        // Existing twin on Public Desktop must never be matched or purged when Personal Desktop item moved.
+        string publicExistingTwin = Path.Combine(publicDesktop, "会议纪要.pdf");
+        File.WriteAllText(publicExistingTwin, "keep-public");
+
+        string movedPersonalSource = Path.Combine(personalLexical, "会议纪要.pdf");
+        var item = new MovedDesktopItem(
+            movedPersonalSource,
+            personalLexical,
+            WasDirectory: false,
+            IsPublicDesktop: false);
+
+        Dictionary<string, MovedDesktopItem> lookup = DesktopIconPositionInterop.BuildGhostCandidateLookup(
+            [item],
+            [personalLexical, personalPhysical],
+            [publicDesktop]);
+
+        Assert.True(lookup.ContainsKey(movedPersonalSource));
+        Assert.True(lookup.ContainsKey(Path.Combine(personalPhysical, "会议纪要.pdf")));
+        Assert.False(lookup.ContainsKey(publicExistingTwin));
+    }
+
+    [Fact]
+    public void ExecuteGhostPurgeSchedule_DoesNotExitEarlyOnCleanFirstPass_AndEscalatesWhenGhostSurvives()
+    {
+        const string ghostPath = @"C:\Users\zcxcq\Desktop\会议纪要.pdf";
+        var sleeps = new List<int>();
+        var escalatedByPass = new List<bool>();
+        int passIndex = 0;
+
+        DesktopIconPositionInterop.ExecuteGhostPurgeSchedule(
+            DesktopIconPositionInterop.GhostPurgePollDelaysMs,
+            DesktopIconPositionInterop.GhostPurgeEscalationFollowUpDelayMs,
+            sleeps.Add,
+            hasAnyMissingSource: static () => true,
+            runPass: previouslyPurged =>
+            {
+                int current = passIndex++;
+                if (current == 0)
+                {
+                    // Pass 0 (100 ms): Explorer's async CDefView / PDF thumbnail batch has not committed yet.
+                    escalatedByPass.Add(false);
+                    return GhostPurgePassOutcome.None;
+                }
+
+                // Pass 1 (300 ms) sees the late ghost; Pass 2 (750 ms) sees it survived SHCNE_DELETE and escalates.
+                bool shouldEscalate = DesktopIconPositionInterop.ShouldEscalateToShellViewRefresh(
+                    [ghostPath],
+                    previouslyPurged);
+                escalatedByPass.Add(shouldEscalate);
+                return new GhostPurgePassOutcome([ghostPath], EscalatedRefresh: shouldEscalate);
+            });
+
+        Assert.Equal([100, 300, 750], sleeps);
+        Assert.Equal([false, false, true], escalatedByPass);
+    }
+
+    [Fact]
+    public void ExecuteGhostPurgeSchedule_RunsFollowUpEscalationPassWhenGhostFirstAppearsOnFinalScheduledPass()
+    {
+        const string lateGhost = @"C:\Users\zcxcq\Desktop\late-download.pdf";
+        var sleeps = new List<int>();
+        var escalatedByPass = new List<bool>();
+        int passIndex = 0;
+
+        DesktopIconPositionInterop.ExecuteGhostPurgeSchedule(
+            [100, 300, 750],
+            escalationFollowUpDelayMs: 600,
+            sleeps.Add,
+            hasAnyMissingSource: static () => true,
+            runPass: previouslyPurged =>
+            {
+                int current = passIndex++;
+                if (current < 2)
+                {
+                    escalatedByPass.Add(false);
+                    return GhostPurgePassOutcome.None;
+                }
+
+                bool shouldEscalate = DesktopIconPositionInterop.ShouldEscalateToShellViewRefresh(
+                    [lateGhost],
+                    previouslyPurged);
+                escalatedByPass.Add(shouldEscalate);
+                return new GhostPurgePassOutcome([lateGhost], EscalatedRefresh: shouldEscalate);
+            });
+
+        Assert.Equal([100, 300, 750, 600], sleeps);
+        Assert.Equal([false, false, false, true], escalatedByPass);
+    }
+
+    [Fact]
+    public void ExecuteGhostPurgeSchedule_StopsImmediatelyOnceSourcePathReturnsToDesktop()
+    {
+        var sleeps = new List<int>();
+        int passesRun = 0;
+        bool stillMissing = true;
+
+        DesktopIconPositionInterop.ExecuteGhostPurgeSchedule(
+            [100, 300, 750],
+            escalationFollowUpDelayMs: 600,
+            sleeps.Add,
+            hasAnyMissingSource: () => stillMissing,
+            runPass: _ =>
+            {
+                passesRun++;
+                stillMissing = false; // Undo restored the file to the Desktop after pass 0.
+                return GhostPurgePassOutcome.None;
+            });
+
+        Assert.Equal([100, 300], sleeps);
+        Assert.Equal(1, passesRun);
+    }
+
+    [Fact]
+    public void FilterRemovedDesktopItems_CapturesDirectDesktopDeletionsAcrossPersonalPublicAndAliases()
+    {
+        const string personalDesktop = @"C:\Users\zcxcq\Desktop";
+        const string redirectedPersonal = @"D:\OneDrive\Desktop";
+        const string publicDesktop = @"C:\Users\Public\Desktop";
+        const string downloads = @"C:\Users\zcxcq\Downloads";
+
+        string? AliasResolver(string dir) =>
+            string.Equals(dir, personalDesktop, StringComparison.OrdinalIgnoreCase)
+                ? redirectedPersonal
+                : null;
+
+        IReadOnlyList<MovedDesktopItem> matched = DesktopIconPositionInterop.FilterRemovedDesktopItems(
+            [
+                (@"C:\Users\zcxcq\Desktop\DeskBox Files.lnk", false),
+                (@"c:\users\zcxcq\desktop\deskbox files.lnk", false),
+                (@"D:\OneDrive\Desktop\TempFolder", true),
+                (@"C:\Users\Public\Desktop\SharedTool.lnk", false),
+                (Path.Combine(downloads, "Unrelated.zip"), false),
+            ],
+            personalDesktop,
+            publicDesktop,
+            AliasResolver);
+
+        Assert.Equal(3, matched.Count);
+        Assert.Contains(matched, item =>
+            string.Equals(item.SourcePath, @"C:\Users\zcxcq\Desktop\DeskBox Files.lnk", StringComparison.OrdinalIgnoreCase) &&
+            !item.IsPublicDesktop &&
+            !item.WasDirectory);
+        Assert.Contains(matched, item =>
+            string.Equals(item.SourcePath, @"D:\OneDrive\Desktop\TempFolder", StringComparison.OrdinalIgnoreCase) &&
+            !item.IsPublicDesktop &&
+            item.WasDirectory);
+        Assert.Contains(matched, item =>
+            string.Equals(item.SourcePath, @"C:\Users\Public\Desktop\SharedTool.lnk", StringComparison.OrdinalIgnoreCase) &&
+            item.IsPublicDesktop &&
+            !item.WasDirectory);
+    }
+
+    [Fact]
+    public void CanEscalateShellViewRefresh_BlocksDuringInlineRenameActiveRestoreOrCooldownWindow()
+    {
+        const long cooldown = DesktopIconPositionInterop.ShellViewRefreshCooldownMs;
+
+        // First-ever refresh (long.MinValue sentinel) with idle rename and zero active restores is permitted.
+        Assert.True(DesktopIconPositionInterop.CanEscalateShellViewRefresh(
+            inlineRenameActive: false,
+            activePositionRestoreCount: 0,
+            nowTick64: 0,
+            lastRefreshTick64: long.MinValue));
+
+        // Inline rename active -> blocked.
+        Assert.False(DesktopIconPositionInterop.CanEscalateShellViewRefresh(
+            inlineRenameActive: true,
+            activePositionRestoreCount: 0,
+            nowTick64: 10_000,
+            lastRefreshTick64: long.MinValue));
+
+        // Active desktop icon position restore (Undo / Move-to-Desktop) -> blocked so Refresh cannot clobber coordinates.
+        Assert.False(DesktopIconPositionInterop.CanEscalateShellViewRefresh(
+            inlineRenameActive: false,
+            activePositionRestoreCount: 1,
+            nowTick64: 10_000,
+            lastRefreshTick64: long.MinValue));
+
+        // Adjacent inside cooldown window (1199 ms < 1200 ms) -> blocked; exact boundary (1200 ms) -> permitted.
+        Assert.False(DesktopIconPositionInterop.CanEscalateShellViewRefresh(
+            inlineRenameActive: false,
+            activePositionRestoreCount: 0,
+            nowTick64: 5_000 + cooldown - 1,
+            lastRefreshTick64: 5_000));
+        Assert.True(DesktopIconPositionInterop.CanEscalateShellViewRefresh(
+            inlineRenameActive: false,
+            activePositionRestoreCount: 0,
+            nowTick64: 5_000 + cooldown,
+            lastRefreshTick64: 5_000));
+    }
+
+    [Fact]
+    public void CoalescedGhostPurgeQueue_MergesConcurrentMovesAndRearmsOnlyForMidCycleArrivals()
+    {
+        var queue = new DesktopIconPositionInterop.CoalescedGhostPurgeBatchQueue();
+        var existingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var itemA = new MovedDesktopItem(@"C:\Users\zcxcq\Desktop\a.pdf", @"C:\Users\zcxcq\Desktop", false);
+        var itemB = new MovedDesktopItem(@"C:\Users\zcxcq\Desktop\b.pdf", @"C:\Users\zcxcq\Desktop", false);
+        var itemC = new MovedDesktopItem(@"C:\Users\zcxcq\Desktop\c.pdf", @"C:\Users\zcxcq\Desktop", false);
+
+        // First enqueue starts the single background worker; burst follow-ups coalesce into the active worker.
+        Assert.True(queue.Enqueue([itemA], [@"C:\Users\zcxcq\Desktop"], [@"C:\Users\Public\Desktop"]));
+        Assert.False(queue.Enqueue([itemB], [@"C:\Users\zcxcq\Desktop"], [@"C:\Users\Public\Desktop"]));
+
+        int firstCycleGen = queue.BeginCycle();
+        (MovedDesktopItem[] snapshot1, _, _) = queue.SnapshotPendingMissing(existingPaths.Contains);
+        Assert.Equal(2, snapshot1.Length);
+
+        // Mid-cycle arrival (itemC) lands while cycle 1 is already mid-flight; itemB is simultaneously undone back to Desktop.
+        Assert.False(queue.Enqueue([itemC], [@"C:\Users\zcxcq\Desktop"], [@"C:\Users\Public\Desktop"]));
+        existingPaths.Add(itemB.SourcePath);
+
+        (MovedDesktopItem[] snapshotMid, _, _) = queue.SnapshotPendingMissing(existingPaths.Contains);
+        Assert.Equal(2, snapshotMid.Length);
+        Assert.DoesNotContain(snapshotMid, candidate =>
+            string.Equals(candidate.SourcePath, itemB.SourcePath, StringComparison.OrdinalIgnoreCase));
+
+        // Completing cycle 1 retires itemA (completed full cycle) and re-arms one cycle strictly for late-arriving itemC.
+        Assert.True(queue.CompleteCycleAndShouldContinue(firstCycleGen, existingPaths.Contains));
+
+        int secondCycleGen = queue.BeginCycle();
+        (MovedDesktopItem[] snapshot2, _, _) = queue.SnapshotPendingMissing(existingPaths.Contains);
+        MovedDesktopItem remaining = Assert.Single(snapshot2);
+        Assert.Equal(itemC.SourcePath, remaining.SourcePath);
+
+        // Completing cycle 2 with no new arrivals marks the worker idle so a future move starts a fresh worker.
+        Assert.False(queue.CompleteCycleAndShouldContinue(secondCycleGen, existingPaths.Contains));
+        Assert.True(queue.Enqueue([itemA], [@"C:\Users\zcxcq\Desktop"], [@"C:\Users\Public\Desktop"]));
+    }
+
+    [Fact]
+    public async Task DesktopOrganizationScanner_ExcludesManagedStorageDesktopShortcutWhileKeepingUserShortcutsEligible()
+    {
+        string desktopDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "ScannerDesktop")).FullName;
+        string publicDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "ScannerPublicDesktop")).FullName;
+        string managedRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "DeskBoxManagedRoot")).FullName;
+        string userFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "UserProject")).FullName;
+
+        string deskBoxShortcutPath = Path.Combine(desktopDir, ManagedStorageDesktopShortcutService.ShortcutFileName);
+        string userShortcutPath = Path.Combine(desktopDir, "UserProject.lnk");
+
+        ShortcutHelper.CreateOrUpdateFolderShortcut(
+            deskBoxShortcutPath,
+            managedRoot,
+            ManagedStorageDesktopShortcutService.ShortcutDescription);
+        ShortcutHelper.CreateOrUpdateFolderShortcut(
+            userShortcutPath,
+            userFolder,
+            "User project folder");
+
+        Assert.True(ManagedStorageDesktopShortcutService.IsManagedStorageShortcutFile(deskBoxShortcutPath));
+        Assert.False(ManagedStorageDesktopShortcutService.IsManagedStorageShortcutFile(userShortcutPath));
+
+        var scanner = new DesktopOrganizationScanner(
+            new DesktopOrganizationClassifier(),
+            () => desktopDir,
+            () => publicDir);
+
+        DesktopOrganizationFileSnapshot autoDeskBoxSnap = scanner.CreateAutoOrganizationSnapshot(deskBoxShortcutPath);
+        DesktopOrganizationFileSnapshot autoUserSnap = scanner.CreateAutoOrganizationSnapshot(userShortcutPath);
+        Assert.False(autoDeskBoxSnap.IsEligible);
+        Assert.Equal(DesktopOrganizationExclusionReason.HiddenOrSystem, autoDeskBoxSnap.ExclusionReason);
+        Assert.True(autoUserSnap.IsEligible);
+        Assert.Equal(DesktopOrganizationExclusionReason.None, autoUserSnap.ExclusionReason);
+
+        DesktopOrganizationScanResult manualScan = await scanner.ScanAsync(includeSlowItems: true);
+        DesktopOrganizationFileSnapshot manualDeskBox = Assert.Single(
+            manualScan.Items,
+            item => string.Equals(item.SourcePath, deskBoxShortcutPath, StringComparison.OrdinalIgnoreCase));
+        DesktopOrganizationFileSnapshot manualUser = Assert.Single(
+            manualScan.Items,
+            item => string.Equals(item.SourcePath, userShortcutPath, StringComparison.OrdinalIgnoreCase));
+        Assert.False(manualDeskBox.IsEligible);
+        Assert.Equal(DesktopOrganizationExclusionReason.HiddenOrSystem, manualDeskBox.ExclusionReason);
+        Assert.True(manualUser.IsEligible);
     }
 
     [Fact]

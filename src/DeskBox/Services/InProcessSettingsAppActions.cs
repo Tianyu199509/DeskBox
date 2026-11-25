@@ -104,15 +104,19 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
 
     public void UpdateTrayIcon() => _app.UpdateTrayIcon();
 
-    public void SetSnapEnabled(bool value) => _app.ResizeGuideOverlay.IsSnapEnabled = value;
+    public void SetSnapEnabled(bool value) =>
+        DeskBox.Platform.UiDispatch.RunOrDefer(() => _app.ResizeGuideOverlay.IsSnapEnabled = value);
 
-    public void SetSnapSpacingDips(double value) => _app.ResizeGuideOverlay.SnapSpacingDips = value;
+    public void SetSnapSpacingDips(double value) =>
+        DeskBox.Platform.UiDispatch.RunOrDefer(() => _app.ResizeGuideOverlay.SnapSpacingDips = value);
 
     public void BringSettingsWindowToRaisedBand(nint windowHandle, string reason) =>
-        _app.WidgetManager?.BringAuxiliaryWindowToFront((IntPtr)windowHandle, reason);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _app.WidgetManager?.BringAuxiliaryWindowToFront((IntPtr)windowHandle, reason));
 
     public void ReleaseRaisedBandGuest(nint windowHandle, string reason) =>
-        _app.WidgetManager?.ReleaseRaisedBandGuest((IntPtr)windowHandle, reason);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _app.WidgetManager?.ReleaseRaisedBandGuest((IntPtr)windowHandle, reason));
 
     public void ScheduleLightMemoryCleanup() => App.ScheduleLightMemoryCleanup();
 
@@ -133,7 +137,7 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
 
     public async Task<string> ExportDiagnosticBundleAsync(string destinationDirectory)
     {
-        DeskBoxDiagnosticSnapshot snapshot = _app.CreateDiagnosticSnapshot();
+        DeskBoxDiagnosticSnapshot snapshot = await _app.CreateDiagnosticSnapshotSafeAsync(TimeSpan.FromSeconds(2));
         return await _app.DiagnosticsBundleService.ExportAsync(
             destinationDirectory,
             snapshot,
@@ -161,13 +165,37 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
         }
     }
 
-    public AppRuntimeHealthSnapshot? GetRuntimeHealthSnapshot() =>
-        _app.DiagnosticsService?.GetRuntimeHealthSnapshot(
-            _app.EverythingSearchService,
-            _app.WidgetManager?.GetFolderWatcherHealthSnapshots());
+    public AppRuntimeHealthSnapshot? GetRuntimeHealthSnapshot()
+    {
+        if (DeskBox.Platform.UiDispatch.HasAccess)
+        {
+            return _app.DiagnosticsService?.GetRuntimeHealthSnapshot(
+                _app.EverythingSearchService,
+                _app.WidgetManager?.GetFolderWatcherHealthSnapshots());
+        }
+
+        try
+        {
+            IReadOnlyList<FolderWatcherHealthSnapshot>? watcherSnapshots = DeskBox.Platform.UiDispatch
+                .RunAsync(() => Task.FromResult<IReadOnlyList<FolderWatcherHealthSnapshot>?>(
+                    _app.WidgetManager?.GetFolderWatcherHealthSnapshots()))
+                .WaitAsync(TimeSpan.FromSeconds(2))
+                .GetAwaiter()
+                .GetResult();
+            return _app.DiagnosticsService?.GetRuntimeHealthSnapshot(
+                _app.EverythingSearchService,
+                watcherSnapshots);
+        }
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or InvalidOperationException)
+        {
+            return _app.DiagnosticsService?.GetRuntimeHealthSnapshot(
+                _app.EverythingSearchService,
+                null);
+        }
+    }
 
     public Task ForceExternalStateRecoveryAsync() =>
-        _app.ForceExternalStateRecoveryAsync();
+        DeskBox.Platform.UiDispatch.RunAsync(_app.ForceExternalStateRecoveryAsync);
 
     public Task<StartupOperationResult> GetAutoStartStatusAsync() =>
         _app.GetAutoStartStatusAsync();

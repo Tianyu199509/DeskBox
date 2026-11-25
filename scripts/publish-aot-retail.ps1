@@ -3,7 +3,15 @@ param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
 
-    [string]$DotNetPath = ""
+    [string]$DotNetPath = "",
+
+    [string]$SignThumbprint = "",
+
+    [string[]]$TimestampUrls = @(
+        "http://time.certum.pl",
+        "http://timestamp.digicert.com",
+        "http://timestamp.sectigo.com"
+    )
 )
 
 $ErrorActionPreference = "Stop"
@@ -552,6 +560,23 @@ $forbiddenFiles = @(
 )
 if ($forbiddenFiles.Count -gt 0) {
     throw "AOT retail output contains forbidden managed/JIT/symbol files: $($forbiddenFiles.Name -join ', ')."
+}
+
+if (-not [string]::IsNullOrWhiteSpace($SignThumbprint)) {
+    $signHelperPath = Join-Path $PSScriptRoot "Sign-DeskBoxFiles.ps1"
+    $firstPartyPePaths = @(
+        "DeskBox.exe",
+        "DeskBox.Updater.exe",
+        "DeskBox.ThumbnailProxy.exe",
+        "deskbox_native.dll",
+        "deskbox_qjs.dll"
+    ) | ForEach-Object { Join-Path $publishDir $_ }
+    & $signHelperPath `
+        -Thumbprint $SignThumbprint `
+        -TimestampUrls $TimestampUrls `
+        -FilePaths $firstPartyPePaths | Out-Null
+    $nativePublishSha256 = (Get-FileHash -LiteralPath $nativePublishPath -Algorithm SHA256).Hash
+    $qjsPublishSha256 = (Get-FileHash -LiteralPath $qjsPublishPath -Algorithm SHA256).Hash
 }
 
 $peResults = @(

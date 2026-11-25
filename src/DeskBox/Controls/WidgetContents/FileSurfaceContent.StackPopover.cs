@@ -606,6 +606,14 @@ public sealed partial class FileSurfaceContent
 
         // A normally dismissed popover keeps its control tree as a bounded
         // per-surface cache. Reopening it only rebinds the current members.
+        if (!_stackPopoverPopupOpen && !_stackPopoverPopupClosing &&
+            ViewModel.UsesStackPopover && ViewModel.FindStackByKey(stackKey) is { } resolvedStack)
+        {
+            _ = Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
+            ShowStackPopover(resolvedStack);
+            return;
+        }
+
         QueueStackPopoverShow(stackKey);
     }
 
@@ -1782,8 +1790,6 @@ public sealed partial class FileSurfaceContent
         object sender,
         RoutedEventArgs e)
     {
-        App.Current?.WidgetManager?.BeginWidgetInteraction(
-            "surface-stack-popover-close-button");
         CloseStackPopover();
     }
 

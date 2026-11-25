@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "Update wurde nicht abgeschlossen",
   "Settings.Update.InstallFailedBody": "DeskBox wurde nach dem fehlgeschlagenen Installer erneut geöffnet. Versuchen Sie das Update erneut oder laden Sie den Installer von der offiziellen Website herunter.",
   "Settings.Update.InstallPathMismatchBody": "Der Installer wurde nicht im ursprünglichen DeskBox-Ordner abgeschlossen. Das Update wurde gestoppt und diese Version erneut geöffnet. Laden Sie bei anhaltendem Problem den Installer von der offiziellen Website herunter.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Installer durch Windows-Sicherheitsrichtlinie blockiert",
+  "Settings.Update.InstallBlockedByPolicyBody": "Die Intelligente App-Steuerung von Windows oder eine Codesignatur-Richtlinie hat den unsignierten Direkt-Installer blockiert. DeskBox hat Ihre aktuelle Version bei unveränderten Daten erneut geöffnet.\n\nDer Installer ist nicht beschädigt – ein erneuter Download von der Website wird in der Regel ebenfalls blockiert, und das Deaktivieren der Intelligenten App-Steuerung wird nicht empfohlen, da sie sich ohne Zurücksetzen von Windows nicht wieder einschalten lässt. Nutzen Sie vorerst Ihre aktuelle Version weiter oder exportieren Sie unter „Diagnose & Wartung“ ein Backup und wechseln Sie zur signierten Microsoft Store-Version.",
   "Settings.Update.DownloadFailedTitle": "Update konnte nicht heruntergeladen werden",
   "Settings.Update.DownloadFailedBody": "{0}\n\nVersuchen Sie den Download erneut oder laden Sie den Installer von der offiziellen Website herunter.",
   "Settings.DragDropPermission.Title": "Drag & Drop-Prüfung",

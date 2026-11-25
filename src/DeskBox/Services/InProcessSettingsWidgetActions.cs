@@ -411,11 +411,12 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             return;
         }
 
-        await manager.ResetFeatureWidgetAsync(kind);
+        await DeskBox.Platform.UiDispatch.RunAsync(() => manager.ResetFeatureWidgetAsync(kind));
     }
 
     public void RefreshVisibleWidgetDesktopLayers(string reason) =>
-        _widgetManager?.RefreshVisibleWidgetDesktopLayers(reason);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _widgetManager?.RefreshVisibleWidgetDesktopLayers(reason));
 
     public void NotifyWidgetGroupPresentationSettingsChanged() =>
         // Batch R11: this arrives on a pool dispatch thread, and the
@@ -428,17 +429,17 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId) =>
         _widgetManager is { } manager
-            ? manager.ReorderWidgetGroupMemberAsync(sourceWidgetId, targetWidgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.ReorderWidgetGroupMemberAsync(sourceWidgetId, targetWidgetId))
             : Task.FromResult(false);
 
     public Task<bool> RemoveWidgetFromGroupAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.RemoveWidgetFromGroupAsync(widgetId, revealStandalone: true)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.RemoveWidgetFromGroupAsync(widgetId, revealStandalone: true))
             : Task.FromResult(false);
 
     public Task<bool> DissolveWidgetGroupContainingAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.DissolveWidgetGroupContainingAsync(widgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.DissolveWidgetGroupContainingAsync(widgetId))
             : Task.FromResult(false);
 
     public IReadOnlyList<ManagedStorageFolderCleanupCandidate>? GetOrphanManagedStorageFolders() =>
@@ -446,17 +447,17 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public Task<int> RestoreOrphanManagedStorageFoldersAsync(IReadOnlyList<string> folderPaths) =>
         _widgetManager is { } manager
-            ? manager.RestoreOrphanManagedStorageFoldersAsync(folderPaths)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.RestoreOrphanManagedStorageFoldersAsync(folderPaths))
             : Task.FromResult(0);
 
     public Task MoveOrphanManagedStorageFolderContentsToDesktopAsync(string folderPath) =>
         _widgetManager is { } manager
-            ? manager.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath))
             : Task.CompletedTask;
 
     public Task DeleteOrphanManagedStorageFolderAsync(string folderPath, nint ownerWindowHandle) =>
         _widgetManager is { } manager
-            ? manager.DeleteOrphanManagedStorageFolderAsync(folderPath, ownerWindowHandle)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.DeleteOrphanManagedStorageFolderAsync(folderPath, ownerWindowHandle))
             : Task.CompletedTask;
 
     public int GetDefaultManagedStorageWidgetCount() =>
@@ -504,62 +505,63 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public Task<GlanceWidgetInstanceInfo> CreateGlanceWidgetAsync(string? sourceWidgetId) =>
         _widgetManager is { } manager
-            ? manager.CreateGlanceWidgetAsync(sourceWidgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.CreateGlanceWidgetAsync(sourceWidgetId))
             : Task.FromException<GlanceWidgetInstanceInfo>(
                 new InvalidOperationException("WidgetManager is not initialized."));
 
     public Task SetGlanceWidgetInstanceEnabledAsync(string widgetId, bool enabled) =>
         _widgetManager is { } manager
-            ? manager.SetGlanceWidgetInstanceEnabledAsync(widgetId, enabled)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.SetGlanceWidgetInstanceEnabledAsync(widgetId, enabled))
             : Task.CompletedTask;
 
     public Task<bool> LocateGlanceWidgetAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.LocateGlanceWidgetAsync(widgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.LocateGlanceWidgetAsync(widgetId))
             : Task.FromResult(false);
 
     public Task RemoveGlanceWidgetAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.RemoveGlanceWidgetAsync(widgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.RemoveGlanceWidgetAsync(widgetId))
             : Task.CompletedTask;
 
     public Task RenameWidgetAsync(string widgetId, string newName) =>
         _widgetManager is { } manager
-            ? manager.RenameWidgetAsync(widgetId, newName)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.RenameWidgetAsync(widgetId, newName))
             : Task.CompletedTask;
 
     public Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync() =>
-        Task.FromResult<IReadOnlyList<GlanceWidgetInstanceInfo>>(
-            _widgetManager?.GetCustomWidgetInstances() ?? []);
+        _widgetManager is { } manager
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => Task.FromResult(manager.GetCustomWidgetInstances()))
+            : Task.FromResult<IReadOnlyList<GlanceWidgetInstanceInfo>>([]);
 
     public Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec) =>
         _widgetManager is { } manager
-            ? manager.CreateCustomWidgetAsync(templateOrPackageSpec)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.CreateCustomWidgetAsync(templateOrPackageSpec))
             : Task.FromException<GlanceWidgetInstanceInfo>(
                 new InvalidOperationException("WidgetManager is not initialized."));
 
     public Task<GlanceWidgetInstanceInfo> CreateCustomWidgetWithSetupAsync(Contracts.CustomWidgetCreateOptions options) =>
         _widgetManager is { } manager
-            ? manager.CreateCustomWidgetAsync(
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.CreateCustomWidgetAsync(
                 options.Spec,
                 initialSettings: options.InitialSettings,
-                initialSecrets: options.InitialSecrets)
+                initialSecrets: options.InitialSecrets))
             : Task.FromException<GlanceWidgetInstanceInfo>(
                 new InvalidOperationException("WidgetManager is not initialized."));
 
     public Task ApplyCustomWidgetMutationAsync(Contracts.CustomWidgetSettingsMutation mutation) =>
         _widgetManager is { } manager
-            ? manager.ApplyCustomWidgetMutationAsync(mutation)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.ApplyCustomWidgetMutationAsync(mutation))
             : Task.CompletedTask;
 
     public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) =>
         _widgetManager is { } manager
-            ? manager.SetCustomWidgetInstanceEnabledAsync(widgetId, enabled)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.SetCustomWidgetInstanceEnabledAsync(widgetId, enabled))
             : Task.CompletedTask;
 
     public Task<bool> LocateCustomWidgetAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.LocateCustomWidgetAsync(widgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.LocateCustomWidgetAsync(widgetId))
             : Task.FromResult(false);
 
     public async Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea)
@@ -586,18 +588,18 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public Task RemoveCustomWidgetAsync(string widgetId) =>
         _widgetManager is { } manager
-            ? manager.RemoveCustomWidgetAsync(widgetId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.RemoveCustomWidgetAsync(widgetId))
             : Task.CompletedTask;
 
     public Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
         string displayStableId) =>
         _widgetManager is { } manager
-            ? manager.MoveAllWidgetSurfacesToDisplayAsync(displayStableId)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.MoveAllWidgetSurfacesToDisplayAsync(displayStableId))
             : Task.FromResult((0, new WidgetMoveAllUndoToken()));
 
     public Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token) =>
         _widgetManager is { } manager
-            ? manager.UndoMoveAllWidgetSurfacesAsync(token)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.UndoMoveAllWidgetSurfacesAsync(token))
             : Task.FromResult(false);
 
     public Task<int> RecalibrateDisplayLayoutAsync() =>
@@ -611,7 +613,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         string? boundScreenId,
         bool persistImmediately = true) =>
         _widgetManager is { } manager
-            ? manager.ApplyScreenBindingAsync(widgetId, mode, boundScreenId, persistImmediately)
+            ? DeskBox.Platform.UiDispatch.RunAsync(() => manager.ApplyScreenBindingAsync(widgetId, mode, boundScreenId, persistImmediately))
             : Task.CompletedTask;
 
 

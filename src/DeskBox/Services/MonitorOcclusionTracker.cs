@@ -322,7 +322,7 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             handle.Free();
         }
 
-        bool isFullscreenActive = Win32Helper.IsFullscreenAppActive();
+        bool isFullscreenActive = Win32Helper.IsExclusiveFullscreenOrPresentationActive();
         if (isFullscreenActive && foregroundMonitor != IntPtr.Zero && !monitors.ContainsKey(foregroundMonitor))
         {
             if (TryGetMonitorBounds(foregroundMonitor, out MonitorBounds fgBounds))
@@ -613,7 +613,9 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
 
     private static bool IsDesktopShellClassNameSpan(ReadOnlySpan<char> className) =>
         className.SequenceEqual("Progman") ||
-        className.SequenceEqual("WorkerW");
+        className.SequenceEqual("WorkerW") ||
+        className.SequenceEqual("#32768") ||
+        className.SequenceEqual("XamlExplorerHostIslandWindow");
 
     private static bool IsExcludedShellClassNameSpan(ReadOnlySpan<char> className) =>
         IsDesktopShellClassNameSpan(className) ||

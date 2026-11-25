@@ -49,9 +49,9 @@ internal readonly record struct QuiescenceTrimDecision(
 /// </summary>
 internal sealed class QuiescenceWorkingSetTrimTracker
 {
-    internal static readonly TimeSpan HiddenQuietDuration = TimeSpan.FromSeconds(3);
-    internal static readonly TimeSpan VisibleBackgroundQuietDuration = TimeSpan.FromSeconds(5);
-    internal static readonly TimeSpan VisibleForegroundQuietDuration = TimeSpan.FromSeconds(15);
+    internal static readonly TimeSpan HiddenQuietDuration = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan VisibleBackgroundQuietDuration = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan VisibleForegroundQuietDuration = TimeSpan.FromSeconds(60);
     internal static readonly TimeSpan MinimumTrimInterval = TimeSpan.FromSeconds(20);
     internal static readonly TimeSpan StaticBackgroundMinimumTrimInterval =
         TimeSpan.FromMinutes(5);
@@ -139,13 +139,18 @@ internal sealed class QuiescenceWorkingSetTrimTracker
             {
                 bool wasEpisodeAvailable = _episodeTrimAvailable;
                 QuiescenceTrimTier previousTier = _quietTier.Value;
-                _episodeTrimAvailable = true;
-                _settledWorkingSetBaseline = null;
-                _lastObservedBelowEpisodeFloor = false;
-                if (!wasEpisodeAvailable ||
-                    tier == QuiescenceTrimTier.VisibleForeground ||
+                bool crossesHiddenBoundary =
                     previousTier == QuiescenceTrimTier.Hidden ||
-                    tier == QuiescenceTrimTier.Hidden)
+                    tier == QuiescenceTrimTier.Hidden;
+                if (crossesHiddenBoundary)
+                {
+                    _episodeTrimAvailable = true;
+                    _settledWorkingSetBaseline = null;
+                    _lastObservedBelowEpisodeFloor = false;
+                }
+
+                if ((!wasEpisodeAvailable && crossesHiddenBoundary) ||
+                    (wasEpisodeAvailable && (tier == QuiescenceTrimTier.VisibleForeground || crossesHiddenBoundary)))
                 {
                     _quietSince = now;
                 }

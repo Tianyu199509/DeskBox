@@ -145,6 +145,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         CurrentContent is TodoWidgetContentAdapter
         {
             HasActiveInlineOverlay: true
+        } ||
+        CurrentContent is CustomWidgetContentAdapter
+        {
+            HasOpenFlyout: true
         };
 
     protected override bool OwnsTransientForegroundWindow(IntPtr foregroundWindow) =>
@@ -186,7 +190,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             return WidgetPositioningService.GetPhysicalMinimumSizeForBounds(
                 new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)),
                 120,
-                58);
+                48);
         }
 
         return base.GetPhysicalMinimumWindowSize(x, y, width, height);
@@ -883,8 +887,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 isDark,
                 surfaceOpacity,
                 SettingsService.Settings.WidgetMaterialIntensity,
-                acrylicControllerAttached: (AcrylicController is { IsClosed: false } && AcrylicControllerAttached) ||
-                    IsInteractionControllerAcrylicSimplified,
+                acrylicControllerAttached: AcrylicController is { IsClosed: false } && AcrylicControllerAttached,
                 micaControllerAttached: MicaController is not null && MicaControllerAttached,
                 legacyAccentBackdropActive: LegacyAccentBackdropActive,
                 usesLegacyWindowAcrylic: WindowsCompatibilityService.UsesLegacyWindowAcrylic,
@@ -1349,7 +1352,10 @@ IsHideAnimationRunning = true;
             return;
         }
 
-        EndExpandedWidgetLayerLease();
+        if (!IsExpandedCapsule)
+        {
+            EndExpandedWidgetLayerLease();
+        }
         CancelPendingDesktopLayerRestore();
     }
 

@@ -1152,6 +1152,7 @@ public sealed partial class CustomWidgetNativeRenderer
         box.LostFocus += (_, _) => EndInteractiveSession(box);
         box.Unloaded += (_, _) => EndInteractiveSession(box);
         MarkInteractiveElement(box);
+        AttachHostKeyboardInputActivation(box);
 
         bool syncing = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
@@ -1279,6 +1280,7 @@ public sealed partial class CustomWidgetNativeRenderer
         textBox.LostFocus += (_, _) => EndInteractiveSession(textBox);
         textBox.Unloaded += (_, _) => EndInteractiveSession(textBox);
         MarkInteractiveElement(textBox);
+        AttachHostKeyboardInputActivation(textBox);
 
         bool suppressSync = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;

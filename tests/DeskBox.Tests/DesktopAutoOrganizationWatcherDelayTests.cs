@@ -82,6 +82,39 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
         Assert.True(File.Exists(Path.Combine(harness.TargetStoragePath, "note.txt")));
     }
 
+    [Fact]
+    public async Task DesktopInlineRenameActive_DefersNewZeroByteFileUntilRenameFinishes()
+    {
+        int renameActiveFlag = 1;
+        using var harness = WatcherHarness.Create(
+            _root,
+            delaySeconds: 10,
+            isDesktopRenameActive: () => Volatile.Read(ref renameActiveFlag) != 0);
+
+        Assert.False(
+            DeskBox.Platform.DesktopIconPositionInterop.IsRealDesktopInlineRenameActive(harness.DesktopPath));
+
+        // Simulates Windows Explorer "Right-click -> New -> Text Document" (0-byte file while inline Edit is open).
+        string desktopFile = Path.Combine(harness.DesktopPath, "新建 文本文档.txt");
+        File.WriteAllBytes(desktopFile, []);
+
+        await WaitUntilAsync(
+            () => harness.RequestedDelays.Any(d => d >= TimeSpan.FromSeconds(10)));
+        harness.Clock.Advance(TimeSpan.FromSeconds(45));
+        await Task.Delay(300);
+
+        // Must remain untouched on the desktop while Explorer's inline rename is active.
+        Assert.True(File.Exists(desktopFile));
+        Assert.False(File.Exists(Path.Combine(harness.TargetStoragePath, "新建 文本文档.txt")));
+
+        // Once inline rename finishes (Esc / focus commit), the deferred retry moves the file cleanly.
+        Volatile.Write(ref renameActiveFlag, 0);
+        harness.Clock.Advance(TimeSpan.FromSeconds(30));
+        await WaitUntilFileMovedAsync(harness, desktopFile);
+        Assert.True(File.Exists(Path.Combine(harness.TargetStoragePath, "新建 文本文档.txt")));
+        await WaitUntilAsync(() => !harness.Completed.IsEmpty);
+    }
+
     public void Dispose()
     {
         try
@@ -173,7 +206,10 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
             Completed = completed;
         }
 
-        public static WatcherHarness Create(string root, int delaySeconds)
+        public static WatcherHarness Create(
+            string root,
+            int delaySeconds,
+            Func<bool>? isDesktopRenameActive = null)
         {
             string desktopPath = Directory.CreateDirectory(
                 Path.Combine(root, "desktop")).FullName;
@@ -224,7 +260,8 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
                 {
                     requestedDelays.Enqueue(delay);
                     return Task.Delay(1, cancellationToken);
-                });
+                },
+                isDesktopRenameActive);
             watcher.ItemOrganized += completed.Enqueue;
             watcher.Start();
 

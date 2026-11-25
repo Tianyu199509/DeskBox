@@ -1356,8 +1356,7 @@ public sealed partial class GlanceWidgetContent : UserControl, IDisposable
         SettleInterruptedTransition();
         DiscardInactiveBackgroundLayer();
 
-        bool resourceSaver = App.Current?.IsResourceSaverPerformanceMode == true;
-        if (!_background.HasFrame || (resourceSaver && !retainDisplayedFrame) || _isDisposed)
+        if (!_background.HasFrame || _isDisposed)
         {
             ClearBackgroundImage();
             return;

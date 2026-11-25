@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "A atualização não foi concluída",
   "Settings.Update.InstallFailedBody": "O DeskBox foi reaberto após a falha do instalador. Tente novamente ou baixe o instalador no site oficial.",
   "Settings.Update.InstallPathMismatchBody": "O instalador não foi concluído na pasta original do DeskBox. A atualização foi interrompida e esta versão foi reaberta. Se o problema continuar, baixe o instalador no site oficial.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Instalador bloqueado pela política de segurança do Windows",
+  "Settings.Update.InstallBlockedByPolicyBody": "O Controle Inteligente de Aplicativos do Windows ou uma política de assinatura bloqueou o instalador direto não assinado. O DeskBox reabriu a versão atual mantendo seus dados intactos.\n\nO instalador não está corrompido — baixá-lo novamente do site oficial geralmente resultará no mesmo bloqueio, e desativar o Controle Inteligente de Aplicativos não é recomendado, pois não pode ser reativado sem restaurar o Windows. Você pode continuar usando a versão atual por enquanto ou exportar um backup em Diagnóstico e Manutenção e usar a edição assinada da Microsoft Store.",
   "Settings.Update.DownloadFailedTitle": "Não foi possível baixar a atualização",
   "Settings.Update.DownloadFailedBody": "{0}\n\nTente baixar novamente ou obtenha o instalador no site oficial.",
   "Settings.DragDropPermission.Title": "Verificação de Drag & Drop",

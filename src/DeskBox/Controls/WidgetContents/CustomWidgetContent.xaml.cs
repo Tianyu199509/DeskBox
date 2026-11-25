@@ -26,6 +26,7 @@ public sealed partial class CustomWidgetContent : UserControl, IDisposable
     private bool _forceFullRebuildPending;
     private bool _coalescedRebuildScheduled;
     private bool _coalescedRebuildDirty;
+    private bool _imeGraceRebuildScheduled;
 
     private CustomWidgetManifest? _lastRenderedManifest;
     private ElementTheme _lastRenderedTheme;
@@ -306,7 +307,10 @@ public sealed partial class CustomWidgetContent : UserControl, IDisposable
             _forceFullRebuildPending = true;
         }
 
-        if (!IsLoaded || _isCompactCollapsed || _renderer.HasOpenOverlayFlyout || _consentDialogOpenCount > 0)
+        if (!IsLoaded ||
+            _isCompactCollapsed ||
+            _renderer.HasOpenOverlayFlyout ||
+            _consentDialogOpenCount > 0)
         {
             _rebuildPending = true;
             return;
@@ -320,6 +324,15 @@ public sealed partial class CustomWidgetContent : UserControl, IDisposable
         {
             if (!mustForceFull && CanPatchExistingRootInPlace() && _renderer.TryPatchRetainedTree())
             {
+                return;
+            }
+
+            if (_renderer.HasOpenFlyout || DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace())
+            {
+                _rebuildPending = true;
+                _forceFullRebuildPending |= mustForceFull;
+                _ = _renderer.TryPatchRetainedTree();
+                SchedulePostImeGraceRebuildIfNeeded();
                 return;
             }
 
@@ -429,12 +442,45 @@ public sealed partial class CustomWidgetContent : UserControl, IDisposable
         RequestCoalescedRebuild();
     }
 
+    internal bool HasOpenFlyout => _renderer.HasOpenFlyout;
+
     private void Renderer_AllFlyoutsClosed()
     {
         if (!_isDisposed && !_isCompactCollapsed && _rebuildPending)
         {
             RebuildNativeTree(forceFullRebuild: _forceFullRebuildPending);
         }
+
+        if (!_isDisposed)
+        {
+            DeskBox.Views.WidgetWindowBase.TryRequestOwnerDesktopPinnedRestoreIfIdle(
+                this,
+                "custom-widget-interactions-closed");
+        }
+    }
+
+    private void SchedulePostImeGraceRebuildIfNeeded()
+    {
+        if (_imeGraceRebuildScheduled ||
+            !DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace() ||
+            DispatcherQueue is not { } dq)
+        {
+            return;
+        }
+
+        _imeGraceRebuildScheduled = true;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(DeskBox.Helpers.ImeCompositionGuard.PostCompositionGraceMs + 25));
+            dq.TryEnqueue(() =>
+            {
+                _imeGraceRebuildScheduled = false;
+                if (!_isDisposed && !_isCompactCollapsed && _rebuildPending)
+                {
+                    RebuildNativeTree(forceFullRebuild: _forceFullRebuildPending);
+                }
+            });
+        });
     }
 
     private void CustomWidgetContent_Loaded(object sender, RoutedEventArgs e)

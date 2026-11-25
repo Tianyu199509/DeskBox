@@ -374,7 +374,8 @@ public sealed class FileWidgetContentAdapter :
             string.Equals(
                 performance.HiddenCacheCleanupScope,
                 PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
-                StringComparison.Ordinal))
+                StringComparison.Ordinal) &&
+            (_isCompactCollapsed || Surface is null))
         {
             ViewModel.ReleaseAllItemIcons(resetRenderWindow: true);
         }

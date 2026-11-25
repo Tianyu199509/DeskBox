@@ -210,6 +210,19 @@ public sealed partial class CustomWidgetNativeRenderer
         }
     }
 
+    private static void AttachHostKeyboardInputActivation(UIElement element)
+    {
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(element);
+        element.AddHandler(
+            UIElement.PointerPressedEvent,
+            new PointerEventHandler((_, _) =>
+                DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(
+                    element,
+                    "custom-widget-input",
+                    expectTextInput: true)),
+            handledEventsToo: true);
+    }
+
     public CustomWidgetNativeRenderer(
         CustomWidgetViewModel viewModel,
         DependencyObject? themeScope = null,
@@ -1244,6 +1257,7 @@ public sealed partial class CustomWidgetNativeRenderer
         }
         ApplyCompactInputStyle(textBox);
         MarkInteractiveElement(textBox);
+        AttachHostKeyboardInputActivation(textBox);
 
         textBox.GotFocus += (_, _) => BeginInteractiveSession(textBox);
         textBox.LostFocus += (_, _) => EndInteractiveSession(textBox);

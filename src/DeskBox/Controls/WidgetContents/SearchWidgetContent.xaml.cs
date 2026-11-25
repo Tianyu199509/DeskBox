@@ -659,9 +659,12 @@ public sealed partial class SearchWidgetContent : UserControl
 
         if (_currentTier == SearchWidgetLayoutTier.CompactBar)
         {
-            ExpandedRootGrid.Padding = new Thickness(8, 12, 8, 6);
+            ExpandedRootGrid.Padding = new Thickness(6, 6, 6, 6);
             ExpandedRootGrid.RowSpacing = 0;
             ExpandedRootGrid.VerticalAlignment = VerticalAlignment.Center;
+            SearchInputContainer.MinHeight = 34;
+            SearchInputBox.MinHeight = 28;
+            SearchInputBox.Padding = new Thickness(0, 4, 0, 3);
             PillsAndStripRow.Visibility = Visibility.Collapsed;
             WideStripScroller.Visibility = Visibility.Collapsed;
             WideStripStatusDot.Visibility = Visibility.Collapsed;
@@ -673,10 +676,13 @@ public sealed partial class SearchWidgetContent : UserControl
         }
 
         ExpandedRootGrid.VerticalAlignment = VerticalAlignment.Stretch;
+        SearchInputContainer.MinHeight = 36;
+        SearchInputBox.MinHeight = 30;
+        SearchInputBox.Padding = new Thickness(0, 5, 0, 4);
 
         if (_currentTier == SearchWidgetLayoutTier.WideStrip)
         {
-            ExpandedRootGrid.Padding = new Thickness(10, 14, 10, 6);
+            ExpandedRootGrid.Padding = new Thickness(10, 10, 10, 8);
             ExpandedRootGrid.RowSpacing = height < 96 ? 5 : 6;
             PillsAndStripRow.Visibility = Visibility.Visible;
             bool showStrip = _viewModel.ShowHistory && _viewModel.WideStripItems.Count > 0;
@@ -711,7 +717,7 @@ public sealed partial class SearchWidgetContent : UserControl
         Grid.SetColumnSpan(WideStripScroller, 1);
         WideStripScroller.Margin = new Thickness(0);
 
-        ExpandedRootGrid.Padding = new Thickness(10, 14, 10, 8);
+        ExpandedRootGrid.Padding = new Thickness(10, 10, 10, 8);
         ExpandedRootGrid.RowSpacing = 8;
         PillsAndStripRow.Visibility = Visibility.Visible;
         WideStripScroller.Visibility = Visibility.Collapsed;

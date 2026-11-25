@@ -269,14 +269,19 @@ internal sealed class HookHealthWatchdog : IDisposable
         }
 
         bool inputKnown = Win32Helper.TryGetLastInputTickCount(out uint lastInputTick);
-        return RunCycleOnceAsync(inputKnown, lastInputTick, Environment.TickCount64);
+        bool foregroundUipiBlocked = inputKnown && Win32Helper.IsForegroundHigherIntegrityThanCurrentProcess();
+        return RunCycleOnceAsync(inputKnown, lastInputTick, Environment.TickCount64, foregroundUipiBlocked);
     }
 
     /// <summary>
     /// One watchdog pass with an externally supplied clock/input snapshot so
     /// the decision logic can be exercised without real user input.
     /// </summary>
-    internal async Task RunCycleOnceAsync(bool inputKnown, uint lastInputTick, long nowTicks)
+    internal async Task RunCycleOnceAsync(
+        bool inputKnown,
+        uint lastInputTick,
+        long nowTicks,
+        bool foregroundUipiBlocked = false)
     {
         List<WatchSlot> slots;
         List<MaintenanceSlot> maintenanceSlots;
@@ -311,7 +316,7 @@ internal sealed class HookHealthWatchdog : IDisposable
 
             try
             {
-                await CheckTargetAsync(slot, target, inputKnown, lastInputTick, nowTicks)
+                await CheckTargetAsync(slot, target, inputKnown, lastInputTick, nowTicks, foregroundUipiBlocked)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -328,7 +333,8 @@ internal sealed class HookHealthWatchdog : IDisposable
         IHookHealthProbeTarget target,
         bool inputKnown,
         uint lastInputTick,
-        long nowTicks)
+        long nowTicks,
+        bool foregroundUipiBlocked = false)
     {
         if (!target.HookProbeWanted)
         {
@@ -347,6 +353,7 @@ internal sealed class HookHealthWatchdog : IDisposable
             dead = true;
         }
         else if (
+            foregroundUipiBlocked ||
             !inputKnown ||
             !IsDivergent(
                 lastInputTick,

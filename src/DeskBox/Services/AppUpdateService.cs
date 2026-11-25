@@ -734,8 +734,32 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 $"[Update] StartInstallerHelper failed: exception={ex.GetType().Name} " +
                 $"nativeError={(nativeError?.ToString(CultureInfo.InvariantCulture) ?? "none")} " +
                 $"message={ex.Message}");
+            if (nativeError is int errorCode && IsPolicyOrSignatureBlockWin32Error(errorCode))
+            {
+                return AppUpdateInstallResult.PolicyBlocked(ex.Message);
+            }
+
             return AppUpdateInstallResult.Failed(ex.Message);
         }
+    }
+
+    internal static bool IsPolicyOrSignatureBlockWin32Error(int nativeErrorCode)
+    {
+        int code = (nativeErrorCode & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000)
+            ? nativeErrorCode & 0xFFFF
+            : nativeErrorCode;
+
+        return code switch
+        {
+            577 => true, // ERROR_INVALID_IMAGE_HASH
+            786 => true, // ERROR_ACCESS_DISABLED_NO_SAFER_UI_BY_POLICY
+            1260 => true, // ERROR_ACCESS_DISABLED_BY_POLICY
+            4551 => true, // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION (Smart App Control / WDAC)
+            >= 4556 and <= 4559 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_*
+            >= 4580 and <= 4582 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE / UNATTAINABLE / EXPLICIT_DENY
+            8235 => true, // ERROR_DS_REFERRAL (UAC ValidateAdminCodeSignatures)
+            _ => false
+        };
     }
 
     /// <summary>

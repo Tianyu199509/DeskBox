@@ -1067,6 +1067,7 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
+        RecoverCustomBackgroundIfReleased();
         if (!IsTargetCollapsed && _contentHost.IsCurrentContentHibernated)
         {
             _contentHost.EnsureCurrentContentViewAttached();
@@ -1111,6 +1112,8 @@ public sealed partial class ContentWidgetWindow
         if (wasTrayShowInFlight)
         {
             CompleteDeferredCompactHostShow();
+            RecoverCustomBackgroundIfReleased();
+            UpdateCustomPanoramaViewport();
         }
 
         int generation = _contentVisibilityGeneration;

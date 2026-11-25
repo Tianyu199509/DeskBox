@@ -721,6 +721,12 @@ public sealed partial class WidgetManager
 
     private void OnSettingsChanged()
     {
+        if (!HasUiThreadAccess())
+        {
+            UiDispatch.RunOrDefer(OnSettingsChanged);
+            return;
+        }
+
         if (_settingsService.LastNotifiedChangeKind == SettingsChangeKind.Appearance)
         {
             // The appearance preview channel already pushed visuals to every
@@ -2936,10 +2942,15 @@ public sealed partial class WidgetManager
 
     public int GetDefaultManagedStorageWidgetCount()
     {
-        return _settingsService.Settings.Widgets.Count(widget =>
-            widget.WidgetKind == WidgetKind.File &&
-            widget.FollowsDefaultStoragePath &&
-            !IsDeleted(widget.Id));
+        int count = 0;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            count = _settingsService.Settings.Widgets.Count(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                widget.FollowsDefaultStoragePath &&
+                !IsDeleted(widget.Id));
+        });
+        return count;
     }
 
     private Controls.WidgetContents.FileWidgetContentAdapter? FindLoadedFileWidgetAdapter(string widgetId)

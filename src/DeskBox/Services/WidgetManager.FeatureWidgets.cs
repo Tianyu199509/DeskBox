@@ -692,18 +692,30 @@ public sealed partial class WidgetManager
 
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances()
     {
-        bool featureEnabled = GetFeatureWidgetEnabledState(WidgetKind.Glance);
-        return _settingsService.Settings.Widgets
-            .Where(widget => widget.WidgetKind == WidgetKind.Glance && !IsDeleted(widget.Id))
-            .Select(widget => new GlanceWidgetInstanceInfo(
-                widget.Id,
-                widget.Name,
-                featureEnabled && !widget.IsDisabled))
-            .ToList();
+        List<GlanceWidgetInstanceInfo> instances = [];
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            bool featureEnabled = GetFeatureWidgetEnabledState(WidgetKind.Glance);
+            instances = _settingsService.Settings.Widgets
+                .Where(widget => widget.WidgetKind == WidgetKind.Glance && !IsDeleted(widget.Id))
+                .Select(widget => new GlanceWidgetInstanceInfo(
+                    widget.Id,
+                    widget.Name,
+                    featureEnabled && !widget.IsDisabled))
+                .ToList();
+        });
+        return instances;
     }
 
-    public bool IsGlanceFeatureEnabled =>
-        GetFeatureWidgetEnabledState(WidgetKind.Glance);
+    public bool IsGlanceFeatureEnabled
+    {
+        get
+        {
+            bool enabled = false;
+            _settingsService.MutateGraphUnderLock(() => enabled = GetFeatureWidgetEnabledState(WidgetKind.Glance));
+            return enabled;
+        }
+    }
 
     public async Task<GlanceWidgetInstanceInfo> CreateGlanceWidgetAsync(
         string? sourceWidgetId = null)

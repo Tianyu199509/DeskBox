@@ -531,7 +531,7 @@ public sealed class WidgetTrayAnimationController : IDisposable
         _rootElement.Opacity = 1;
         var visual = GetCachedRootVisual();
         StopVisualAnimations(visual);
-        ClearWipeClip(visual);
+        PrepareInitialShowWipeClipOrClear(visual);
         visual.CenterPoint = GetVisualCenterPoint();
         visual.Offset = Vector3.Zero;
         visual.RotationAngleInDegrees = _showStartRotation;
@@ -549,7 +549,7 @@ public sealed class WidgetTrayAnimationController : IDisposable
             ApplyWindowOffset(_preparedOffsetX, _preparedOffsetY);
             var v = GetCachedRootVisual();
             StopVisualAnimations(v);
-            ClearWipeClip(v);
+            PrepareInitialShowWipeClipOrClear(v);
             v.Opacity = Math.Clamp(_preparedOpacity, 0.0f, 1.0f);
             v.CenterPoint = GetVisualCenterPoint();
             v.RotationAngleInDegrees = _showStartRotation;
@@ -1372,6 +1372,21 @@ public sealed class WidgetTrayAnimationController : IDisposable
                 clip.LeftInset = value;
                 break;
         }
+    }
+
+    private void PrepareInitialShowWipeClipOrClear(Microsoft.UI.Composition.Visual visual)
+    {
+        if (_wipeDirection is null)
+        {
+            ClearWipeClip(visual);
+            return;
+        }
+
+        var compositor = GetCachedCompositor(visual);
+        var clip = _cachedRootClip ??= compositor.CreateInsetClip();
+        visual.Clip = clip;
+        (_, float fullInset) = GetWipeInsetTarget();
+        ApplyWipeInset(clip, fullInset);
     }
 
     private void ClearWipeClip(Microsoft.UI.Composition.Visual visual)

@@ -1356,6 +1356,7 @@ public partial class App : Application
         {
             "cancelled" => "cancelled",
             "path-mismatch" => "path-mismatch",
+            "blocked-by-policy" => "blocked-by-policy",
             "failed" => "failed",
             _ => null
         };
@@ -2599,6 +2600,11 @@ public partial class App : Application
     /// </summary>
     private async Task WaitForStartupDisplaySettlingAsync()
     {
+        if (!IsStartupMode)
+        {
+            return;
+        }
+
         try
         {
             IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
@@ -2607,7 +2613,7 @@ public partial class App : Application
                 return;
             }
 
-            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMilliseconds(900);
             while (DateTimeOffset.UtcNow < deadline)
             {
                 IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
@@ -2616,7 +2622,7 @@ public partial class App : Application
                     break;
                 }
 
-                await Task.Delay(500);
+                await Task.Delay(100);
             }
         }
         catch (Exception ex)
@@ -3961,7 +3967,7 @@ public partial class App : Application
 
             string outcome = File.ReadAllText(PendingUpdateInstallResultPath);
             File.Delete(PendingUpdateInstallResultPath);
-            return string.IsNullOrWhiteSpace(outcome) ? null : outcome;
+            return NormalizeUpdateInstallOutcome(outcome);
         }
         catch (Exception ex)
         {
@@ -7263,6 +7269,18 @@ public partial class App : Application
         // bypasses this path via WM_QUERYENDSESSION/WM_ENDSESSION so ARSO stays
         // armed when AutoStart is enabled.
         UnregisterApplicationRestartForCleanExit();
+
+        if (UiDispatcherQueue is { HasThreadAccess: false } queue &&
+            await TryDispatchShutdownToUiAsync(queue))
+        {
+            return;
+        }
+
+        await ShutdownApplicationOnUiCoreAsync();
+    }
+
+    private async Task ShutdownApplicationOnUiCoreAsync()
+    {
         bool dependentTeardownCompleted = true;
         try
         {

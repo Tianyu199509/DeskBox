@@ -48,6 +48,10 @@ internal sealed partial class StackPopoverHostWindow : Window
     private bool _isPreparing;
     private bool _externalDragPassthroughApplied;
     private long _showSessionId;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _unactivatedOutsideClickTimer;
+    private bool _wasMouseButtonDownDuringWatch;
+    private IntPtr _initialForegroundOnWatchStart;
+    private long _suppressForegroundSwitchDismissUntilTick;
 
     private readonly Win32Helper.SubclassProc _inputSubclassProc;
     private bool _inputSubclassInstalled;
@@ -124,9 +128,13 @@ internal sealed partial class StackPopoverHostWindow : Window
 
         Activated += (_, args) =>
         {
-            if (args.WindowActivationState != WindowActivationState.Deactivated ||
-                _closed ||
-                !_isShown)
+            if (args.WindowActivationState != WindowActivationState.Deactivated)
+            {
+                StopOutsideClickWatch();
+                return;
+            }
+
+            if (_closed || !_isShown)
             {
                 return;
             }
@@ -352,6 +360,7 @@ internal sealed partial class StackPopoverHostWindow : Window
         _isShown = true;
         _nativeDropBridge?.EnsureRegistered();
         ActivateInput();
+        EnsureOutsideClickWatchArmed();
     }
 
     /// <summary>
@@ -424,6 +433,7 @@ internal sealed partial class StackPopoverHostWindow : Window
         _isPreparing = false;
         _isShown = true;
         _nativeDropBridge?.EnsureRegistered();
+        EnsureOutsideClickWatchArmed();
     }
 
     private const uint WmNcHitTest = 0x0084;
@@ -485,6 +495,7 @@ internal sealed partial class StackPopoverHostWindow : Window
         ++_showSessionId;
         _isShown = false;
         _isPreparing = false;
+        StopOutsideClickWatch();
         SetCloaked(true);
 
         IntPtr foregroundBeforeHide = Win32Helper.GetForegroundWindow();
@@ -731,6 +742,7 @@ internal sealed partial class StackPopoverHostWindow : Window
         _closed = true;
         _isShown = false;
         _isPreparing = false;
+        StopOutsideClickWatch();
         _nativeDropBridge?.Dispose();
         _nativeDropBridge = null;
         if (_inputSubclassInstalled)
@@ -864,6 +876,121 @@ internal sealed partial class StackPopoverHostWindow : Window
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+    }
+
+    private void EnsureOutsideClickWatchArmed()
+    {
+        if (_closed || !_isShown)
+        {
+            StopOutsideClickWatch();
+            return;
+        }
+
+        IntPtr currentForeground = Win32Helper.GetForegroundWindow();
+        if (currentForeground == WindowHandle)
+        {
+            StopOutsideClickWatch();
+            return;
+        }
+
+        _initialForegroundOnWatchStart = currentForeground;
+        _suppressForegroundSwitchDismissUntilTick = 0;
+        _wasMouseButtonDownDuringWatch = IsAnyPrimaryOrContextMouseButtonDown();
+        if (_unactivatedOutsideClickTimer is null)
+        {
+            _unactivatedOutsideClickTimer = DispatcherQueue.CreateTimer();
+            _unactivatedOutsideClickTimer.Interval = TimeSpan.FromMilliseconds(32);
+            _unactivatedOutsideClickTimer.IsRepeating = true;
+            _unactivatedOutsideClickTimer.Tick += UnactivatedOutsideClickTimer_Tick;
+        }
+
+        if (!_unactivatedOutsideClickTimer.IsRunning)
+        {
+            _unactivatedOutsideClickTimer.Start();
+        }
+    }
+
+    private void StopOutsideClickWatch()
+    {
+        _unactivatedOutsideClickTimer?.Stop();
+        _wasMouseButtonDownDuringWatch = false;
+        _initialForegroundOnWatchStart = IntPtr.Zero;
+        _suppressForegroundSwitchDismissUntilTick = 0;
+    }
+
+    private static bool IsAnyPrimaryOrContextMouseButtonDown() =>
+        Win32Helper.IsKeyPressed(Windows.System.VirtualKey.LeftButton) ||
+        Win32Helper.IsKeyPressed(Windows.System.VirtualKey.RightButton) ||
+        Win32Helper.IsKeyPressed(Windows.System.VirtualKey.MiddleButton);
+
+    private void UnactivatedOutsideClickTimer_Tick(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args)
+    {
+        if (_closed || !_isShown)
+        {
+            StopOutsideClickWatch();
+            return;
+        }
+
+        IntPtr fg = Win32Helper.GetForegroundWindow();
+        if (fg == WindowHandle)
+        {
+            // Native WM_ACTIVATE(WA_INACTIVE) now owns light-dismiss.
+            StopOutsideClickWatch();
+            return;
+        }
+
+        if ((_content?.XamlRoot is { } xamlRoot &&
+             VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0) ||
+            ShellContextMenuProxy.IsMenuRoundInFlight ||
+            DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) ||
+            DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg))
+        {
+            _wasMouseButtonDownDuringWatch = IsAnyPrimaryOrContextMouseButtonDown();
+            _initialForegroundOnWatchStart = IntPtr.Zero;
+            _suppressForegroundSwitchDismissUntilTick = Environment.TickCount64 + 250;
+            return;
+        }
+
+        bool isMouseDown = IsAnyPrimaryOrContextMouseButtonDown();
+        bool mousePressedEdge = isMouseDown && !_wasMouseButtonDownDuringWatch;
+        _wasMouseButtonDownDuringWatch = isMouseDown;
+
+        Win32Helper.POINT? observedCursor = Win32Helper.GetCursorPos(out Win32Helper.POINT cursor)
+            ? cursor
+            : null;
+        bool cursorOutsidePopover = observedCursor is { } pt &&
+            Win32Helper.GetWindowRect(WindowHandle, out Win32Helper.RECT bounds) &&
+            (pt.X < bounds.Left || pt.X >= bounds.Right || pt.Y < bounds.Top || pt.Y >= bounds.Bottom);
+
+        bool switchedToAnotherWindow = false;
+        if (_initialForegroundOnWatchStart == IntPtr.Zero ||
+            Environment.TickCount64 < _suppressForegroundSwitchDismissUntilTick)
+        {
+            _initialForegroundOnWatchStart = fg;
+        }
+        else if (fg != IntPtr.Zero &&
+                 fg != _initialForegroundOnWatchStart &&
+                 fg != _ownerWindowHandle)
+        {
+            switchedToAnotherWindow = true;
+        }
+
+        if ((mousePressedEdge && cursorOutsidePopover) ||
+            (switchedToAnotherWindow && (!observedCursor.HasValue || cursorOutsidePopover)))
+        {
+            long sessionId = _showSessionId;
+            StopOutsideClickWatch();
+            UiDispatch.PostAfterCallback(() =>
+            {
+                if (!_closed && _isShown && sessionId == _showSessionId)
+                {
+                    LastDeactivationCursorPoint = observedCursor;
+                    DeactivatedByOutsideClick?.Invoke();
+                }
+            });
+        }
     }
 
 }

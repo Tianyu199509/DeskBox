@@ -332,8 +332,14 @@ internal static class WidgetCompactInteractionPolicy
     public static bool CanTrustPointerOwnership(
         bool isPointerPhysicallyInside,
         bool nativeRootCanReceivePointer,
-        bool hasRecentRoutedPointerEvidence)
+        bool hasRecentRoutedPointerEvidence,
+        bool isOccludedByPeerDeskBoxWindow = false)
     {
+        if (isOccludedByPeerDeskBoxWindow)
+        {
+            return false;
+        }
+
         return isPointerPhysicallyInside &&
             (nativeRootCanReceivePointer || hasRecentRoutedPointerEvidence);
     }

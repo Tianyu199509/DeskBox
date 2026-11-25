@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "La mise à jour n'a pas été terminée",
   "Settings.Update.InstallFailedBody": "DeskBox a été rouvert après l'échec du programme d'installation. Essayez à nouveau la mise à jour ou téléchargez le programme d'installation depuis le site officiel.",
   "Settings.Update.InstallPathMismatchBody": "Le programme d'installation ne s'est pas terminé dans le répertoire DeskBox d'origine, donc DeskBox a arrêté la mise à jour et a rouvert cette version. Téléchargez le programme d'installation depuis le site officiel si le problème persiste.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Programme d'installation bloqué par la stratégie de sécurité Windows",
+  "Settings.Update.InstallBlockedByPolicyBody": "Le Contrôle intelligent des applications de Windows ou une stratégie de signature du code a bloqué l'installateur direct non signé. DeskBox a rouvert votre version actuelle sans affecter vos données.\n\nLe fichier n'est pas corrompu : un nouveau téléchargement depuis le site officiel sera généralement bloqué de la même façon, et il est déconseillé de désactiver le Contrôle intelligent des applications car ce choix est irréversible sans réinitialiser Windows. Vous pouvez conserver votre version actuelle pour le moment, ou exporter une sauvegarde dans Diagnostics et maintenance puis passer à l'édition signée du Microsoft Store.",
   "Settings.Update.DownloadFailedTitle": "Impossible de télécharger la mise à jour",
   "Settings.Update.DownloadFailedBody": "{0}\n\nEssayez à nouveau le téléchargement ou récupérez le programme d'installation sur le site officiel.",
   "Settings.DragDropPermission.Title": "Vérification par glisser-déposer",

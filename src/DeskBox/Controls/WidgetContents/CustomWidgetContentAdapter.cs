@@ -66,6 +66,9 @@ public sealed class CustomWidgetContentAdapter :
     public bool IsReadyForReuse =>
         !IsDisposed && (MaterializedView is not null || ViewModel.IsInitialized);
 
+    internal bool HasOpenFlyout =>
+        MaterializedView is CustomWidgetContent content && content.HasOpenFlyout;
+
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
     public event EventHandler? ChromePreferenceChanged;
     public event Action<string>? SettingsNavigationRequested;

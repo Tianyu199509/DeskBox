@@ -985,7 +985,9 @@ public static partial class IconHelper
 
         int iconByteEntriesBefore = s_iconBytesCache.Count;
         long iconBytesBefore = GetIconByteCacheSize();
-        TrimIconByteCacheTo(0, 0);
+        TrimIconByteCacheTo(
+            Math.Max(1, MaxIconCacheEntries / 2),
+            Math.Max(1, MaxIconCacheBytes / 2));
         long iconBytesAfter = GetIconByteCacheSize();
 
         // Timeout/failure markers are cheap but should not survive a full hidden

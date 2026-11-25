@@ -326,7 +326,7 @@
         <!-- L2 / L3W / L3 / L4 Expanded Shell -->
         <Grid
             x:Name="ExpandedRootGrid"
-            Padding="10,14,10,8"
+            Padding="10,10,10,8"
             RowSpacing="8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

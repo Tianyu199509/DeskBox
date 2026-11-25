@@ -57,6 +57,7 @@ public sealed class FolderWatcherService : IDisposable
     // restarts and plateauing the reconnect backoff keeps the recovery loop
     // (an ACL fix must self-heal) without flooding the log.
     private const int ReconnectPlateauSeconds = 180;
+    private const long HealthyWatchWindowBeforeBackoffResetMs = 60_000;
     private const int LegacyWatcherRestartMinIntervalSeconds = 30;
     internal const int NativeBufferSizeBytes = 32 * 1024;
     internal const NotifyFilters NativeNotifyFilter =
@@ -83,6 +84,7 @@ public sealed class FolderWatcherService : IDisposable
     private int _iconDebounceStartQueued;
     private bool _legacyRestartQueued;
     private DateTimeOffset _lastLegacyRestartAtUtc = DateTimeOffset.MinValue;
+    private long _watchingStartedAtTick;
     private bool _legacyErrorAnnounced;
     private int _watchGeneration;
     private string? _reconnectPath;
@@ -250,7 +252,11 @@ public sealed class FolderWatcherService : IDisposable
             lock (_lock)
             {
                 _reconnectPath = null;
-                _reconnectAttempt = 0;
+                _watchingStartedAtTick = Environment.TickCount64;
+                if (_reconnectAttempt > 0 && !nativeStarted)
+                {
+                    // Degraded startup has not proven native watch stability yet.
+                }
             }
         }
 
@@ -513,6 +519,19 @@ public sealed class FolderWatcherService : IDisposable
         _legacyWatcher = null;
     }
 
+    private void ResetReconnectBackoffIfHealthy()
+    {
+        lock (_lock)
+        {
+            if (_reconnectAttempt > 0 &&
+                _watchingStartedAtTick != 0 &&
+                Environment.TickCount64 - _watchingStartedAtTick >= HealthyWatchWindowBeforeBackoffResetMs)
+            {
+                _reconnectAttempt = 0;
+            }
+        }
+    }
+
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (!TryGetActiveGeneration(sender, _legacyWatcher, out int generation))
@@ -526,6 +545,7 @@ public sealed class FolderWatcherService : IDisposable
             return;
         }
 
+        ResetReconnectBackoffIfHealthy();
         QueueChange(new FolderChange(e.FullPath, e.ChangeType), generation);
         if (e.ChangeType == WatcherChangeTypes.Changed && Directory.Exists(e.FullPath))
         {
@@ -546,6 +566,7 @@ public sealed class FolderWatcherService : IDisposable
             return;
         }
 
+        ResetReconnectBackoffIfHealthy();
         QueueChange(
             new FolderChange(e.FullPath, WatcherChangeTypes.Renamed, e.OldFullPath),
             generation);

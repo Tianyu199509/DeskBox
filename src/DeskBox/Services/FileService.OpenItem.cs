@@ -452,7 +452,7 @@ public sealed partial class FileService
         {
             try
             {
-                string expandedWorkDir = Environment.ExpandEnvironmentVariables(rawWorkDir.Trim());
+                string expandedWorkDir = Environment.ExpandEnvironmentVariables(rawWorkDir.Trim().Trim('"')).Trim();
                 ShortcutTargetKind workDirKind = ShortcutTargetProbe.Classify(expandedWorkDir);
                 if (workDirKind != ShortcutTargetKind.LocalFileSystem ||
                     Directory.Exists(expandedWorkDir))
@@ -473,14 +473,15 @@ public sealed partial class FileService
         {
             try
             {
-                string expandedTarget = Environment.ExpandEnvironmentVariables(candidateTarget.Trim());
+                string unquotedTarget = candidateTarget.Trim().Trim('"');
+                string expandedTarget = Environment.ExpandEnvironmentVariables(unquotedTarget).Trim();
                 if (ShortcutTargetProbe.Classify(expandedTarget) == ShortcutTargetKind.LocalFileSystem)
                 {
                     string effectiveTarget = expandedTarget;
                     if (!File.Exists(effectiveTarget) &&
                         !Directory.Exists(effectiveTarget) &&
                         ShortcutTargetProbe.TryResolveProgramFilesX86Counterpart(
-                            candidateTarget,
+                            unquotedTarget,
                             expandedTarget,
                             out string x86Counterpart) &&
                         (File.Exists(x86Counterpart) || Directory.Exists(x86Counterpart)))
@@ -531,7 +532,7 @@ public sealed partial class FileService
 
         try
         {
-            string expandedWorkDir = Environment.ExpandEnvironmentVariables(rawWorkDir.Trim());
+            string expandedWorkDir = Environment.ExpandEnvironmentVariables(rawWorkDir.Trim().Trim('"')).Trim();
             return ShortcutTargetProbe.Classify(expandedWorkDir) == ShortcutTargetKind.LocalFileSystem &&
                    !Directory.Exists(expandedWorkDir);
         }
@@ -654,7 +655,8 @@ public sealed partial class FileService
 
             try
             {
-                string expanded = Environment.ExpandEnvironmentVariables(rawTarget.Trim());
+                string unquotedTarget = rawTarget.Trim().Trim('"');
+                string expanded = Environment.ExpandEnvironmentVariables(unquotedTarget).Trim();
                 if (ShortcutTargetProbe.Classify(expanded) != ShortcutTargetKind.LocalFileSystem)
                 {
                     return false;
@@ -667,7 +669,7 @@ public sealed partial class FileService
                 }
 
                 if (ShortcutTargetProbe.TryResolveProgramFilesX86Counterpart(
-                        rawTarget,
+                        unquotedTarget,
                         expanded,
                         out string x86Counterpart) &&
                     (File.Exists(x86Counterpart) || Directory.Exists(x86Counterpart)))

@@ -93,6 +93,12 @@ public sealed partial class CustomWidgetStudioWindow : Window
         _hostBridge = hostBridge ?? NullStudioHostBridge.Instance;
         InitializeComponent();
 
+        if (RootGrid.RequestedTheme == ElementTheme.Default)
+        {
+            RootGrid.RequestedTheme = Win32Helper.IsSystemDarkMode()
+                ? ElementTheme.Dark
+                : ElementTheme.Light;
+        }
         _usesSolidWindowBackdrop = WindowsCompatibilityService.ApplySafeBackdrop(this) == "Solid";
 
         ExtendsContentIntoTitleBar = true;
@@ -1929,6 +1935,11 @@ public sealed partial class CustomWidgetStudioWindow : Window
 
     private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args)
     {
+        if (_usesSolidWindowBackdrop)
+        {
+            _ = WindowsCompatibilityService.ApplySafeBackdrop(this);
+        }
+
         ApplyTitleBarColors();
         _previewTheme.ApplyStageBackdropVisuals();
 

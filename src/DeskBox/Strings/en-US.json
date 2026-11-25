@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "Update was not completed",
   "Settings.Update.InstallFailedBody": "DeskBox was reopened after the installer failed. Try the update again, or download the installer from the official website.",
   "Settings.Update.InstallPathMismatchBody": "The installer did not finish in the original DeskBox directory, so DeskBox stopped the update and reopened this version. Download the installer from the official website if the problem continues.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Installer blocked by Windows security policy",
+  "Settings.Update.InstallBlockedByPolicyBody": "Windows Smart App Control or a system code-signing policy blocked the unsigned direct installer. DeskBox reopened your current version with your data intact.\n\nThe installer is not corrupted—downloading the direct installer again will usually be blocked as well, and turning off Smart App Control is not recommended because it cannot be re-enabled without resetting Windows. You can keep using your current version for now, or export a backup in Diagnostics & Maintenance and switch to the signed Microsoft Store edition.",
   "Settings.Update.DownloadFailedTitle": "Could not download update",
   "Settings.Update.DownloadFailedBody": "{0}\n\nTry the download again, or get the installer from the official website.",
   "Settings.DragDropPermission.Title": "Drag-and-drop check",

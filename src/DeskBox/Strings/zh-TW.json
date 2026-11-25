@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "更新沒有完成",
   "Settings.Update.InstallFailedBody": "安裝程式未能完成，DeskBox 已重新開啟。可以重新嘗試更新，或前往官網下載最新版。",
   "Settings.Update.InstallPathMismatchBody": "安裝程式沒有在原 DeskBox 目錄中完成更新，因此已停止安裝並重新開啟目前版本。如果問題持續，請前往官網下載最新版。",
+  "Settings.Update.InstallBlockedByPolicyTitle": "安裝程式被系統安全原則攔截",
+  "Settings.Update.InstallBlockedByPolicyBody": "Windows「智慧應用程式控制」或系統簽章原則攔截了未簽章的直裝更新套件，DeskBox 已重新開啟目前版本（資料未受影響）。\n\n這並非安裝套件損毀，重新從官網下載直裝套件通常仍會被攔截；也不建議為此關閉「智慧應用程式控制」（關閉後除非重設系統否則無法恢復）。你可以繼續使用目前版本等待後續放行，或先在「診斷與維護」匯出備份後改用已簽章的 Microsoft Store 版。",
   "Settings.Update.DownloadFailedTitle": "更新下載失敗",
   "Settings.Update.DownloadFailedBody": "{0}\n\n可以重新下載，或前往官網獲取安裝套件。",
   "Settings.DragDropPermission.Title": "拖曳診斷",
