@@ -33,6 +33,7 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
     private readonly string _desktopPath;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+    private readonly Func<bool> _isDesktopRenameActive;
     private readonly ConcurrentDictionary<string, byte> _targetUnavailableNotifiedWidgetIds =
         new(StringComparer.Ordinal);
     private FileSystemWatcher? _watcher;
@@ -73,7 +74,8 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
         WidgetManager widgetManager,
         Func<string>? desktopPathProvider,
         Func<DateTimeOffset> utcNow,
-        Func<TimeSpan, CancellationToken, Task> delayAsync)
+        Func<TimeSpan, CancellationToken, Task> delayAsync,
+        Func<bool>? isDesktopRenameActive = null)
     {
         _settingsService = settingsService;
         _organizerService = organizerService;
@@ -84,6 +86,8 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
 
         _desktopPath = desktopPathProvider?.Invoke() ??
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        _isDesktopRenameActive = isDesktopRenameActive ??
+            (() => DesktopIconPositionInterop.IsRealDesktopInlineRenameActive(_desktopPath));
         _scanner = new DesktopOrganizationScanner(
             new DesktopOrganizationClassifier(),
             () => _desktopPath);
@@ -748,6 +752,14 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
                 return;
             }
 
+            if (_isDesktopRenameActive())
+            {
+                App.Log(
+                    $"[DesktopAutoOrganization] Deferred '{workItem.Path}' while desktop inline rename is active.");
+                Defer(workItem, DesktopAutoOrganizationRetryKind.Persistent);
+                return;
+            }
+
             await DesktopOrganizationTransaction.OperationGate.WaitAsync(cancellationToken);
             try
             {
@@ -792,6 +804,14 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
                         workItem,
                         DesktopAutoOrganizationItemState.Processing))
                 {
+                    return;
+                }
+
+                if (_isDesktopRenameActive())
+                {
+                    App.Log(
+                        $"[DesktopAutoOrganization] Deferred '{workItem.Path}' before move while desktop inline rename is active.");
+                    Defer(workItem, DesktopAutoOrganizationRetryKind.Persistent);
                     return;
                 }
 

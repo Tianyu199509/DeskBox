@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "La actualización no se completó",
   "Settings.Update.InstallFailedBody": "DeskBox se volvió a abrir después de que fallara el instalador. Vuelve a intentar la actualización o descarga el instalador del sitio web oficial.",
   "Settings.Update.InstallPathMismatchBody": "El instalador no finalizó en el directorio original de DeskBox, por lo que DeskBox detuvo la actualización y volvió a abrir esta versión. Descarga el instalador del sitio web oficial si el problema continúa.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Instalador bloqueado por la directiva de seguridad de Windows",
+  "Settings.Update.InstallBlockedByPolicyBody": "El Control inteligente de aplicaciones de Windows o una directiva de firma de código bloqueó el instalador directo sin firmar. DeskBox volvió a abrir tu versión actual con tus datos intactos.\n\nEl instalador no está dañado: volver a descargarlo del sitio oficial suele bloquearse igual, y no se recomienda desactivar el Control inteligente de aplicaciones porque no se puede volver a activar sin restablecer Windows. Puedes seguir usando tu versión actual por ahora, o exportar una copia de seguridad en Diagnóstico y mantenimiento y cambiar a la edición firmada de Microsoft Store.",
   "Settings.Update.DownloadFailedTitle": "No se pudo descargar la actualización",
   "Settings.Update.DownloadFailedBody": "{0}\n\nIntenta descargar nuevamente u obtén el instalador desde el sitio web oficial.",
   "Settings.DragDropPermission.Title": "Comprobar arrastrar y soltar",

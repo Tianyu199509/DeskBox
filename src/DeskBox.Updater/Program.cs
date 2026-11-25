@@ -18,8 +18,10 @@ internal enum DirectInstallScope
 internal static class Program
 {
     private const int InstallRegistrationMismatchExitCode = 20;
+    internal const int PolicyBlockedExitCode = 21;
     private const int InstallerTimedOutExitCode = 1460;
     private const string UpdateInstallResultArgument = "--update-install-result";
+    internal const string BlockedByPolicyOutcome = "blocked-by-policy";
     private const string AwaitParentExitArgument = "--await-parent-exit";
 
     // Canonical names from the [Languages] sections of installer/DeskBox.iss
@@ -221,6 +223,18 @@ internal static class Program
         {
             Log("Installer launch was cancelled at the elevation prompt.");
             return 2;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (IsPolicyOrSignatureBlockWin32Error(ex.NativeErrorCode))
+        {
+            Log(
+                $"Installer launch was blocked by Windows code-integrity or signature policy " +
+                $"(Win32 error {ex.NativeErrorCode}: {ex.Message}).");
+            return PolicyBlockedExitCode;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            Log($"Installer launch failed with Win32 error {ex.NativeErrorCode}: {ex.Message}");
+            return 3;
         }
 
         using (process)
@@ -507,6 +521,26 @@ internal static class Program
         }
     }
 
+    internal static bool IsPolicyOrSignatureBlockWin32Error(int nativeErrorCode)
+    {
+        // Normalize HRESULT_FROM_WIN32(x) (0x8007xxxx) if a caller passes HResult.
+        int code = (nativeErrorCode & unchecked((int)0xFFFF0000)) == unchecked((int)0x80070000)
+            ? nativeErrorCode & 0xFFFF
+            : nativeErrorCode;
+
+        return code switch
+        {
+            577 => true, // ERROR_INVALID_IMAGE_HASH
+            786 => true, // ERROR_ACCESS_DISABLED_NO_SAFER_UI_BY_POLICY
+            1260 => true, // ERROR_ACCESS_DISABLED_BY_POLICY (AppLocker / SRP)
+            4551 => true, // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION (Smart App Control / WDAC)
+            >= 4556 and <= 4559 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_* (SAC reputation / offline)
+            >= 4580 and <= 4582 => true, // ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE / UNATTAINABLE / EXPLICIT_DENY
+            8235 => true, // ERROR_DS_REFERRAL (UAC ValidateAdminCodeSignatures unsigned rejection)
+            _ => false
+        };
+    }
+
     internal static string GetIncompleteUpdateOutcome(
         int exitCode,
         bool elevationRequired = false,
@@ -516,6 +550,12 @@ internal static class Program
         if (exitCode is 2 or 5)
         {
             return "cancelled";
+        }
+
+        if (exitCode == PolicyBlockedExitCode ||
+            (exitCode > InstallRegistrationMismatchExitCode && IsPolicyOrSignatureBlockWin32Error(exitCode)))
+        {
+            return BlockedByPolicyOutcome;
         }
 
         // Inno Setup's asInvoker bootstrapper (SetupLdr) elevates the inner

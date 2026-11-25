@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -89,6 +90,7 @@ public sealed class ManagedStorageDesktopShortcutService
                 shortcutPath,
                 currentRootPath,
                 ShortcutDescription);
+            Win32Helper.NotifyShellDirectoryUpdated(_desktopDirectory);
 
             if (!string.Equals(
                     settings.ManagedStorageDesktopShortcutPath,
@@ -146,6 +148,7 @@ public sealed class ManagedStorageDesktopShortcutService
                 shortcutPath,
                 currentRootPath,
                 ShortcutDescription);
+            Win32Helper.NotifyShellDirectoryUpdated(_desktopDirectory);
             await StoreShortcutStateAsync(enabled: true, shortcutPath);
             App.Log(
                 $"[ManagedStorageShortcut] Created by user action path='{shortcutPath}' " +
@@ -319,8 +322,23 @@ public sealed class ManagedStorageDesktopShortcutService
         }
 
         File.Delete(shortcutPath);
+        DesktopIconPositionInterop.NotifyShellItemDeleted(shortcutPath, wasDirectory: false);
         App.Log($"[ManagedStorageShortcut] Removed path='{shortcutPath}'");
         return true;
+    }
+
+    internal static bool IsManagedStorageShortcutFile(string? shortcutPath)
+    {
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            !Path.GetExtension(shortcutPath).Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+            !File.Exists(shortcutPath))
+        {
+            return false;
+        }
+
+        ShortcutInfo? metadata = ShortcutHelper.ReadStoredMetadata(shortcutPath);
+        return metadata is not null &&
+               string.Equals(metadata.Description, ShortcutDescription, StringComparison.Ordinal);
     }
 
     private static bool IsOwnedShortcut(

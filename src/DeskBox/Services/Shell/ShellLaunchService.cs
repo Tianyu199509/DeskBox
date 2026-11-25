@@ -71,7 +71,12 @@ public static class ShellLaunchService
             return FileService.OpenItemResult.Failed;
         }
 
-        string trimmed = path.Trim();
+        string trimmed = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')).Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return FileService.OpenItemResult.Failed;
+        }
+
         bool isProtocolUri = Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? parsedUri) &&
                              !parsedUri.IsFile;
         bool isShellToken = !isProtocolUri &&

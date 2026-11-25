@@ -399,6 +399,7 @@ public sealed partial class CustomWidgetNativeRenderer
         box.LostFocus += (_, _) => EndInteractiveSession(box);
         box.Unloaded += (_, _) => EndInteractiveSession(box);
         MarkInteractiveElement(box);
+        AttachHostKeyboardInputActivation(box);
 
         bool suppressSync = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
@@ -1054,6 +1055,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
             ApplyCompactInputStyle(editor);
+            AttachHostKeyboardInputActivation(editor);
             BeginInteractiveSession(editor);
             editor.Unloaded += (_, _) => EndInteractiveSession(editor);
             Grid.SetColumn(editor, bodyColumnIndex);

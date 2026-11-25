@@ -293,16 +293,21 @@ public sealed class AppUpdateInstallResult
 {
     // JsonConstructor: see AppUpdateDownloadResult (batch 3c-3a).
     [System.Text.Json.Serialization.JsonConstructor]
-    internal AppUpdateInstallResult(bool success, string? errorMessage)
+    internal AppUpdateInstallResult(bool success, string? errorMessage, bool blockedByPolicy = false)
     {
         Success = success;
         ErrorMessage = errorMessage;
+        BlockedByPolicy = blockedByPolicy;
     }
 
     public bool Success { get; }
     public string? ErrorMessage { get; }
+    public bool BlockedByPolicy { get; }
 
-    public static AppUpdateInstallResult Started() => new(true, null);
+    public static AppUpdateInstallResult Started() => new(true, null, false);
 
-    public static AppUpdateInstallResult Failed(string errorMessage) => new(false, errorMessage);
+    public static AppUpdateInstallResult Failed(string errorMessage) => new(false, errorMessage, false);
+
+    public static AppUpdateInstallResult PolicyBlocked(string? errorMessage = null) =>
+        new(false, errorMessage, blockedByPolicy: true);
 }

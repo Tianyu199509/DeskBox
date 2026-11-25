@@ -626,12 +626,35 @@ public sealed partial class MarkdownDocumentView : UserControl
     private bool CanRenderShadowMirror() =>
         !_visualHandlersReleased &&
         _isLoaded &&
+        _documentText.IsLoaded &&
         XamlRoot?.Content is UIElement &&
-        Visibility == Visibility.Visible &&
+        IsEffectivelyVisibleInTree() &&
         ActualWidth > 0 &&
         ActualHeight > 0 &&
         _documentText.Blocks.Count > 0 &&
         WidgetTextShadow.IsActiveFor(_shadowMirror);
+
+    private bool IsEffectivelyVisibleInTree()
+    {
+        UIElement? root = XamlRoot?.Content;
+        DependencyObject? current = this;
+        for (int depth = 0; depth < 48 && current is not null; depth++)
+        {
+            if (current is UIElement uiElement && uiElement.Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, root))
+            {
+                break;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return true;
+    }
 
     private void ClearShadowMirrorSnapshot()
     {

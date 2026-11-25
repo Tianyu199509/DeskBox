@@ -5,8 +5,8 @@
 ; ISCC /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=<publish 目录> DeskBox.arm64.iss
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.6.1"
-#define MyAppVersionInfo "1.6.1.0"
+#define MyAppVersion "1.6.2"
+#define MyAppVersionInfo "1.6.2.0"
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -88,6 +88,10 @@ LZMANumFastBytes=273
 LZMAUseSeparateProcess=yes
 SolidCompression=yes
 WizardStyle=modern
+#ifdef DeskBoxUseSignTool
+SignTool=deskboxsign
+SignedUninstaller=yes
+#endif
 ; Keep this language list identical to DeskBox.iss: silent in-app updates
 ; pin /LANG from AppUpdateService.MapAppCultureToInstallerLanguage, whose
 ; names must match the [Languages] entries here.

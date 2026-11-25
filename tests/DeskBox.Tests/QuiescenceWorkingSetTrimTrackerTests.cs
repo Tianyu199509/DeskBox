@@ -231,7 +231,7 @@ public sealed class QuiescenceWorkingSetTrimTrackerTests
     }
 
     [Fact]
-    public void NoteActivity_RearmsEpisodeTrim_AndRespectsTwentySecondMinimumTrimInterval()
+    public void NoteActivity_RearmsEpisodeTrim_AndWaitsForHiddenQuietDuration()
     {
         var tracker = new QuiescenceWorkingSetTrimTracker();
         tracker.CommitTrim(T0);
@@ -242,25 +242,50 @@ public sealed class QuiescenceWorkingSetTrimTrackerTests
 
         Observe(tracker, T0 + TimeSpan.FromSeconds(1), Hidden, workingSet: 200 * MB);
 
-        var heldByCooldown = Observe(
+        var heldByQuiet = Observe(
             tracker,
             T0 + TimeSpan.FromSeconds(10),
             Hidden,
             workingSet: 200 * MB);
-        Assert.False(heldByCooldown.ShouldTrim);
-        Assert.Equal("trim-cooldown", heldByCooldown.Reason);
+        Assert.False(heldByQuiet.ShouldTrim);
+        Assert.Equal("waiting-for-quiet", heldByQuiet.Reason);
 
         TimeSpan? remainingDelay = tracker.GetNextEvaluationDelay(
             T0 + TimeSpan.FromSeconds(10),
             Hidden);
-        Assert.Equal(TimeSpan.FromSeconds(10), remainingDelay);
+        Assert.Equal(
+            QuiescenceWorkingSetTrimTracker.HiddenQuietDuration - TimeSpan.FromSeconds(9),
+            remainingDelay);
 
-        var dueAfterCooldown = Observe(
+        var dueAfterQuiet = Observe(
             tracker,
-            T0 + QuiescenceWorkingSetTrimTracker.MinimumTrimInterval + TimeSpan.FromSeconds(1),
+            T0 + TimeSpan.FromSeconds(1) + QuiescenceWorkingSetTrimTracker.HiddenQuietDuration,
             Hidden,
             workingSet: 200 * MB);
-        Assert.True(dueAfterCooldown.ShouldTrim);
+        Assert.True(dueAfterQuiet.ShouldTrim);
+    }
+
+    [Fact]
+    public void VisibleHoverTransition_AfterEpisodeTrim_DoesNotRearmTwentySecondChurn()
+    {
+        var tracker = new QuiescenceWorkingSetTrimTracker();
+        Observe(tracker, T0, VisibleBackground, workingSet: 180 * MB);
+
+        DateTimeOffset initialTrimAt = T0 + QuiescenceWorkingSetTrimTracker.VisibleBackgroundQuietDuration;
+        Assert.True(Observe(tracker, initialTrimAt, VisibleBackground, workingSet: 180 * MB).ShouldTrim);
+        tracker.CommitTrim(initialTrimAt);
+
+        // Moving pointer onto and off a widget must NOT reset _episodeTrimAvailable.
+        DateTimeOffset hoverAt = initialTrimAt + TimeSpan.FromSeconds(25);
+        Assert.False(Observe(tracker, hoverAt, VisibleForeground, workingSet: 180 * MB).ShouldTrim);
+
+        DateTimeOffset leaveAt = hoverAt + TimeSpan.FromSeconds(2);
+        Assert.False(Observe(tracker, leaveAt, VisibleBackground, workingSet: 180 * MB).ShouldTrim);
+
+        DateTimeOffset afterQuiet = leaveAt + QuiescenceWorkingSetTrimTracker.VisibleBackgroundQuietDuration + TimeSpan.FromSeconds(5);
+        var postHoverDecision = Observe(tracker, afterQuiet, VisibleBackground, workingSet: 180 * MB);
+        Assert.False(postHoverDecision.ShouldTrim);
+        Assert.Equal("trim-cooldown", postHoverDecision.Reason);
     }
 
     [Fact]

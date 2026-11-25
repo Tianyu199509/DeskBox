@@ -1278,9 +1278,9 @@ public sealed partial class QuickCaptureSurfaceContent :
         await SwitchViewAsync(mode);
     }
 
-    private async void ItemsList_ItemClick(object sender, ItemClickEventArgs e)
+    private void ItemsList_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is not QuickCaptureItemViewModel item)
+        if (_isDisposed || e.ClickedItem is not QuickCaptureItemViewModel item)
         {
             return;
         }
@@ -1297,7 +1297,13 @@ public sealed partial class QuickCaptureSurfaceContent :
             return;
         }
 
-        await OpenDetailAfterSavingAsync(item);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isDisposed)
+            {
+                _ = RunAsync(() => OpenDetailAfterSavingAsync(item));
+            }
+        });
     }
 
     private void SearchButton_Click(object sender, RoutedEventArgs e)
@@ -1604,13 +1610,22 @@ public sealed partial class QuickCaptureSurfaceContent :
         object sender,
         DoubleTappedRoutedEventArgs e)
     {
+        if (_isDisposed || _isDetailEditing || (!_isCreatingDetail && _detailItem is null))
+        {
+            return;
+        }
+
         double? ratio = DetailMarkdownView.Visibility == Visibility.Visible
             ? GetDetailReaderScrollRatio(e.GetPosition(DetailMarkdownView))
             : null;
-        if (BeginDetailEditing(ratio))
+        e.Handled = true;
+        DispatcherQueue.TryEnqueue(() =>
         {
-            e.Handled = true;
-        }
+            if (!_isDisposed)
+            {
+                _ = BeginDetailEditing(ratio);
+            }
+        });
     }
 
     private bool BeginDetailEditing() => BeginDetailEditing(null);
@@ -3872,26 +3887,10 @@ public sealed partial class QuickCaptureSurfaceContent :
     private Brush ResolveMaterialBrush(QuickCaptureAppearancePreset preset)
     {
         bool dark = ActualTheme == ElementTheme.Dark;
-        if (QuickCaptureMaterialBrushCache.GetSurfaceBrush(preset, dark) is { } cachedSurfaceBrush)
-        {
-            return cachedSurfaceBrush;
-        }
-        return preset switch
-        {
-            QuickCaptureAppearancePreset.Paper => new SolidColorBrush(
-                dark ? Color.FromArgb(0xB8, 0x3A, 0x36, 0x30) : Color.FromArgb(0xEC, 0xFA, 0xF5, 0xEA)),
-            QuickCaptureAppearancePreset.StickyYellow => new SolidColorBrush(
-                dark ? Color.FromArgb(0xB8, 0x4A, 0x40, 0x25) : Color.FromArgb(0xEC, 0xFF, 0xF0, 0xB3)),
-            QuickCaptureAppearancePreset.Rose => new SolidColorBrush(
-                dark ? Color.FromArgb(0xB8, 0x47, 0x2E, 0x38) : Color.FromArgb(0xEC, 0xFC, 0xE3, 0xEA)),
-            QuickCaptureAppearancePreset.Mint => new SolidColorBrush(
-                dark ? Color.FromArgb(0xB8, 0x28, 0x42, 0x35) : Color.FromArgb(0xEC, 0xDD, 0xF3, 0xE3)),
-            QuickCaptureAppearancePreset.MistBlue => new SolidColorBrush(
-                dark ? Color.FromArgb(0xB8, 0x2B, 0x3D, 0x53) : Color.FromArgb(0xEC, 0xDF, 0xEC, 0xF8)),
-            _ => ResolveBrush(
-                "CardBackgroundFillColorDefaultBrush",
-                Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF))
-        };
+        return _materialBrushCache.GetSurfaceBrush(preset, dark) ??
+               ResolveBrush(
+                   "CardBackgroundFillColorDefaultBrush",
+                   Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
     }
 
     private async void QuickCaptureViewSegmented_SelectionChanged(

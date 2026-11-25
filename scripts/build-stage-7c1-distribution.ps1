@@ -6,7 +6,15 @@ param(
 
     [string]$OutputDirectory = "",
 
-    [string]$DotNetPath = ""
+    [string]$DotNetPath = "",
+
+    [string]$SignThumbprint = "",
+
+    [string[]]$TimestampUrls = @(
+        "http://time.certum.pl",
+        "http://timestamp.digicert.com",
+        "http://timestamp.sectigo.com"
+    )
 )
 
 $ErrorActionPreference = "Stop"
@@ -123,12 +131,24 @@ if (-not (Test-Path -LiteralPath $directAuditSummaryPath -PathType Leaf)) {
 Copy-Item -LiteralPath $directAuditSummaryPath `
     -Destination (Join-Path $OutputDirectory "direct-aot-audit-summary.json") -Force
 
+$signingEnabled = -not [string]::IsNullOrWhiteSpace($SignThumbprint)
+$resolvedSigningCertificate = $null
+if ($signingEnabled) {
+    $signHelperScript = Join-Path $PSScriptRoot "Sign-DeskBoxFiles.ps1"
+    $resolvedSigningCertificate = & $signHelperScript -Thumbprint $SignThumbprint -ResolveOnly
+    Write-Host "Authenticode signing enabled: $($resolvedSigningCertificate.Subject) ($($resolvedSigningCertificate.Thumbprint))" -ForegroundColor Cyan
+}
+
 $retailPublishScript = Join-Path $PSScriptRoot "publish-aot-retail.ps1"
 $retailPublishArguments = @{
     Platform = $Platform
 }
 if (-not [string]::IsNullOrWhiteSpace($DotNetPath)) {
     $retailPublishArguments.DotNetPath = [System.IO.Path]::GetFullPath($DotNetPath)
+}
+if ($signingEnabled) {
+    $retailPublishArguments.SignThumbprint = $resolvedSigningCertificate.Thumbprint
+    $retailPublishArguments.TimestampUrls = $TimestampUrls
 }
 Write-Host "Publishing the smoke-free Full Native AOT retail payload for $Platform..." `
     -ForegroundColor Cyan
@@ -330,9 +350,19 @@ $innoArguments = @(
     "/DDeskBoxBundledRuntime=1",
     "/DMyAppReleaseDir=$directPublishDirectory",
     "/F$installerOutputBaseName",
-    "/O$installerOutputDirectory",
-    $installerScript
+    "/O$installerOutputDirectory"
 )
+if ($signingEnabled) {
+    $powershellHost = (Get-Process -Id $PID).Path
+    $signHelperPath = Join-Path $PSScriptRoot "Sign-DeskBoxFiles.ps1"
+    # Use Inno Setup's $q quote macro so ISCC's argv parser never splits paths containing spaces (e.g. "C:\Program Files\...").
+    $innoSignCmd = "`$q$powershellHost`$q -NoProfile -ExecutionPolicy Bypass -File `$q$signHelperPath`$q -Thumbprint $($resolvedSigningCertificate.Thumbprint) -FilePath `$f"
+    $innoArguments += @(
+        "/DDeskBoxUseSignTool=1",
+        "/Sdeskboxsign=$innoSignCmd"
+    )
+}
+$innoArguments += $installerScript
 Write-Host "Compiling the Direct Full Native AOT installer with '$innoCompiler'..." -ForegroundColor Cyan
 & $innoCompiler @innoArguments 2>&1 | Tee-Object -FilePath $innoLogPath | Out-Host
 if ($LASTEXITCODE -ne 0) {
@@ -409,6 +439,12 @@ if (@($uploadEntries | Where-Object { $_ -like '*.msix' }).Count -ne 1 -or
 }
 
 $installerSignature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+if ($signingEnabled) {
+    if ($installerSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        $null -eq $installerSignature.TimeStamperCertificate) {
+        throw "Authenticode verification failed for signed installer '$($installer.FullName)': status=$($installerSignature.Status)."
+    }
+}
 $summary = [ordered]@{
     schemaVersion = 1
     status = "passed"
@@ -473,7 +509,7 @@ $summary = [ordered]@{
         interactiveDesktopExecuted = $false
         installerInstallationExecuted = $false
         msixInstallationExecuted = $false
-        signingExecuted = $false
+        signingExecuted = $signingEnabled
         wackExecuted = $false
         inPlaceUpgradeExecuted = $false
         storeFlightExecuted = $false

@@ -240,9 +240,6 @@ internal sealed partial class ElementBackdropTargetBridge : SystemBackdrop, IDis
         _maskedProxy?.UpdateParameters(_cornerRadiusDip, _rasterizationScale);
     }
 
-    internal bool SetInteractionTintOverride(Windows.UI.Color? color) =>
-        !_isDisposed && _maskedProxy?.SetInteractionTintOverride(color) == true;
-
     internal void Suspend()
     {
         if (_isDisposed)
@@ -531,9 +528,6 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         _cornerRadiusDip = Math.Max(0.0, cornerRadiusDip);
         _maskedProxy?.UpdateParameters(_cornerRadiusDip, _rasterizationScale);
     }
-
-    internal bool SetInteractionTintOverride(Windows.UI.Color? color) =>
-        !_isDisposed && _maskedProxy?.SetInteractionTintOverride(color) == true;
 
     internal void UpdateAppearance(
         WidgetMaterialBackdropAppearance appearance)

@@ -41,6 +41,8 @@ Microsoft Store 渠道由商店负责安装和更新。两个渠道的核心功�
 
 从 GitHub 下载时，发布页同时提供 `.sha256` 校验文件，可在安装前核对安装包完整性。
 
+> 注意：当前 Direct 直装包暂未附加商业 Authenticode 数字签名。若你的 Windows 11 开启了「智能应用控制（Smart App Control）」并拦截未签名安装器，请勿为此关闭智能应用控制（关闭后不可逆），可参考[常见问题与故障排查](16-troubleshooting.md)说明或使用已由微软签名的 Microsoft Store 渠道。
+
 ## 安装过程
 
 Direct 安装包是 Full Native AOT 构建，内置匹配架构的私有 Windows App Runtime，不需要联网下载 .NET 10 或 Windows App Runtime。安装器仍会先检查目标电脑

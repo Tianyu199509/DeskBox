@@ -1375,7 +1375,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
 
                             if (exportFile is not null)
                             {
-                                pkg.SetStorageItems([exportFile]);
+                                pkg.SetStorageItems(new Windows.Storage.IStorageItem[] { exportFile });
                                 DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [effectiveExportPath]);
                             }
                             else

@@ -80,8 +80,8 @@ public sealed class DeskBoxAiService
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
             KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-            KeepAlivePingDelay = TimeSpan.FromSeconds(30),
-            KeepAlivePingTimeout = TimeSpan.FromSeconds(30),
+            KeepAlivePingDelay = TimeSpan.FromSeconds(60),
+            KeepAlivePingTimeout = TimeSpan.FromSeconds(90),
             AutomaticDecompression = System.Net.DecompressionMethods.All,
             ConnectCallback = CustomWidgetNetworkSecurity.ConnectToValidatedLocalOrPublicIpAsync
         }))

@@ -2025,6 +2025,7 @@ public static partial class Win32Helper
     private const int ShcneRenameItem = 0x00000001;
     private const int ShcneUpdateDir = 0x00001000;
     private const uint ShcnfPathW = 0x0005;
+    private const uint ShcnfFlushNoWait = 0x3000;
 
     [LibraryImport("shell32.dll", EntryPoint = "SHChangeNotify", StringMarshalling = StringMarshalling.Utf16)]
     private static partial void SHChangeNotify(
@@ -2034,41 +2035,37 @@ public static partial class Win32Helper
         string? dwItem2);
 
     /// <summary>
-    /// Notifies the Shell that an entry moved so Explorer folder views
-    /// (including the desktop) drop stale icons. Raw file APIs used by the
-    /// managed transfer engine do not post this notification themselves.
+    /// Notifies the Shell that an entry moved so Explorer folder views drop stale icons.
     /// </summary>
     internal static void NotifyShellItemMoved(string oldPath, string newPath)
     {
         try
         {
-            SHChangeNotify(ShcneRenameItem, ShcnfPathW, oldPath, newPath);
+            if (DesktopIconPositionInterop.TryNotifyShellItemMoved(oldPath, newPath))
+            {
+                return;
+            }
+            SHChangeNotify(ShcneRenameItem, ShcnfPathW | ShcnfFlushNoWait, oldPath, newPath);
         }
         catch (Exception ex)
         {
-            App.Log(
-                $"[ShellNotify] Move notification failed source='{oldPath}': " +
-                ex.Message);
+            App.Log($"[ShellNotify] Move notification failed source='{oldPath}': {ex.Message}");
         }
     }
 
     /// <summary>
-    /// Asks shell folder views (including OneDrive-backed desktops) to
-    /// re-enumerate a directory. This is the programmatic equivalent of the
-    /// user pressing F5 and reliably clears entries left behind by raw file
-    /// operations on views that ignore per-item notifications.
+    /// Asks shell folder views (including OneDrive/virtual desktops) to re-enumerate a directory.
     /// </summary>
     internal static void NotifyShellDirectoryUpdated(string directory)
     {
         try
         {
-            SHChangeNotify(ShcneUpdateDir, ShcnfPathW, directory, null);
+            SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlushNoWait, directory, null);
+            DesktopIconPositionInterop.NotifyDesktopNamespaceIfMatch(directory);
         }
         catch (Exception ex)
         {
-            App.Log(
-                $"[ShellNotify] Directory update notification failed " +
-                $"directory='{directory}': {ex.Message}");
+            App.Log($"[ShellNotify] Directory update notification failed directory='{directory}': {ex.Message}");
         }
     }
 
@@ -3804,7 +3801,8 @@ public static partial class Win32Helper
         // legacy SE_ERR_NOASSOC (31) that raw ShellExecute returns.
         const int ErrorNoAssociation = 1155;
 
-        string directory = ResolveShellLaunchDirectory(path);
+        string effectivePath = ResolveEffectiveOpenTargetAndDirectory(path, out string directory);
+
         // Which implementation and branch handled this open is the only way to
         // tell "Windows accepted it" from "the app actually started" after the
         // fact; all builds run the Rust implementation unconditionally.
@@ -3817,10 +3815,10 @@ public static partial class Win32Helper
             // path until the breaker sees a restarted shell.
             App.Log(
                 "[OpenFile] Explorer-hosted launch bypassed (circuit open, explorer restarted or RPC failures) " +
-                $"path='{path}'");
+                $"path='{effectivePath}'");
         }
         else if (ExplorerShellLaunchService.TryOpen(
-                path,
+                effectivePath,
                 directory,
                 string.Empty,
                 out string? explorerLaunchError,
@@ -3830,7 +3828,7 @@ public static partial class Win32Helper
             ExplorerLaunchCircuitBreaker.RecordSuccess();
             App.Log(
                 $"[OpenFile] backend=explorer-hosted implementation={explorerBackend} " +
-                $"path='{path}'" +
+                $"path='{effectivePath}'" +
                 (explorerLaunchResult is { } native
                     ? $" applicationHr=0x{native.ApplicationHResult:X8}" +
                       $" executeHr=0x{native.ExecuteHResult:X8}"
@@ -3841,14 +3839,14 @@ public static partial class Win32Helper
         {
             ExplorerLaunchCircuitBreaker.RecordFailure(explorerLaunchHResult);
             App.Log(
-                $"[OpenFile] Explorer-hosted launch unavailable for '{path}': " +
+                $"[OpenFile] Explorer-hosted launch unavailable for '{effectivePath}': " +
                 $"implementation={explorerBackend} " +
                 $"{explorerLaunchError ?? "unknown error"}. Falling back to local ShellExecuteEx.");
         }
 
         using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
         LocalShellExecuteCompletionMarker pendingLocalLaunch =
-            WatchPendingLocalShellExecute(path);
+            WatchPendingLocalShellExecute(effectivePath);
 
         try
         {
@@ -3863,7 +3861,7 @@ public static partial class Win32Helper
                 Mask = 0x00000100u, // SEE_MASK_NOASYNC
                 OwnerWindow = ownerWindow,
                 Verb = null,
-                FileName = path,
+                FileName = effectivePath,
                 Parameters = null,
                 Directory = string.IsNullOrWhiteSpace(directory) ? null : directory,
                 Show = 1 // SW_SHOWNORMAL
@@ -3943,15 +3941,16 @@ public static partial class Win32Helper
             // dispatch, resolving the target's default handler directly via
             // ShellExecuteExW without SEE_MASK_NOCLOSEPROCESS handle waits.
             _ = AllowSetForegroundWindow(uint.MaxValue);
+            string effectivePath = ResolveEffectiveLocalLaunchPaths(path, workingDirectory, out string? effectiveWorkingDir);
             var executeInfo = new ElevatedLaunchNativeMethods.ShellExecuteInfo
             {
                 Size = (uint)Marshal.SizeOf<ElevatedLaunchNativeMethods.ShellExecuteInfo>(),
                 Mask = 0x00000100u, // SEE_MASK_NOASYNC
                 OwnerWindow = ownerWindow,
                 Verb = null,
-                FileName = path,
+                FileName = effectivePath,
                 Parameters = null,
-                Directory = string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
+                Directory = effectiveWorkingDir,
                 Show = 1 // SW_SHOWNORMAL
             };
             if (!ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo))
@@ -4111,15 +4110,16 @@ public static partial class Win32Helper
         try
         {
             _ = AllowSetForegroundWindow(uint.MaxValue);
+            string effectivePath = ResolveEffectiveLocalLaunchPaths(path, workingDirectory, out string? effectiveWorkingDir);
             var executeInfo = new ElevatedLaunchNativeMethods.ShellExecuteInfo
             {
                 Size = (uint)Marshal.SizeOf<ElevatedLaunchNativeMethods.ShellExecuteInfo>(),
                 Mask = 0x00000100u, // SEE_MASK_NOASYNC
                 OwnerWindow = ownerWindow,
                 Verb = string.IsNullOrWhiteSpace(verb) ? null : verb,
-                FileName = path,
+                FileName = effectivePath,
                 Parameters = string.IsNullOrWhiteSpace(parameters) ? null : parameters,
-                Directory = string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
+                Directory = effectiveWorkingDir,
                 Show = 1 // SW_SHOWNORMAL
             };
             if (!ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo))

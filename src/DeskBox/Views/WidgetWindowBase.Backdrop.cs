@@ -70,10 +70,6 @@ public abstract partial class WidgetWindowBase
 
     private SharedMicaSlot? _attachedMicaSlot;
     private SharedAcrylicSlot? _attachedAcrylicSlot;
-    private bool _interactionSimplifiedAcrylicController;
-
-    protected bool IsInteractionControllerAcrylicSimplified =>
-        _isInteractionBackdropDowngraded && _interactionSimplifiedAcrylicController;
 
     protected void ApplyBackdropPreference()
     {
@@ -115,8 +111,6 @@ public abstract partial class WidgetWindowBase
         try
         {
             _isInteractionBackdropDowngraded = false;
-            _interactionSimplifiedAcrylicController = false;
-            _materialBackdropBridge?.SetInteractionTintOverride(null);
 
             // The immersive-dark-mode attribute, shadowless frame and DWM
             // border depend only on the theme, not the material. Re-issuing
@@ -317,52 +311,15 @@ public abstract partial class WidgetWindowBase
     /// </summary>
     public void SimplifyBackdropForInteraction()
     {
+        // Only Win32's legacy SWCA_ACCENT_POLICY (ACCENT_ENABLE_ACRYLICBLURBEHIND)
+        // suffers from the Win10 SetWindowPos blur-resample stall. Detaching DComp's
+        // DesktopAcrylicController mid-interaction strips the frosted/fallback layer
+        // at frame 0 (causing a visible semi-transparent pop before slide animations)
+        // and churns the controller's internal Compositor unnecessarily.
         if (_isInteractionBackdropDowngraded ||
+            !LegacyAccentBackdropActive ||
             !WindowsCompatibilityService.UsesLegacyWindowAcrylic ||
             HWnd == IntPtr.Zero)
-        {
-            return;
-        }
-
-        if (AcrylicControllerAttached &&
-            _materialBackdropBridge?.Target is not null)
-        {
-            if (!InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
-                    WidgetCompactAnimationCoordinator.RecentFrameOverrunMask,
-                    WindowsCompatibilityService.IsSoftwareOrRemoteGraphicsSession))
-            {
-                return;
-            }
-
-            bool isDark = RootElement.ActualTheme == ElementTheme.Dark;
-            double surfaceOpacity = Math.Clamp(WidgetOpacity, 0.0, 1.0);
-            string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-                SettingsService.Settings.WidgetShell.WidgetMaterialType);
-            bool useBase = string.Equals(
-                materialType,
-                SettingsService.WidgetMaterialTypeAcrylicBase,
-                StringComparison.Ordinal);
-            Windows.UI.Color tintColor = BuildNativeBackdropTintColor(isDark);
-            Windows.UI.Color simplifiedColor =
-                WidgetMaterialVisualCalculator.BuildInteractionSimplifiedAcrylicColor(
-                    tintColor,
-                    useBase,
-                    surfaceOpacity,
-                    SettingsService.Settings.WidgetShell.WidgetMaterialIntensity);
-            if (!_materialBackdropBridge.SetInteractionTintOverride(simplifiedColor))
-            {
-                return;
-            }
-
-            DetachAcrylicControllerTarget();
-            _isInteractionBackdropDowngraded = true;
-            _interactionSimplifiedAcrylicController = true;
-            App.LogVerbose(
-                $"[Backdrop.Win10] hwnd=0x{HWnd.ToInt64():X} interaction controller-acrylic tint-only override applied");
-            return;
-        }
-
-        if (!LegacyAccentBackdropActive)
         {
             return;
         }
@@ -386,7 +343,6 @@ public abstract partial class WidgetWindowBase
         }
 
         _isInteractionBackdropDowngraded = true;
-        _interactionSimplifiedAcrylicController = false;
         App.LogVerbose(
             $"[Backdrop.Win10] hwnd=0x{HWnd.ToInt64():X} interaction tint-only accent applied " +
             $"(recent overrun bits={System.Numerics.BitOperations.PopCount((ulong)WidgetCompactAnimationCoordinator.RecentFrameOverrunMask)})");
@@ -405,45 +361,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        bool wasControllerSimplified = _interactionSimplifiedAcrylicController;
         _isInteractionBackdropDowngraded = false;
-        _interactionSimplifiedAcrylicController = false;
-        if (wasControllerSimplified)
-        {
-            if (IsClosing || HWnd == IntPtr.Zero || !IsWindowVisibleForBackdrop)
-            {
-                _materialBackdropBridge?.SetInteractionTintOverride(null);
-                _lastAppliedBackdropSignature = null;
-                return;
-            }
-
-            bool isDark = RootElement.ActualTheme == ElementTheme.Dark;
-            double surfaceOpacity = Math.Clamp(WidgetOpacity, 0.0, 1.0);
-            string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-                SettingsService.Settings.WidgetShell.WidgetMaterialType);
-            if (!SettingsService.IsAcrylicMaterial(materialType))
-            {
-                _materialBackdropBridge?.SetInteractionTintOverride(null);
-                _lastAppliedBackdropSignature = null;
-                ApplyBackdropPreference();
-                return;
-            }
-
-            bool restored = ApplyAcrylicController(
-                isDark,
-                BuildNativeBackdropTintColor(isDark),
-                surfaceOpacity,
-                materialType == SettingsService.WidgetMaterialTypeAcrylicBase);
-            _materialBackdropBridge?.SetInteractionTintOverride(null);
-            if (!restored)
-            {
-                _lastAppliedBackdropSignature = null;
-                ApplyBackdropPreference();
-            }
-
-            return;
-        }
-
         if (!LegacyAccentBackdropActive || HWnd == IntPtr.Zero)
         {
             return;
@@ -473,7 +391,6 @@ public abstract partial class WidgetWindowBase
               (signature.EffectiveCornerRadius > 0 && transparentHostReady && !WindowsCompatibilityService.SupportsMica)
             : SettingsService.IsAcrylicMaterial(signature.MaterialType)
                 ? (transparentHostReady && AcrylicController is { IsClosed: false } && AcrylicControllerAttached) ||
-                  (transparentHostReady && IsInteractionControllerAcrylicSimplified && _materialBackdropBridge?.Target is not null) ||
                   (signature.EffectiveCornerRadius <= 0 && LegacyAccentBackdropActive) ||
                   (signature.EffectiveCornerRadius > 0 && transparentHostReady && !WindowsCompatibilityService.SupportsDesktopAcrylic)
                 : signature.MaterialType == SettingsService.WidgetMaterialTypeSolid &&
@@ -939,8 +856,6 @@ public abstract partial class WidgetWindowBase
         }
 
         _isInteractionBackdropDowngraded = false;
-        _interactionSimplifiedAcrylicController = false;
-        _materialBackdropBridge?.SetInteractionTintOverride(null);
         _lastAppliedBackdropSignature = null;
         RoundedBackdropMaskService.TrimIdle();
         DetachAcrylicControllerTarget();
@@ -955,7 +870,6 @@ public abstract partial class WidgetWindowBase
         }
 
         _isInteractionBackdropDowngraded = false;
-        _interactionSimplifiedAcrylicController = false;
         DetachAcrylicControllerTarget();
         DetachMicaControllerTarget();
         _materialBackdropBridge?.Suspend();

@@ -6,7 +6,7 @@ namespace DeskBox.Services;
 /// </summary>
 internal static class WidgetTrayAnimationPreparation
 {
-    internal const int DefaultVisualCommitFallbackTimeoutMs = 32;
+    internal const int DefaultVisualCommitFallbackTimeoutMs = 160;
 
     public static bool ShouldDeferWindowReveal(
         bool deferRevealUntilAnimationReady,

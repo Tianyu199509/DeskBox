@@ -127,12 +127,22 @@ public sealed partial class WidgetManager
             return [];
         }
 
-        var activePaths = _settingsService.Settings.Widgets
-            .Where(widget => widget.WidgetKind == WidgetKind.File &&
-                             widget.FollowsDefaultStoragePath &&
-                             !IsDeleted(widget.Id))
-            .SelectMany(widget => GetPossibleManagedStoragePaths(widget, rootPath))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var activePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            foreach (WidgetConfig widget in _settingsService.Settings.Widgets)
+            {
+                if (widget.WidgetKind == WidgetKind.File &&
+                    widget.FollowsDefaultStoragePath &&
+                    !IsDeleted(widget.Id))
+                {
+                    foreach (string possiblePath in GetPossibleManagedStoragePaths(widget, rootPath))
+                    {
+                        activePaths.Add(possiblePath);
+                    }
+                }
+            }
+        });
         activePaths.UnionWith(GetSiblingChannelProtectedFolderPaths());
 
         return Directory.EnumerateDirectories(rootPath)

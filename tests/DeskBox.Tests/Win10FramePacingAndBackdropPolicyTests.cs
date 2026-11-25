@@ -144,17 +144,17 @@ public sealed class Win10FramePacingAndBackdropPolicyTests
     }
 
     [Fact]
-    public void ControllerAcrylicSimplification_StaysFrostedOnHardwareGpuUntilOverrunsOrSoftwareSession()
+    public void LegacyAccentSimplificationPolicy_RequiresSustainedOverrunsOrResourceSaver()
     {
-        Assert.False(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+        Assert.False(InteractionBackdropSimplificationPolicy.ShouldSimplify(
             recentOverrunMask: 0,
-            isSoftwareOrRemoteGraphics: false));
-        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+            performanceMode: PerformanceSettingsPolicy.ModeBalanced));
+        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplify(
             recentOverrunMask: 0,
-            isSoftwareOrRemoteGraphics: true));
-        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplifyControllerAcrylic(
+            performanceMode: PerformanceSettingsPolicy.ModeResourceSaver));
+        Assert.True(InteractionBackdropSimplificationPolicy.ShouldSimplify(
             recentOverrunMask: (1L << 24) - 1,
-            isSoftwareOrRemoteGraphics: false));
+            performanceMode: PerformanceSettingsPolicy.ModeBalanced));
     }
 
     [Theory]
@@ -173,28 +173,5 @@ public sealed class Win10FramePacingAndBackdropPolicyTests
         Assert.Equal(
             expectedSoftware,
             CustomWidgetNativeMetrics.IsSoftwareOrSyntheticDxgiAdapter(vendorId, deviceId, flags));
-    }
-
-    [Fact]
-    public void BuildInteractionSimplifiedAcrylicColor_PreservesTintRgbAndHitTestableAlpha()
-    {
-        var tint = Windows.UI.Color.FromArgb(0xFF, 0x20, 0x24, 0x2C);
-
-        Windows.UI.Color zeroOpacity = WidgetMaterialVisualCalculator.BuildInteractionSimplifiedAcrylicColor(
-            tint,
-            useBase: false,
-            surfaceOpacity: 0.0,
-            materialIntensity: 0.0);
-        Windows.UI.Color normalOpacity = WidgetMaterialVisualCalculator.BuildInteractionSimplifiedAcrylicColor(
-            tint,
-            useBase: true,
-            surfaceOpacity: 0.8,
-            materialIntensity: 0.65);
-
-        Assert.Equal(tint.R, zeroOpacity.R);
-        Assert.Equal(tint.G, zeroOpacity.G);
-        Assert.Equal(tint.B, zeroOpacity.B);
-        Assert.True(zeroOpacity.A >= 1);
-        Assert.True(normalOpacity.A > zeroOpacity.A);
     }
 }

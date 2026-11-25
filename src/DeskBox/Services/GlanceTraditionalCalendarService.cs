@@ -305,7 +305,7 @@ internal sealed class GlanceTraditionalCalendarService
             GlanceTraditionalCalendarMode.ThaiBuddhist => (CalendarIdentifiers.Thai, "th-TH"),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
         };
-        var calendar = new WinCalendar([language], calendarSystem, ClockIdentifiers.TwentyFourHour);
+        var calendar = new WinCalendar(new string[] { language }, calendarSystem, ClockIdentifiers.TwentyFourHour);
         DateTime localNoon = DateTime.SpecifyKind(
             date.ToDateTime(new TimeOnly(12, 0)),
             DateTimeKind.Local);

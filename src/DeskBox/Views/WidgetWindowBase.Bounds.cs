@@ -1531,7 +1531,8 @@ public abstract partial class WidgetWindowBase
         string.Equals(reason, "todo-custom-due", StringComparison.Ordinal) ||
         string.Equals(reason, "todo-search", StringComparison.Ordinal) ||
         string.Equals(reason, "widget-title-rename", StringComparison.Ordinal) ||
-        string.Equals(reason, "file-inline-rename", StringComparison.Ordinal);
+        string.Equals(reason, "file-inline-rename", StringComparison.Ordinal) ||
+        string.Equals(reason, "custom-widget-input", StringComparison.Ordinal);
 
     private static bool CanProceedAfterTransientMenuForegroundChange(
         IntPtr targetWidgetHwnd,

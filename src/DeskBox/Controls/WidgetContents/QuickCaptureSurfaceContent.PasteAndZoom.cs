@@ -430,7 +430,7 @@ public sealed partial class QuickCaptureSurfaceContent
             return;
         }
 
-        DetailPageTransitionHelper.PlayNavigationEnter(target, enteringDetail ? 14f : -14f);
+        ElementCompositionPreview.SetIsTranslationEnabled(target, true);
         var visual = ElementCompositionPreview.GetElementVisual(target);
         var compositor = visual.Compositor;
         visual.StopAnimation("Opacity");

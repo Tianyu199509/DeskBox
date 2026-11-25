@@ -144,16 +144,23 @@ internal sealed class InProcessStudioHostBridge : IStudioHostBridge
         NullStudioHostBridge.Instance.ResolvePreviewBorderVisuals(isDark, accentColor, existingWidgetId);
 
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetCustomWidgetInstances() =>
-        _getWidgetManager()?.GetCustomWidgetInstances() ?? [];
+        DeskBox.Platform.UiDispatch.HasAccess
+            ? (_getWidgetManager()?.GetCustomWidgetInstances() ?? [])
+            : DeskBox.Platform.UiDispatch.RunAsync(() =>
+                  Task.FromResult<IReadOnlyList<GlanceWidgetInstanceInfo>>(
+                      _getWidgetManager()?.GetCustomWidgetInstances() ?? []))
+              .GetAwaiter().GetResult();
 
     public WidgetConfig? ResolveCustomWidgetConfig(string widgetId) =>
         _getWidgetManager()?.ResolveCustomWidgetConfig(widgetId);
 
     public void BringAuxiliaryWindowToFront(IntPtr hwnd, string reason) =>
-        _getWidgetManager()?.BringAuxiliaryWindowToFront(hwnd, reason);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _getWidgetManager()?.BringAuxiliaryWindowToFront(hwnd, reason));
 
     public void ReleaseRaisedBandGuest(IntPtr hwnd, string reason) =>
-        _getWidgetManager()?.ReleaseRaisedBandGuest(hwnd, reason);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _getWidgetManager()?.ReleaseRaisedBandGuest(hwnd, reason));
 
     public async Task<GlanceWidgetInstanceInfo?> CreateCustomWidgetAsync(
         string? templateOrPackageSpec,
@@ -164,20 +171,23 @@ internal sealed class InProcessStudioHostBridge : IStudioHostBridge
         IReadOnlyDictionary<string, string>? initialSettings = null,
         IReadOnlyDictionary<string, string>? initialSecrets = null)
     {
-        if (_getWidgetManager() is not { } manager)
+        return await DeskBox.Platform.UiDispatch.RunAsync(async () =>
         {
-            return null;
-        }
+            if (_getWidgetManager() is not { } manager)
+            {
+                return null;
+            }
 
-        return await manager.CreateCustomWidgetAsync(
-            templateOrPackageSpec,
-            logicJsOverride: logicJsOverride,
-            hasLogicJsOverride: hasLogicJsOverride,
-            localesOverride: localesOverride,
-            hasLocalesOverride: hasLocalesOverride,
-            initialSettings: initialSettings,
-            initialSecrets: initialSecrets,
-            allowTrustedJsonAuthoring: true);
+            return (GlanceWidgetInstanceInfo?)await manager.CreateCustomWidgetAsync(
+                templateOrPackageSpec,
+                logicJsOverride: logicJsOverride,
+                hasLogicJsOverride: hasLogicJsOverride,
+                localesOverride: localesOverride,
+                hasLocalesOverride: hasLocalesOverride,
+                initialSettings: initialSettings,
+                initialSecrets: initialSecrets,
+                allowTrustedJsonAuthoring: true);
+        });
     }
 
     public async Task<GlanceWidgetInstanceInfo?> UpdateCustomWidgetManifestAsync(
@@ -190,41 +200,51 @@ internal sealed class InProcessStudioHostBridge : IStudioHostBridge
         CustomWidgetLocaleCatalog? locales = null,
         bool updateLocales = false)
     {
-        if (_getWidgetManager() is not { } manager)
+        return await DeskBox.Platform.UiDispatch.RunAsync(async () =>
         {
-            return null;
-        }
+            if (_getWidgetManager() is not { } manager)
+            {
+                return null;
+            }
 
-        return await manager.UpdateCustomWidgetManifestAsync(
-            widgetId,
-            manifestJson,
-            resizeToDefault: resizeToDefault,
-            reveal: reveal,
-            logicJs: logicJs,
-            updateLogicJs: updateLogicJs,
-            locales: locales,
-            updateLocales: updateLocales);
+            return await manager.UpdateCustomWidgetManifestAsync(
+                widgetId,
+                manifestJson,
+                resizeToDefault: resizeToDefault,
+                reveal: reveal,
+                logicJs: logicJs,
+                updateLogicJs: updateLogicJs,
+                locales: locales,
+                updateLocales: updateLocales);
+        });
     }
 
     public Task ApplyCustomWidgetMutationAsync(CustomWidgetSettingsMutation mutation) =>
-        _getWidgetManager()?.ApplyCustomWidgetMutationAsync(mutation) ?? Task.CompletedTask;
+        DeskBox.Platform.UiDispatch.RunAsync(
+            () => _getWidgetManager()?.ApplyCustomWidgetMutationAsync(mutation) ?? Task.CompletedTask);
 
     public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) =>
-        _getWidgetManager()?.SetCustomWidgetInstanceEnabledAsync(widgetId, enabled) ?? Task.CompletedTask;
+        DeskBox.Platform.UiDispatch.RunAsync(
+            () => _getWidgetManager()?.SetCustomWidgetInstanceEnabledAsync(widgetId, enabled) ?? Task.CompletedTask);
 
     public async Task LocateCustomWidgetAsync(string widgetId)
     {
-        if (_getWidgetManager() is { } manager)
+        await DeskBox.Platform.UiDispatch.RunAsync(async () =>
         {
-            _ = await manager.LocateCustomWidgetAsync(widgetId);
-        }
+            if (_getWidgetManager() is { } manager)
+            {
+                _ = await manager.LocateCustomWidgetAsync(widgetId);
+            }
+        });
     }
 
     public Task RemoveCustomWidgetAsync(string widgetId) =>
-        _getWidgetManager()?.RemoveCustomWidgetAsync(widgetId) ?? Task.CompletedTask;
+        DeskBox.Platform.UiDispatch.RunAsync(
+            () => _getWidgetManager()?.RemoveCustomWidgetAsync(widgetId) ?? Task.CompletedTask);
 
     public void ShowNotification(string title, string body) =>
-        _getNotificationService()?.TryShow(title, body);
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _getNotificationService()?.TryShow(title, body));
 
     public IReadOnlyList<AgentStageSummary> GetPendingAgentStages() =>
         CustomWidgetAgentStageStore.ListPending();

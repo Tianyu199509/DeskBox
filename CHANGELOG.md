@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.1 - 2026-11-25
+## 1.6.2 - 2026-11-25
 
 ### English
 
@@ -12,9 +12,11 @@
 
 #### Fixes & Performance
 
-- **Reliable rename & keyboard focus.** Fixed unresponsive Rename/Edit actions and IME composition interruptions across files, folders, stacks, stack popovers, widget titles, Todo items, and Quick Capture notes in desktop-pinned mode; eliminated focus/retry loops when renaming widgets.
-- **Smooth file/folder pickers & UI responsiveness.** Moved all folder and file pickers into the isolated out-of-process native proxy (with dark-theme sync and automatic cleanup on host exit) so slow network drives or Shell extensions can never freeze DeskBox. Fixed repeated desktop-layer Z-order restacking above wallpaper/helper windows, Recycle Bin menu probe stalls, and UI-thread drive checks in Settings.
-- **Steadier capsules, overlays & diagnostics.** Fixed a crash when placing a newly created Custom Widget from Workshop onto the desktop, capsule placement jumps after title-bar drags or canceled group merges, Todo custom due-date overlay focus races, post-update layout quarantine recovery, update download progress ordering, and added a 15-second standalone emergency fallback when exporting diagnostics bundles.
+- **Instant `F7` icon reveal, zero-flash wake & gentler memory trimming.** Preserves visible first-screen file icons and warm compressed icon bytes across hidden states so `F7` / double-click wake displays icons immediately instead of reloading row by row; relaxes working-set trim thresholds to eliminate hover and short-hide page-fault stalls, pre-applies wipe clips and extends DWM commit grace to prevent first-frame wake flashes, restores custom/panoramic backgrounds on wake, stops Glance photo blink on desktop refresh, and narrows fullscreen occlusion checks to exclusive fullscreen and presentation mode.
+- **Capsule Z-order, stack popovers & zero-ghost batch hide.** Keeps expanded capsules above lower-row collapsed capsules across desktop clicks and group restacks while blocking pointer-through hover activation from occluded widgets; cancels deferred layer-restore timers and suppresses `SWP_SHOWWINDOW` during layer demotion so hidden capsules never reappear on the desktop; fixes unactivated stack popover outside-click light-dismiss, post-context-menu rename focus grace, and close-button interaction-lease leaks.
+- **Reliable rename, Custom Widget `<input>` focus & Todo `All`-view reordering.** Fixed unresponsive Rename/Edit actions and IME composition interruptions across files, folders, stacks, stack popovers, widget titles, Todo items, and Quick Capture notes in desktop-pinned mode; added host keyboard activation, smart-capsule collapse protection, and live retained-patch updates while typing or composing CJK IME in Custom Widget `<input>` / `<textarea>` controls; fixed Todo drag-to-reorder in the `All` filter so active and completed partitions reorder independently without snapping back.
+- **Clipboard image copy, non-ASCII / `.lnk` / Store launch & Windows 10 stability.** Fixed NativeAOT WinRT marshaling failures when copying Clipboard History images, probing `System.Kind`, and formatting system traditional calendars; fixed "The directory name is invalid" errors when invoking Shell context-menu commands in non-ASCII/CJK folders, opening `.lnk` shortcuts with quoted working directories, or launching Microsoft Store virtualized `LocalCache` files (while preserving NTFS symlinks and junctions); resolved Windows 10 `DesktopAcrylicController` cross-compositor crashes, Windows 10 solid-backdrop theme contrast, Quick Capture popout/double-tap crashes, companion IPC UI-thread shutdown hangs (`0x8001010E`) and false restore failure prompts, manual-launch startup settling waits, UIPI-elevated foreground hook false alarms, 65-second AI co-creation keep-alive drops, and Smart App Control / policy-block installer diagnostics.
+- **Out-of-process pickers & resilient diagnostics.** Moved folder and file open pickers into the isolated out-of-process native proxy (with dark-theme sync and automatic cleanup on host exit) so slow network drives or Shell extensions never freeze DeskBox; fixed desktop-floor Z-order restacking storms above wallpaper helpers, Recycle Bin probe stalls, Workshop desktop-placement animation races, capsule drag/cancel-merge jumps, and added a 15-second standalone emergency fallback when exporting diagnostics bundles.
 
 ### 中文
 
@@ -26,9 +28,11 @@
 
 #### 修复与性能优化
 
-- **重命名与输入焦点全面修复。** 修复桌面钉住模式下文件、文件夹、叠放标题、叠放弹窗内项目、盒子标题、待办事项及随记点击「重命名 / 编辑」无反应或输入法选词中断的问题；消除盒子重命名失焦引发的重试与焦点循环。
-- **彻底解决选目录/选文件假死与界面卡顿。** 将全部文件夹与文件选择器迁入独立原生代理进程（同步深色主题并在宿主退出时自动清理），彻底避免第三方外壳扩展或慢速网络盘卡死主界面；修复特定壁纸/辅助窗口下的桌面底层反复重排、右键探测回收站状态卡顿及设置页磁盘检测阻塞。
-- **组件创建、胶囊拖拽与诊断导出更稳健。** 修复从工坊创建自定义组件并放置到桌面时的动画竞态闪退、智能胶囊标题栏拖拽或取消分组合并后的位置跳变、待办自定义到期日浮层焦点竞态，加固升级后布局恢复与更新进度顺序，并为一键导出诊断包增加 15 秒独立应急导出兜底。
+- **`F7` 唤起图标秒显、零闪烁唤醒与内存回收调优。** 隐藏期间保留展开态文件格子首屏可见图标与热区压缩缓存，按 `F7` 或双击桌面唤起时第 0 帧即带齐图标不再逐排蹦出；回调工作集裁剪静默阈值以消除日常悬停与短时切换的缺页卡顿，修复唤起首帧闪烁、自定义/全景背景丢失与桌面右键刷新时时光格子照片闪白，并将全屏遮挡判定收窄至独占全屏与演示模式。
+- **胶囊展开层级、叠放弹窗外点收起与批量隐藏零残留。** 多排胶囊上下排列时展开面板始终压住下方未展开胶囊且点击桌面不掉层，阻断被遮挡胶囊悬停穿透串点；批量隐藏时取消延迟层恢复定时器并禁止隐藏态层降级重新点亮窗口，彻底根除隐藏后个别胶囊残留桌面；修复叠放弹窗点击外部不自动收起、右键菜单重命名瞬态误关及关闭按钮交互锁泄漏。
+- **重命名、自定义组件 `<input>` 焦点与待办「全部」拖拽全面修复。** 修复桌面钉住模式下文件、文件夹、叠放标题、叠放弹窗内项目、盒子标题、待办事项及随记点击「重命名 / 编辑」无反应或输入法选词中断的问题；补齐自定义组件输入框点击获焦、打字期智能胶囊防自动收起与输入法组词期原地局部刷新保护；修复待办「全部」视图下无法上下拖拽调整顺序及已完成分区排序回弹的问题。
+- **剪贴板图片复制、中文目录右键打开与 Windows 10 / 商店版稳定性加固。** 修复 NativeAOT 下剪贴板历史点击图片复制失效、`System.Kind` 探测异常及和历/伊斯兰历等系统传统历法空白；修复含中文路径的系统右键菜单、带双引号起始目录的 `.lnk` 快捷方式及微软商店版 `LocalCache` 虚拟化路径打开时报「目录名称无效」（同时完整保留用户 NTFS 符号链接与目录联接）；根治 Windows 10 点击开始菜单收起胶囊触发的跨 `Compositor` 闪退、Windows 10 纯色回退深浅色错位、随记双击与独立小窗关闭闪退、设置伴侣进程触发重启/更新时的 `0x8001010E` 5 秒卡死与误报恢复失败、手动启动白等 5 秒、管理员前台窗口触发的钩子误重绑、工坊 AI 二创 65 秒断流，以及 Windows 安全策略拦截更新安装器时的明确指引。
+- **彻底解决选目录/选文件假死与应急诊断加固。** 将文件夹与文件打开选择器迁入独立原生代理进程（同步深色主题并在宿主退出时自动清理），避免第三方外壳扩展或慢速网络盘卡死主界面；修复特定壁纸辅助窗口下的桌面底层反复重排、回收站状态探测卡顿、工坊新建组件放置桌面动画闪退、智能胶囊拖拽/取消合并跳变，并为一键导出诊断包增加 15 秒独立应急导出兜底。
 
 ## 1.6.0 - 2026-11-23
 

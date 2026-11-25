@@ -829,12 +829,12 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppShutdownForRestart:
                 if (_appActions is null) return unavailable(method);
-                await _appActions.ShutdownForRestartAsync();
+                _ = _appActions.ShutdownForRestartAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppShutdownForUpdate:
                 if (_appActions is null) return unavailable(method);
-                await _appActions.ShutdownForUpdateAsync();
+                _ = _appActions.ShutdownForUpdateAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppScheduleRestart:
@@ -1215,7 +1215,7 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.CloudShutdownForRestart:
                 if (_backupRestore is null) return unavailable(method);
-                await _backupRestore.ShutdownForRestartAsync();
+                _ = _backupRestore.ShutdownForRestartAsync();
                 return (true, null, null);
 
             case SettingsIpcMethods.CloudDeleteTemporaryDownload:

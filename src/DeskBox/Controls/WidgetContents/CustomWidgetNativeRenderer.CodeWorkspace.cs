@@ -459,6 +459,7 @@ public sealed partial class CustomWidgetNativeRenderer
             });
         });
 
+        AttachHostKeyboardInputActivation(textBox);
         textBox.KeyDown += (_, e) => FireAndForgetSafeUi(async () =>
         {
             if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e) ||

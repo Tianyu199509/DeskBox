@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "업데이트가 완료되지 않음",
   "Settings.Update.InstallFailedBody": "설치 관리자가 완료되지 못해 DeskBox가 다시 열렸습니다. 업데이트를 다시 시도하거나 공식 웹 사이트에서 최신 버전을 다운로드하세요.",
   "Settings.Update.InstallPathMismatchBody": "설치 관리자가 원래 DeskBox 폴더에서 업데이트를 완료하지 못해 설치를 중단하고 현재 버전을 다시 열었습니다. 문제가 계속되면 공식 웹 사이트에서 최신 버전을 다운로드하세요.",
+  "Settings.Update.InstallBlockedByPolicyTitle": "Windows 보안 정책에 의해 설치 관리자가 차단됨",
+  "Settings.Update.InstallBlockedByPolicyBody": "Windows 스마트 앱 컨트롤 또는 코드 서명 정책이 서명되지 않은 직접 설치 패키지를 차단하여, DeskBox가 데이터를 유지한 채 현재 버전을 다시 열었습니다.\n\n설치 파일 손상이 아니므로 공식 웹사이트에서 다시 다운로드해도 동일하게 차단될 수 있으며, 스마트 앱 컨트롤은 한 번 끄면 Windows를 초기화하기 전까지 다시 켤 수 없으므로 끄지 않는 것이 좋습니다. 당분간 현재 버전을 계속 사용하거나, '진단 및 유지 관리'에서 백업을 내보낸 뒤 서명된 Microsoft Store 버전을 이용해 주세요.",
   "Settings.Update.DownloadFailedTitle": "업데이트를 다운로드할 수 없음",
   "Settings.Update.DownloadFailedBody": "{0}\n\n다시 다운로드하거나 공식 웹 사이트에서 설치 파일을 받을 수 있습니다.",
   "Settings.DragDropPermission.Title": "끌어서 놓기 진단",

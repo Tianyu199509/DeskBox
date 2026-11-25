@@ -163,8 +163,8 @@ ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.ar
 Expected outputs:
 
 ```text
-Output\DeskBox_Setup_1.6.1_x64.exe
-Output\DeskBox_Setup_1.6.1_arm64.exe
+Output\DeskBox_Setup_1.6.2_x64.exe
+Output\DeskBox_Setup_1.6.2_arm64.exe
 ```
 
 ### Project Layout

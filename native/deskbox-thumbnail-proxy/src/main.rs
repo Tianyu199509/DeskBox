@@ -1878,10 +1878,11 @@ mod windows_proxy {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty());
         let parent_wide: Vec<u16> = parent_path.map(encode_wide_path).unwrap_or_default();
-        let mut parent_ansi: Vec<u8> = parent_path
-            .map(|parent| parent.to_string_lossy().into_owned().into_bytes())
-            .unwrap_or_default();
-        parent_ansi.push(0);
+        let parent_ansi: Vec<u8> = if parent_wide.is_empty() {
+            Vec::new()
+        } else {
+            encode_ansi_directory_path(&parent_wide)
+        };
         // Capture the modifier state at invocation time; Shift+Delete and
         // friends must be reported to the handler, not polled later. The
         // high-order bit of GetKeyState means the key is down.
@@ -3953,6 +3954,155 @@ mod windows_proxy {
                 CONTEXT_MENU_SERVER_MAX_CONSECUTIVE_FAILURES
             ));
         }
+
+        #[test]
+        fn encode_ansi_directory_path_preserves_ascii_and_rejects_unmappable_emoji_under_non_utf8_acp() {
+            let ascii_wide = encode_wide_path(Path::new(r"C:\Users\Public\DeskBox"));
+            let ascii_ansi = encode_ansi_directory_path(&ascii_wide);
+            assert_eq!(ascii_ansi, b"C:\\Users\\Public\\DeskBox\0".to_vec());
+
+            let emoji_wide = encode_wide_path(Path::new(r"C:\Users\Public\🚀NonExistentEmojiDir_DeskBoxTest"));
+            let emoji_ansi = encode_ansi_directory_path(&emoji_wide);
+            unsafe extern "system" {
+                fn GetACP() -> u32;
+            }
+            let acp = unsafe { GetACP() };
+            if acp == 65001 {
+                assert!(!emoji_ansi.is_empty());
+                assert_eq!(*emoji_ansi.last().unwrap(), 0);
+            } else {
+                // Non-UTF8 ACP (e.g. GBK 936 or Windows-1252) cannot represent 🚀 losslessly
+                // and the path does not exist on disk (no 8.3 short name), so it must fall back
+                // to empty (PCSTR::null()) rather than passing '?' or raw UTF-8 Mojibake.
+                assert!(emoji_ansi.is_empty());
+            }
+        }
+    }
+
+    fn encode_ansi_directory_path(wide_nul_terminated: &[u16]) -> Vec<u8> {
+        if wide_nul_terminated.len() <= 1 {
+            return Vec::new();
+        }
+
+        const CP_ACP: u32 = 0;
+        const CP_UTF8: u32 = 65001;
+        const WC_NO_BEST_FIT_CHARS: u32 = 0x0000_0400;
+
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetACP() -> u32;
+            fn WideCharToMultiByte(
+                code_page: u32,
+                dw_flags: u32,
+                lp_wide_char_str: *const u16,
+                cch_wide_char: i32,
+                lp_multi_byte_str: *mut u8,
+                cb_multi_byte: i32,
+                lp_default_char: *const u8,
+                lp_used_default_char: *mut i32,
+            ) -> i32;
+            fn GetShortPathNameW(
+                lpsz_long_path: *const u16,
+                lpsz_short_path: *mut u16,
+                cch_buffer: u32,
+            ) -> u32;
+        }
+
+        fn try_encode_lossless_acp(wide: &[u16], acp: u32) -> Option<Vec<u8>> {
+            if acp == CP_UTF8 {
+                let needed = unsafe {
+                    WideCharToMultiByte(
+                        CP_UTF8,
+                        0,
+                        wide.as_ptr(),
+                        -1,
+                        std::ptr::null_mut(),
+                        0,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                    )
+                };
+                if needed <= 1 {
+                    return None;
+                }
+                let mut buf = vec![0u8; needed as usize];
+                let written = unsafe {
+                    WideCharToMultiByte(
+                        CP_UTF8,
+                        0,
+                        wide.as_ptr(),
+                        -1,
+                        buf.as_mut_ptr(),
+                        needed,
+                        std::ptr::null(),
+                        std::ptr::null_mut(),
+                    )
+                };
+                return (written == needed).then_some(buf);
+            }
+
+            let mut used_default: i32 = 0;
+            let needed = unsafe {
+                WideCharToMultiByte(
+                    CP_ACP,
+                    WC_NO_BEST_FIT_CHARS,
+                    wide.as_ptr(),
+                    -1,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null(),
+                    &mut used_default,
+                )
+            };
+            if needed <= 1 || used_default != 0 {
+                return None;
+            }
+
+            let mut buf = vec![0u8; needed as usize];
+            used_default = 0;
+            let written = unsafe {
+                WideCharToMultiByte(
+                    CP_ACP,
+                    WC_NO_BEST_FIT_CHARS,
+                    wide.as_ptr(),
+                    -1,
+                    buf.as_mut_ptr(),
+                    needed,
+                    std::ptr::null(),
+                    &mut used_default,
+                )
+            };
+            (written == needed && used_default == 0).then_some(buf)
+        }
+
+        let acp = unsafe { GetACP() };
+        if let Some(encoded) = try_encode_lossless_acp(wide_nul_terminated, acp) {
+            return encoded;
+        }
+
+        // Fall back to 8.3 short path when the folder contains Unicode characters
+        // outside the active legacy code page (e.g. Japanese/Emoji on CP936).
+        let short_needed =
+            unsafe { GetShortPathNameW(wide_nul_terminated.as_ptr(), std::ptr::null_mut(), 0) };
+        if short_needed > 1 {
+            let mut short_buf = vec![0u16; short_needed as usize];
+            let short_written = unsafe {
+                GetShortPathNameW(
+                    wide_nul_terminated.as_ptr(),
+                    short_buf.as_mut_ptr(),
+                    short_needed,
+                )
+            };
+            if short_written > 0 && (short_written as usize) < short_buf.len() {
+                short_buf.truncate((short_written as usize) + 1);
+                short_buf[short_written as usize] = 0;
+                if let Some(encoded_short) = try_encode_lossless_acp(&short_buf, acp) {
+                    return encoded_short;
+                }
+            }
+        }
+
+        Vec::new()
     }
 }
 

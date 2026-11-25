@@ -5,7 +5,9 @@ internal readonly record struct IdleWidgetZOrderCandidate(
     string DisplayKey,
     double Top,
     double Left,
-    string StableKey);
+    string StableKey,
+    bool HasExpandedLease = false,
+    bool IsExpandedCapsule = false);
 
 /// <summary>
 /// Defines the deterministic peer order used for batch widget group
@@ -21,6 +23,8 @@ internal static class IdleWidgetZOrderPolicy
             .GroupBy(candidate => candidate.WindowHandle)
             .Select(group => group.First())
             .OrderBy(candidate => candidate.DisplayKey, StringComparer.Ordinal)
+            .ThenByDescending(candidate => candidate.HasExpandedLease)
+            .ThenByDescending(candidate => candidate.IsExpandedCapsule)
             .ThenByDescending(candidate => candidate.Top)
             .ThenByDescending(candidate => candidate.Left)
             .ThenBy(candidate => candidate.StableKey, StringComparer.Ordinal)

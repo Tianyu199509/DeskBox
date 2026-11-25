@@ -1102,6 +1102,8 @@ public sealed partial class FileService
         return string.Empty;
     }
 
+    private static readonly string[] s_systemKindPropertyNames = ["System.Kind"];
+
     public async Task<string> GetShellKindAsync(WidgetItem item)
     {
         string path = item.IsShortcut && !string.IsNullOrWhiteSpace(item.TargetPath)
@@ -1132,7 +1134,7 @@ public sealed partial class FileService
         try
         {
             StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-            var properties = await file.Properties.RetrievePropertiesAsync(["System.Kind"]);
+            var properties = await file.Properties.RetrievePropertiesAsync(s_systemKindPropertyNames);
             if (properties.TryGetValue("System.Kind", out object? value))
             {
                 kind = value switch
@@ -3076,19 +3078,18 @@ public sealed partial class FileService
         if (File.Exists(path))
         {
             await Task.Run(() => File.Delete(path));
+            DeskBox.Platform.DesktopIconPositionInterop.NotifyShellItemDeleted(path, wasDirectory: false);
             return;
         }
-
         if (Directory.Exists(path))
         {
             await Task.Run(() => Directory.Delete(path, recursive: true));
+            DeskBox.Platform.DesktopIconPositionInterop.NotifyShellItemDeleted(path, wasDirectory: true);
         }
     }
 
-    private static string GetAvailableDestinationPath(string destinationFolder, string name)
-    {
-        return GetAvailablePath(Path.Combine(destinationFolder, name));
-    }
+    private static string GetAvailableDestinationPath(string destinationFolder, string name) =>
+        GetAvailablePath(Path.Combine(destinationFolder, name));
 
     /// <summary>
     /// Open a file or shortcut using the default application.

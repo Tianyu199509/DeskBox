@@ -186,4 +186,109 @@ public sealed class DeskBoxUpdaterTests
                 installerLogWritten,
                 validateAdminCodeSignatures));
     }
+
+    [Theory]
+    [InlineData(4551, true)] // ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION (Smart App Control / WDAC)
+    [InlineData(4556, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_MALICIOUS
+    [InlineData(4557, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_PUA
+    [InlineData(4558, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_DANGEROUS_EXT
+    [InlineData(4559, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_OFFLINE
+    [InlineData(4580, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_UNFRIENDLY_FILE
+    [InlineData(4581, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_UNATTAINABLE
+    [InlineData(4582, true)] // ERROR_SYSTEM_INTEGRITY_REPUTATION_EXPLICIT_DENY_FILE
+    [InlineData(1260, true)] // ERROR_ACCESS_DISABLED_BY_POLICY
+    [InlineData(786, true)]  // ERROR_ACCESS_DISABLED_NO_SAFER_UI_BY_POLICY
+    [InlineData(577, true)]  // ERROR_INVALID_IMAGE_HASH
+    [InlineData(8235, true)] // ERROR_DS_REFERRAL (ValidateAdminCodeSignatures)
+    [InlineData(unchecked((int)0x800711C7), true)] // HRESULT_FROM_WIN32(4551)
+    [InlineData(unchecked((int)0x800704EC), true)] // HRESULT_FROM_WIN32(1260)
+    [InlineData(4555, false)] // Adjacent non-reputation CI error
+    [InlineData(4560, false)] // Adjacent non-reputation CI error
+    [InlineData(4579, false)] // Adjacent boundary below 4580
+    [InlineData(4583, false)] // ERROR_SYSTEM_INTEGRITY_WHQL_NOT_SATISFIED (driver-only boundary)
+    [InlineData(0, false)]
+    [InlineData(2, false)]    // ERROR_FILE_NOT_FOUND
+    [InlineData(5, false)]    // ERROR_ACCESS_DENIED
+    [InlineData(1223, false)] // ERROR_CANCELLED (UAC declined)
+    [InlineData(1460, false)] // ERROR_TIMEOUT
+    public void PolicyOrSignatureBlockWin32Error_ClassifiesSmartAppControlAndPolicyCodes(
+        int nativeErrorCode,
+        bool expected)
+    {
+        Assert.Equal(expected, DeskBox.Updater.Program.IsPolicyOrSignatureBlockWin32Error(nativeErrorCode));
+        Assert.Equal(expected, DeskBox.Services.AppUpdateService.IsPolicyOrSignatureBlockWin32Error(nativeErrorCode));
+    }
+
+    [Theory]
+    [InlineData(DeskBox.Updater.Program.PolicyBlockedExitCode, "blocked-by-policy")]
+    [InlineData(4551, "blocked-by-policy")]
+    [InlineData(4580, "blocked-by-policy")]
+    [InlineData(1260, "blocked-by-policy")]
+    [InlineData(1460, "failed")]
+    public void IncompleteInstallerExitCode_MapsPolicyBlockToBlockedByPolicyOutcome(
+        int exitCode,
+        string expected)
+    {
+        Assert.Equal(expected, DeskBox.Updater.Program.GetIncompleteUpdateOutcome(exitCode));
+    }
+
+    [Theory]
+    [InlineData("blocked-by-policy", "blocked-by-policy")]
+    [InlineData(" BLOCKED-BY-POLICY ", "blocked-by-policy")]
+    [InlineData("\"blocked-by-policy\"", "blocked-by-policy")]
+    [InlineData("cancelled", "cancelled")]
+    [InlineData("path-mismatch", "path-mismatch")]
+    [InlineData("failed", "failed")]
+    [InlineData("unknown-outcome", null)]
+    public void NormalizeUpdateInstallOutcome_AcceptsBlockedByPolicyAcrossAppAndSettingsHost(
+        string raw,
+        string? expected)
+    {
+        Assert.Equal(expected, DeskBox.App.NormalizeUpdateInstallOutcome(raw));
+        Assert.Equal(
+            expected,
+            DeskBox.App.SettingsHostLaunch.TryGetInstallResultArgument(
+                ["DeskBox.exe", "--settings", "1234", "--settings-install-result", raw]));
+    }
+
+    [Fact]
+    public void ResolveUpdateInstallResultDialog_RoutesBlockedByPolicyToDedicatedCopyAndStoreAction()
+    {
+        var policySpec = DeskBox.Views.SettingsWindow.ResolveUpdateInstallResultDialog("blocked-by-policy");
+        Assert.Equal("Settings.Update.InstallBlockedByPolicyTitle", policySpec.TitleKey);
+        Assert.Equal("Settings.Update.InstallBlockedByPolicyBody", policySpec.BodyKey);
+        Assert.True(policySpec.OfferMicrosoftStoreInsteadOfManualDownload);
+
+        var cancelledSpec = DeskBox.Views.SettingsWindow.ResolveUpdateInstallResultDialog("cancelled");
+        Assert.Equal("Settings.Update.InstallCancelledTitle", cancelledSpec.TitleKey);
+        Assert.Equal("Settings.Update.InstallCancelledBody", cancelledSpec.BodyKey);
+        Assert.False(cancelledSpec.OfferMicrosoftStoreInsteadOfManualDownload);
+
+        var mismatchSpec = DeskBox.Views.SettingsWindow.ResolveUpdateInstallResultDialog("path-mismatch");
+        Assert.Equal("Settings.Update.InstallFailedTitle", mismatchSpec.TitleKey);
+        Assert.Equal("Settings.Update.InstallPathMismatchBody", mismatchSpec.BodyKey);
+        Assert.False(mismatchSpec.OfferMicrosoftStoreInsteadOfManualDownload);
+
+        var failedSpec = DeskBox.Views.SettingsWindow.ResolveUpdateInstallResultDialog("failed");
+        Assert.Equal("Settings.Update.InstallFailedTitle", failedSpec.TitleKey);
+        Assert.Equal("Settings.Update.InstallFailedBody", failedSpec.BodyKey);
+        Assert.False(failedSpec.OfferMicrosoftStoreInsteadOfManualDownload);
+    }
+
+    [Fact]
+    public void AppUpdateInstallResult_PolicyBlocked_RoundTripsThroughSettingsIpcJson()
+    {
+        var original = DeskBox.Models.AppUpdateInstallResult.PolicyBlocked("Blocked by Smart App Control");
+        string? encoded = DeskBox.Services.SettingsIpcPayload.Encode(
+            original,
+            DeskBox.Services.SettingsIpcJsonContext.Default.AppUpdateInstallResult);
+        DeskBox.Models.AppUpdateInstallResult? decoded = DeskBox.Services.SettingsIpcPayload.Decode(
+            encoded,
+            DeskBox.Services.SettingsIpcJsonContext.Default.AppUpdateInstallResult);
+
+        Assert.NotNull(decoded);
+        Assert.False(decoded.Success);
+        Assert.True(decoded.BlockedByPolicy);
+        Assert.Equal("Blocked by Smart App Control", decoded.ErrorMessage);
+    }
 }

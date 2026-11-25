@@ -820,6 +820,12 @@ public sealed partial class TodoWidgetViewModel
             return left.IsCompleted ? 1 : -1;
         }
 
+        int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
+        if (sortCompare != 0)
+        {
+            return sortCompare;
+        }
+
         if (left.IsCompleted && right.IsCompleted)
         {
             int completedCompare = Nullable.Compare(right.CompletedAt, left.CompletedAt);
@@ -829,10 +835,7 @@ public sealed partial class TodoWidgetViewModel
             }
         }
 
-        int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
-        return sortCompare != 0
-            ? sortCompare
-            : right.UpdatedAt.CompareTo(left.UpdatedAt);
+        return right.UpdatedAt.CompareTo(left.UpdatedAt);
     }
 
     private bool ShouldCountInNonCompletedFilter(TodoItemViewModel item)
@@ -932,13 +935,24 @@ public sealed partial class TodoWidgetViewModel
         var visibleWithoutMoving = VisibleItems
             .Where(item => !string.Equals(item.Id, movingItem.Id, StringComparison.Ordinal))
             .ToList();
-        targetVisibleIndex = Math.Clamp(targetVisibleIndex, 0, visibleWithoutMoving.Count);
-        if (targetVisibleIndex >= visibleWithoutMoving.Count)
+        int clampedVisibleIndex = Math.Clamp(targetVisibleIndex, 0, visibleWithoutMoving.Count);
+        var samePartitionWithoutMoving = visibleWithoutMoving
+            .Where(item => item.IsCompleted == movingItem.IsCompleted)
+            .ToList();
+        if (samePartitionWithoutMoving.Count == 0)
         {
-            return Items.Count;
+            return Math.Max(0, Items.IndexOf(movingItem));
         }
 
-        return Math.Max(0, Items.IndexOf(visibleWithoutMoving[targetVisibleIndex]));
+        int samePartitionTargetIndex = visibleWithoutMoving
+            .Take(clampedVisibleIndex)
+            .Count(item => item.IsCompleted == movingItem.IsCompleted);
+        if (samePartitionTargetIndex >= samePartitionWithoutMoving.Count)
+        {
+            return Items.IndexOf(samePartitionWithoutMoving[^1]) + 1;
+        }
+
+        return Math.Max(0, Items.IndexOf(samePartitionWithoutMoving[samePartitionTargetIndex]));
     }
 
     private void CaptureDeleteUndoSnapshot(IReadOnlyList<TodoItemViewModel> deletedItems, string message)

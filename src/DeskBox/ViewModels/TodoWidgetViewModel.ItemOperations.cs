@@ -458,6 +458,26 @@ public sealed partial class TodoWidgetViewModel
             item.IsCompleted = true;
             item.RefreshDateDependentProperties();
 
+            int existingFirstCompletedIndex = -1;
+            for (int i = 0; i < Items.Count; i++)
+            {
+                if (!ReferenceEquals(Items[i], item) && Items[i].IsCompleted)
+                {
+                    existingFirstCompletedIndex = i;
+                    break;
+                }
+            }
+            if (existingFirstCompletedIndex >= 0)
+            {
+                int currentIdx = Items.IndexOf(item);
+                if (currentIdx > existingFirstCompletedIndex)
+                {
+                    Items.RemoveAt(currentIdx);
+                    Items.Insert(existingFirstCompletedIndex, item);
+                }
+            }
+            NormalizeSortOrders();
+
             _undoSnapshot = new TodoUndoSnapshot(
                 [],
                 _localizationService.T("Todo.Undo.Completed"),

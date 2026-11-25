@@ -14,7 +14,7 @@ public sealed partial class QuickCaptureSurfaceContent
 {
     private void QuickCaptureItem_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (!Win32Helper.IsKeyPressed(VirtualKey.Menu))
+        if (_isDisposed || !Win32Helper.IsKeyPressed(VirtualKey.Menu))
         {
             return;
         }
@@ -22,7 +22,14 @@ public sealed partial class QuickCaptureSurfaceContent
         if (sender is Border { DataContext: QuickCaptureItemViewModel item })
         {
             e.Handled = true;
-            App.Current?.OpenQuickCapturePopoutWindow(item.Id, startAlwaysOnTop: true);
+            string itemId = item.Id;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isDisposed)
+                {
+                    App.Current?.OpenQuickCapturePopoutWindow(itemId, startAlwaysOnTop: true);
+                }
+            });
         }
     }
 

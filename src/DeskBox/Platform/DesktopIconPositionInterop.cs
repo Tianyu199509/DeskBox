@@ -7,7 +7,24 @@ internal readonly record struct DesktopIconPoint(int X, int Y);
 internal readonly record struct MovedDesktopItem(
     string SourcePath,
     string DesktopDirectory,
-    bool WasDirectory);
+    bool WasDirectory,
+    bool IsPublicDesktop = false);
+
+internal enum ShellMoveNotificationPlanKind
+{
+    SameVolumeFileRename,
+    SameVolumeFolderRename,
+    DeleteSourceAndCreateDestination,
+}
+
+internal readonly record struct GhostPurgePassOutcome(
+    IReadOnlyList<string> PurgedCanonicalPaths,
+    bool EscalatedRefresh)
+{
+    public static GhostPurgePassOutcome None { get; } = new([], EscalatedRefresh: false);
+
+    public bool AnyPurged => PurgedCanonicalPaths.Count > 0;
+}
 
 /// <summary>
 /// Reads and restores Windows Explorer desktop icon coordinates through the
@@ -23,22 +40,34 @@ internal static unsafe partial class DesktopIconPositionInterop
     private const uint CoInitApartmentThreaded = 0x2;
     private const uint ClsctxInprocServer = 0x1;
     private const uint ClsctxLocalServer = 0x4;
+    private const int CsidlDesktop = 0x0000;
     private const int SwcDesktop = 8;
     private const int SwfoNeedDispatch = 1;
     private const uint SvgioAllView = 0x00000002;
     private const uint ShgdnForParsing = 0x00008000;
     private const uint SvsiPositionItem = 0x00000080;
+    private const int ShcneCreate = 0x00000002;
     private const int ShcneDelete = 0x00000004;
+    private const int ShcneMkDir = 0x00000008;
     private const int ShcneRmDir = 0x00000010;
     private const int ShcneUpdateDir = 0x00001000;
+    private const int ShcneRenameFolder = 0x00020000;
     private const uint ShcnfIdList = 0x0000;
     private const uint ShcnfPathW = 0x0005;
     private const uint ShcnfFlush = 0x1000;
     private const uint ShcnfFlushNoWait = 0x3000;
+    private const uint LvmGetEditControl = 0x1000 + 24;
+    private const uint SmtoAbortIfHung = 0x0002;
     private const int BoundsTolerancePx = 64;
 
     private static readonly int[] RestorePollDelaysMs = [80, 140, 220, 320, 450];
-    private static readonly int[] GhostPurgePollDelaysMs = [90, 220];
+    internal static readonly int[] GhostPurgePollDelaysMs = [100, 300, 750];
+    internal const int GhostPurgeEscalationFollowUpDelayMs = 600;
+    internal const long ShellViewRefreshCooldownMs = 1200;
+
+    private static readonly CoalescedGhostPurgeBatchQueue s_ghostPurgeQueue = new();
+    private static int s_activePositionRestoreCount;
+    private static long s_lastShellViewRefreshTick64 = long.MinValue;
 
     private static readonly Guid ClsidShellWindows =
         new("9BA05972-F6A8-11CF-A442-00A0C90A8F39");
@@ -145,12 +174,28 @@ internal static unsafe partial class DesktopIconPositionInterop
         string? dwItem1,
         nint dwItem2);
 
+    [LibraryImport(
+        "shell32.dll",
+        EntryPoint = "SHChangeNotify",
+        StringMarshalling = StringMarshalling.Utf16)]
+    private static partial void SHChangeNotifyPaths(
+        int wEventId,
+        uint uFlags,
+        string? dwItem1,
+        string? dwItem2);
+
     [LibraryImport("shell32.dll", EntryPoint = "SHChangeNotify")]
     private static partial void SHChangeNotifyPidl(
         int wEventId,
         uint uFlags,
         nint dwItem1,
         nint dwItem2);
+
+    [LibraryImport("shell32.dll", EntryPoint = "SHGetSpecialFolderLocation")]
+    private static partial int SHGetSpecialFolderLocation(
+        nint hwndReserve,
+        int csidl,
+        out nint ppidl);
 
     [LibraryImport("shell32.dll", EntryPoint = "SHGetIDListFromObject")]
     private static partial int SHGetIDListFromObject(
@@ -230,14 +275,170 @@ internal static unsafe partial class DesktopIconPositionInterop
                point.Y <= bottom + BoundsTolerancePx;
     }
 
+    internal static ShellMoveNotificationPlanKind ClassifyShellMoveNotification(
+        string? oldPath,
+        string? newPath,
+        bool isDirectory,
+        string? personalDesktopPath,
+        string? publicDesktopPath,
+        Func<string, string?>? finalPathResolver = null)
+    {
+        string? normalizedOld = TryNormalizeEntryPath(oldPath);
+        string? normalizedNew = TryNormalizeEntryPath(newPath);
+        if (normalizedOld is null || normalizedNew is null)
+        {
+            return isDirectory
+                ? ShellMoveNotificationPlanKind.SameVolumeFolderRename
+                : ShellMoveNotificationPlanKind.SameVolumeFileRename;
+        }
+
+        if (FilterMovedDesktopItems(
+                [(normalizedOld, normalizedNew, isDirectory)],
+                personalDesktopPath,
+                publicDesktopPath,
+                finalPathResolver).Count > 0)
+        {
+            return ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination;
+        }
+
+        if (!AreSameVolumeRoot(normalizedOld, normalizedNew, finalPathResolver))
+        {
+            return ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination;
+        }
+
+        return isDirectory
+            ? ShellMoveNotificationPlanKind.SameVolumeFolderRename
+            : ShellMoveNotificationPlanKind.SameVolumeFileRename;
+    }
+
+    internal static bool TryNotifyShellItemMoved(string oldPath, string newPath)
+    {
+        bool isDirectory = !string.IsNullOrWhiteSpace(newPath) && Directory.Exists(newPath);
+        string personalDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        string publicDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        ShellMoveNotificationPlanKind plan = ClassifyShellMoveNotification(
+            oldPath,
+            newPath,
+            isDirectory,
+            personalDesktop,
+            publicDesktop);
+        switch (plan)
+        {
+            case ShellMoveNotificationPlanKind.DeleteSourceAndCreateDestination:
+                SHChangeNotify(
+                    isDirectory ? ShcneRmDir : ShcneDelete,
+                    ShcnfPathW | ShcnfFlushNoWait,
+                    oldPath,
+                    0);
+                SHChangeNotify(
+                    isDirectory ? ShcneMkDir : ShcneCreate,
+                    ShcnfPathW | ShcnfFlushNoWait,
+                    newPath,
+                    0);
+                return true;
+
+            case ShellMoveNotificationPlanKind.SameVolumeFolderRename:
+                SHChangeNotifyPaths(
+                    ShcneRenameFolder,
+                    ShcnfPathW | ShcnfFlushNoWait,
+                    oldPath,
+                    newPath);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    internal static void NotifyDesktopNamespaceIfMatch(string? directory)
+    {
+        if (IsRecognizedDesktopDirectory(directory))
+        {
+            NotifyDesktopNamespaceUpdated(flushBlocking: false);
+        }
+    }
+
+    internal static void NotifyDesktopNamespaceUpdated(bool flushBlocking = false)
+    {
+        _ = flushBlocking;
+        if (SHGetSpecialFolderLocation(0, CsidlDesktop, out nint desktopRootPidl) != 0 ||
+            desktopRootPidl == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            // Always use SHCNF_FLUSHNOWAIT (0x3000): plain SHCNF_FLUSH (0x1000)
+            // blocks synchronously on every SHChangeNotifyRegister window in the
+            // session and can stall for HungAppTimeout (~5s) if any third-party
+            // shell/cloud tray listener is unresponsive.
+            SHChangeNotifyPidl(ShcneUpdateDir, ShcnfIdList | ShcnfFlushNoWait, desktopRootPidl, 0);
+        }
+        catch
+        {
+        }
+        finally
+        {
+            CoTaskMemFree(desktopRootPidl);
+        }
+    }
+
+    internal static bool IsRecognizedDesktopDirectory(
+        string? directoryPath,
+        string? personalDesktopPath = null,
+        string? publicDesktopPath = null,
+        Func<string, string?>? finalPathResolver = null)
+    {
+        string? normalized = TryNormalizeDirectoryPath(directoryPath);
+        if (normalized is null)
+        {
+            return false;
+        }
+
+        string effectivePersonal = personalDesktopPath ??
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        string effectivePublic = publicDesktopPath ??
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(effectivePersonal, finalPathResolver);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(effectivePublic, finalPathResolver);
+        if (personalAliases.Contains(normalized) || publicAliases.Contains(normalized))
+        {
+            return true;
+        }
+
+        string? resolvedCandidate = (finalPathResolver ?? TryResolveFinalDirectoryPath)(normalized);
+        return resolvedCandidate is not null &&
+               (personalAliases.Contains(resolvedCandidate) || publicAliases.Contains(resolvedCandidate));
+    }
+
+    internal static bool IsRealDesktopInlineRenameActive(string? watchedDesktopPath)
+    {
+        if (!IsRecognizedDesktopDirectory(watchedDesktopPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            nint listViewHwnd = FindVerifiedDesktopListViewHwnd();
+            return listViewHwnd != 0 && IsListViewInlineRenameActive(listViewHwnd);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static IReadOnlyList<MovedDesktopItem> FilterMovedDesktopItems(
         IEnumerable<(string SourcePath, string DestinationPath, bool WasDirectory)> movedOperations,
         string? personalDesktopPath,
-        string? publicDesktopPath)
+        string? publicDesktopPath,
+        Func<string, string?>? finalPathResolver = null)
     {
-        string? normalizedPersonal = TryNormalizeDirectoryPath(personalDesktopPath);
-        string? normalizedPublic = TryNormalizeDirectoryPath(publicDesktopPath);
-        if (normalizedPersonal is null && normalizedPublic is null)
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(personalDesktopPath, finalPathResolver);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(publicDesktopPath, finalPathResolver);
+        if (personalAliases.Count == 0 && publicAliases.Count == 0)
         {
             return [];
         }
@@ -246,53 +447,149 @@ internal static unsafe partial class DesktopIconPositionInterop
         var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach ((string sourcePath, string destinationPath, bool wasDirectory) in movedOperations)
         {
-            string? normalizedSource = TryNormalizeEntryPath(sourcePath);
             string? normalizedDestination = TryNormalizeEntryPath(destinationPath);
-            if (normalizedSource is null ||
-                normalizedDestination is null ||
+            if (normalizedDestination is null ||
+                !TryMatchDesktopSource(
+                    sourcePath,
+                    personalAliases,
+                    publicAliases,
+                    finalPathResolver,
+                    out string normalizedSource,
+                    out string sourceParent,
+                    out bool isPublicDesktopSource) ||
                 !seenSources.Add(normalizedSource))
             {
                 continue;
             }
 
-            string? sourceParent = TryNormalizeDirectoryPath(Path.GetDirectoryName(normalizedSource));
             string? destinationParent = TryNormalizeDirectoryPath(Path.GetDirectoryName(normalizedDestination));
-            if (sourceParent is null)
+            bool staysOnDesktop = false;
+            if (destinationParent is not null)
             {
-                continue;
+                staysOnDesktop = personalAliases.Contains(destinationParent) ||
+                                 publicAliases.Contains(destinationParent);
+                if (!staysOnDesktop)
+                {
+                    string? resolvedDestinationParent =
+                        (finalPathResolver ?? TryResolveFinalDirectoryPath)(destinationParent);
+                    if (resolvedDestinationParent is not null)
+                    {
+                        staysOnDesktop = personalAliases.Contains(resolvedDestinationParent) ||
+                                         publicAliases.Contains(resolvedDestinationParent);
+                    }
+                }
             }
 
-            bool isPersonalDesktopSource = normalizedPersonal is not null &&
-                string.Equals(sourceParent, normalizedPersonal, StringComparison.OrdinalIgnoreCase);
-            bool isPublicDesktopSource = !isPersonalDesktopSource &&
-                normalizedPublic is not null &&
-                string.Equals(sourceParent, normalizedPublic, StringComparison.OrdinalIgnoreCase);
-            if (!isPersonalDesktopSource && !isPublicDesktopSource)
-            {
-                continue;
-            }
-
-            bool staysOnDesktop =
-                (normalizedPersonal is not null &&
-                 string.Equals(destinationParent, normalizedPersonal, StringComparison.OrdinalIgnoreCase)) ||
-                (normalizedPublic is not null &&
-                 string.Equals(destinationParent, normalizedPublic, StringComparison.OrdinalIgnoreCase));
             if (staysOnDesktop)
             {
                 continue;
             }
 
-            matched.Add(new MovedDesktopItem(normalizedSource, sourceParent, wasDirectory));
+            matched.Add(new MovedDesktopItem(
+                normalizedSource,
+                sourceParent,
+                wasDirectory,
+                IsPublicDesktop: isPublicDesktopSource));
         }
 
         return matched;
     }
 
+    internal static IReadOnlyList<MovedDesktopItem> FilterRemovedDesktopItems(
+        IEnumerable<(string SourcePath, bool WasDirectory)> removedOperations,
+        string? personalDesktopPath,
+        string? publicDesktopPath,
+        Func<string, string?>? finalPathResolver = null)
+    {
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(personalDesktopPath, finalPathResolver);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(publicDesktopPath, finalPathResolver);
+        if (personalAliases.Count == 0 && publicAliases.Count == 0)
+        {
+            return [];
+        }
+
+        var matched = new List<MovedDesktopItem>();
+        var seenSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string sourcePath, bool wasDirectory) in removedOperations)
+        {
+            if (!TryMatchDesktopSource(
+                    sourcePath,
+                    personalAliases,
+                    publicAliases,
+                    finalPathResolver,
+                    out string normalizedSource,
+                    out string sourceParent,
+                    out bool isPublicDesktopSource) ||
+                !seenSources.Add(normalizedSource))
+            {
+                continue;
+            }
+
+            matched.Add(new MovedDesktopItem(
+                normalizedSource,
+                sourceParent,
+                wasDirectory,
+                IsPublicDesktop: isPublicDesktopSource));
+        }
+
+        return matched;
+    }
+
+    private static bool TryMatchDesktopSource(
+        string? sourcePath,
+        HashSet<string> personalAliases,
+        HashSet<string> publicAliases,
+        Func<string, string?>? finalPathResolver,
+        out string normalizedSource,
+        out string sourceParent,
+        out bool isPublicDesktopSource)
+    {
+        normalizedSource = string.Empty;
+        sourceParent = string.Empty;
+        isPublicDesktopSource = false;
+
+        string? candidateSource = TryNormalizeEntryPath(sourcePath);
+        if (candidateSource is null)
+        {
+            return false;
+        }
+
+        string? candidateParent = TryNormalizeDirectoryPath(Path.GetDirectoryName(candidateSource));
+        if (candidateParent is null)
+        {
+            return false;
+        }
+
+        bool isPersonal = personalAliases.Contains(candidateParent);
+        bool isPublic = !isPersonal && publicAliases.Contains(candidateParent);
+        if (!isPersonal && !isPublic)
+        {
+            string? resolvedParent = (finalPathResolver ?? TryResolveFinalDirectoryPath)(candidateParent);
+            if (resolvedParent is not null)
+            {
+                isPersonal = personalAliases.Contains(resolvedParent);
+                isPublic = !isPersonal && publicAliases.Contains(resolvedParent);
+            }
+        }
+
+        if (!isPersonal && !isPublic)
+        {
+            return false;
+        }
+
+        normalizedSource = candidateSource;
+        sourceParent = candidateParent;
+        isPublicDesktopSource = isPublic;
+        return true;
+    }
+
     /// <summary>
-    /// Flushes explicit Shell delete + directory-update notifications when items
-    /// physically move off the Windows Desktop, and schedules a post-drag-unwind
-    /// <c>IFolderView</c> sweep to evict any stale <c>.url</c>/<c>.lnk</c> ghost
-    /// child PIDLs retained after <c>DROPEFFECT_COPY</c> drop completion.
+    /// Flushes explicit Shell delete + directory-update notifications (including
+    /// the virtual <c>CSIDL_DESKTOP</c> root) when items physically move off the
+    /// Windows Desktop, and enqueues them into a single coalesced background
+    /// <c>IFolderView</c> sweep worker across Explorer's async enumeration/thumbnail
+    /// window, escalating to <c>IShellView::Refresh()</c> if a stale ghost child
+    /// PIDL survives <c>SHCNE_DELETE</c>.
     /// </summary>
     internal static void NotifyMovedOffRealDesktopIfNeeded(
         IEnumerable<(string SourcePath, string DestinationPath, bool WasDirectory)> movedOperations)
@@ -304,10 +601,79 @@ internal static unsafe partial class DesktopIconPositionInterop
 
         string personalDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         string publicDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(personalDesktop, finalPathResolver: null);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(publicDesktop, finalPathResolver: null);
         IReadOnlyList<MovedDesktopItem> candidates = FilterMovedDesktopItems(
             movedOperations,
             personalDesktop,
             publicDesktop);
+        DispatchMissingDesktopItems(candidates, personalAliases, publicAliases);
+    }
+
+    internal static void NotifyRemovedFromRealDesktopIfNeeded(
+        IEnumerable<(string SourcePath, bool WasDirectory)> removedOperations)
+    {
+        if (removedOperations is null)
+        {
+            return;
+        }
+
+        string personalDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        string publicDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(personalDesktop, finalPathResolver: null);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(publicDesktop, finalPathResolver: null);
+        IReadOnlyList<MovedDesktopItem> candidates = FilterRemovedDesktopItems(
+            removedOperations,
+            personalDesktop,
+            publicDesktop);
+        DispatchMissingDesktopItems(candidates, personalAliases, publicAliases);
+    }
+
+    internal static void NotifyShellItemDeleted(string? path, bool wasDirectory)
+    {
+        string? normalized = TryNormalizeEntryPath(path);
+        if (normalized is null)
+        {
+            return;
+        }
+
+        string personalDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        string publicDesktop = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
+        HashSet<string> personalAliases = BuildDirectoryAliasSet(personalDesktop, finalPathResolver: null);
+        HashSet<string> publicAliases = BuildDirectoryAliasSet(publicDesktop, finalPathResolver: null);
+        IReadOnlyList<MovedDesktopItem> desktopMatches = FilterRemovedDesktopItems(
+            [(normalized, wasDirectory)],
+            personalDesktop,
+            publicDesktop);
+        if (desktopMatches.Count > 0)
+        {
+            DispatchMissingDesktopItems(desktopMatches, personalAliases, publicAliases);
+            return;
+        }
+
+        try
+        {
+            SHChangeNotify(
+                wasDirectory ? ShcneRmDir : ShcneDelete,
+                ShcnfPathW | ShcnfFlushNoWait,
+                normalized,
+                0);
+            string? parentDir = TryNormalizeDirectoryPath(Path.GetDirectoryName(normalized));
+            if (parentDir is not null && Directory.Exists(parentDir))
+            {
+                SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlushNoWait, parentDir, 0);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void DispatchMissingDesktopItems(
+        IReadOnlyList<MovedDesktopItem> candidates,
+        HashSet<string> personalAliases,
+        HashSet<string> publicAliases)
+    {
         if (candidates.Count == 0)
         {
             return;
@@ -348,7 +714,7 @@ internal static unsafe partial class DesktopIconPositionInterop
             {
                 if (Directory.Exists(desktopDir))
                 {
-                    SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlush, desktopDir, 0);
+                    SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlushNoWait, desktopDir, 0);
                 }
             }
             catch
@@ -356,30 +722,140 @@ internal static unsafe partial class DesktopIconPositionInterop
             }
         }
 
-        _ = Task.Run(() => RunGhostPurgePollLoop(missingItems));
+        NotifyDesktopNamespaceUpdated();
+        if (s_ghostPurgeQueue.Enqueue(missingItems, personalAliases, publicAliases))
+        {
+            _ = Task.Run(RunCoalescedGhostPurgeWorker);
+        }
     }
 
-    private static void RunGhostPurgePollLoop(List<MovedDesktopItem> missingItems)
+    internal static bool ShouldEscalateToShellViewRefresh(
+        IEnumerable<string> currentGhostCanonicalPaths,
+        IReadOnlySet<string> previouslyPurgedCanonicalPaths)
     {
+        if (previouslyPurgedCanonicalPaths.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (string path in currentGhostCanonicalPaths)
+        {
+            if (previouslyPurgedCanonicalPaths.Contains(path))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool CanEscalateShellViewRefresh(
+        bool inlineRenameActive,
+        int activePositionRestoreCount,
+        long nowTick64,
+        long lastRefreshTick64,
+        long cooldownMs = ShellViewRefreshCooldownMs)
+    {
+        if (inlineRenameActive || activePositionRestoreCount > 0)
+        {
+            return false;
+        }
+
+        if (lastRefreshTick64 != long.MinValue &&
+            nowTick64 - lastRefreshTick64 < cooldownMs)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    internal static void ExecuteGhostPurgeSchedule(
+        IReadOnlyList<int> pollDelaysMs,
+        int escalationFollowUpDelayMs,
+        Action<int> sleep,
+        Func<bool> hasAnyMissingSource,
+        Func<IReadOnlySet<string>, GhostPurgePassOutcome> runPass)
+    {
+        var previouslyPurged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        GhostPurgePassOutcome lastOutcome = GhostPurgePassOutcome.None;
+
+        for (int i = 0; i < pollDelaysMs.Count; i++)
+        {
+            sleep(pollDelaysMs[i]);
+            if (!hasAnyMissingSource())
+            {
+                return;
+            }
+
+            // Never exit early on an empty pass: Explorer's CDefView ~250-500 ms
+            // batch timer or out-of-process thumbnail/ADS callbacks can commit a
+            // late ghost entry after the initial 100 ms probe saw a clean view.
+            lastOutcome = runPass(previouslyPurged);
+            foreach (string path in lastOutcome.PurgedCanonicalPaths)
+            {
+                previouslyPurged.Add(path);
+            }
+        }
+
+        // If a ghost only surfaced on the final scheduled pass (or inline rename /
+        // active icon restore / refresh cooldown temporarily deferred escalation),
+        // run one follow-up pass so stubborn late ghosts still receive Refresh.
+        if (lastOutcome.AnyPurged &&
+            !lastOutcome.EscalatedRefresh &&
+            escalationFollowUpDelayMs > 0)
+        {
+            sleep(escalationFollowUpDelayMs);
+            if (hasAnyMissingSource())
+            {
+                _ = runPass(previouslyPurged);
+            }
+        }
+    }
+
+    private static void RunCoalescedGhostPurgeWorker()
+    {
+        static bool PathCurrentlyExists(string path) =>
+            File.Exists(path) || Directory.Exists(path);
+
         try
         {
-            foreach (int delayMs in GhostPurgePollDelaysMs)
+            while (true)
             {
-                Thread.Sleep(delayMs);
-                MovedDesktopItem[] stillMissing = missingItems
-                    .Where(static item => !File.Exists(item.SourcePath) && !Directory.Exists(item.SourcePath))
-                    .ToArray();
-                if (stillMissing.Length == 0)
-                {
-                    return;
-                }
+                int cycleGeneration = s_ghostPurgeQueue.BeginCycle();
+                ExecuteGhostPurgeSchedule(
+                    GhostPurgePollDelaysMs,
+                    GhostPurgeEscalationFollowUpDelayMs,
+                    Thread.Sleep,
+                    () => s_ghostPurgeQueue.HasPendingMissing(PathCurrentlyExists),
+                    previouslyPurged =>
+                    {
+                        (MovedDesktopItem[] stillMissing,
+                         HashSet<string> personalAliases,
+                         HashSet<string> publicAliases) =
+                            s_ghostPurgeQueue.SnapshotPendingMissing(PathCurrentlyExists);
+                        if (stillMissing.Length == 0)
+                        {
+                            return GhostPurgePassOutcome.None;
+                        }
 
-                bool anyFound = RunBoundedSta(
-                    "DeskBox.DesktopGhostPurge",
-                    timeoutMs: 1200,
-                    () => PurgeGhostDesktopItemsOnStaThread(stillMissing),
-                    fallback: false);
-                if (!anyFound)
+                        var purgedSnapshot = new HashSet<string>(
+                            previouslyPurged,
+                            StringComparer.OrdinalIgnoreCase);
+                        return RunBoundedSta(
+                            "DeskBox.DesktopGhostPurge",
+                            timeoutMs: 1400,
+                            () => PurgeGhostDesktopItemsOnStaThread(
+                                stillMissing,
+                                personalAliases,
+                                publicAliases,
+                                purgedSnapshot),
+                            fallback: GhostPurgePassOutcome.None);
+                    });
+
+                if (!s_ghostPurgeQueue.CompleteCycleAndShouldContinue(
+                        cycleGeneration,
+                        PathCurrentlyExists))
                 {
                     return;
                 }
@@ -387,32 +863,197 @@ internal static unsafe partial class DesktopIconPositionInterop
         }
         catch
         {
+            s_ghostPurgeQueue.ResetOnFault();
         }
     }
 
-    private static bool PurgeGhostDesktopItemsOnStaThread(IReadOnlyList<MovedDesktopItem> missingItems)
+    internal sealed class CoalescedGhostPurgeBatchQueue
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<string, (MovedDesktopItem Item, int Generation)> _pendingBySource =
+            new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _personalAliases = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _publicAliases = new(StringComparer.OrdinalIgnoreCase);
+        private int _generation;
+        private bool _workerActive;
+
+        public bool Enqueue(
+            IReadOnlyList<MovedDesktopItem> items,
+            IEnumerable<string> personalAliases,
+            IEnumerable<string> publicAliases)
+        {
+            if (items.Count == 0)
+            {
+                return false;
+            }
+
+            lock (_gate)
+            {
+                int nextGeneration = ++_generation;
+                foreach (MovedDesktopItem item in items)
+                {
+                    _pendingBySource[item.SourcePath] = (item, nextGeneration);
+                }
+
+                _personalAliases.UnionWith(personalAliases);
+                _publicAliases.UnionWith(publicAliases);
+                if (_workerActive)
+                {
+                    return false;
+                }
+
+                _workerActive = true;
+                return true;
+            }
+        }
+
+        public int BeginCycle()
+        {
+            lock (_gate)
+            {
+                return _generation;
+            }
+        }
+
+        public bool HasPendingMissing(Func<string, bool> pathExists)
+        {
+            lock (_gate)
+            {
+                PruneExistingLocked(pathExists);
+                return _pendingBySource.Count > 0;
+            }
+        }
+
+        public (MovedDesktopItem[] MissingItems, HashSet<string> PersonalAliases, HashSet<string> PublicAliases)
+            SnapshotPendingMissing(Func<string, bool> pathExists)
+        {
+            lock (_gate)
+            {
+                PruneExistingLocked(pathExists);
+                if (_pendingBySource.Count == 0)
+                {
+                    return ([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                }
+
+                MovedDesktopItem[] items = _pendingBySource.Values
+                    .Select(static entry => entry.Item)
+                    .ToArray();
+                return (
+                    items,
+                    new HashSet<string>(_personalAliases, StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(_publicAliases, StringComparer.OrdinalIgnoreCase));
+            }
+        }
+
+        public bool CompleteCycleAndShouldContinue(
+            int cycleStartGeneration,
+            Func<string, bool> pathExists)
+        {
+            lock (_gate)
+            {
+                foreach ((string key, (MovedDesktopItem item, int gen)) in _pendingBySource.ToArray())
+                {
+                    if (gen <= cycleStartGeneration || pathExists(item.SourcePath))
+                    {
+                        _pendingBySource.Remove(key);
+                    }
+                }
+
+                if (_pendingBySource.Count > 0)
+                {
+                    return true;
+                }
+
+                _personalAliases.Clear();
+                _publicAliases.Clear();
+                _workerActive = false;
+                return false;
+            }
+        }
+
+        public void ResetOnFault()
+        {
+            lock (_gate)
+            {
+                _pendingBySource.Clear();
+                _personalAliases.Clear();
+                _publicAliases.Clear();
+                _workerActive = false;
+            }
+        }
+
+        private void PruneExistingLocked(Func<string, bool> pathExists)
+        {
+            foreach ((string key, (MovedDesktopItem item, _)) in _pendingBySource.ToArray())
+            {
+                if (pathExists(item.SourcePath))
+                {
+                    _pendingBySource.Remove(key);
+                }
+            }
+        }
+    }
+
+    internal static Dictionary<string, MovedDesktopItem> BuildGhostCandidateLookup(
+        IReadOnlyList<MovedDesktopItem> missingItems,
+        IReadOnlyCollection<string> personalAliases,
+        IReadOnlyCollection<string> publicAliases)
+    {
+        var byCandidatePath = new Dictionary<string, MovedDesktopItem>(
+            missingItems.Count * 2,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (MovedDesktopItem item in missingItems)
+        {
+            if (File.Exists(item.SourcePath) || Directory.Exists(item.SourcePath))
+            {
+                continue;
+            }
+
+            byCandidatePath[item.SourcePath] = item;
+            string fileName = Path.GetFileName(item.SourcePath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+
+            IReadOnlyCollection<string> scopeAliases = item.IsPublicDesktop
+                ? publicAliases
+                : personalAliases;
+            foreach (string aliasDir in scopeAliases)
+            {
+                string? aliasCandidate = TryNormalizeEntryPath(Path.Combine(aliasDir, fileName));
+                if (aliasCandidate is not null &&
+                    !File.Exists(aliasCandidate) &&
+                    !Directory.Exists(aliasCandidate))
+                {
+                    byCandidatePath.TryAdd(aliasCandidate, item);
+                }
+            }
+        }
+
+        return byCandidatePath;
+    }
+
+    private static GhostPurgePassOutcome PurgeGhostDesktopItemsOnStaThread(
+        IReadOnlyList<MovedDesktopItem> missingItems,
+        HashSet<string> personalAliases,
+        HashSet<string> publicAliases,
+        HashSet<string> previouslyPurgedCanonicalPaths)
     {
         if (missingItems.Count == 0 || !TryAcquireDesktopFolderView(out DesktopViewHandles handles))
         {
-            return false;
+            return GhostPurgePassOutcome.None;
         }
 
         try
         {
-            var bySourcePath = new Dictionary<string, MovedDesktopItem>(
-                missingItems.Count,
-                StringComparer.OrdinalIgnoreCase);
-            foreach (MovedDesktopItem item in missingItems)
-            {
-                if (!File.Exists(item.SourcePath) && !Directory.Exists(item.SourcePath))
-                {
-                    bySourcePath[item.SourcePath] = item;
-                }
-            }
-
+            Dictionary<string, MovedDesktopItem> bySourcePath = BuildGhostCandidateLookup(
+                missingItems,
+                personalAliases,
+                publicAliases);
             if (bySourcePath.Count == 0)
             {
-                return false;
+                return GhostPurgePassOutcome.None;
             }
 
             List<(string Path, nint ChildPidl)> ghosts = EnumerateDesktopItems(
@@ -421,7 +1062,7 @@ internal static unsafe partial class DesktopIconPositionInterop
                 bySourcePath.Keys);
             if (ghosts.Count == 0)
             {
-                return false;
+                return GhostPurgePassOutcome.None;
             }
 
             nint desktopFolderPidl = 0;
@@ -429,13 +1070,15 @@ internal static unsafe partial class DesktopIconPositionInterop
             {
                 _ = SHGetIDListFromObject(handles.ShellFolder, out desktopFolderPidl);
                 var dirsToRefresh = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                int purgedCount = 0;
+                var purgedCanonicalPaths = new List<string>(ghosts.Count);
 
                 foreach ((string ghostPath, nint childPidl) in ghosts)
                 {
                     if (File.Exists(ghostPath) ||
                         Directory.Exists(ghostPath) ||
-                        !bySourcePath.TryGetValue(ghostPath, out MovedDesktopItem info))
+                        !bySourcePath.TryGetValue(ghostPath, out MovedDesktopItem info) ||
+                        File.Exists(info.SourcePath) ||
+                        Directory.Exists(info.SourcePath))
                     {
                         continue;
                     }
@@ -449,7 +1092,7 @@ internal static unsafe partial class DesktopIconPositionInterop
                         {
                             try
                             {
-                                SHChangeNotifyPidl(eventId, ShcnfIdList | ShcnfFlush, fullPidl, 0);
+                                SHChangeNotifyPidl(eventId, ShcnfIdList | ShcnfFlushNoWait, fullPidl, 0);
                             }
                             finally
                             {
@@ -459,23 +1102,62 @@ internal static unsafe partial class DesktopIconPositionInterop
                     }
 
                     SHChangeNotify(eventId, ShcnfPathW | ShcnfFlushNoWait, ghostPath, 0);
-                    purgedCount++;
+                    if (!string.Equals(ghostPath, info.SourcePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        SHChangeNotify(eventId, ShcnfPathW | ShcnfFlushNoWait, info.SourcePath, 0);
+                    }
+
+                    purgedCanonicalPaths.Add(info.SourcePath);
+                }
+
+                if (purgedCanonicalPaths.Count == 0)
+                {
+                    return GhostPurgePassOutcome.None;
+                }
+
+                if (desktopFolderPidl != 0)
+                {
+                    SHChangeNotifyPidl(ShcneUpdateDir, ShcnfIdList | ShcnfFlushNoWait, desktopFolderPidl, 0);
+                }
+                else
+                {
+                    NotifyDesktopNamespaceUpdated();
                 }
 
                 foreach (string desktopDir in dirsToRefresh)
                 {
                     if (Directory.Exists(desktopDir))
                     {
-                        SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlush, desktopDir, 0);
+                        SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlushNoWait, desktopDir, 0);
                     }
                 }
 
-                if (purgedCount > 0)
+                bool escalatedRefresh = false;
+                long nowTick64 = Environment.TickCount64;
+                long lastRefreshTick64 = Interlocked.Read(ref s_lastShellViewRefreshTick64);
+                if (ShouldEscalateToShellViewRefresh(purgedCanonicalPaths, previouslyPurgedCanonicalPaths) &&
+                    CanEscalateShellViewRefresh(
+                        IsShellViewInlineRenameActive(handles.ShellView),
+                        Volatile.Read(ref s_activePositionRestoreCount),
+                        nowTick64,
+                        lastRefreshTick64))
                 {
-                    App.Log($"[DesktopIconPosition] Purged {purgedCount} stale desktop view ghost item(s) after move-off.");
+                    escalatedRefresh = TryRefreshDesktopShellView(handles.ShellView);
+                    if (escalatedRefresh)
+                    {
+                        Interlocked.Exchange(ref s_lastShellViewRefreshTick64, Environment.TickCount64);
+                        App.Log(
+                            $"[DesktopIconPosition] Escalated to IShellView::Refresh() after " +
+                            $"{purgedCanonicalPaths.Count} ghost desktop item(s) survived SHCNE_DELETE.");
+                    }
+                }
+                else
+                {
+                    App.Log(
+                        $"[DesktopIconPosition] Purged {purgedCanonicalPaths.Count} stale desktop view ghost item(s) after move-off.");
                 }
 
-                return purgedCount > 0;
+                return new GhostPurgePassOutcome(purgedCanonicalPaths, escalatedRefresh);
             }
             finally
             {
@@ -491,6 +1173,212 @@ internal static unsafe partial class DesktopIconPositionInterop
         {
             handles.Release();
         }
+    }
+
+    private static bool TryRefreshDesktopShellView(nint shellView)
+    {
+        if (shellView == 0)
+        {
+            return false;
+        }
+
+        nint* svVtbl = *(nint**)shellView;
+        // IShellView::Refresh sits at slot 8 (3 IUnknown + 2 IOleWindow + 3 IShellView).
+        var refresh = (delegate* unmanaged[Stdcall]<nint, int>)svVtbl[8];
+        return refresh(shellView) >= 0;
+    }
+
+    private static bool IsShellViewInlineRenameActive(nint shellView)
+    {
+        if (shellView == 0)
+        {
+            return false;
+        }
+
+        nint* svVtbl = *(nint**)shellView;
+        // IShellView::GetWindow (inherited from IOleWindow) sits at slot 3.
+        var getWindow = (delegate* unmanaged[Stdcall]<nint, nint*, int>)svVtbl[3];
+        nint defViewHwnd = 0;
+        if (getWindow(shellView, &defViewHwnd) < 0 || defViewHwnd == 0)
+        {
+            return false;
+        }
+
+        nint listViewHwnd = FindWindowExW(defViewHwnd, 0, "SysListView32", null);
+        return listViewHwnd != 0 && IsListViewInlineRenameActive(listViewHwnd);
+    }
+
+    private static bool IsListViewInlineRenameActive(nint listViewHwnd)
+    {
+        if (listViewHwnd == 0 || !Win32Helper.IsWindowVisible(listViewHwnd))
+        {
+            return false;
+        }
+
+        IntPtr delivered = Win32Helper.SendMessageTimeout(
+            listViewHwnd,
+            LvmGetEditControl,
+            UIntPtr.Zero,
+            IntPtr.Zero,
+            SmtoAbortIfHung,
+            80,
+            out UIntPtr editHandleValue);
+        if (delivered == IntPtr.Zero || editHandleValue == UIntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr editHwnd = (IntPtr)(nint)editHandleValue;
+        return Win32Helper.IsWindowVisible(editHwnd);
+    }
+
+    private static nint FindVerifiedDesktopListViewHwnd()
+    {
+        IntPtr shellWindow = Win32Helper.GetShellWindow();
+        uint shellProcessId = 0;
+        if (shellWindow != IntPtr.Zero)
+        {
+            Win32Helper.GetWindowThreadProcessId(shellWindow, out shellProcessId);
+        }
+
+        nint foundListView = 0;
+        Win32Helper.EnumWindows((hWnd, _) =>
+        {
+            if (hWnd == IntPtr.Zero || !IsVerifiedDesktopHostRoot(hWnd, shellWindow, shellProcessId))
+            {
+                return true;
+            }
+
+            nint defView = FindDesktopDefViewChild(hWnd);
+            if (defView == 0)
+            {
+                return true;
+            }
+
+            nint listView = FindWindowExW(defView, 0, "SysListView32", null);
+            if (listView != 0)
+            {
+                foundListView = listView;
+                return false;
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return foundListView;
+    }
+
+    private static bool IsVerifiedDesktopHostRoot(
+        IntPtr rootHwnd,
+        IntPtr shellWindow,
+        uint shellProcessId)
+    {
+        Span<char> classBuffer = stackalloc char[64];
+        int length = Win32Helper.GetClassName(rootHwnd, classBuffer);
+        if (length <= 0)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> className = classBuffer[..length];
+        if (!className.Equals("Progman", StringComparison.Ordinal) &&
+            !className.Equals("WorkerW", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (shellWindow == IntPtr.Zero || shellProcessId == 0)
+        {
+            return true;
+        }
+
+        Win32Helper.GetWindowThreadProcessId(rootHwnd, out uint rootProcessId);
+        return rootProcessId == 0 || rootProcessId == shellProcessId;
+    }
+
+    private static nint FindDesktopDefViewChild(nint hostHwnd)
+    {
+        nint direct = FindWindowExW(hostHwnd, 0, "SHELLDLL_DefView", null);
+        if (direct != 0)
+        {
+            return direct;
+        }
+
+        nint childWorker = FindWindowExW(hostHwnd, 0, "WorkerW", null);
+        while (childWorker != 0)
+        {
+            nint nested = FindWindowExW(childWorker, 0, "SHELLDLL_DefView", null);
+            if (nested != 0)
+            {
+                return nested;
+            }
+
+            childWorker = FindWindowExW(hostHwnd, childWorker, "WorkerW", null);
+        }
+
+        return 0;
+    }
+
+    private static HashSet<string> BuildDirectoryAliasSet(
+        string? directoryPath,
+        Func<string, string?>? finalPathResolver)
+    {
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? normalized = TryNormalizeDirectoryPath(directoryPath);
+        if (normalized is null)
+        {
+            return aliases;
+        }
+
+        aliases.Add(normalized);
+        string? resolved = (finalPathResolver ?? TryResolveFinalDirectoryPath)(normalized);
+        string? normalizedResolved = TryNormalizeDirectoryPath(resolved);
+        if (normalizedResolved is not null)
+        {
+            aliases.Add(normalizedResolved);
+        }
+
+        return aliases;
+    }
+
+    private static string? TryResolveFinalDirectoryPath(string normalizedDirectoryPath)
+    {
+        if (!OperatingSystem.IsWindows() || !Directory.Exists(normalizedDirectoryPath))
+        {
+            return null;
+        }
+
+        return Win32Helper.TryGetFinalPath(normalizedDirectoryPath, out string finalPath)
+            ? TryNormalizeDirectoryPath(finalPath)
+            : null;
+    }
+
+    private static bool AreSameVolumeRoot(
+        string firstPath,
+        string secondPath,
+        Func<string, string?>? finalPathResolver)
+    {
+        string effectiveFirst = ResolveEffectiveParentOrPath(firstPath, finalPathResolver);
+        string effectiveSecond = ResolveEffectiveParentOrPath(secondPath, finalPathResolver);
+        string? firstRoot = TryNormalizeDirectoryPath(Path.GetPathRoot(effectiveFirst));
+        string? secondRoot = TryNormalizeDirectoryPath(Path.GetPathRoot(effectiveSecond));
+        return firstRoot is not null &&
+               secondRoot is not null &&
+               string.Equals(firstRoot, secondRoot, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveEffectiveParentOrPath(
+        string normalizedPath,
+        Func<string, string?>? finalPathResolver)
+    {
+        string? parent = TryNormalizeDirectoryPath(Path.GetDirectoryName(normalizedPath));
+        if (parent is null)
+        {
+            return normalizedPath;
+        }
+
+        string? resolvedParent = (finalPathResolver ?? TryResolveFinalDirectoryPath)(parent);
+        return TryNormalizeDirectoryPath(resolvedParent) ?? parent;
     }
 
     private static string? TryNormalizeDirectoryPath(string? path)
@@ -606,6 +1494,21 @@ internal static unsafe partial class DesktopIconPositionInterop
     }
 
     private static HashSet<string> RestoreOnStaThread(
+        Dictionary<string, DesktopIconPoint> desiredPositionsByPath,
+        int totalTimeoutMs)
+    {
+        Interlocked.Increment(ref s_activePositionRestoreCount);
+        try
+        {
+            return RestoreOnStaThreadCore(desiredPositionsByPath, totalTimeoutMs);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref s_activePositionRestoreCount);
+        }
+    }
+
+    private static HashSet<string> RestoreOnStaThreadCore(
         Dictionary<string, DesktopIconPoint> desiredPositionsByPath,
         int totalTimeoutMs)
     {
@@ -747,7 +1650,8 @@ internal static unsafe partial class DesktopIconPositionInterop
         {
             try
             {
-                SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlush, dir, 0);
+                SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlushNoWait, dir, 0);
+                NotifyDesktopNamespaceIfMatch(dir);
             }
             catch
             {

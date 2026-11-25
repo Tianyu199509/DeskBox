@@ -72,6 +72,11 @@ public static class WidgetLayerService
         return false;
     }
 
+    internal static bool IsPeerDeskBoxWindow(IntPtr candidateRootHwnd, IntPtr selfHwnd) =>
+        candidateRootHwnd != IntPtr.Zero &&
+        candidateRootHwnd != selfHwnd &&
+        App.Current?.IsDeskBoxWindow(candidateRootHwnd) == true;
+
     public static bool MoveToDesktopBottom(
         IntPtr windowHandle,
         bool showWindow = true)
@@ -102,9 +107,9 @@ public static class WidgetLayerService
 
         if (UsesDesktopPinnedMode())
         {
-            if (!TryAttachToDesktopIconLayer(windowHandle))
+            if (!TryAttachToDesktopIconLayer(windowHandle, showWindow: false))
             {
-                MoveToDynamicDesktopBottom(windowHandle);
+                MoveToDynamicDesktopBottom(windowHandle, showWindow: false);
             }
 
             disposition = RelativeLayerRestoreDisposition.DesktopBottom;
@@ -125,7 +130,7 @@ public static class WidgetLayerService
         switch (disposition)
         {
             case RelativeLayerRestoreDisposition.DesktopBottom:
-                MoveToDesktopBottom(windowHandle);
+                MoveToDesktopBottom(windowHandle, showWindow: false);
                 break;
 
             case RelativeLayerRestoreDisposition.PreservePeerOrder:
@@ -252,15 +257,15 @@ public static class WidgetLayerService
 
         if (UsesDesktopPinnedMode())
         {
-            if (!TryAttachToDesktopIconLayer(windowHandle))
+            if (!TryAttachToDesktopIconLayer(windowHandle, showWindow: false))
             {
-                MoveToDynamicDesktopBottom(windowHandle);
+                MoveToDynamicDesktopBottom(windowHandle, showWindow: false);
             }
 
             return;
         }
 
-        MoveToDesktopBottom(windowHandle);
+        MoveToDesktopBottom(windowHandle, showWindow: false);
     }
 
     public static void HoldTemporaryTopMost(

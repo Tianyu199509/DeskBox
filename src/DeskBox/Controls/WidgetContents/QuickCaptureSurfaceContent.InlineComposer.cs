@@ -24,6 +24,7 @@ namespace DeskBox.Controls.WidgetContents;
 public sealed partial class QuickCaptureSurfaceContent
 {
     private readonly List<DroppedFilePath> _pendingInlineAttachments = [];
+    private readonly QuickCaptureMaterialBrushCache _materialBrushCache = new();
     private DispatcherQueueTimer? _relativeTimestampTimer;
     private bool _isInlineComposerOpen;
     private bool _isCommittingInlineComposer;
@@ -88,6 +89,7 @@ public sealed partial class QuickCaptureSurfaceContent
         }
 
         _pendingInlineAttachments.Clear();
+        _materialBrushCache.Clear();
         InlineComposerAttachmentStrip?.ReleaseVisualHandlers();
     }
 
@@ -163,35 +165,35 @@ public sealed partial class QuickCaptureSurfaceContent
         bool isDark = ActualTheme == ElementTheme.Dark;
         if (PaperMaterialSwatch is not null)
         {
-            PaperMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            PaperMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Paper,
                 isDark);
         }
 
         if (YellowMaterialSwatch is not null)
         {
-            YellowMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            YellowMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.StickyYellow,
                 isDark);
         }
 
         if (RoseMaterialSwatch is not null)
         {
-            RoseMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            RoseMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Rose,
                 isDark);
         }
 
         if (MintMaterialSwatch is not null)
         {
-            MintMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            MintMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.Mint,
                 isDark);
         }
 
         if (BlueMaterialSwatch is not null)
         {
-            BlueMaterialSwatch.Background = QuickCaptureMaterialBrushCache.GetSwatchBrush(
+            BlueMaterialSwatch.Background = _materialBrushCache.GetSwatchBrush(
                 QuickCaptureAppearancePreset.MistBlue,
                 isDark);
         }

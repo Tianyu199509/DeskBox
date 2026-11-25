@@ -9,9 +9,9 @@ on:
         default: false
         type: boolean
       expected-signer-cn:
-        description: 'Expected signer certificate CN for verification (substring match, empty = DeskBox)'
+        description: 'Expected signer certificate CN for verification (substring match, empty = Tianyu Zhu)'
         required: false
-        default: 'DeskBox'
+        default: 'Tianyu Zhu'
         type: string
 
 permissions:
@@ -225,7 +225,7 @@ jobs:
         shell: pwsh
         run: |
           $expectedCn = '${{ inputs.expected-signer-cn }}'
-          if ([string]::IsNullOrWhiteSpace($expectedCn)) { $expectedCn = 'DeskBox' }
+          if ([string]::IsNullOrWhiteSpace($expectedCn)) { $expectedCn = 'Tianyu Zhu' }
 
           $installers = @(Get-ChildItem -LiteralPath .\signed -Recurse -Filter 'DeskBox_Setup_*.exe' -File)
           if ($installers.Count -ne 2) {

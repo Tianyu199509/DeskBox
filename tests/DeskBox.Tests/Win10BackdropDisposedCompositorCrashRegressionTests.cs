@@ -7,18 +7,24 @@ namespace DeskBox.Tests;
 public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
 {
     [Fact]
-    public void MaskedBackdropTargetProxy_InteractionTintOverride_SurvivesControllerCompositorClosureAcrossFiveTargets()
+    public void MaskedBackdropTargetProxy_NeverAppliesForeignCompositorBrush_AndReleasesMaskBeforeControllerCompositorClosure()
     {
-        RunOnStaWithCompositor(() =>
+        RunOnStaWithCompositor(threadCompositor =>
         {
-            var targets = Enumerable.Range(0, 5).Select(_ => new FakeBackdropTarget()).ToArray();
+            // Simulate WinAppSDK DesktopAcrylicController's internal Compositor feeding
+            // 5 SystemBackdropElement (ContentExternalBackdropLink) widget targets.
+            // ContentExternalBackdropLink fail-fasts natively (0xc000027b) if a brush from
+            // a foreign Compositor (such as DeskBox's standalone threadCompositor) is ever assigned.
+            var controllerCompositor = new Windows.UI.Composition.Compositor();
+            Assert.NotSame(threadCompositor, controllerCompositor);
+
+            var targets = Enumerable.Range(0, 5)
+                .Select(_ => new StrictElementCompositorBackdropTarget(expectedCompositor: controllerCompositor))
+                .ToArray();
             var proxies = targets
                 .Select(static target => new MaskedBackdropTargetProxy(target, cornerRadiusDip: 12.0, rasterizationScale: 1.0))
                 .ToArray();
 
-            // Simulate WinAppSDK DesktopAcrylicController's internal Compositor feeding
-            // all 5 widget targets before batch hide.
-            var controllerCompositor = new Windows.UI.Composition.Compositor();
             var controllerBrush = controllerCompositor.CreateColorBrush(Colors.CornflowerBlue);
             foreach (MaskedBackdropTargetProxy proxy in proxies)
             {
@@ -26,50 +32,47 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
                 Assert.NotNull(proxy.SystemBackdrop);
             }
 
-            Assert.All(targets, static t => Assert.IsType<Windows.UI.Composition.CompositionMaskBrush>(t.SystemBackdrop));
-
-            // Simulate SimplifyBackdropForInteraction() across all 5 widgets followed by
-            // DetachAcrylicControllerTarget(): when the 5th (last) target detaches,
-            // DesktopAcrylicController closes its internal Compositor.
-            var simplifiedTint = Windows.UI.Color.FromArgb(220, 32, 34, 38);
-            for (int i = 0; i < proxies.Length; i++)
-            {
-                Assert.True(proxies[i].SetInteractionTintOverride(simplifiedTint));
-                proxies[i].SystemBackdrop = null;
-            }
-
-            controllerBrush.Dispose();
-            controllerCompositor.Dispose();
-
-            // Every widget's live interaction tint mask must still be alive on DeskBox's
-            // persistent thread compositor rather than closed with controllerCompositor.
-            foreach (FakeBackdropTarget target in targets)
+            foreach (StrictElementCompositorBackdropTarget target in targets)
             {
                 var appliedMask = Assert.IsType<Windows.UI.Composition.CompositionMaskBrush>(target.SystemBackdrop);
-                Assert.NotNull(appliedMask.Source);
+                Assert.Same(controllerCompositor, appliedMask.Compositor);
+                Assert.Same(controllerBrush, appliedMask.Source);
                 Assert.NotNull(appliedMask.Mask);
             }
 
-            // Simulate RestoreBackdropAfterInteraction() after batch hide completes:
-            // clearing the interaction override must never throw ObjectDisposedException
-            // or leave _overrideBrush wedged for subsequent ApplyBackdropPreference / Dispose calls.
+            // Simulate DetachAcrylicControllerTarget() across all 5 widgets:
+            // RemoveSystemBackdropTarget clears proxy.SystemBackdrop = null synchronously
+            // BEFORE closing controllerCompositor when the 5th (last) target detaches.
             foreach (MaskedBackdropTargetProxy proxy in proxies)
             {
-                Assert.True(proxy.SetInteractionTintOverride(null));
+                proxy.SystemBackdrop = null;
             }
 
             Assert.All(targets, static t => Assert.Null(t.SystemBackdrop));
 
-            // Re-attaching a new controller compositor on next reveal and later closing
-            // the widget must also succeed cleanly without throwing.
-            using var nextControllerCompositor = new Windows.UI.Composition.Compositor();
-            using var nextControllerBrush = nextControllerCompositor.CreateColorBrush(Colors.CadetBlue);
+            // Now the last target has detached and DesktopAcrylicController closes its internal Compositor.
+            controllerBrush.Dispose();
+            controllerCompositor.Dispose();
+
+            // Subsequent parameter updates, TrimIdle, re-attachment to a newly created controller
+            // compositor on next reveal, and disposal must never throw ObjectDisposedException
+            // or assign a cross-compositor brush.
             foreach (MaskedBackdropTargetProxy proxy in proxies)
             {
-                proxy.SystemBackdrop = nextControllerBrush;
+                proxy.UpdateParameters(cornerRadiusDip: 14.0, rasterizationScale: 1.0);
             }
 
-            Assert.All(targets, static t => Assert.IsType<Windows.UI.Composition.CompositionMaskBrush>(t.SystemBackdrop));
+            RoundedBackdropMaskService.TrimIdle();
+
+            using var nextControllerCompositor = new Windows.UI.Composition.Compositor();
+            using var nextControllerBrush = nextControllerCompositor.CreateColorBrush(Colors.CadetBlue);
+            for (int i = 0; i < proxies.Length; i++)
+            {
+                targets[i].AllowCompositor(nextControllerCompositor);
+                proxies[i].SystemBackdrop = nextControllerBrush;
+                var reattachedMask = Assert.IsType<Windows.UI.Composition.CompositionMaskBrush>(targets[i].SystemBackdrop);
+                Assert.Same(nextControllerCompositor, reattachedMask.Compositor);
+            }
 
             foreach (MaskedBackdropTargetProxy proxy in proxies)
             {
@@ -85,12 +88,12 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
     [Fact]
     public void MaskedBackdropTargetProxy_AndMaskCache_SelfHealWhenUnderlyingCompositorAlreadyClosed()
     {
-        RunOnStaWithCompositor(() =>
+        RunOnStaWithCompositor(_ =>
         {
-            var target = new FakeBackdropTarget();
+            var deadCompositor = new Windows.UI.Composition.Compositor();
+            var target = new StrictElementCompositorBackdropTarget(expectedCompositor: deadCompositor);
             var proxy = new MaskedBackdropTargetProxy(target, cornerRadiusDip: 14.0, rasterizationScale: 1.25);
 
-            var deadCompositor = new Windows.UI.Composition.Compositor();
             var deadSourceBrush = deadCompositor.CreateColorBrush(Colors.SlateBlue);
             proxy.SystemBackdrop = deadSourceBrush;
             Assert.IsType<Windows.UI.Composition.CompositionMaskBrush>(target.SystemBackdrop);
@@ -99,21 +102,19 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
             // entry are still referenced by the proxy and CompositorMaskCache.
             deadCompositor.Dispose();
 
-            // Clearing override, updating parameters, suspending, and disposing must never
+            // Clearing source, updating parameters, suspending, and disposing must never
             // propagate RO_E_CLOSED / ObjectDisposedException.
             var exception = Record.Exception(() =>
             {
+                proxy.SystemBackdrop = null;
                 proxy.UpdateParameters(cornerRadiusDip: 16.0, rasterizationScale: 1.5);
-                proxy.SetInteractionTintOverride(null);
                 proxy.ReleaseSuspendedResources();
                 proxy.Dispose();
             });
             Assert.Null(exception);
             Assert.Null(target.SystemBackdrop);
 
-            // Acquiring a mask on a live compositor with the same key must succeed cleanly,
-            // and if a compositor with a cached entry is later closed, TryGetReusableEntry
-            // must evict the dead entry rather than returning a closed NineGridBrush.
+            // Acquiring against a closed compositor returns null cleanly without throwing.
             var ephemeralCacheCompositor = new Windows.UI.Composition.Compositor();
             var lease = RoundedBackdropMaskService.AcquireNineGridMask(
                 ephemeralCacheCompositor,
@@ -124,7 +125,6 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
 
             ephemeralCacheCompositor.Dispose();
 
-            // Acquiring against a closed compositor returns null cleanly without throwing.
             var afterCloseException = Record.Exception(() =>
             {
                 var closedLease = RoundedBackdropMaskService.AcquireNineGridMask(
@@ -136,6 +136,43 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
             });
             Assert.Null(afterCloseException);
         });
+    }
+
+    [Fact]
+    public void Win10InteractionSimplification_PreservesDesktopAcrylicController_AndNeverInjectsCrossCompositorOverride()
+    {
+        string widgetBackdrop = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.Backdrop.cs"));
+        string maskService = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/RoundedBackdropMaskService.cs"));
+        string materialBackdrop = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetMaterialSystemBackdrop.cs"));
+
+        // SystemBackdropElement (ContentExternalBackdropLink) targets fail-fast natively (0xc000027b)
+        // in Windows 10 VMs if a brush created on SolidTintSystemBackdrop's standalone thread
+        // Compositor is assigned to them. Ensure MaskedBackdropTargetProxy never touches
+        // SolidTintSystemBackdrop or exposes cross-compositor override brushes.
+        Assert.DoesNotContain("SolidTintSystemBackdrop", maskService, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetInteractionTintOverride", maskService, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetInteractionTintOverride", materialBackdrop, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetInteractionTintOverride", widgetBackdrop, StringComparison.Ordinal);
+
+        // SimplifyBackdropForInteraction must only target legacy Win32 SWCA_ACCENT_POLICY
+        // (!LegacyAccentBackdropActive -> return) and never detach DesktopAcrylicController
+        // mid-animation (which strips frosted/fallback backing at frame 0 and causes a visible
+        // semi-transparent pop before slide/hide animations).
+        int simplifyStart = widgetBackdrop.IndexOf("public void SimplifyBackdropForInteraction()", StringComparison.Ordinal);
+        int restoreStart = widgetBackdrop.IndexOf("public void RestoreBackdropAfterInteraction()", simplifyStart, StringComparison.Ordinal);
+        Assert.True(simplifyStart >= 0 && restoreStart > simplifyStart);
+        string simplifyBody = widgetBackdrop[simplifyStart..restoreStart];
+        Assert.Contains("!LegacyAccentBackdropActive", simplifyBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("DetachAcrylicControllerTarget", simplifyBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("AcrylicControllerAttached", simplifyBody, StringComparison.Ordinal);
+
+        int canReuseStart = widgetBackdrop.IndexOf("private bool CanReuseAppliedBackdrop", restoreStart, StringComparison.Ordinal);
+        Assert.True(canReuseStart > restoreStart);
+        string restoreBody = widgetBackdrop[restoreStart..canReuseStart];
+        Assert.DoesNotContain("ApplyAcrylicController", restoreBody, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,7 +259,7 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
         Assert.Contains("TryDisposeElementTargetLink(", materialBackdrop, StringComparison.Ordinal);
     }
 
-    private static void RunOnStaWithCompositor(Action action)
+    private static void RunOnStaWithCompositor(Action<Windows.UI.Composition.Compositor> action)
     {
         Exception? staError = null;
         var staThread = new Thread(() =>
@@ -232,7 +269,7 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
                 Windows.UI.Composition.Compositor? threadCompositor =
                     SolidTintSystemBackdrop.TryEnsureThreadCompositor();
                 Assert.NotNull(threadCompositor);
-                action();
+                action(threadCompositor!);
             }
             catch (Exception ex)
             {
@@ -252,9 +289,29 @@ public sealed class Win10BackdropDisposedCompositorCrashRegressionTests
         }
     }
 
-    private sealed class FakeBackdropTarget : ICompositionSupportsSystemBackdrop
+    private sealed class StrictElementCompositorBackdropTarget(
+        Windows.UI.Composition.Compositor expectedCompositor) : ICompositionSupportsSystemBackdrop
     {
-        public Windows.UI.Composition.CompositionBrush? SystemBackdrop { get; set; }
+        private Windows.UI.Composition.Compositor _expectedCompositor = expectedCompositor;
+        private Windows.UI.Composition.CompositionBrush? _systemBackdrop;
+
+        public void AllowCompositor(Windows.UI.Composition.Compositor compositor) =>
+            _expectedCompositor = compositor;
+
+        public Windows.UI.Composition.CompositionBrush? SystemBackdrop
+        {
+            get => _systemBackdrop;
+            set
+            {
+                if (value is not null && !ReferenceEquals(value.Compositor, _expectedCompositor))
+                {
+                    throw new InvalidOperationException(
+                        "Cross-compositor brush assigned to SystemBackdropElement (ContentExternalBackdropLink) — native FailFast 0xc000027b!");
+                }
+
+                _systemBackdrop = value;
+            }
+        }
     }
 
     private sealed class ThrowingDisposable : IDisposable

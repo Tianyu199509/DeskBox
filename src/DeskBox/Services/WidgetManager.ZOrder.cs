@@ -834,12 +834,17 @@ public sealed partial class WidgetManager
     {
         ResetBeddingLeakTracking();
 
-        List<IntPtr> handles = GetLoadedDesktopWindows()
-            .Where(window => window.Visible &&
-                window.WindowHandle != IntPtr.Zero &&
-                Win32Helper.IsWindow(window.WindowHandle) &&
-                !(window is WidgetWindowBase activeInputWindow &&
-                  activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus()))
+        IntPtr expandedLeaseOwner = HasActiveExpandedWidgetLayerLease()
+            ? _expandedWidgetLayerLease.WindowHandle
+            : IntPtr.Zero;
+        List<IntPtr> handles = GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows()
+                    .Where(window => window.Visible &&
+                        window.WindowHandle != IntPtr.Zero &&
+                        Win32Helper.IsWindow(window.WindowHandle) &&
+                        !(window is WidgetWindowBase activeInputWindow &&
+                          activeInputWindow.IsHoldingDesktopPinnedInputOrPopupFocus())),
+                expandedLeaseOwner)
             .Select(window => window.WindowHandle)
             .ToList();
         if (handles.Count == 0)
@@ -1204,7 +1209,8 @@ public sealed partial class WidgetManager
     }
 
     private static IReadOnlyList<IDesktopWidgetWindow> GetWindowsInIdleHighestFirstOrder(
-        IEnumerable<IDesktopWidgetWindow> windows)
+        IEnumerable<IDesktopWidgetWindow> windows,
+        IntPtr expandedLeaseOwner = default)
     {
         Dictionary<IntPtr, IDesktopWidgetWindow> byHandle = windows
             .Where(window => window.WindowHandle != IntPtr.Zero)
@@ -1215,12 +1221,18 @@ public sealed partial class WidgetManager
                 byHandle.Values.Select(window =>
                 {
                     Windows.Foundation.Rect bounds = window.RestingAnimationBounds;
+                    bool hasExpandedLease =
+                        (expandedLeaseOwner != IntPtr.Zero && window.WindowHandle == expandedLeaseOwner) ||
+                        (window is WidgetWindowBase leaseBase && leaseBase.HasExpandedWidgetLayerLease);
+                    bool isExpandedCapsule = window is WidgetWindowBase widgetBase && widgetBase.IsExpandedCapsule;
                     return new IdleWidgetZOrderCandidate(
                         window.WindowHandle,
                         GetAnimationWorkAreaKey(window),
                         bounds.Top,
                         bounds.Left,
-                        window.Identity.SurfaceId);
+                        window.Identity.SurfaceId,
+                        HasExpandedLease: hasExpandedLease,
+                        IsExpandedCapsule: isExpandedCapsule);
                 }));
         return ordered
             .Select(candidate => byHandle[candidate.WindowHandle])

@@ -1222,6 +1222,8 @@
   "Settings.Update.InstallFailedTitle": "アップデートを完了できませんでした",
   "Settings.Update.InstallFailedBody": "インストールに失敗したため DeskBox を再度起動しました。再試行するか、公式サイトからインストーラーをダウンロードしてください。",
   "Settings.Update.InstallPathMismatchBody": "元の DeskBox フォルダーでインストールが完了しなかったため、アップデートを停止してこのバージョンを再度起動しました。問題が続く場合は公式サイトからダウンロードしてください。",
+  "Settings.Update.InstallBlockedByPolicyTitle": "インストーラーが Windows のセキュリティ ポリシーによりブロックされました",
+  "Settings.Update.InstallBlockedByPolicyBody": "Windows の「スマート アプリ コントロール」または署名ポリシーにより未署名の直接インストーラーがブロックされたため、DeskBox はデータを保持したまま現在のバージョンを再度開きました。\n\nインストーラーの破損ではないため、公式サイトから再ダウンロードしても通常は同様にブロックされます。また、「スマート アプリ コントロール」をオフにすると PC をリセットしない限り元に戻せないため推奨されません。現在のバージョンを引き続き使用するか、「診断とメンテナンス」でバックアップをエクスポートしてから署名済みの Microsoft Store 版をご利用ください。",
   "Settings.Update.DownloadFailedTitle": "アップデートをダウンロードできませんでした",
   "Settings.Update.DownloadFailedBody": "{0}\n\n再試行するか、公式サイトからインストーラーをダウンロードしてください。",
   "Settings.DragDropPermission.Title": "ドラッグ＆ドロップチェック",
